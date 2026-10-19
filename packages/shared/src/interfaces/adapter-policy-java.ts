@@ -6,13 +6,49 @@
  * "initialized" during the initialize handshake, before the launch request.
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, UnresolvedSourceContext } from './adapter-policy.js';
+import * as path from 'path';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling, GeneratedFileCandidate, GeneratedFileContext, LocalVariableExtraction, UnresolvedSourceContext } from './adapter-policy.js';
 import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-policy.js';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
 
 /** Package prefixes identifying JDK-internal classes in frame names or FQCNs. */
 const JDK_INTERNAL_PREFIXES = ['java.', 'javax.', 'sun.', 'jdk.', 'com.sun.'];
+
+/** How many trailing directories of a source's path are tried as its package path under a classpath entry (issue #950). */
+const MAX_PACKAGE_DEPTH = 8;
+/** A classpath entry that is an archive: a class inside it has no file of its own to stamp. */
+const ARCHIVE_ENTRY = /\.(jar|zip)$/i;
+
+/**
+ * The classpath directories a launch runs against, absolute (issue #950): the
+ * launch config's `classpath` — the platform's delimiter-joined string or an
+ * array; `.` when it names none, as the JDI bridge defaults it — resolved
+ * against the launch `cwd`. Archives and wildcard entries are skipped, and so
+ * is a relative entry when no cwd is known to resolve it against.
+ */
+function classpathDirectories(launchConfig: Record<string, unknown>): string[] {
+  const raw = launchConfig.classpath;
+  const entries = Array.isArray(raw)
+    ? raw.filter((entry): entry is string => typeof entry === 'string')
+    : typeof raw === 'string' && raw.length > 0
+      ? raw.split(path.delimiter)
+      : ['.'];
+  const cwd = typeof launchConfig.cwd === 'string' && launchConfig.cwd.length > 0 ? launchConfig.cwd : undefined;
+  const dirs: string[] = [];
+  for (const entry of entries) {
+    const trimmed = entry.trim();
+    if (trimmed.length === 0 || trimmed.includes('*') || ARCHIVE_ENTRY.test(trimmed)) {
+      continue;
+    }
+    if (path.isAbsolute(trimmed)) {
+      dirs.push(trimmed);
+    } else if (cwd !== undefined) {
+      dirs.push(path.resolve(cwd, trimmed));
+    }
+  }
+  return dirs;
+}
 
 export const JavaAdapterPolicy = {
   name: 'java',
@@ -184,6 +220,48 @@ export const JavaAdapterPolicy = {
   // suspended (JDWP suspend=y attach) it reports stopped without deepening
   // the JDI suspend count, so a single continue still releases the VM.
   getAttachBehavior: () => ({ pauseAfterAttach: true, pauseAllThreads: true }),
+
+  /**
+   * Where a `.java` binds (issue #950): the `.class` whose LineNumberTable
+   * JDI resolves the line through. The adapter never compiles user code, so
+   * every launch is a prebuilt one. The class file is `<classpath dir>/<package
+   * path>/<Name>.class`, and the package path mirrors the source's directory
+   * chain under every build tool and under `javac -d`, so the last k
+   * directories of the source's path are tried under each classpath
+   * directory, deepest first (the most specific match wins), then the sibling
+   * `<Name>.class` a bare `javac Foo.java` emits. A source's inner classes are
+   * emitted with the outer, so the outer file's mtime stands for all. Unknown
+   * before a launch: the classpath is the launch's.
+   */
+  generatedFileCandidates: (info: GeneratedFileContext): GeneratedFileCandidate[] | undefined => {
+    const { sourcePath, launchConfig } = info;
+    if (launchConfig === undefined || path.extname(sourcePath).toLowerCase() !== '.java') {
+      return undefined;
+    }
+    const classFile = `${path.basename(sourcePath, path.extname(sourcePath))}.class`;
+    const dir = path.dirname(sourcePath);
+    const segments = path.relative(path.parse(dir).root, dir).split(/[\\/]/).filter(segment => segment.length > 0);
+    const candidates: string[] = [];
+    for (const entry of classpathDirectories(launchConfig)) {
+      for (let depth = Math.min(MAX_PACKAGE_DEPTH, segments.length); depth >= 0; depth--) {
+        candidates.push(path.join(entry, ...segments.slice(segments.length - depth), classFile));
+      }
+    }
+    candidates.push(path.join(dir, classFile));
+    // Dedupe: a classpath entry that is the source directory coincides with the sibling.
+    const seen = new Set<string>();
+    return candidates
+      .filter(candidate => {
+        const normalized = path.normalize(candidate);
+        const key = process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+        if (seen.has(key)) {
+          return false;
+        }
+        seen.add(key);
+        return true;
+      })
+      .map(candidate => ({ path: candidate, linkedBy: 'launch' as const }));
+  },
 
   // JdiDapServer sends "initialized" during initialize (before launch).
   // sendLaunchBeforeConfig tells the proxy to wait for initialized first,

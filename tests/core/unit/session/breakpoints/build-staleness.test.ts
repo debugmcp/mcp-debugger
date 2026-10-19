@@ -90,6 +90,7 @@ describe('BuildStalenessChecker', () => {
         sourceMtimeMs: 20_000,
         generatedFile: DIST,
         generatedMtimeMs: 10_000,
+        linkedBy: 'sourceMap',
         mapFile: DIST_MAP
       });
     });
@@ -219,6 +220,91 @@ describe('BuildStalenessChecker', () => {
       const { fs } = makeFs(files);
 
       expect((await new BuildStalenessChecker(fs, logger()).check(SRC, JsDebugAdapterPolicy))?.generatedFile).toBe(at('build', 'a.js'));
+    });
+  });
+
+  describe('a candidate the launch links (issue #950): the artefact the engine runs, with no map to prove it', () => {
+    const CS = at('Program.cs');
+    const DLL = at('bin', 'app.dll');
+    const OTHER_DLL = at('bin', 'other.dll');
+    /** A .NET-shaped policy: a C# source binds through the launched DLL, and only once a launch exists. */
+    const launchPolicy: GeneratedFilePolicy = {
+      name: 'dotnet',
+      generatedFileCandidates: info =>
+        info.program !== undefined && info.sourcePath.endsWith('.cs') ? [{ path: info.program, linkedBy: 'launch' }] : undefined
+    };
+    const launchOf = (program: string) => ({ program, launchConfig: { program } });
+
+    it('reports the evidence from the two mtimes alone when the source is newer than the launched artefact', async () => {
+      const { fs, readFile } = makeFs({ [CS]: { content: '', mtimeMs: 20_000 }, [DLL]: { content: '', mtimeMs: 10_000 } });
+
+      const evidence = await new BuildStalenessChecker(fs, logger()).check(CS, launchPolicy, launchOf(DLL));
+
+      expect(evidence).toEqual({
+        sourceFile: CS,
+        sourceMtimeMs: 20_000,
+        generatedFile: DLL,
+        generatedMtimeMs: 10_000,
+        linkedBy: 'launch'
+      });
+      expect(readFile).not.toHaveBeenCalled();
+    });
+
+    it('hands the launch to the policy on the probe and on the context call alike', async () => {
+      const { fs } = makeFs({ [CS]: { content: '', mtimeMs: 20_000 }, [DLL]: { content: '', mtimeMs: 10_000 } });
+      const hook = vi.fn(launchPolicy.generatedFileCandidates!);
+
+      await new BuildStalenessChecker(fs, logger()).check(CS, { name: 'dotnet', generatedFileCandidates: hook }, launchOf(DLL));
+
+      expect(hook).toHaveBeenCalled();
+      for (const [info] of hook.mock.calls) {
+        expect(info).toMatchObject({ sourcePath: CS, program: DLL, launchConfig: { program: DLL } });
+      }
+    });
+
+    it('touches no file without a launch: the artefact is unknown until the transform names it', async () => {
+      const { fs, stat, readFile, pathExists } = makeFs({ [CS]: { content: '', mtimeMs: 20_000 }, [DLL]: { content: '', mtimeMs: 10_000 } });
+
+      expect(await new BuildStalenessChecker(fs, logger()).check(CS, launchPolicy)).toBeUndefined();
+      expect(stat).not.toHaveBeenCalled();
+      expect(readFile).not.toHaveBeenCalled();
+      expect(pathExists).not.toHaveBeenCalled();
+    });
+
+    it('skips a launched artefact that does not exist', async () => {
+      const { fs } = makeFs({ [CS]: { content: '', mtimeMs: 20_000 } });
+
+      expect(await new BuildStalenessChecker(fs, logger()).check(CS, launchPolicy, launchOf(DLL))).toBeUndefined();
+    });
+
+    it('stays silent when the artefact is as new as the source or newer', async () => {
+      for (const generated of [20_000, 30_000]) {
+        const { fs } = makeFs({ [CS]: { content: '', mtimeMs: 20_000 }, [DLL]: { content: '', mtimeMs: generated } });
+        expect(await new BuildStalenessChecker(fs, logger()).check(CS, launchPolicy, launchOf(DLL)), String(generated)).toBeUndefined();
+      }
+    });
+
+    it('remembers the discovery per program, so two launches of different artefacts from one source do not share it', async () => {
+      const { fs } = makeFs({
+        [CS]: { content: '', mtimeMs: 20_000 },
+        [DLL]: { content: '', mtimeMs: 10_000 },
+        [OTHER_DLL]: { content: '', mtimeMs: 5_000 }
+      });
+      const checker = new BuildStalenessChecker(fs, logger());
+
+      expect((await checker.check(CS, launchPolicy, launchOf(DLL)))?.generatedFile).toBe(DLL);
+      expect((await checker.check(CS, launchPolicy, launchOf(OTHER_DLL)))?.generatedFile).toBe(OTHER_DLL);
+      expect((await checker.check(CS, launchPolicy, launchOf(DLL)))?.generatedFile).toBe(DLL);
+    });
+
+    it('still sees a rebuild of the artefact immediately', async () => {
+      const files = { [CS]: { content: '', mtimeMs: 20_000 }, [DLL]: { content: '', mtimeMs: 10_000 } };
+      const { fs } = makeFs(files);
+      const checker = new BuildStalenessChecker(fs, logger());
+
+      expect(await checker.check(CS, launchPolicy, launchOf(DLL))).toBeDefined();
+      files[DLL] = { content: '', mtimeMs: 30_000 };
+      expect(await checker.check(CS, launchPolicy, launchOf(DLL))).toBeUndefined();
     });
   });
 

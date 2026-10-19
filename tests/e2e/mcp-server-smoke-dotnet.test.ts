@@ -18,7 +18,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';
 import { execSync } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, statSync, utimesSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -154,6 +154,60 @@ describe.skipIf(SKIP_DOTNET)('.NET Adapter Smoke Test', () => {
     expect(dotnetLang).toBeDefined();
     console.log('[.NET Smoke Test] dotnet language is available');
   });
+
+  it('warns on set_breakpoint once the launch has named the DLL, and notes on the stop, when dotnet.dll is older than Program.cs (issue #950)', async (ctx) => {
+    const dllPath = ensureDotnetBuild();
+    const sourceFile = path.resolve(ROOT, 'examples', 'dotnet', 'Program.cs');
+    const stamp = statSync(dllPath);
+    // The DLL is aged an hour behind its source BEFORE netcoredbg loads it
+    // (Windows refuses utimes on an open handle) and restored below.
+    const past = new Date(statSync(sourceFile).mtimeMs - 3_600_000);
+    utimesSync(dllPath, past, past);
+    try {
+      const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'create_debug_session',
+        arguments: { language: 'dotnet', name: 'dotnet-950-stale-dll' }
+      }));
+      sessionId = createResponse.sessionId as string;
+
+      // Before the launch nothing names the DLL: the echo stands alone.
+      const before = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: sourceFile, line: 14 }
+      }));
+      expect(before.success).toBe(true);
+      expect(String(before.warning ?? ''), JSON.stringify(before)).not.toMatch(/may be stale/);
+
+      const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: { sessionId, scriptPath: dllPath, dapLaunchArgs: { stopOnEntry: false, justMyCode: true } }
+      }));
+      if (!startResponse.success) {
+        skipIfSpawnBlocked(ctx, startResponse, '.NET');
+        throw new Error(`start_debugging failed: ${JSON.stringify(startResponse, null, 2)}`);
+      }
+
+      // The launch named the DLL: a breakpoint set now carries the warning, naming both files.
+      const after = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: sourceFile, line: 15 }
+      }));
+      expect(after.success).toBe(true);
+      expect(String(after.warning ?? ''), JSON.stringify(after)).toMatch(/may be stale/);
+      expect(after.warning).toContain(dllPath);
+      expect(after.warning).toContain(sourceFile);
+
+      // And the stop at the breakpoint says so too.
+      const stop = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'wait_for_stop',
+        arguments: { sessionId, timeout: 20000 }
+      }));
+      expect(stop.state, JSON.stringify(stop)).toBe('paused');
+      expect(String(stop.note ?? ''), JSON.stringify(stop)).toMatch(/may be stale/);
+    } finally {
+      utimesSync(dllPath, stamp.atime, stamp.mtime);
+    }
+  }, 90000);
 
   it('should complete .NET debugging flow', async (ctx) => {
     const dllPath = ensureDotnetBuild();

@@ -779,6 +779,8 @@ describe('JsDebugAdapterPolicy.generatedFileCandidates (issue #938)', () => {
   // An absolute project root on either platform (C:\proj or /proj).
   const P = path.resolve(path.sep, 'proj');
   const at = (...parts: string[]) => path.join(P, ...parts);
+  /** A candidate the core may trust only once its `.map` names the source. */
+  const gen = (...parts: string[]) => ({ path: at(...parts), linkedBy: 'sourceMap' as const });
 
   it('declines every source js-debug does not bind through a source map', () => {
     for (const name of ['a.js', 'a.mjs', 'a.cjs', 'a.jsx', 'a.py', 'a.d.ts', 'a.d.mts', 'a.d.cts']) {
@@ -787,8 +789,24 @@ describe('JsDebugAdapterPolicy.generatedFileCandidates (issue #938)', () => {
   });
 
   it('answers the sibling .js for a TypeScript source asked for with the path alone (the applicability probe)', () => {
-    expect(hook({ sourcePath: at('src', 'a.ts') })).toEqual([at('src', 'a.js')]);
-    expect(hook({ sourcePath: at('src', 'B.TS') })).toEqual([at('src', 'B.js')]);
+    expect(hook({ sourcePath: at('src', 'a.ts') })).toEqual([gen('src', 'a.js')]);
+    expect(hook({ sourcePath: at('src', 'B.TS') })).toEqual([gen('src', 'B.js')]);
+  });
+
+  it('declines when the launched program is itself a TypeScript source: tsx, ts-node and type stripping build nothing to be stale (issue #950)', () => {
+    for (const program of [at('src', 'main.ts'), at('src', 'main.mts'), at('src', 'main.cts'), at('src', 'main.tsx')]) {
+      expect(hook({ sourcePath: at('src', 'a.ts'), program, launchConfig: { program } }), program).toBeUndefined();
+    }
+  });
+
+  it('declines when the launched program is a runner under node_modules: vitest, jest and mocha transform sources in memory (issue #950)', () => {
+    const program = at('node_modules', 'vitest', 'vitest.mjs');
+    expect(hook({ sourcePath: at('src', 'a.ts'), program, launchConfig: { program } })).toBeUndefined();
+  });
+
+  it('keeps answering under a launched .js program: that is the build the source binds through', () => {
+    const program = at('dist', 'main.js');
+    expect(hook({ sourcePath: at('src', 'a.ts'), program, launchConfig: { program } })).toEqual([gen('src', 'a.js')]);
   });
 
   it('places the tsconfig outDir candidates first: rootDir-relative, config-dir-relative, then the sibling, deduplicated', () => {
@@ -797,20 +815,20 @@ describe('JsDebugAdapterPolicy.generatedFileCandidates (issue #938)', () => {
       tsconfig: { dir: P, outDir: 'dist', rootDir: 'src' }
     });
     expect(candidates).toEqual([
-      at('dist', 'a', 'b.js'),        // outDir/<rel from rootDir>; the src/-stripped form coincides and is deduped
-      at('dist', 'src', 'a', 'b.js'), // outDir/<rel from the tsconfig dir>
-      at('src', 'a', 'b.js')          // sibling
+      gen('dist', 'a', 'b.js'),        // outDir/<rel from rootDir>; the src/-stripped form coincides and is deduped
+      gen('dist', 'src', 'a', 'b.js'), // outDir/<rel from the tsconfig dir>
+      gen('src', 'a', 'b.js')          // sibling
     ]);
   });
 
   it('strips a leading src/ ahead of the config-dir-relative form when the tsconfig names no rootDir', () => {
     const candidates = hook({ sourcePath: at('src', 'a.ts'), tsconfig: { dir: P, outDir: 'dist' } });
-    expect(candidates).toEqual([at('dist', 'a.js'), at('dist', 'src', 'a.js'), at('src', 'a.js')]);
+    expect(candidates).toEqual([gen('dist', 'a.js'), gen('dist', 'src', 'a.js'), gen('src', 'a.js')]);
   });
 
   it('leaves out the rootDir candidate for a source outside rootDir', () => {
     const candidates = hook({ sourcePath: at('tests', 'a.ts'), tsconfig: { dir: P, outDir: 'dist', rootDir: 'src' } });
-    expect(candidates).toEqual([at('dist', 'tests', 'a.js'), at('tests', 'a.js')]);
+    expect(candidates).toEqual([gen('dist', 'tests', 'a.js'), gen('tests', 'a.js')]);
   });
 
   it('resolves outDir and rootDir against the tsconfig directory and accepts absolute ones', () => {
@@ -818,29 +836,29 @@ describe('JsDebugAdapterPolicy.generatedFileCandidates (issue #938)', () => {
       sourcePath: at('pkg', 'src', 'a.ts'),
       tsconfig: { dir: at('pkg'), outDir: at('out-abs'), rootDir: 'src' }
     });
-    expect(candidates?.[0]).toBe(at('out-abs', 'a.js'));
+    expect(candidates?.[0]?.path).toBe(at('out-abs', 'a.js'));
   });
 
   it('tries the conventional out dirs under the package when no tsconfig names an outDir', () => {
     const candidates = hook({ sourcePath: at('src', 'a.ts'), packageDir: P });
     expect(candidates).toEqual([
-      at('dist', 'a.js'), at('dist', 'src', 'a.js'),
-      at('build', 'a.js'), at('build', 'src', 'a.js'),
-      at('out', 'a.js'), at('out', 'src', 'a.js'),
-      at('lib', 'a.js'), at('lib', 'src', 'a.js'),
-      at('src', 'a.js')
+      gen('dist', 'a.js'), gen('dist', 'src', 'a.js'),
+      gen('build', 'a.js'), gen('build', 'src', 'a.js'),
+      gen('out', 'a.js'), gen('out', 'src', 'a.js'),
+      gen('lib', 'a.js'), gen('lib', 'src', 'a.js'),
+      gen('src', 'a.js')
     ]);
   });
 
   it('ignores the conventional out dirs once a tsconfig names an outDir', () => {
     const candidates = hook({ sourcePath: at('src', 'a.ts'), tsconfig: { dir: P, outDir: 'dist' }, packageDir: P })!;
-    expect(candidates.some(candidate => candidate.includes(`${path.sep}build${path.sep}`))).toBe(false);
-    expect(candidates[0]).toBe(at('dist', 'a.js'));
+    expect(candidates.some(candidate => candidate.path.includes(`${path.sep}build${path.sep}`))).toBe(false);
+    expect(candidates[0].path).toBe(at('dist', 'a.js'));
   });
 
   it('maps .mts to .mjs, .cts to .cjs and .tsx to .js', () => {
-    expect(hook({ sourcePath: at('a.mts') })).toEqual([at('a.mjs')]);
-    expect(hook({ sourcePath: at('a.cts') })).toEqual([at('a.cjs')]);
-    expect(hook({ sourcePath: at('a.tsx') })).toEqual([at('a.js')]);
+    expect(hook({ sourcePath: at('a.mts') })).toEqual([gen('a.mjs')]);
+    expect(hook({ sourcePath: at('a.cts') })).toEqual([gen('a.cjs')]);
+    expect(hook({ sourcePath: at('a.tsx') })).toEqual([gen('a.js')]);
   });
 });

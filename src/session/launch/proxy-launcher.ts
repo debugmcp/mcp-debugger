@@ -92,6 +92,7 @@ export class ProxyLauncher {
     this.ctx.updateSession(session.id, { toolchainValidation: undefined });
     session.launchConfigNotices = [];
     session.attachTransformNotices = undefined;
+    session.transformedLaunch = undefined;
 
     // Log entrance for Windows CI debugging
     this.ctx.logger.info(
@@ -117,6 +118,15 @@ export class ProxyLauncher {
     );
     try {
       const plan = await this.prepareAdapterLaunch(session, lease.adapter, inputs, request);
+
+      // The artefact a source binds through is whatever the transform made the
+      // engine run (issue #950) — the compiled binary for a `.rs`/`.cpp`
+      // program, the DLL a .NET launch named, the script itself for Python —
+      // so it is recorded here, after the transform; lastLaunch holds the
+      // caller's request. An attach debugs some other process: nothing to record.
+      if (!inputs.isAttachMode) {
+        session.transformedLaunch = { program: plan.proxyConfig.scriptPath, launchConfig: { ...plan.launchConfig } };
+      }
 
       // Create and start ProxyManager with the adapter. Ownership moves here:
       // ProxyManager.cleanup() becomes the disposer and release() below is a

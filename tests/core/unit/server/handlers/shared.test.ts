@@ -84,27 +84,30 @@ describe('successWarning', () => {
   });
 });
 
-describe('describeStaleBuild (issue #938)', () => {
+describe('describeStaleBuild (issues #938/#950)', () => {
   let ctx: any;
   const evidence = {
     sourceFile: '/app/src/a.ts',
     sourceMtimeMs: Date.UTC(2026, 9, 16, 23, 9, 0),
     generatedFile: '/app/dist/a.js',
     generatedMtimeMs: Date.UTC(2026, 9, 16, 23, 4, 0),
+    linkedBy: 'sourceMap',
     mapFile: '/app/dist/a.js.map'
   };
+  /** What the adapter's transform handed the engine for the current launch. */
+  const launched = { program: '/app/dist/main.js', launchConfig: { program: '/app/dist/main.js' } };
 
   beforeEach(() => {
     ctx = createMockToolContext();
     ctx.buildStaleness = { check: vi.fn().mockResolvedValue(evidence) };
-    ctx.sessionManager.getSession.mockReturnValue({ id: 's1', lastLaunch: { scriptPath: '/app/dist/main.js' } });
+    ctx.sessionManager.getSession.mockReturnValue({ id: 's1', transformedLaunch: launched });
     ctx.sessionManager.getSessionPolicy.mockReturnValue(JsDebugAdapterPolicy);
   });
 
   it('names both files and their mtimes in a hedged sentence when the build is older than the source', async () => {
     const sentence = await describeStaleBuild(ctx, 's1', '/app/src/a.ts', 'breakpoint');
 
-    expect(ctx.buildStaleness.check).toHaveBeenCalledWith('/app/src/a.ts', JsDebugAdapterPolicy);
+    expect(ctx.buildStaleness.check).toHaveBeenCalledWith('/app/src/a.ts', JsDebugAdapterPolicy, launched);
     expect(sentence).toMatch(/may be stale/);
     expect(sentence).toContain('/app/dist/a.js');
     expect(sentence).toContain('/app/src/a.ts');
@@ -132,27 +135,30 @@ describe('describeStaleBuild (issue #938)', () => {
     expect(ctx.buildStaleness.check).not.toHaveBeenCalled();
   });
 
-  it('asks nothing when the program itself is a TypeScript source (tsx, ts-node, type stripping: no build to be stale)', async () => {
-    ctx.sessionManager.getSession.mockReturnValue({ id: 's1', lastLaunch: { scriptPath: '/app/src/main.ts' } });
+  it('hands the transformed launch to the checker whatever the program is: how the sources run is the policy\'s word, not the core\'s (issue #950)', async () => {
+    const tsx = { program: '/app/src/main.ts', launchConfig: { program: '/app/src/main.ts' } };
+    ctx.sessionManager.getSession.mockReturnValue({ id: 's1', transformedLaunch: tsx });
 
-    expect(await describeStaleBuild(ctx, 's1', '/app/src/a.ts', 'breakpoint')).toBeUndefined();
-    expect(ctx.buildStaleness.check).not.toHaveBeenCalled();
+    await describeStaleBuild(ctx, 's1', '/app/src/a.ts', 'breakpoint');
+
+    expect(ctx.buildStaleness.check).toHaveBeenCalledWith('/app/src/a.ts', JsDebugAdapterPolicy, tsx);
   });
 
-  it('asks nothing when the launched program is a runner under node_modules (vitest, jest, mocha: the sources run in memory)', async () => {
-    ctx.sessionManager.getSession.mockReturnValue({ id: 's1', lastLaunch: { scriptPath: '/app/node_modules/vitest/vitest.mjs' } });
+  it('hands no launch before one exists', async () => {
+    ctx.sessionManager.getSession.mockReturnValue({ id: 's1' });
 
-    expect(await describeStaleBuild(ctx, 's1', '/app/src/a.ts', 'breakpoint')).toBeUndefined();
-    expect(ctx.buildStaleness.check).not.toHaveBeenCalled();
+    await describeStaleBuild(ctx, 's1', '/app/src/a.ts', 'breakpoint');
+
+    expect(ctx.buildStaleness.check).toHaveBeenCalledWith('/app/src/a.ts', JsDebugAdapterPolicy, undefined);
   });
 
-  it('ignores a stale lastLaunch on an attach session: the attached process is not the launched one', async () => {
+  it('hands no launch on an attach session: the attached process is not the one launched before', async () => {
     ctx.sessionManager.getSession.mockReturnValue({
-      id: 's1', attachMode: true, attachLocality: 'pid', lastLaunch: { scriptPath: '/app/src/main.ts' }
+      id: 's1', attachMode: true, attachLocality: 'pid', transformedLaunch: launched
     });
 
     expect(await describeStaleBuild(ctx, 's1', '/app/src/a.ts', 'breakpoint')).toMatch(/may be stale/);
-    expect(ctx.buildStaleness.check).toHaveBeenCalledWith('/app/src/a.ts', JsDebugAdapterPolicy);
+    expect(ctx.buildStaleness.check).toHaveBeenCalledWith('/app/src/a.ts', JsDebugAdapterPolicy, undefined);
   });
 
   it('asks nothing for an unknown session', async () => {

@@ -233,10 +233,26 @@ export interface UnresolvedSourceContext {
   attachMode: boolean;
 }
 
-/** Context passed to AdapterPolicy.generatedFileCandidates (issue #938). */
+/** Context passed to AdapterPolicy.generatedFileCandidates (issues #938/#950). */
 export interface GeneratedFileContext {
   /** The source path as the breakpoint or stop names it (absolute, server-resolved). */
   sourcePath: string;
+  /**
+   * The program the adapter's transform handed the engine for the session's
+   * current launch — the binary, DLL or script it actually runs — or
+   * undefined before any launch and on an attach session (issue #950). A
+   * policy whose launch compiles the source afresh (tsx, cargo on a `.rs`
+   * program, Delve's debug mode) reads it to decline; one whose engine binds
+   * through a prebuilt artefact names that artefact from it.
+   */
+  program?: string;
+  /**
+   * The transformed launch config the program came from, for the policies
+   * whose artefact is not the program itself (Java's `classpath` and `cwd`)
+   * or whose mode says whether the program is one (Go's `mode`, COBOL's
+   * `runner`). Absent with `program`.
+   */
+  launchConfig?: Record<string, unknown>;
   /**
    * The nearest tsconfig.json above the source when the core found and parsed
    * one: its directory and the two emit options that place outputs, as
@@ -246,6 +262,20 @@ export interface GeneratedFileContext {
   tsconfig?: { dir: string; outDir?: string; rootDir?: string };
   /** Directory of the nearest package.json above the source, when one exists. */
   packageDir?: string;
+}
+
+/** One compiled file a source may bind through, and what ties the two together (issue #950). */
+export interface GeneratedFileCandidate {
+  /** Absolute path of the compiled file. */
+  path: string;
+  /**
+   * `sourceMap`: a guess from path arithmetic that the core trusts only once
+   * `<path>.map` names the source. `launch`: the artefact the transformed
+   * launch runs (or the class file derived from its classpath), linked by the
+   * launch itself — no map exists to prove it, and the warning's hedge ("may
+   * be stale") carries the mtime-only comparison.
+   */
+  linkedBy: 'sourceMap' | 'launch';
 }
 
 export interface AdapterPolicy {
@@ -460,23 +490,28 @@ export interface AdapterPolicy {
   describeUnresolvedSource?(info: UnresolvedSourceContext): string | undefined;
 
   /**
-   * Where the compiled file a source-mapped location binds through may live
-   * (issue #938), most specific first. A `set_breakpoint` on `src/x.ts`
-   * echoes the line from that file, while js-debug binds it through
-   * `dist/x.js`'s source map; when the build is older than the source the
-   * two disagree and the echo is a confident lie. The adapter answers under
-   * the source path, so the generated file never appears in any record: the
-   * core locates it with this hook, verifies the candidate through its
-   * `.map`, and compares mtimes.
+   * Where the compiled file a location binds through may live (issues
+   * #938/#950), most specific first. A `set_breakpoint` echoes the line from
+   * the source file, while the engine binds it through a compiled one —
+   * js-debug through the generated `.js` and its source map, JDI through the
+   * `.class`, netcoredbg through the DLL's PDB, CodeLLDB and Delve through the
+   * binary's DWARF; when that file is older than the source the two disagree
+   * and the echo is a confident lie. The adapter answers under the source
+   * path, so the compiled file never appears in any record: the core locates
+   * it with this hook, proves a `sourceMap` candidate through its `.map`,
+   * takes a `launch` candidate as the launch's own word, and compares mtimes.
    *
-   * The core probes with `{ sourcePath }` alone first: `undefined` means the
-   * path is not one this adapter compiles (a plain `.js` under js-debug,
-   * every file under every other adapter) and no filesystem work follows;
-   * otherwise it gathers the tsconfig/package context and asks again. Pure
-   * path arithmetic, no filesystem. Optional: absent means the adapter never
-   * binds through a generated file.
+   * The core probes with `{ sourcePath, program, launchConfig }` first:
+   * `undefined` means this adapter binds the path through nothing it can
+   * name — a plain `.js` under js-debug, a source the launch compiles afresh
+   * (tsx, a `.rs` program cargo rebuilds, Delve's debug mode), a compiled
+   * language before any launch has named its artefact — and no filesystem
+   * work follows. A `sourceMap` answer makes the core gather the
+   * tsconfig/package context and ask again; a `launch` answer needs no
+   * context. Pure path arithmetic, no filesystem. Optional: absent means the
+   * adapter never binds through a compiled file.
    */
-  generatedFileCandidates?(info: GeneratedFileContext): string[] | undefined;
+  generatedFileCandidates?(info: GeneratedFileContext): GeneratedFileCandidate[] | undefined;
 
   /**
    * Return true to drop a DAP 'output' event that is known adapter-internal

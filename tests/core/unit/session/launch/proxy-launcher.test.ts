@@ -548,6 +548,39 @@ describe('ProxyLauncher.start', () => {
     expect(h.ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining('transformAttachConfig failed'));
   });
 
+  it('records the transformed launch on the session: the program the engine runs, not the script asked for (issue #950)', async () => {
+    const BIN = path.join('/work', 'app', 'bin', 'app');
+    const adapter = new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE });
+    adapter.transformLaunchConfig.mockImplementation(async config => ({ ...config, program: BIN, mode: 'exec' }));
+    const h = makeHarness({ adapter, proxyManager: new MockProxyManager() });
+    const session = makeSession();
+
+    await h.launcher.start(session, { scriptPath: SCRIPT });
+
+    expect(session.transformedLaunch).toEqual({
+      program: BIN,
+      launchConfig: expect.objectContaining({ program: BIN, mode: 'exec' })
+    });
+  });
+
+  it('clears the recorded launch when the transform fails, and on an attach (issue #950)', async () => {
+    const adapter = new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE });
+    const h = makeHarness({ adapter, proxyManager: new MockProxyManager() });
+    const session = makeSession();
+    await h.launcher.start(session, { scriptPath: SCRIPT });
+    expect(session.transformedLaunch?.program).toBe(SCRIPT);
+
+    adapter.transformLaunchConfig.mockRejectedValueOnce(new Error('compile failed'));
+    await expect(h.launcher.start(session, { scriptPath: SCRIPT })).rejects.toThrow('compile failed');
+    expect(session.transformedLaunch).toBeUndefined();
+
+    await h.launcher.start(session, { scriptPath: SCRIPT });
+    expect(session.transformedLaunch?.program).toBe(SCRIPT);
+    adapter.withAttachSupport();
+    await h.launcher.start(session, { scriptPath: 'attach://pid', dapLaunchArgs: launchArgs({ request: 'attach' }) });
+    expect(session.transformedLaunch).toBeUndefined();
+  });
+
   it('builds the adapter command from the resolved executable and hands the plan to the ProxyManager', async () => {
     const adapter = new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE });
     const proxyManager = new MockProxyManager();

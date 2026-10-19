@@ -181,10 +181,11 @@ export const ErrorMessages = {
     `the session will report 'paused' once the stop lands. Call wait_for_stop to block until then.`,
 
   /**
-   * The compiled file a source-mapped location binds through is older than
-   * the source the caller named (issue #938). Hedged on purpose: mtime says
-   * "older", not "different". The set_breakpoint warning and the stop-answer
-   * note are this one sentence.
+   * The compiled file a location binds through — the generated `.js` a
+   * source map names, or the class file, DLL or binary the launch runs — is
+   * older than the source the caller named (issues #938/#950). Hedged on
+   * purpose: mtime says "older", not "different". The set_breakpoint warning
+   * and the stop-answer note are this one sentence, for every adapter.
    * Used in: src/server/handlers/shared.ts (describeStaleBuild)
    */
   staleGeneratedFile: (evidence: {

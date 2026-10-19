@@ -117,6 +117,10 @@ In container mode (`MCP_CONTAINER=true`) the adapter auto-derives a best-effort 
 
 Alternatively, compile inside the container (or with `-fdebug-prefix-map=/home/user/proj=/workspace`) so the DWARF paths match the mount directly.
 
+## Stale builds
+
+A prebuilt executable runs as it is given; a lone source file is recompiled when that one file is newer than its binary, but its headers are not tracked. Either way CodeLLDB binds a breakpoint through the binary's DWARF while the echo comes from the source on disk. Once `start_debugging` has named the executable, mcp-debugger compares the two for every `.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hh`, `.hpp` and `.hxx` it is asked about: a `set_breakpoint` in a source or header newer than the executable carries a `warning` naming both files and their mtimes, and `step_*`, `wait_for_stop` and `pause_execution` carry the same sentence as `note` (issue #950) — so an edited header against an un-rebuilt binary is no longer silent. Not covered: attach sessions (no executable is known). Rebuild, or pass `forceRebuild: true` for a source launch, to clear it.
+
 ## Troubleshooting
 
 - **"CodeLLDB executable not found"** — run `pnpm --filter @debugmcp/codelldb-common run build:adapter`, or set `CODELLDB_PATH`.

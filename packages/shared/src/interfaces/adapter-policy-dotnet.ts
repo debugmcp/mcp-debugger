@@ -34,10 +34,14 @@
  * terminateDebuggee is always false when detaching from attached processes.
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, StopReasonContext } from './adapter-policy.js';
+import * as path from 'path';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling, GeneratedFileCandidate, GeneratedFileContext, LocalVariableExtraction, StopReasonContext } from './adapter-policy.js';
 import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-policy.js';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
+
+/** The sources netcoredbg binds through the launched DLL's Portable PDB (issue #950). */
+const DOTNET_SOURCE_EXTENSIONS: ReadonlySet<string> = new Set(['.cs', '.fs', '.vb']);
 
 export const DotnetAdapterPolicy = {
   name: 'dotnet',
@@ -305,6 +309,21 @@ export const DotnetAdapterPolicy = {
    * python/ruby/js policies.
    */
   getAttachBehavior: () => ({ pauseAfterAttach: true }),
+
+  /**
+   * A .NET source binds through the launched DLL's PDB (issue #950). The
+   * adapter never builds user code, so every launch is a prebuilt one: the
+   * DLL the transform handed netcoredbg is the artefact, and `dotnet build`
+   * writes it and its PDB together, so its mtime stands for both. Unknown
+   * before a launch.
+   */
+  generatedFileCandidates: (info: GeneratedFileContext): GeneratedFileCandidate[] | undefined => {
+    const program = info.program;
+    if (program === undefined || program.length === 0 || !DOTNET_SOURCE_EXTENSIONS.has(path.extname(info.sourcePath).toLowerCase())) {
+      return undefined;
+    }
+    return [{ path: program, linkedBy: 'launch' }];
+  },
 
   /**
    * Filter stack frames to remove .NET runtime/framework internal frames

@@ -11,6 +11,8 @@ import type {
   AdapterSpawnPayload,
   AdapterSpecificState,
   CommandHandling,
+  GeneratedFileCandidate,
+  GeneratedFileContext,
   LocalVariableExtraction,
   StopReasonContext,
   UnresolvedSourceContext
@@ -21,6 +23,34 @@ import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from '
 
 /** CodeLLDB names the locals scope "Local" or "Locals" depending on version. */
 export const LLDB_LOCAL_SCOPE_NAMES = ['Local', 'Locals'] as const;
+
+/**
+ * Where a CodeLLDB-debugged source binds (issue #950): the binary the launch
+ * runs, whose DWARF the breakpoint resolves through. Known only once the
+ * transform has named it — for a source launch that is the binary the
+ * adapter just built (fresh, so the core finds nothing to say), for a
+ * prebuilt launch the executable as given, which nothing rebuilds.
+ * `sourceExtensions` is the language's own set (lower-case, dotted): a header
+ * or copybook counts as much as a program file, which is exactly the gap the
+ * adapters' single-source rebuild checks leave open. A program that is itself
+ * a source has not been turned into a binary: nothing to compare against.
+ */
+export function lldbGeneratedFileCandidates(
+  info: GeneratedFileContext,
+  sourceExtensions: ReadonlySet<string>
+): GeneratedFileCandidate[] | undefined {
+  const program = info.program;
+  if (program === undefined || program.length === 0) {
+    return undefined;
+  }
+  if (!sourceExtensions.has(path.extname(info.sourcePath).toLowerCase())) {
+    return undefined;
+  }
+  if (sourceExtensions.has(path.extname(program).toLowerCase())) {
+    return undefined;
+  }
+  return [{ path: program, linkedBy: 'launch' }];
+}
 
 /**
  * Three CodeLLDB stop-reason quirks are normalized here:

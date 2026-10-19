@@ -231,6 +231,10 @@ java -agentlib:jdwp=transport=dt_socket,server=y,address=5005,suspend=y \
 4. Continue execution to resume the suspended JVM
 5. Wait for breakpoint to fire, then inspect variables
 
+## Stale builds
+
+The adapter never compiles your code: JDI binds a breakpoint through the `.class` file's `LineNumberTable`, while `set_breakpoint` and the stop answers echo the line from the `.java` on disk. When the source is newer than the class file, the echo names a statement that is not the one that runs. Once a launch has named the classpath, mcp-debugger compares the two: a `set_breakpoint` whose `.java` is newer than its `.class` carries a `warning` naming both files and their mtimes, and `step_*`, `wait_for_stop` and `pause_execution` carry the same sentence as `note` (issue #950). The class file is looked for under each `classpath` directory (resolved against the launch `cwd`; `.` when none is given, as the bridge defaults it) at the package path that mirrors the source's directory chain, then beside the source (a bare `javac Foo.java`). Not covered: classes inside jars, attach sessions (no classpath is known), and stops in a file no breakpoint was set in (the bridge reports those by package-relative path). Before `start_debugging` nothing names the class file, so the first warning comes after the launch. Recompile with `javac -g` to clear it.
+
 ## Troubleshooting
 
 ### Empty variables list

@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { existsSync, rmSync } from 'fs';
+import { existsSync, rmSync, statSync, utimesSync } from 'fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
@@ -387,6 +387,66 @@ describe.skipIf(SKIP_CPP)('MCP Server C/C++ Debugging Smoke Test @requires-cpp',
         .join('');
       expect(stdout).toContain('CPP_DEBUG_MARKER: Hello from C++ answer=42');
       expect(stdout).toContain('values has 3 elements');
+    },
+    90000
+  );
+
+  it(
+    'warns on set_breakpoint once the launch has named the binary, and notes on the stop, when the prebuilt executable is older than its source (issue #950)',
+    async (ctx) => {
+      const { sourcePath, binaryPath } = prepareCppExample('hello_world');
+      const stamp = statSync(binaryPath);
+      // The binary is aged an hour behind its source BEFORE CodeLLDB loads it
+      // (Windows refuses utimes on an open handle) and restored below; the
+      // next prepareCppExample would recompile it anyway.
+      const past = new Date(statSync(sourcePath).mtimeMs - 3_600_000);
+      utimesSync(binaryPath, past, past);
+      try {
+        const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+          name: 'create_debug_session',
+          arguments: { language: 'cpp', name: 'cpp-950-stale-binary' }
+        }));
+        expect(createResponse.success).toBe(true);
+        sessionId = createResponse.sessionId as string;
+
+        // Before the launch nothing names the binary: the echo stands alone.
+        const before = parseSdkToolResult(await mcpClient!.callTool({
+          name: 'set_breakpoint',
+          arguments: { sessionId, file: sourcePath, line: BP_LINE }
+        }));
+        expect(before.success).toBe(true);
+        expect(String(before.warning ?? ''), JSON.stringify(before)).not.toMatch(/may be stale/);
+
+        const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+          name: 'start_debugging',
+          arguments: { sessionId, scriptPath: binaryPath, dapLaunchArgs: { stopOnEntry: false } }
+        }));
+        if (!startResponse.success) {
+          skipIfSpawnBlocked(ctx, startResponse, 'C/C++');
+          throw new Error(`start_debugging failed: ${JSON.stringify(startResponse, null, 2)}`);
+        }
+
+        // The launch named the binary: a breakpoint set now carries the warning, naming both files.
+        const after = parseSdkToolResult(await mcpClient!.callTool({
+          name: 'set_breakpoint',
+          arguments: { sessionId, file: sourcePath, line: BP_LINE + 1 }
+        }));
+        expect(after.success).toBe(true);
+        expect(String(after.warning ?? ''), JSON.stringify(after)).toMatch(/may be stale/);
+        expect(after.warning).toContain(binaryPath);
+        expect(after.warning).toContain(sourcePath);
+
+        // And the stop at the breakpoint says so too.
+        expect(await reachUserFrame(BP_LINE), 'session should pause at the breakpoint').toBe(true);
+        const stop = parseSdkToolResult(await mcpClient!.callTool({
+          name: 'wait_for_stop',
+          arguments: { sessionId, timeout: 20000 }
+        }));
+        expect(stop.state, JSON.stringify(stop)).toBe('paused');
+        expect(String(stop.note ?? ''), JSON.stringify(stop)).toMatch(/may be stale/);
+      } finally {
+        utimesSync(binaryPath, stamp.atime, stamp.mtime);
+      }
     },
     90000
   );

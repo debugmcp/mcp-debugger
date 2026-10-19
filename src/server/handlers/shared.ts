@@ -89,23 +89,21 @@ export function isForeignAttach(session: Pick<ManagedSession, 'attachMode' | 'at
   return session.attachMode === true && session.attachLocality !== 'pid' && session.attachLocality !== 'loopback';
 }
 
-const NODE_MODULES_SEGMENT = /[\\/]node_modules[\\/]/;
-
 /**
  * The stale-build sentence for a location the session's adapter binds
- * through a compiled file (issue #938), or nothing. Advisory like
+ * through a compiled file (issues #938/#950), or nothing. Advisory like
  * `readLineContext`: every failure is a debug line under the caller's label.
  *
  * Nothing is said when the session is unknown; when the attach target is not
- * on this host (`isForeignAttach`); when the policy declares no generated
- * files; or when the launched program says the sources run as they are, so
- * there is no build to be stale — the program is itself a source the policy
- * compiles (tsx, ts-node, Node's type stripping) or a runner installed under
- * `node_modules` (vitest, jest, mocha, which transform sources in memory).
- * That launch knowledge is read only while the session is a launch: an
- * attach in the same session debugs some other process, whatever was
- * launched before. Before a launch nothing says how the program will run,
- * and the sentence's hedge carries that.
+ * on this host (`isForeignAttach`); or when the policy declares no generated
+ * files. What the engine runs — the transformed launch's program and config —
+ * goes to the policy through the checker, and the policy says what it means:
+ * js-debug declines a program that is itself a `.ts` or a runner under
+ * `node_modules` (the sources run as they are, so there is no build to be
+ * stale), the compiled languages name their artefact from it and have
+ * nothing to name before a launch. The core knows no language. The launch is
+ * read only while the session is a launch: an attach in the same session
+ * debugs some other process, whatever was launched before.
  */
 export async function describeStaleBuild(
   ctx: ToolContext,
@@ -122,14 +120,8 @@ export async function describeStaleBuild(
     if (!policy.generatedFileCandidates) {
       return undefined;
     }
-    const program = session.attachMode === true ? undefined : session.lastLaunch?.scriptPath;
-    if (
-      program !== undefined &&
-      (NODE_MODULES_SEGMENT.test(program) || policy.generatedFileCandidates({ sourcePath: program }) !== undefined)
-    ) {
-      return undefined;
-    }
-    const evidence = await ctx.buildStaleness.check(file, policy);
+    const launch = session.attachMode === true ? undefined : session.transformedLaunch;
+    const evidence = await ctx.buildStaleness.check(file, policy, launch);
     return evidence ? ErrorMessages.staleGeneratedFile(evidence) : undefined;
   } catch (error) {
     ctx.logger.debug(`Could not check build staleness for ${logLabel}`, { file, error });

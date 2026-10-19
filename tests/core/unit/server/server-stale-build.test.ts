@@ -11,7 +11,7 @@ import * as path from 'path';
 import type { Stats } from 'fs';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { JsDebugAdapterPolicy } from '@debugmcp/shared';
+import { DotnetAdapterPolicy, JsDebugAdapterPolicy } from '@debugmcp/shared';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { createProductionDependencies, type Dependencies } from '../../../../src/container/dependencies.js';
@@ -161,5 +161,48 @@ describe('set_breakpoint stale-build warning (#938)', () => {
     expect(content.warning ?? '').not.toMatch(/may be stale/);
     const probed = vi.mocked(mockDependencies.fileSystem.pathExists).mock.calls.map(([file]) => String(file));
     expect(probed.some(file => file.endsWith('tsconfig.json'))).toBe(false);
+  });
+
+  describe('a compiled language binds through the artefact the launch runs (issue #950)', () => {
+    const CS = at('Program.cs');
+    const DLL = at('bin', 'Debug', 'net8.0', 'app.dll');
+    const launched = { program: DLL, launchConfig: { program: DLL } };
+
+    beforeEach(() => {
+      files[CS] = { content: TS_FILE, mtimeMs: 20_000 };
+      files[DLL] = { content: 'MZ', mtimeMs: 10_000 };
+      mockSessionManager.getSessionPolicy.mockReturnValue(DotnetAdapterPolicy);
+    });
+
+    it('warns on a .NET source newer than the launched DLL, naming both', async () => {
+      mockSessionManager.getSession.mockReturnValue({ id: 'test-session', sessionLifecycle: 'active', transformedLaunch: launched });
+
+      const content = await setBreakpoint(CS, {});
+
+      expect(content.success).toBe(true);
+      expect(content.warning).toMatch(/may be stale/);
+      expect(content.warning).toContain(DLL);
+      expect(content.warning).toContain(CS);
+    });
+
+    it('says nothing before a launch: the artefact is unknown until the transform names it', async () => {
+      const content = await setBreakpoint(CS, {});
+
+      expect(content.warning ?? '').not.toMatch(/may be stale/);
+      const stats = vi.mocked(mockDependencies.fileSystem.stat).mock.calls.map(([file]) => String(file));
+      expect(stats).not.toContain(DLL);
+    });
+
+    it('says nothing about a DLL as new as the source, nor on an attach session', async () => {
+      files[DLL].mtimeMs = 20_000;
+      mockSessionManager.getSession.mockReturnValue({ id: 'test-session', sessionLifecycle: 'active', transformedLaunch: launched });
+      expect((await setBreakpoint(CS, {})).warning ?? '').not.toMatch(/may be stale/);
+
+      files[DLL].mtimeMs = 10_000;
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session', sessionLifecycle: 'active', attachMode: true, attachLocality: 'pid', transformedLaunch: launched
+      });
+      expect((await setBreakpoint(CS, {})).warning ?? '').not.toMatch(/may be stale/);
+    });
   });
 });

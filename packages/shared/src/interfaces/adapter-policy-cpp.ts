@@ -11,10 +11,11 @@
  * getPolicyForLanguage('cpp') routes correctly. Language-less payloads fall
  * back to RustAdapterPolicy, whose engine behavior is identical.
  */
-import type { AdapterPolicy } from './adapter-policy.js';
+import type { AdapterPolicy, GeneratedFileContext } from './adapter-policy.js';
 import {
   normalizeLldbStopReason,
   extractLldbLocalVariables,
+  lldbGeneratedFileCandidates,
   LLDB_LOCAL_SCOPE_NAMES,
   validateCodeLLDBExecutable,
   matchesLldbAdapterCommand,
@@ -32,6 +33,9 @@ import {
   describeLldbUnresolvedSource,
   lldbShouldSuppressOutputEvent
 } from './lldb-policy-shared.js';
+
+/** The sources CodeLLDB binds through the binary's DWARF (issue #950): headers included. */
+const CPP_SOURCE_EXTENSIONS: ReadonlySet<string> = new Set(['.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.hxx']);
 
 export const CppAdapterPolicy = {
   name: 'cpp',
@@ -138,6 +142,12 @@ export const CppAdapterPolicy = {
   getDapClientBehavior: getLldbDapClientBehavior,
 
   getAttachBehavior: () => getLldbAttachBehavior(),
+
+  // A source or header binds through the executable the launch runs (issue
+  // #950): the one the adapter compiled from a lone source (fresh — but its
+  // headers are not staleness-tracked by that compile, and a header newer
+  // than the binary now compares) or the prebuilt one, which nothing rebuilds.
+  generatedFileCandidates: (info: GeneratedFileContext) => lldbGeneratedFileCandidates(info, CPP_SOURCE_EXTENSIONS),
 
   getAdapterSpawnConfig: (payload, platform: NodeJS.Platform = process.platform, arch: NodeJS.Architecture = process.arch) =>
     buildLldbSpawnConfig(payload, platform, arch)

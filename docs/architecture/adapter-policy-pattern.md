@@ -86,9 +86,13 @@ export interface AdapterPolicy {
   isInternalFrame?(frame: StackFrame): boolean;
   // What a frame flagged unresolvedSource IS under this debugger, for the get_stack_trace note (issue #816)
   describeUnresolvedSource?(info: { count: number; files: readonly string[]; attachMode: boolean }): string | undefined;
-  // Where the compiled file a source-mapped location binds through may live, most specific first (issue #938);
-  // undefined for a source this adapter does not compile. Pure path arithmetic: the core does the fs work.
-  generatedFileCandidates?(info: { sourcePath: string; tsconfig?: { dir: string; outDir?: string; rootDir?: string }; packageDir?: string }): string[] | undefined;
+  // Where the compiled file a location binds through may live, most specific first (issues #938/#950). Each candidate
+  // says what links it to the source: 'sourceMap' (trusted once `<path>.map` names the source — js-debug) or 'launch'
+  // (the artefact the transformed launch runs, handed in as `program`/`launchConfig`: the .NET DLL, the Go exec /
+  // Rust / C/C++ / COBOL binary, the Java .class on the classpath). undefined for a source this adapter does not
+  // compile, one the launch compiles afresh, or a compiled language before a launch has named its artefact.
+  // Pure path arithmetic: the core does the fs work.
+  generatedFileCandidates?(info: { sourcePath: string; program?: string; launchConfig?: Record<string, unknown>; tsconfig?: { dir: string; outDir?: string; rootDir?: string }; packageDir?: string }): Array<{ path: string; linkedBy: 'sourceMap' | 'launch' }> | undefined;
 
   // === Variable extraction (optional) ===
   extractLocalVariables?(stackFrames, scopes, variables, includeSpecial?): LocalVariableExtraction;

@@ -1,24 +1,33 @@
 /**
  * Is the file the caller points at newer than the compiled file the debugger
- * binds it through? (issue #938)
+ * binds it through? (issues #938/#950)
  *
  * `set_breakpoint` echoes the requested line from the source file, and every
- * stop answer reads its context from the same file, while js-debug binds a
- * `.ts` location through the generated `.js`'s source map. When `dist/` is
- * older than `src/` the two disagree and the echo is a confident lie: the
+ * stop answer reads its context from the same file, while the engine binds
+ * the location through a compiled file: js-debug through the generated
+ * `.js`'s source map, JDI through the `.class`, netcoredbg through the DLL's
+ * PDB, CodeLLDB and Delve through a binary's DWARF. When that file is older
+ * than the source the two disagree and the echo is a confident lie: the
  * breakpoint sits on a different statement than the one shown, and every
  * later line number is off. The adapter answers under the source path, so
- * the generated file never appears in any record; this module finds it.
+ * the compiled file never appears in any record; this module finds it.
  *
  * The split: the adapter's policy knows where its compiler emits
  * (`AdapterPolicy.generatedFileCandidates`, pure path arithmetic); this
- * module does the filesystem work — the tsconfig/package walk, the stat of
- * each candidate, the `.map` read that proves a candidate is compiled from
- * the source (a guess that merely exists is never trusted) — and the mtime
- * comparison. A result is evidence for a hedged sentence, never a verdict:
- * mtime says "older", not "different".
+ * module does the filesystem work and the mtime comparison. A candidate says
+ * what links it to the source: `linkedBy: 'sourceMap'` is a guess — the
+ * tsconfig/package walk feeds it, and the `.map` beside it must name the
+ * source before it is trusted (a guess that merely exists never is);
+ * `linkedBy: 'launch'` is the artefact the transformed launch runs (the .NET
+ * DLL, a Go/Rust/C/COBOL binary, the Java `.class` on the classpath), taken
+ * as the launch's own word — it needs no walk and has no map, so only its
+ * existence is checked. A result is evidence for a hedged sentence, never a
+ * verdict: mtime says "older", not "different".
  *
  * Never throws and never logs above debug. Known limits, by design:
+ * - A `launch` candidate is believed to contain the source because the
+ *   launch runs it; a source newer than the artefact but not compiled into
+ *   it (a scratch file beside the project) reads as stale too.
  * - tsconfig `extends` is not followed; the walk takes the nearest config
  *   that names an `outDir` (so a per-directory config that only extends the
  *   root one is walked past), and a parse failure means "no tsconfig".
@@ -37,18 +46,23 @@
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { LRUCache } from 'lru-cache';
-import type { AdapterPolicy, IFileSystem } from '@debugmcp/shared';
+import type { AdapterPolicy, GeneratedFileCandidate, GeneratedFileContext, IFileSystem } from '@debugmcp/shared';
 import { samePath } from './hit-verification.js';
 
-/** What was compared when the source is newer than the compiled file its map names. */
+/** What was compared when the source is newer than the compiled file it binds through. */
 export interface StaleBuildEvidence {
   sourceFile: string;
   sourceMtimeMs: number;
   generatedFile: string;
   generatedMtimeMs: number;
-  /** The map that proved `generatedFile` is compiled from `sourceFile`. */
-  mapFile: string;
+  /** What tied `generatedFile` to `sourceFile`: its map, or the launch that runs it. */
+  linkedBy: GeneratedFileCandidate['linkedBy'];
+  /** The map that proved `generatedFile` is compiled from `sourceFile`; `sourceMap` candidates only. */
+  mapFile?: string;
 }
+
+/** The session's current launch as the policy hook sees it: absent before a launch and on attach. */
+export type LaunchContext = Pick<GeneratedFileContext, 'program' | 'launchConfig'>;
 
 export interface BuildStalenessOptions {
   /** The source must be newer by more than this (default 2000 ms: FAT and other coarse mtimes). */
@@ -84,12 +98,13 @@ interface FileStamp {
   size: number;
 }
 
-/** One located compiled file, remembered with the stamp of the map that proved it. */
+/** One located compiled file; a `sourceMap` one is remembered with the stamp of the map that proved it. */
 interface Discovery {
   generatedFile: string;
-  mapFile: string;
-  mapMtimeMs: number;
-  mapSize: number;
+  linkedBy: GeneratedFileCandidate['linkedBy'];
+  mapFile?: string;
+  mapMtimeMs?: number;
+  mapSize?: number;
 }
 
 interface TsconfigSummary {
@@ -137,18 +152,27 @@ export class BuildStalenessChecker {
 
   /**
    * The evidence when `sourcePath` is newer than the compiled file the
-   * policy's map-verified candidate names; undefined when the policy does
-   * not compile this source, nothing matching was found, the build is
-   * current, or any read failed.
+   * policy's candidate names — a `sourceMap` one proved by its map, a
+   * `launch` one taken from the session's current launch; undefined when the
+   * policy does not compile this source, nothing matching was found, the
+   * build is current, or any read failed. `launch` is what the transformed
+   * launch handed the engine; without it a compiled language's policy has no
+   * artefact to name and answers nothing.
    */
-  async check(sourcePath: string, policy: GeneratedFilePolicy): Promise<StaleBuildEvidence | undefined> {
-    // The applicability probe: no filesystem work for a source this adapter never compiles.
-    if (!policy.generatedFileCandidates || policy.generatedFileCandidates({ sourcePath }) === undefined) {
+  async check(sourcePath: string, policy: GeneratedFilePolicy, launch?: LaunchContext): Promise<StaleBuildEvidence | undefined> {
+    if (!policy.generatedFileCandidates) {
       return undefined;
     }
-    const key = `${policy.name}\0${sourcePath}`;
+    // The applicability probe: no filesystem work for a source this adapter
+    // binds through nothing it can name.
+    const probe: GeneratedFileContext = { sourcePath, ...launch };
+    const probed = policy.generatedFileCandidates(probe);
+    if (probed === undefined) {
+      return undefined;
+    }
+    const key = `${policy.name}\0${launch?.program ?? ''}\0${sourcePath}`;
     try {
-      const discovery = await this.discover(key, sourcePath, policy);
+      const discovery = await this.discover(key, probe, probed, policy);
       if (!discovery) {
         return undefined;
       }
@@ -165,7 +189,8 @@ export class BuildStalenessChecker {
         sourceMtimeMs: source.mtimeMs,
         generatedFile: discovery.generatedFile,
         generatedMtimeMs: generated.mtimeMs,
-        mapFile: discovery.mapFile
+        linkedBy: discovery.linkedBy,
+        ...(discovery.mapFile !== undefined ? { mapFile: discovery.mapFile } : {})
       };
     } catch (error) {
       this.logger?.debug(`[BuildStaleness] check failed for ${sourcePath}: ${error instanceof Error ? error.message : String(error)}`);
@@ -178,22 +203,46 @@ export class BuildStalenessChecker {
     this.contexts.clear();
   }
 
-  private async discover(key: string, sourcePath: string, policy: GeneratedFilePolicy): Promise<Discovery | undefined> {
+  /**
+   * The compiled file for this probe: the remembered one while its proof
+   * stands (a `launch` discovery needs none beyond the artefact's existence,
+   * which `check` reads fresh), else the first candidate that exists and —
+   * for a `sourceMap` one — whose map names the source. Candidates the launch
+   * links need no directory context, so the probe's own answer serves when
+   * every candidate in it is one; otherwise the tsconfig/package walk runs
+   * and the policy is asked again with it.
+   */
+  private async discover(
+    key: string,
+    probe: GeneratedFileContext,
+    probed: GeneratedFileCandidate[],
+    policy: GeneratedFilePolicy
+  ): Promise<Discovery | undefined> {
     const cached = this.discoveries.get(key);
     if (cached) {
-      const mapStamp = await this.stamp(cached.mapFile);
+      if (cached.linkedBy === 'launch') {
+        return cached;
+      }
+      const mapStamp = cached.mapFile !== undefined ? await this.stamp(cached.mapFile) : undefined;
       if (mapStamp && mapStamp.mtimeMs === cached.mapMtimeMs && mapStamp.size === cached.mapSize) {
         return cached;
       }
       this.discoveries.delete(key);
     }
-    const context = await this.contextFor(path.dirname(sourcePath));
-    const candidates = policy.generatedFileCandidates!({ sourcePath, ...context }) ?? [];
+    const { sourcePath } = probe;
+    const candidates = probed.length > 0 && probed.every(candidate => candidate.linkedBy === 'launch')
+      ? probed
+      : policy.generatedFileCandidates!({ ...probe, ...(await this.contextFor(path.dirname(sourcePath))) }) ?? [];
     for (const candidate of candidates) {
-      if (!(await this.stamp(candidate))) {
+      if (!(await this.stamp(candidate.path))) {
         continue;
       }
-      const mapFile = `${candidate}.map`;
+      if (candidate.linkedBy === 'launch') {
+        const discovery: Discovery = { generatedFile: candidate.path, linkedBy: 'launch' };
+        this.discoveries.set(key, discovery);
+        return discovery;
+      }
+      const mapFile = `${candidate.path}.map`;
       const mapStamp = await this.stamp(mapFile);
       if (!mapStamp) {
         continue;
@@ -206,7 +255,13 @@ export class BuildStalenessChecker {
       if (!sources.some(source => samePath(source, sourcePath))) {
         continue;
       }
-      const discovery: Discovery = { generatedFile: candidate, mapFile, mapMtimeMs: mapStamp.mtimeMs, mapSize: mapStamp.size };
+      const discovery: Discovery = {
+        generatedFile: candidate.path,
+        linkedBy: 'sourceMap',
+        mapFile,
+        mapMtimeMs: mapStamp.mtimeMs,
+        mapSize: mapStamp.size
+      };
       this.discoveries.set(key, discovery);
       return discovery;
     }

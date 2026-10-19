@@ -14,11 +14,13 @@
  * language-less payload can never be mistaken for rust/cpp.
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy, LocalVariableExtraction } from './adapter-policy.js';
+import * as path from 'path';
+import type { AdapterPolicy, GeneratedFileCandidate, GeneratedFileContext, LocalVariableExtraction } from './adapter-policy.js';
 import { emptyLocalVariableExtraction } from './adapter-policy.js';
 import type { StackFrame, Variable } from '../models/index.js';
 import {
   normalizeLldbStopReason,
+  lldbGeneratedFileCandidates,
   validateCodeLLDBExecutable,
   buildLldbSpawnConfig,
   lldbCommandHandling,
@@ -40,6 +42,26 @@ import {
  * program has items there.
  */
 export const COBOL_SCOPE_NAMES = ['WORKING-STORAGE', 'LOCAL-STORAGE', 'LINKAGE', 'FILE'] as const;
+
+/** The sources the engine binds through the executable's DWARF (issue #950): copybooks included. */
+const COBOL_SOURCE_EXTENSIONS: ReadonlySet<string> = new Set(['.cob', '.cbl', '.cobol', '.cpy']);
+
+/**
+ * GnuCOBOL's module loader, the program a `runner: "cobcrun"` launch hands the
+ * engine (issue #950). Recognised by name: the adapter's transform consumes the
+ * `runner` key before the config reaches the engine, so the launched program is
+ * the one signal that survives (measured on the dev proxy: with the key alone
+ * as the guard, every cobcrun launch warned about the loader's 2023 mtime).
+ */
+const COBCRUN_LOADER = /^cobcrun(\.exe)?$/i;
+
+/** Whether a launch runs the user's module under cobcrun, whose file is not in the launch config. */
+function launchesUnderCobcrun(info: GeneratedFileContext): boolean {
+  return (
+    info.launchConfig?.runner === 'cobcrun' ||
+    (info.program !== undefined && COBCRUN_LOADER.test(path.basename(info.program)))
+  );
+}
 
 /** The exception filter the shim advertises; breaks on libcob's `cob_runtime_error`. */
 export const COBOL_RUNTIME_ERROR_FILTER = 'cobol_runtime_error';
@@ -234,6 +256,14 @@ export const CobolAdapterPolicy = {
   // The shim fronts CodeLLDB, so an attach carries the same Windows detach
   // hazard as cpp (issue #763).
   getAttachBehavior: () => getLldbAttachBehavior(),
+
+  // A program or copybook binds through the executable the launch runs
+  // (issue #950): the one cobc built from a source (fresh) or the prebuilt
+  // one, which nothing rebuilds. Not under cobcrun, whose program is
+  // GnuCOBOL's loader rather than the user's module — the module's own file
+  // is not in the launch config, so nothing is named.
+  generatedFileCandidates: (info: GeneratedFileContext): GeneratedFileCandidate[] | undefined =>
+    launchesUnderCobcrun(info) ? undefined : lldbGeneratedFileCandidates(info, COBOL_SOURCE_EXTENSIONS),
 
   getAdapterSpawnConfig: (payload, platform: NodeJS.Platform = process.platform, arch: NodeJS.Architecture = process.arch) =>
     buildLldbSpawnConfig(payload, platform, arch)

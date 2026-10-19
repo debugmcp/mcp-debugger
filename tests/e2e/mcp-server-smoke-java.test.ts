@@ -24,6 +24,7 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
+import { statSync, utimesSync } from 'fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
@@ -128,6 +129,63 @@ describe('MCP Server Java Debugging Smoke Test @requires-java', () => {
 
     expect(sessionId).toBeTruthy();
   });
+
+  it('warns on set_breakpoint once the launch has named the classpath, and notes on the stop, when HelloWorld.class is older than HelloWorld.java (issue #950)', async () => {
+    const { sourcePath, classDir, mainClass } = prepareJavaExample('HelloWorld');
+    const classFile = path.join(classDir, `${mainClass}.class`);
+    const stamp = statSync(classFile);
+    // The class file is aged an hour behind its source BEFORE the JVM opens it
+    // (Windows refuses utimes on an open handle) and restored below; the next
+    // prepareJavaExample would recompile it anyway.
+    const past = new Date(statSync(sourcePath).mtimeMs - 3_600_000);
+    utimesSync(classFile, past, past);
+    try {
+      const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'create_debug_session',
+        arguments: { language: 'java', name: 'java-950-stale-class' }
+      }));
+      sessionId = createResponse.sessionId as string;
+
+      // Before the launch nothing names the class file: the echo stands alone.
+      const before = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: sourcePath, line: 10 }
+      }));
+      expect(before.success).toBe(true);
+      expect(String(before.warning ?? ''), JSON.stringify(before)).not.toMatch(/may be stale/);
+
+      const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: sourcePath,
+          dapLaunchArgs: { mainClass, classpath: classDir, cwd: classDir, stopOnEntry: false }
+        }
+      }));
+      expect(startResponse.success, JSON.stringify(startResponse)).toBe(true);
+
+      // The launch named the classpath: a breakpoint set now carries the warning, naming both files.
+      const after = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: sourcePath, line: 11 }
+      }));
+      expect(after.success).toBe(true);
+      expect(String(after.warning ?? ''), JSON.stringify(after)).toMatch(/may be stale/);
+      expect(after.warning).toContain(classFile);
+      expect(after.warning).toContain(sourcePath);
+
+      // The stop at the breakpoint says so too: the bridge echoes the absolute
+      // path of a file a breakpoint was set in, which is what the note needs.
+      const stop = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'wait_for_stop',
+        arguments: { sessionId, timeout: 20000 }
+      }));
+      expect(stop.state, JSON.stringify(stop)).toBe('paused');
+      expect(String(stop.note ?? ''), JSON.stringify(stop)).toMatch(/may be stale/);
+    } finally {
+      utimesSync(classFile, stamp.atime, stamp.mtime);
+    }
+  }, 60000);
 
   it('should complete Java debugging flow with verified stack and variables', async () => {
     // Check for java and javac
