@@ -504,6 +504,27 @@ describe('ProxyLauncher.start', () => {
     expect(logDirWrittenBeforeCreate).toBe(true);
   });
 
+  it('releases the lease when committing the record throws, as when the session was closed during a long compile', async () => {
+    const adapter = new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE });
+    const proxyManager = new MockProxyManager();
+    const h = makeHarness({ adapter, proxyManager });
+    // The first toolchainValidation write is the clear at the top of start();
+    // the second is the commit, which goes through the store and throws once
+    // the session is gone.
+    let toolchainWrites = 0;
+    vi.mocked(h.ctx.updateSession).mockImplementation((_id, patch) => {
+      if ('toolchainValidation' in patch && ++toolchainWrites === 2) {
+        throw new Error('Session not found: sess-1');
+      }
+    });
+
+    await expect(h.launcher.start(makeSession(), { scriptPath: SCRIPT })).rejects.toThrow('Session not found');
+
+    // The registry slot comes back (#557): nothing was transferred, so the lease disposes.
+    expect(adapter.dispose).toHaveBeenCalledTimes(1);
+    expect(proxyManager.startCalls).toHaveLength(0);
+  });
+
   it('commits the launch notices before the proxy handlers are installed, which seed them into the output buffer', async () => {
     const adapter = Object.assign(new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE }), {
       supportedLaunchKeys: ['program']

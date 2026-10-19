@@ -156,18 +156,20 @@ export class ProxyLauncher {
     );
 
     const inputs = await this.prepareLaunchInputs(session, request);
-    // The run directory goes on the session before anything fallible: a
+    // The run directory goes on the session before the adapter is acquired: a
     // failure's proxy-log pointers (proxy-failure-diagnostics.ts) are derived
     // from it and must name this attempt's directory, not the last run's.
     this.ctx.updateSession(session.id, { logDir: inputs.sessionLogDir });
 
-    const outcome = await this.prepareAdapter(session, inputs, request);
     // What preparation learned is this attempt's record whether or not it
     // succeeded: a thrown transform has still drained its notices, and the
     // verdict it recorded still names the cause. Committed before the proxy
     // handlers are installed, which seed the notices into the output buffer.
-    this.commitPreparation(session, outcome.record);
+    const outcome = await this.prepareAdapter(session, inputs, request);
     if (!outcome.ok) {
+      // The lease is already released: a throw from the commit itself (the
+      // session closed meanwhile) strands nothing.
+      this.commitPreparation(session, outcome.record);
       throw outcome.error;
     }
 
@@ -179,9 +181,13 @@ export class ProxyLauncher {
     // disposes the adapter from there. Same behaviour as the `adapterOwnedByProxy`
     // boolean it replaces (#557); the difference is that the boolean had to be
     // assigned at one point and consulted from one catch, so the next throw site
-    // added outside that window would have silently reopened the leak.
+    // added outside that window would have silently reopened the leak — which is
+    // why the commit below runs inside this try: it writes through the store,
+    // and the store throws once a close has removed the session.
     const { lease, plan } = outcome;
     try {
+      this.commitPreparation(session, outcome.record);
+
       // Create and start ProxyManager with the adapter. Ownership moves here:
       // ProxyManager.cleanup() becomes the disposer and release() below is a
       // no-op.

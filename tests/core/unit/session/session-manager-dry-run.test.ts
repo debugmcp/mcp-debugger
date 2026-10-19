@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import type { CustomLaunchRequestArguments } from '../../../../src/session/session-manager-core.js';
-import { SessionState, SessionLifecycleState, DebugLanguage } from '@debugmcp/shared';
+import { SessionState, SessionLifecycleState, DebugLanguage, type AdapterPolicy } from '@debugmcp/shared';
 import { FakeDebugAdapter } from '../../../test-utils/fakes/fake-debug-adapter.js';
 import { createMockDependencies } from './session-manager-test-utils.js';
 
@@ -221,6 +221,37 @@ describe('SessionManager dry run (issue #812)', () => {
     expect(dry.success).toBe(false);
     expect(dry.error).toBe('MSVC_TOOLCHAIN_DETECTED');
     expect(dry.canContinue).toBe(false);
+    expect(sessionManager.getSession(session.id)!.state).toBe(SessionState.CREATED);
+  });
+
+  it('gives the adapter back after answering: the registry slot a dry run takes is released', async () => {
+    const adapter = new FakeDebugAdapter();
+    vi.mocked(dependencies.adapterRegistry.create).mockImplementationOnce(async () => adapter);
+    const session = await createSession('Slot');
+
+    const dry = await sessionManager.startDebugging(session.id, 'test.py', [], {}, true);
+
+    expect(dry.success).toBe(true);
+    expect(adapter.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers a policy that cannot say what it would spawn as a failure, naming it, and still gives the adapter back', async () => {
+    const adapter = new FakeDebugAdapter();
+    vi.mocked(dependencies.adapterRegistry.create).mockImplementationOnce(async () => adapter);
+    const facade = sessionManager as unknown as { selectPolicy: (language: string) => AdapterPolicy };
+    const original = facade.selectPolicy.bind(sessionManager);
+    vi.spyOn(facade, 'selectPolicy').mockImplementation((language) => ({
+      ...original(language),
+      getAdapterSpawnConfig: () => undefined
+    }));
+    const session = await createSession('NoSpawnConfig');
+
+    const dry = await sessionManager.startDebugging(session.id, 'test.py', [], {}, true);
+
+    expect(dry.success).toBe(false);
+    expect(dry.error).toMatch(/Cannot determine adapter command .*\(policy: mock\)/);
+    expect(dry.state).toBe(SessionState.CREATED);
+    expect(adapter.dispose).toHaveBeenCalledTimes(1);
     expect(sessionManager.getSession(session.id)!.state).toBe(SessionState.CREATED);
   });
 
