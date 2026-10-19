@@ -641,11 +641,12 @@ export class DebugLauncher {
       // stack read a step, a pause or wait_for_stop makes, so the answer
       // carries `location` — and `threadId`/`note` when there is something
       // to say — and the handler can read the line and the build behind it.
-      // Only for a stop the core kept: PAUSED without lastStop is the
-      // auto-continue transient (below), whose line the program is about to
-      // leave. Best effort, like every landing read: a stack that cannot be
-      // read leaves the answer as it was.
-      const landing = finalState === SessionState.PAUSED && finalSession.lastStop
+      // An entry stop the core auto-continues never gets here: the readiness
+      // wait reads the state through waitForSessionState, whose microtask
+      // re-read (issue #849) sees the RUNNING the continue sets in the same
+      // call stack. Best effort, like every landing read: a stack that cannot
+      // be read leaves the answer as it was.
+      const landing = finalState === SessionState.PAUSED
         ? await describeStopLocation(this.ctx, sessionId, 'launch')
         : {};
 
@@ -752,11 +753,10 @@ export class DebugLauncher {
           ...(runToCompletion?.data ?? {}),
           // Prefer the actual DAP stop reason (issue #214) — the first stop is
           // not always a breakpoint (e.g. an uncaught exception before any
-          // breakpoint is hit). handleStopped records lastStop synchronously
-          // before every user-visible PAUSED transition, so PAUSED without
-          // lastStop is only the auto-continue transient (an entry stop being
-          // auto-continued); report 'unknown' rather than fabricating
-          // 'breakpoint' there (issue #255 residual).
+          // breakpoint is hit). A PAUSED session always carries lastStop
+          // (_updateSessionState enforces it, issue #598), so the fallback is
+          // for the type alone: 'entry' for a stopOnEntry launch, 'unknown'
+          // otherwise — never a fabricated 'breakpoint' (issue #255).
           reason:
             finalState === SessionState.PAUSED
               ? finalSession.lastStop?.reason ??

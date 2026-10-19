@@ -400,22 +400,28 @@ Starts debugging a script.
   "success": true,
   "state": "paused",
   "message": "Debugging started for /abs/path/examples/python_simple_swap/swap_vars.py. Current state: paused",
-  "location": { "file": "/abs/path/examples/python_simple_swap/swap_vars.py", "line": 12, "column": 1 },
+  "location": { "file": "/abs/path/examples/python_simple_swap/swap_vars.py", "line": 10, "column": 1 },
   "context": {
-    "lineContent": "    a, b = b, a",
-    "surrounding": [ { "line": 10, "content": "    print(a, b)" }, { "line": 11, "content": "" }, { "line": 12, "content": "    a, b = b, a" } ]
+    "lineContent": "    a = b  # Bug: 'a' loses its original value here",
+    "surrounding": [
+      { "line": 8, "content": "    # Or Python's tuple assignment: a, b = b, a" },
+      { "line": 9, "content": "    " },
+      { "line": 10, "content": "    a = b  # Bug: 'a' loses its original value here" },
+      { "line": 11, "content": "    b = a  # Bug: 'b' gets the new value of 'a' (which is original 'b')" },
+      { "line": 12, "content": "    " }
+    ]
   },
   "data": {
     "message": "Debugging started for /abs/path/examples/python_simple_swap/swap_vars.py. Current state: paused",
     "reason": "breakpoint",
-    "location": { "file": "/abs/path/examples/python_simple_swap/swap_vars.py", "line": 12, "column": 1 }
+    "location": { "file": "/abs/path/examples/python_simple_swap/swap_vars.py", "line": 10, "column": 1 }
   }
 }
 ```
 
 **When the launch answers:** once the program is launched, `start_debugging` holds its answer for a short window and reports the session as it is when the first of three things happens — the same way in every language (issues #815, #823, #826):
 
-- **The program stops** — `state: "paused"` with `reason`, and where, the way `wait_for_stop` answers a stop (issue #951): `location` is the first visible frame, `context` the source line around it, and `threadId` and `note` appear when there is something to say — the answer anchored on a thread other than the reported one, no frame of the stack being program code (as for `pause_execution`), or the compiled file the debugger binds the location through being older than its source (the stale-build sentence `set_breakpoint` warns with, issues #938/#950). `location`, `threadId` and `note` sit at the top level and in `data`; `context` at the top level only. A breakpoint reached as the program starts is answered here, in the one call (the example above).
+- **The program stops** — `state: "paused"` with `reason`, and where, the way `wait_for_stop` answers a stop (issue #951): `location` is the first visible frame, `context` the source line around it, and `threadId` and `note` appear when there is something to say — the answer anchored on a thread other than the reported one, no frame of the stack being program code (as for `pause_execution`), or the compiled file the debugger binds the location through being older than its source (the stale-build sentence `set_breakpoint` warns with, issues #938/#950). `location` and `threadId` sit at the top level and in `data`; `context` and the full `note` at the top level (`data.note` is the session layer's part of the note, without the stale-build sentence the handler appends). A breakpoint reached as the program starts is answered here, in the one call (the example above).
 - **The program ends** — `state: "stopped"` with the run-to-completion summary and `exitCode` below.
 - **The hold elapses** — `state: "running"` with **`pending: true`** (top level and in `data`, like `step_over`) and a `message` that says what is armed: `…has not reached 2 breakpoint(s) yet. Nothing was cancelled: what is armed stays armed…`; or, with nothing armed (the `"uncaught"` default does not count — a crash is not a stop you are waiting for), `…nothing is armed to stop it (no breakpoints, no entry stop, no caught-exception filter)…`; or, for a `noDebug` launch, that the debugger is off. Logpoints the adapter runs on never stop the program, so they are named apart: `…1 logpoint(s) that log without stopping is armed (read get_output for the messages), and nothing is armed to stop it (no pausing breakpoints, …)…`. What is armed is read when the answer is built, so a breakpoint set while the launch was in flight is named.
 

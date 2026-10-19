@@ -1,6 +1,7 @@
 /**
  * Where a stop landed, for the answers that name a location (issue #904):
- * pause, the steps, wait_for_stop and the attach. One read through the
+ * pause, the steps, wait_for_stop, the attach, and a launch or relaunch that
+ * is paused when it answers (issue #951). One read through the
  * frame-anchor resolver, so an answer sees the resolver's verdict — which
  * thread it is anchored on, whether any frame is program code, the note
  * that explains a switch — instead of the top frame alone, which used to be

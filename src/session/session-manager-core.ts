@@ -123,8 +123,8 @@ export interface DebugResultData extends ProxyFailureDiagnostics {
 export type StopLocation = Pick<StackFrame, 'file' | 'line' | 'column'>;
 
 /**
- * What a location-bearing answer (pause, step, wait_for_stop) carries about
- * where the stop landed, read through the frame-anchor resolver (issue
+ * What a location-bearing answer (pause, step, wait_for_stop, and a launch
+ * that stopped) carries about where the stop landed, read through the frame-anchor resolver (issue
  * #904): the first visible frame when the stack could be read; the thread
  * the answer is anchored on, only when it is not the thread the stop was
  * reported on; and a note when there is something to say — a sibling
