@@ -106,7 +106,6 @@ graph TB
     'error': (error: Error) => void;
     'exit': (code: number | null, signal?: string, expected?: boolean) => void;
     // Status events
-    'dry-run-complete': (command: string, script: string) => void;
     'adapter-configured': () => void;
     'adapter-capabilities': (capabilities: Capabilities) => void;
     'function-breakpoints-synced': (results: FunctionBreakpointSyncResult[]) => void;

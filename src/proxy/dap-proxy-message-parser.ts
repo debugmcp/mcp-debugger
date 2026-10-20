@@ -90,7 +90,7 @@ export class MessageParser {
     }
 
     // Coerce boolean strings → booleans (Claude Code SSE double-stringify bug)
-    for (const boolKey of ['stopOnEntry', 'justMyCode', 'dryRunSpawn', 'debuggerOff'] as const) {
+    for (const boolKey of ['stopOnEntry', 'justMyCode', 'debuggerOff'] as const) {
       if (obj[boolKey] === 'true') obj[boolKey] = true;
       else if (obj[boolKey] === 'false') obj[boolKey] = false;
     }
@@ -101,10 +101,6 @@ export class MessageParser {
 
     if (obj.justMyCode !== undefined && typeof obj.justMyCode !== 'boolean') {
       throw new Error(`Init payload 'justMyCode' must be a boolean if provided`);
-    }
-
-    if (obj.dryRunSpawn !== undefined && typeof obj.dryRunSpawn !== 'boolean') {
-      throw new Error(`Init payload 'dryRunSpawn' must be a boolean if provided`);
     }
 
     if (obj.debuggerOff !== undefined && typeof obj.debuggerOff !== 'boolean') {

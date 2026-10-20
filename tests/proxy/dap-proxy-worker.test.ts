@@ -63,6 +63,20 @@ const createMockMessageSender = () => ({
   send: vi.fn<(message: SentMessage) => void>()
 });
 
+/**
+ * Stop every worker constructed while the spy is live at the point where the
+ * init handler would spawn the adapter and connect. The tests that use this
+ * are about what the init handler does BEFORE that step (policy selection,
+ * the logger and trace hooks, the status it sends); they used to ride the
+ * worker's dry-run branch for the same effect, which #812 removed along with
+ * the dry run's trip through the proxy.
+ */
+const stubAdapterConnect = () =>
+  vi.spyOn(
+    DapProxyWorker.prototype as unknown as { startAdapterAndConnect: () => Promise<void> },
+    'startAdapterAndConnect'
+  ).mockResolvedValue(undefined);
+
 describe('DapProxyWorker', () => {
   let worker: DapProxyWorker;
   let dependencies: DapProxyDependencies;
@@ -123,46 +137,52 @@ describe('DapProxyWorker', () => {
     });
 
     it('should transition to INITIALIZING on init command', async () => {
-      vi.useFakeTimers();
-      
-      // Use worker with mocked exit hook to prevent process.exit
-      const exitSpy = vi.fn();
-      worker = new DapProxyWorker(dependencies, { exit: exitSpy });
-      
-      const payload: ProxyInitPayload = {
-        cmd: 'init',
-        sessionId: 'test-session',
-        scriptPath: '/path/to/script.js',
-        adapterHost: 'localhost',
-        adapterPort: 9229,
-        logDir: '/logs',
-        executablePath: 'node',
-        adapterCommand: {
-          command: 'node',
-          args: ['--inspect']
-        },
-        dryRunSpawn: true
-      };
+      const connectSpy = stubAdapterConnect();
+      try {
+        const exitSpy = vi.fn();
+        worker = new DapProxyWorker(dependencies, { exit: exitSpy });
 
-      await worker.handleCommand(payload);
+        const payload: ProxyInitPayload = {
+          cmd: 'init',
+          sessionId: 'test-session',
+          scriptPath: '/path/to/script.js',
+          adapterHost: 'localhost',
+          adapterPort: 9229,
+          logDir: '/logs',
+          executablePath: 'node',
+          adapterCommand: {
+            command: 'node',
+            args: ['--inspect']
+          }
+        };
 
-      expect(worker.getState()).toBe(ProxyState.TERMINATED); // Dry run ends in TERMINATED
-      
-      // Exit hook will be called after a delay due to Windows IPC fix
-      // Dry run with adapter command present exits with code 1
-      await vi.advanceTimersByTimeAsync(150);
-      expect(exitSpy).toHaveBeenCalledWith(1);
-      
-      vi.useRealTimers();
+        await worker.handleCommand(payload);
+
+        expect(worker.getState()).toBe(ProxyState.INITIALIZING);
+        expect(connectSpy).toHaveBeenCalledWith(payload);
+        expect(exitSpy).not.toHaveBeenCalled();
+      } finally {
+        connectSpy.mockRestore();
+      }
     });
   });
 
   describe('Policy Selection', () => {
+    let connectSpy: ReturnType<typeof stubAdapterConnect>;
+
+    beforeEach(() => {
+      connectSpy = stubAdapterConnect();
+    });
+
+    afterEach(() => {
+      connectSpy.mockRestore();
+    });
+
     it('should select Python policy when no adapter command provided', async () => {
       // Use worker with mocked exit hook to prevent process.exit
       const exitSpy = vi.fn();
       worker = new DapProxyWorker(dependencies, { exit: exitSpy });
-      
+
       const payload: ProxyInitPayload = {
         cmd: 'init',
         sessionId: 'test-session',
@@ -170,17 +190,14 @@ describe('DapProxyWorker', () => {
         adapterHost: 'localhost',
         adapterPort: 5678,
         logDir: '/logs',
-        executablePath: 'python',
-        dryRunSpawn: true
+        executablePath: 'python'
       };
 
       await worker.handleCommand(payload);
 
-      const statusCall = mockMessageSender.send.mock.calls.find(
-        call => call[0].type === 'status' && call[0].status === 'dry_run_complete'
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining('[Worker] Using adapter policy: python')
       );
-      expect(statusCall).toBeTruthy();
-      expect(statusCall![0].command).toContain('debugpy');
     });
 
     it('should select JavaScript policy for js-debug adapter', async () => {
@@ -199,8 +216,7 @@ describe('DapProxyWorker', () => {
         adapterCommand: {
           command: 'node',
           args: ['vendor/js-debug/vsDebugServer.js', '--port', '9229']
-        },
-        dryRunSpawn: true
+        }
       };
 
       await worker.handleCommand(payload);
@@ -226,8 +242,7 @@ describe('DapProxyWorker', () => {
         adapterCommand: {
           command: 'python',
           args: ['-m', 'debugpy.adapter']
-        },
-        dryRunSpawn: true
+        }
       };
 
       await worker.handleCommand(payload);
@@ -334,60 +349,6 @@ describe('DapProxyWorker', () => {
     });
   });
 
-  describe('Dry Run Mode', () => {
-    it('should execute dry run and report command', async () => {
-      // Use worker with mocked exit hook to prevent process.exit
-      const exitSpy = vi.fn();
-      worker = new DapProxyWorker(dependencies, { exit: exitSpy });
-      
-      const payload: ProxyInitPayload = {
-        cmd: 'init',
-        sessionId: 'test-session',
-        scriptPath: '/path/to/script.py',
-        adapterHost: 'localhost',
-        adapterPort: 5678,
-        logDir: '/logs',
-        executablePath: 'python',
-        adapterCommand: {
-          command: 'python',
-          args: ['-m', 'debugpy.adapter', '--port', '5678']
-        },
-        dryRunSpawn: true
-      };
-
-      await worker.handleCommand(payload);
-
-      expect(mockMessageSender.send).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: 'status',
-          status: 'dry_run_complete',
-          command: 'python -m debugpy.adapter --port 5678'
-        })
-      );
-    });
-
-    it('throws when adapter policy cannot provide spawn config', () => {
-      const payload: ProxyInitPayload = {
-        cmd: 'init',
-        sessionId: 'dry-run-error',
-        scriptPath: '/path/to/script.js',
-        adapterHost: 'localhost',
-        adapterPort: 1234,
-        logDir: '/logs',
-        executablePath: 'node',
-        dryRunSpawn: true
-      };
-
-      (worker as unknown as { adapterPolicy: typeof DefaultAdapterPolicy }).adapterPolicy =
-        DefaultAdapterPolicy;
-      (worker as unknown as { logger: ILogger }).logger = mockLogger;
-
-      expect(() =>
-        (worker as unknown as { handleDryRun: (p: ProxyInitPayload) => void }).handleDryRun(payload)
-      ).toThrow(/Cannot determine adapter command/);
-    });
-  });
-
   describe('Hook integration', () => {
     const basePayload: ProxyInitPayload = {
       cmd: 'init',
@@ -400,9 +361,19 @@ describe('DapProxyWorker', () => {
       adapterCommand: {
         command: 'python',
         args: ['-m', 'debugpy.adapter', '--port', '5678']
-      },
-      dryRunSpawn: true
+      }
     };
+
+    // The hooks under test run before the adapter is spawned; stop there.
+    let connectSpy: ReturnType<typeof stubAdapterConnect>;
+
+    beforeEach(() => {
+      connectSpy = stubAdapterConnect();
+    });
+
+    afterEach(() => {
+      connectSpy.mockRestore();
+    });
 
     it('uses custom trace file factory during initialization', async () => {
       vi.useFakeTimers();
@@ -420,7 +391,8 @@ describe('DapProxyWorker', () => {
 
       await worker.handleCommand(basePayload);
 
-      // Clear timers to prevent Windows IPC fix timer from leaking
+      // A successful init schedules nothing; the clear keeps a regression's
+      // timers from leaking into later tests.
       vi.clearAllTimers();
 
       expect(traceSpy).toHaveBeenCalledWith(basePayload.sessionId, basePayload.logDir);
@@ -572,22 +544,21 @@ describe('DapProxyWorker', () => {
       vi.useRealTimers();
     });
 
-    it('does not trigger exit hook during successful dry run', async () => {
+    it('does not trigger the exit hook during a successful initialization', async () => {
       vi.useFakeTimers();
-      
+
       const exitSpy = vi.fn();
       worker = new DapProxyWorker(dependencies, {
         exit: exitSpy
       });
 
       await worker.handleCommand(basePayload);
+      // The failure path schedules its exit as setImmediate + setTimeout(100 ms);
+      // run past that window so a success path that wrongly scheduled one is caught.
+      await vi.advanceTimersByTimeAsync(200);
 
-      // The Windows IPC fix will schedule an exit after 100ms
-      // Clear timers to prevent it from firing in later tests
-      vi.clearAllTimers();
-      
       expect(exitSpy).not.toHaveBeenCalled();
-      
+
       vi.useRealTimers();
     });
   });
@@ -3858,25 +3829,7 @@ describe('DapProxyWorker', () => {
 
   describe('DAP Command Handling', () => {
     it('should reject DAP commands before connection', async () => {
-      // Initialize worker with dry run to avoid connection issues
-      const initPayload: ProxyInitPayload = {
-        cmd: 'init',
-        sessionId: 'test-session',
-        scriptPath: '/path/to/script.py',
-        adapterHost: 'localhost',
-        adapterPort: 5678,
-        logDir: '/logs',
-        executablePath: 'python',
-        adapterCommand: {
-          command: 'python',
-          args: ['-m', 'debugpy.adapter']
-        },
-        dryRunSpawn: true  // Use dry run to avoid connection
-      };
-      
-      await worker.handleCommand(initPayload);
-
-      // Reset state to allow DAP commands (but still not connected)
+      // A fresh worker: nothing has connected.
       worker = new DapProxyWorker(dependencies, { exit: workerExitSpy });
 
       const dapPayload: DapCommandPayload = {
@@ -4565,29 +4518,32 @@ describe('DapProxyWorker', () => {
 
   describe('Message Sending', () => {
     it('should send status messages', async () => {
-      // Use worker with mocked exit hook to prevent process.exit
-      const exitSpy = vi.fn();
-      worker = new DapProxyWorker(dependencies, { exit: exitSpy });
-      
-      const payload: ProxyInitPayload = {
-        cmd: 'init',
-        sessionId: 'test-session',
-        scriptPath: '/path/to/script.py',
-        adapterHost: 'localhost',
-        adapterPort: 5678,
-        logDir: '/logs',
-        executablePath: 'python',
-        dryRunSpawn: true
-      };
+      const connectSpy = stubAdapterConnect();
+      try {
+        const exitSpy = vi.fn();
+        worker = new DapProxyWorker(dependencies, { exit: exitSpy });
 
-      await worker.handleCommand(payload);
+        const payload: ProxyInitPayload = {
+          cmd: 'init',
+          sessionId: 'test-session',
+          scriptPath: '/path/to/script.py',
+          adapterHost: 'localhost',
+          adapterPort: 5678,
+          logDir: '/logs',
+          executablePath: 'python'
+        };
 
-      expect(mockMessageSender.send).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: 'status',
-          sessionId: 'test-session'
-        })
-      );
+        await worker.handleCommand(payload);
+
+        expect(mockMessageSender.send).toHaveBeenCalledWith(
+          expect.objectContaining({
+            type: 'status',
+            sessionId: 'test-session'
+          })
+        );
+      } finally {
+        connectSpy.mockRestore();
+      }
     });
 
     it('should send error messages', async () => {

@@ -572,17 +572,14 @@ describe('SessionManager launches with noDebug (issue #710)', () => {
     it('does not set it for a dry run — nothing launched', async () => {
       pinPolicy({ honoursNoDebug: true });
       const s = await sessionManager.createSession({ language: DebugLanguage.MOCK });
-      const proxy = dependencies.mockProxyManager;
-      proxy.start = vi.fn().mockImplementation(async (startConfig) => {
-        proxy.startCalls.push(startConfig);
-        process.nextTick(() => proxy.emit('dry-run-complete', 'python app.py', '/work/src/app.py'));
-      }) as MockProxyManager['start'];
 
       const startPromise = sessionManager.startDebugging(s.id, '/work/src/app.py', [], { stopOnEntry: false, noDebug: true }, true);
       await vi.runAllTimersAsync();
       const result = await startPromise;
 
       expect((result.data as { dryRun?: boolean }).dryRun).toBe(true);
+      // A dry run is a query (issue #812): no proxy, and no decision recorded.
+      expect(dependencies.mockProxyManager.startCalls).toHaveLength(0);
       expect(sessionManager.getSession(s.id)?.launchDebuggerOff).toBeUndefined();
     });
 

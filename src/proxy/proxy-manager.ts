@@ -68,7 +68,6 @@ export interface ProxyManagerEvents {
   'exit': (code: number | null, signal?: string, expected?: boolean) => void;
 
   // Status events
-  'dry-run-complete': (command: string, script: string) => void;
   'adapter-configured': () => void;
   /** Adapter initialize response body captured by the worker (issue #243) */
   'adapter-capabilities': (capabilities: DebugProtocol.Capabilities) => void;
@@ -134,8 +133,6 @@ export interface IProxyManager extends EventEmitter {
     event: K, 
     ...args: Parameters<ProxyManagerEvents[K]>
   ): boolean;
-  hasDryRunCompleted(): boolean;
-  getDryRunSnapshot(): { command?: string; script?: string } | undefined;
 }
 
 /** Fails to compile unless T is assignable to U. */
@@ -252,10 +249,6 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
    * worker's own timeout (which produces the actionable error) fires first.
    */
   private dapParentMarginMs = 5000;
-  private isDryRun = false;
-  private dryRunCompleteReceived = false;
-  private dryRunCommandSnapshot?: string;
-  private dryRunScriptPath?: string;
   private dapState: DAPSessionState | null = null;
   /** Whether this parent has already consumed a stopped event for this run. */
   private initializationStopSeen = false;
@@ -336,22 +329,9 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     this.adapterStderrTail = [];
     // The latch tracks the process this start() launches (issue #530)
     this.everInitialized = false;
-    this.isDryRun = config.dryRunSpawn === true;
-    this.dryRunCompleteReceived = false;
-    this.dryRunCommandSnapshot = undefined;
-    this.dryRunScriptPath = config.scriptPath;
     this.lastExitDetails = undefined;
     this.initializationStopSeen = false;
-    if (config.adapterCommand?.command) {
-      const parts = [config.adapterCommand.command, ...(config.adapterCommand.args ?? [])]
-        .filter((part) => typeof part === 'string' && part.length > 0);
-      if (parts.length > 0) {
-        this.dryRunCommandSnapshot = parts.join(' ');
-      }
-    } else if (!this.dryRunCommandSnapshot && config.executablePath) {
-      this.dryRunCommandSnapshot = config.executablePath;
-    }
-    
+
     // Initialize functional core state
     this.dapState = createInitialState(config.sessionId);
     
@@ -401,7 +381,6 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       justMyCode: config.justMyCode,
       initialBreakpoints: config.initialBreakpoints,
       initialFunctionBreakpoints: config.initialFunctionBreakpoints,
-      dryRunSpawn: config.dryRunSpawn,
       debuggerOff: config.debuggerOff,
       logLevel: config.logLevel,
       breakOnExceptions: config.breakOnExceptions,
@@ -437,7 +416,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     // Send init command with retry logic
     await this.sendInitWithRetry(initCommand);
 
-    // Wait for initialization or dry run completion
+    // Wait for initialization
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         cleanup();
@@ -454,7 +433,6 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       const cleanup = () => {
         clearTimeout(timeout);
         this.removeListener('initialized', handleInitialized);
-        this.removeListener('dry-run-complete', handleDryRun);
         this.removeListener('error', handleError);
         this.removeListener('exit', handleExit);
       };
@@ -462,11 +440,6 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       const handleInitialized = () => {
         this.isInitialized = true;
         this.everInitialized = true;
-        cleanup();
-        resolve();
-      };
-
-      const handleDryRun = () => {
         cleanup();
         resolve();
       };
@@ -496,7 +469,6 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       };
 
       this.once('initialized', handleInitialized);
-      this.once('dry-run-complete', handleDryRun);
       this.once('error', handleError);
       this.once('exit', handleExit);
     });
@@ -841,8 +813,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     // Latch the ack for the whole retry sequence (issue #512): the worker
     // acks exactly once, and on a slow boot (>500ms — inspected or heavily
     // loaded host) that ack lands between attempt windows. A per-attempt
-    // listener silently drops it, and for a worker that then exits (dry-run)
-    // every remaining retry fails against a process that already did its job.
+    // listener silently drops it, and every remaining retry then fails against
+    // a process that already did its job.
     let acked = false;
     const onAck = () => {
       acked = true;
@@ -1071,14 +1043,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
     // Handle exit
     track(proc, 'exit', (code: number | null, signal: string | null) => {
-      const expectedDryRunExit =
-        this.isDryRun && code === 0 && this.dryRunCompleteReceived;
-      const exitMessage = `[ProxyManager] Proxy exited. Code: ${code}, Signal: ${signal}`;
-      if (expectedDryRunExit) {
-        this.logger.debug(exitMessage);
-      } else {
-        this.logger.info(exitMessage);
-      }
+      this.logger.info(`[ProxyManager] Proxy exited. Code: ${code}, Signal: ${signal}`);
 
       this.lastExitDetails = {
         code,
@@ -1090,7 +1055,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       // everInitialized, not isInitialized: stop() runs cleanup() (which
       // resets isInitialized) before this event fires, so the reset flag
       // would report every orderly shutdown as a pre-init death (issue #530)
-      if (!this.everInitialized && !expectedDryRunExit) {
+      if (!this.everInitialized) {
         this.logger.error(
           `[ProxyManager] Proxy exited before initialization. code=${code} signal=${signal} stderrLines=${this.stderrBuffer.length}`,
           this.stderrBuffer
@@ -1428,18 +1393,6 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         this.emit('init-received');
         break;
 
-      case 'dry_run_complete':
-        this.logger.info(`[ProxyManager] Dry run complete`);
-        this.dryRunCompleteReceived = true;
-        if (typeof message.command === 'string' && message.command.trim().length > 0) {
-          this.dryRunCommandSnapshot = message.command;
-        }
-        if (typeof message.script === 'string' && message.script.trim().length > 0) {
-          this.dryRunScriptPath = message.script;
-        }
-        this.emit('dry-run-complete', message.command, message.script);
-        break;
-      
       case 'adapter_configured_and_launched':
         this.logger.info(`[ProxyManager] Adapter configured and launched`);
         // Some adapters (notably rdbg) emit `stopped` synchronously with
@@ -1628,19 +1581,5 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     }
     this.activeLaunchBarrier = null;
     this.activeLaunchBarrierRequestId = null;
-  }
-
-  hasDryRunCompleted(): boolean {
-    return this.dryRunCompleteReceived;
-  }
-
-  getDryRunSnapshot(): { command?: string; script?: string } | undefined {
-    if (!this.dryRunCommandSnapshot && !this.dryRunScriptPath) {
-      return undefined;
-    }
-    return {
-      command: this.dryRunCommandSnapshot,
-      script: this.dryRunScriptPath
-    };
   }
 }

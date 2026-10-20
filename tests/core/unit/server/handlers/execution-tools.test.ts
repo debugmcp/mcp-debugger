@@ -270,6 +270,25 @@ describe('execution tool handlers', () => {
 
         expect(payload.note).toBe('existing');
       });
+
+      // A frame whose file is a `<…>` label or an adapter's relative spelling
+      // of a source it could not locate (a JDI package path) names no file on
+      // this host (issue #951): the location is still reported, but neither
+      // the line nor the build is read for it — a relative path would be
+      // resolved against the server's cwd.
+      for (const file of ['<unknown_source>', 'java/io/PrintStream.java']) {
+        it(`${tool} reads neither the line nor the build for a location whose file is not an openable path (${file})`, async () => {
+          ctx.buildStaleness = { check: vi.fn().mockResolvedValue(evidence) };
+
+          const payload = JSON.parse((await answer({ message: 'Paused', location: { file, line: 1 } })).content[0].text);
+
+          expect(payload.location).toEqual({ file, line: 1 });
+          expect(payload).not.toHaveProperty('context');
+          expect(payload).not.toHaveProperty('note');
+          expect(ctx.lineReader.getLineContext).not.toHaveBeenCalled();
+          expect(ctx.buildStaleness.check).not.toHaveBeenCalled();
+        });
+      }
     }
   });
 

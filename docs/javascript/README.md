@@ -163,7 +163,7 @@ column 1 of the program, and V8 resolves that to the first breakable position in
 whose first declaration is a function that the program calls later, that position is inside the function —
 so the "entry" stop fires at the function's first call, after the top-level code before it has run (output
 included), and fires again at every later call. mcp-debugger cannot move the stop, but it says so: the
-stop's `lastStop.text` (in the `start_debugging` answer, `wait_for_stop`, `list_debug_sessions`) explains
+stop's `lastStop.text` (in `wait_for_stop`, `get_stack_trace` and `list_debug_sessions`) explains
 where it landed and why. To stop at the first statement, put a statement above the function or set a line
 breakpoint on it. A function breakpoint on that first-declared function is not affected: the stop that
 binds it *is* the function's first call, and it is reported as the function breakpoint. Reported upstream as
@@ -421,8 +421,9 @@ open on its port (Node never closes it by itself) — a later attach by PID or b
   names an outDir, then a sibling `.js` — keeps the first one whose `.js.map`
   lists the source, and when that file's mtime is older than the source's
   (by more than 2 s) adds a `warning` to the `set_breakpoint` answer and a
-  `note` to the `step_*`/`wait_for_stop`/`pause_execution` answers naming both
-  files and their mtimes (issue #938). It is mtime-only and hedged ("may be
+  `note` to the `start_debugging`/`step_*`/`wait_for_stop`/`pause_execution`
+  answers, and to `get_stack_trace` for its top frame, naming both files and
+  their mtimes (issues #938, #951). It is mtime-only and hedged ("may be
   stale"): a source saved without a content change reads as newer too, and
   an incremental build (`tsc -b`, `--incremental`, `tsc --watch`) does not
   re-emit for an unchanged content hash, so only a full rebuild or a real
