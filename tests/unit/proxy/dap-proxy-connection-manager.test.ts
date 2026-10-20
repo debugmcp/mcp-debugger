@@ -103,28 +103,168 @@ describe('DapConnectionManager', () => {
       expect(result).toBe(mockDapClient);
     });
 
-    it('should fail after maximum retry attempts', async () => {
-      mockDapClient.connect.mockRejectedValue(new Error('ECONNREFUSED'));
+    // The window is a wall-clock budget, not an attempt count (issue #963): a
+    // slow adapter boot on a loaded runner used to run out of the 60 attempts
+    // (~12.5 s) while the adapter was still starting, 17.5 s before the
+    // parent's own 30 s deadline would have given up.
+    it('keeps attempting past the old 60-attempt ceiling while the budget remains (issue #963)', async () => {
+      let attempts = 0;
+      mockDapClient.connect.mockImplementation(() => {
+        attempts++;
+        return attempts < 90 ? Promise.reject(new Error('ECONNREFUSED')) : Promise.resolve();
+      });
+
+      const resultPromise = connectionManager.connectWithRetry('localhost', 5678, { budgetMs: 25_000 });
+
+      await vi.advanceTimersByTimeAsync(500);
+      await waitForRetries(89);
+
+      await expect(resultPromise).resolves.toBe(mockDapClient);
+      expect(mockDapClient.connect).toHaveBeenCalledTimes(90);
+    });
+
+    it('gives up when the budget expires with nothing listening, saying what expired (issue #963)', async () => {
+      mockDapClient.connect.mockRejectedValue(new Error('connect ECONNREFUSED 127.0.0.1:5678'));
 
       // Create expectation immediately to attach rejection handler
       const expectation = expect(
-        connectionManager.connectWithRetry('localhost', 5678)
-      ).rejects.toThrow('Failed to connect DAP client: ECONNREFUSED');
-      
-      // Wait for initial delay
-      await vi.advanceTimersByTimeAsync(500);
-      
-      // Wait for all 60 retries
-      await waitForRetries(60);
-      
-      // Await the expectation
-      await expectation;
-      
-      expect(mockDapClient.connect).toHaveBeenCalledTimes(60);
-      expect(mockDapClient.off).toHaveBeenCalledWith('error', expect.any(Function));
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        expect.stringContaining('Failed to connect DAP client after 60 attempts')
+        connectionManager.connectWithRetry('127.0.0.1', 5678)
+      ).rejects.toThrow(
+        'Failed to connect DAP client: nothing accepted a connection on 127.0.0.1:5678 within 12.5s'
       );
+
+      // Wait for initial delay, then out the default budget (today's 60-attempt equivalent).
+      await vi.advanceTimersByTimeAsync(500);
+      await waitForRetries(61);
+
+      await expectation;
+
+      expect(mockDapClient.connect.mock.calls.length).toBeGreaterThanOrEqual(60);
+      expect(mockDapClient.off).toHaveBeenCalledWith('error', expect.any(Function));
+      expect(mockDapClient.disconnect).toHaveBeenCalledTimes(1);
+      // The elapsed time is stated beside the window: one attempt can outlive
+      // the window (a remote attach host that drops SYNs answers ETIMEDOUT
+      // after the OS's own ~21 s), and the message must not read as if the
+      // loop had stopped at 12.5 s.
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('within 12.5s (12.5s elapsed, 61 attempts; last error: connect ECONNREFUSED 127.0.0.1:5678)')
+      );
+    });
+
+    it('states the real elapsed time when a single attempt outlives the window (issue #963)', async () => {
+      // One connect that only settles after 21 s, as a dropped SYN does.
+      mockDapClient.connect.mockImplementation(
+        () => new Promise((_resolve, reject) => setTimeout(() => reject(new Error('connect ETIMEDOUT 10.0.0.9:5678')), 21_000))
+      );
+
+      const expectation = expect(
+        connectionManager.connectWithRetry('10.0.0.9', 5678)
+      ).rejects.toThrow('nothing accepted a connection on 10.0.0.9:5678 within 12.5s (21.5s elapsed, 1 attempts; last error: connect ETIMEDOUT 10.0.0.9:5678)');
+
+      await vi.advanceTimersByTimeAsync(500 + 21_000);
+      await expectation;
+    });
+
+    it('keeps reporting the real reason when the client refuses to disconnect (issue #963)', async () => {
+      mockDapClient.connect.mockRejectedValue(new Error('ECONNREFUSED'));
+      mockDapClient.disconnect.mockImplementation(() => {
+        throw new Error('disconnect exploded');
+      });
+
+      const expectation = expect(
+        connectionManager.connectWithRetry('127.0.0.1', 5678, { budgetMs: 100 })
+      ).rejects.toThrow('nothing accepted a connection on 127.0.0.1:5678');
+
+      await vi.advanceTimersByTimeAsync(100);
+      await expectation;
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('disconnect exploded'));
+    });
+
+    it('quotes at most the last ten stderr lines of an exited adapter, as seen at its exit (issue #963)', async () => {
+      mockDapClient.connect.mockRejectedValue(new Error('ECONNREFUSED'));
+      const adapterExit = new AbortController();
+      const stderrTail = Array.from({ length: 15 }, (_unused, index) => `line ${index + 1} of the tail`);
+      adapterExit.abort({ code: 1, signal: null, stderrTail });
+
+      const failure = await connectionManager.connectWithRetry('127.0.0.1', 5678, { abort: adapterExit.signal })
+        .then(() => undefined, (error: Error) => error);
+
+      expect(failure).toBeDefined();
+      expect(failure!.message).toContain('Its last stderr lines by the time it exited: line 6 of the tail | ');
+      expect(failure!.message).not.toContain('line 5 of the tail');
+      expect(failure!.message).toContain('line 15 of the tail');
+    });
+
+    it('caps the quoted stderr at the parent\'s 2000 characters, keeping the most recent (issue #963)', async () => {
+      mockDapClient.connect.mockRejectedValue(new Error('ECONNREFUSED'));
+      const adapterExit = new AbortController();
+      const stderrTail = Array.from({ length: 10 }, (_unused, index) => `line ${index + 1} ${'x'.repeat(300)}`);
+      adapterExit.abort({ code: 1, signal: null, stderrTail });
+
+      const failure = await connectionManager.connectWithRetry('127.0.0.1', 5678, { abort: adapterExit.signal })
+        .then(() => undefined, (error: Error) => error);
+
+      expect(failure).toBeDefined();
+      expect(failure!.message).toContain('line 10 ');
+      expect(failure!.message).not.toContain('line 1 ');
+      expect(failure!.message.length).toBeLessThan(2300);
+    });
+
+    it('makes at least one attempt however small the budget (issue #963)', async () => {
+      mockDapClient.connect.mockRejectedValue(new Error('ECONNREFUSED'));
+
+      const expectation = expect(
+        connectionManager.connectWithRetry('127.0.0.1', 5678, { budgetMs: 100 })
+      ).rejects.toThrow('within 0.1s');
+
+      await vi.advanceTimersByTimeAsync(100);
+      await expectation;
+
+      expect(mockDapClient.connect).toHaveBeenCalledTimes(1);
+    });
+
+    it('ends the wait at once when the adapter process exits, quoting the exit (issue #963)', async () => {
+      mockDapClient.connect.mockRejectedValue(new Error('ECONNREFUSED'));
+      const adapterExit = new AbortController();
+
+      const expectation = expect(
+        connectionManager.connectWithRetry('127.0.0.1', 5678, { budgetMs: 30_500, abort: adapterExit.signal })
+      ).rejects.toThrow(
+        'Failed to connect DAP client: the adapter process exited (code 1) before it started listening on 127.0.0.1:5678. Its last stderr lines by the time it exited: rdbg: command not found'
+      );
+
+      await vi.advanceTimersByTimeAsync(500);
+      await waitForRetries(3);
+      const attemptsBeforeExit = mockDapClient.connect.mock.calls.length;
+      expect(attemptsBeforeExit).toBeGreaterThan(0);
+
+      adapterExit.abort({ code: 1, signal: null, stderrTail: ['rdbg: command not found'] });
+      await expectation;
+
+      // No further attempts after the exit, however long the budget had left.
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(mockDapClient.connect.mock.calls.length).toBe(attemptsBeforeExit);
+      expect(mockDapClient.off).toHaveBeenCalledWith('error', expect.any(Function));
+      expect(mockDapClient.disconnect).toHaveBeenCalledTimes(1);
+    });
+
+    it('names a signal-terminated adapter and copes with an abort that carries no reason (issue #963)', async () => {
+      mockDapClient.connect.mockRejectedValue(new Error('ECONNREFUSED'));
+
+      const killed = new AbortController();
+      killed.abort({ code: null, signal: 'SIGKILL' });
+      await expect(
+        connectionManager.connectWithRetry('127.0.0.1', 5678, { abort: killed.signal })
+      ).rejects.toThrow('the adapter process exited (signal SIGKILL) before it started listening on 127.0.0.1:5678');
+      // Already exited before the first wait: no attempt is made.
+      expect(mockDapClient.connect).not.toHaveBeenCalled();
+
+      const bare = new AbortController();
+      bare.abort();
+      await expect(
+        connectionManager.connectWithRetry('127.0.0.1', 5678, { abort: bare.signal })
+      ).rejects.toThrow('the adapter process exited before it started listening on 127.0.0.1:5678');
     });
 
     it('should handle temporary error events during connection', async () => {
@@ -211,11 +351,11 @@ describe('DapConnectionManager', () => {
       ).rejects.toThrow('Failed to connect DAP client');
       
       await vi.advanceTimersByTimeAsync(500);
-      await waitForRetries(60);
-      
+      await waitForRetries(61);
+
       // Await the expectation
       await expectation;
-      
+
       // Verify error handler was removed
       expect(mockDapClient.off).toHaveBeenCalledWith('error', expect.any(Function));
     });

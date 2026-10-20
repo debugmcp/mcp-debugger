@@ -1114,12 +1114,119 @@ describe('DapProxyWorker', () => {
       await (worker as any).startAdapterAndConnect(payload);
 
       expect(processStub.spawn).toHaveBeenCalledTimes(1);
-      expect(connectionStub.connectWithRetry).toHaveBeenCalledWith(payload.adapterHost, payload.adapterPort);
+      // Spawn mode: the connect loop is told when the adapter exits; a legacy
+      // payload without the parent's deadline keeps the default budget (#963).
+      expect(connectionStub.connectWithRetry).toHaveBeenCalledWith(
+        payload.adapterHost,
+        payload.adapterPort,
+        expect.objectContaining({ abort: expect.any(AbortSignal) })
+      );
+      expect(connectionStub.connectWithRetry.mock.calls[0][2].budgetMs).toBeUndefined();
       const statusCall = mockMessageSender.send.mock.calls.find(
         ([message]) => message.type === 'status' && message.status === 'adapter_connected'
       );
       expect(statusCall).toBeDefined();
       expect(worker.getState()).toBe(ProxyState.CONNECTED);
+    });
+
+    // The connect window has no budget of its own in spawn mode (issue #963):
+    // it ends when the adapter exits or just after the parent's deadline, whose
+    // stage-aware message ("adapter process spawned … DAP connection was never
+    // established") is the one a slow boot should get. The +500 ms is the tie.
+    it('sizes the connect window from the parent deadline the init payload carries (issue #963)', async () => {
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'js-session-963',
+        executablePath: 'node',
+        adapterHost: 'localhost',
+        adapterPort: 9229,
+        logDir: '/logs',
+        scriptPath: '/path/to/script.js',
+        initializationTimeoutMs: 30000,
+        adapterCommand: { command: 'node', args: ['adapter.js'] }
+      };
+      const processStub = {
+        spawn: vi.fn().mockResolvedValue({ process: new EventEmitter() as unknown as ChildProcess, pid: 321 }),
+        shutdown: vi.fn().mockResolvedValue(undefined)
+      };
+      const connectionStub = {
+        connectWithRetry: vi.fn().mockResolvedValue(mockDapClient),
+        setAdapterPolicy: vi.fn(),
+        setupEventHandlers: vi.fn(),
+        initializeSession: vi.fn(),
+        sendLaunchRequest: vi.fn(),
+        setBreakpoints: vi.fn(),
+        sendConfigurationDone: vi.fn(),
+        disconnect: vi.fn()
+      };
+      (worker as any).logger = mockLogger;
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = JsDebugAdapterPolicy;
+      (worker as any).adapterState = JsDebugAdapterPolicy.createInitialState();
+      (worker as any).currentInitPayload = payload;
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      await (worker as any).startAdapterAndConnect(payload);
+
+      expect(connectionStub.connectWithRetry).toHaveBeenCalledWith(
+        'localhost',
+        9229,
+        expect.objectContaining({ budgetMs: 30500, abort: expect.any(AbortSignal) })
+      );
+    });
+
+    it('aborts the connect wait with the exit when the adapter process dies while it is still connecting (issue #963)', async () => {
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'js-session-963-exit',
+        executablePath: 'node',
+        adapterHost: 'localhost',
+        adapterPort: 9229,
+        logDir: '/logs',
+        scriptPath: '/path/to/script.js',
+        initializationTimeoutMs: 30000,
+        adapterCommand: { command: 'node', args: ['adapter.js'] }
+      };
+      const adapterProcess = new EventEmitter() as unknown as ChildProcess;
+      const processStub = {
+        spawn: vi.fn().mockResolvedValue({ process: adapterProcess, pid: 321, recentStderr: () => ['Error: Cannot find module adapter.js'] }),
+        shutdown: vi.fn().mockResolvedValue(undefined)
+      };
+      let observed: AbortSignal | undefined;
+      const connectionStub = {
+        // The real loop rejects when its signal fires; the stub does the same.
+        connectWithRetry: vi.fn((_host: string, _port: number, options: { abort: AbortSignal }) => {
+          observed = options.abort;
+          return new Promise((_resolve, reject) => {
+            options.abort.addEventListener('abort', () => reject(new Error('Failed to connect DAP client: the adapter process exited')), { once: true });
+          });
+        }),
+        setAdapterPolicy: vi.fn(),
+        setupEventHandlers: vi.fn(),
+        initializeSession: vi.fn(),
+        sendLaunchRequest: vi.fn(),
+        setBreakpoints: vi.fn(),
+        sendConfigurationDone: vi.fn(),
+        disconnect: vi.fn()
+      };
+      (worker as any).logger = mockLogger;
+      (worker as any).processManager = processStub;
+      (worker as any).connectionManager = connectionStub;
+      (worker as any).adapterPolicy = JsDebugAdapterPolicy;
+      (worker as any).adapterState = JsDebugAdapterPolicy.createInitialState();
+      (worker as any).currentInitPayload = payload;
+      (worker as any).state = ProxyState.INITIALIZING;
+
+      const started = (worker as any).startAdapterAndConnect(payload);
+      const failure = expect(started).rejects.toThrow('the adapter process exited');
+      await vi.waitFor(() => expect(observed).toBeDefined());
+
+      adapterProcess.emit('exit', 1, null);
+
+      await failure;
+      expect(observed!.aborted).toBe(true);
+      expect(observed!.reason).toEqual({ code: 1, signal: null, stderrTail: ['Error: Cannot find module adapter.js'] });
     });
 
     it('reports adapter_configured_and_launched once the js-debug child is adopted (issue #704)', async () => {

@@ -27,7 +27,12 @@ import type { IDapMirrorServer, MirrorEndpoint } from './dap-mirror-server.js';
 import { CallbackRequestTracker } from './dap-proxy-request-tracker.js';
 import { GenericAdapterManager, AdapterStdioSource, AdapterStdioLineInfo } from './dap-proxy-adapter-manager.js';
 import { dapTracePathFor, proxyLogPathFor } from './session-log-layout.js';
-import { DapConnectionManager } from './dap-proxy-connection-manager.js';
+import {
+  DapConnectionManager,
+  PARENT_DEADLINE_TIE_MS,
+  type AdapterExitReason,
+  type ConnectRetryOptions
+} from './dap-proxy-connection-manager.js';
 import { 
   validateProxyInitPayload
 } from '../utils/type-guards.js';
@@ -571,6 +576,23 @@ export class DapProxyWorker {
       throw new Error(`Adapter policy ${this.adapterPolicy.name} does not provide spawn configuration`);
     }
 
+    // Spawn mode's connect window (issue #963): the loop ends when the adapter
+    // exits (this controller) or just after the parent's init deadline, whose
+    // stage-aware message is the one a slow adapter boot should get — the
+    // +500 ms lets the parent's timer, armed first, win the tie while the
+    // worker still ends its loop promptly (the parent's stop() kills the
+    // worker anyway). Connect mode has nothing booting: no controller, no
+    // budget of its own, the historical default window.
+    const adapterExit = new AbortController();
+    const connectOptions: ConnectRetryOptions | undefined = spawnConfig.mode === 'spawn'
+      ? {
+          abort: adapterExit.signal,
+          ...(typeof payload.initializationTimeoutMs === 'number'
+            ? { budgetMs: payload.initializationTimeoutMs + PARENT_DEADLINE_TIE_MS }
+            : {})
+        }
+      : undefined;
+
     if (spawnConfig.mode === 'spawn') {
       // In container mode, default adapter cwd to workspace root so that
       // relative paths in DAP launch args (classpath, cwd, etc.) resolve
@@ -616,6 +638,13 @@ export class DapProxyWorker {
         // Recorded synchronously: the terminated slot's synthesis wait may
         // resolve on this very event (issue #258)
         this.adapterExitCode = code;
+        // A connect loop still waiting for this process to listen ends now,
+        // quoting the exit (issue #963).
+        adapterExit.abort({
+          code,
+          signal,
+          stderrTail: this.adapterRecentStderr?.()
+        } satisfies AdapterExitReason);
         this.enqueueTerminalSignal('adapter_exited', async () => {
           await this.waitForAdapterStdioDrain();
           await this.settleAdapterStderr();
@@ -641,10 +670,9 @@ export class DapProxyWorker {
 
     // Connect to adapter
     try {
-      this.dapClient = await this.connectionManager!.connectWithRetry(
-        spawnConfig.host,
-        spawnConfig.port
-      );
+      this.dapClient = connectOptions
+        ? await this.connectionManager!.connectWithRetry(spawnConfig.host, spawnConfig.port, connectOptions)
+        : await this.connectionManager!.connectWithRetry(spawnConfig.host, spawnConfig.port);
 
       // Record the break-on-exception mode on the client so DAP child
       // sessions (js-debug) can apply the same filters (issue #220).

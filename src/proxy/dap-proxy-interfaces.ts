@@ -34,6 +34,15 @@ export interface ProxyInitPayload {
   logLevel?: string;
   /** Abstract break-on-exception mode; resolved to concrete DAP filters via the adapter policy (issue #220) */
   breakOnExceptions?: 'uncaught' | 'all' | 'none';
+  /**
+   * The parent's initialization deadline (ms), the one `ProxyManager.start`
+   * holds the whole init to. The worker sizes its DAP connect window from it
+   * in spawn mode (issue #963): the window ends when the adapter exits or just
+   * after this deadline, never before — a slow adapter boot gets the parent's
+   * stage-aware timeout message, not a premature `ECONNREFUSED`. Absent on
+   * legacy payloads, where the connect window keeps its historical ~12.5 s.
+   */
+  initializationTimeoutMs?: number;
   launchConfig?: LanguageSpecificLaunchConfig;
   // Adapter command info for language-agnostic adapter spawning
   adapterCommand?: {

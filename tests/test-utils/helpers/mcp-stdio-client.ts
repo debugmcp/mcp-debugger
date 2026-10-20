@@ -11,6 +11,7 @@
  * `callToolSafely` that swallows errors — the opposite contract from `call`
  * below, which asserts); this is the integration-project counterpart.
  */
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect } from 'vitest';
@@ -19,6 +20,27 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
 /** The repository root (this file lives at tests/test-utils/helpers/). */
 const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+
+/** Remove the direct children of `dir` whose mtime is older than `maxAgeMs`; best effort. */
+function sweepStaleEntries(dir: string, maxAgeMs: number): void {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return;
+  }
+  const cutoff = Date.now() - maxAgeMs;
+  for (const entry of entries) {
+    const full = path.join(dir, entry);
+    try {
+      if (fs.statSync(full).mtimeMs < cutoff) {
+        fs.rmSync(full, { recursive: true, force: true });
+      }
+    } catch {
+      // A concurrent suite may be writing here; leave it.
+    }
+  }
+}
 
 /**
  * Variables the spawned server must never inherit from the test runner:
@@ -106,9 +128,20 @@ export interface StdioClientHandle {
  */
 export async function startStdioClient(options: StdioClientOptions): Promise<StdioClientHandle> {
   const client = new Client({ name: options.name, version: '1' });
+  // --log-file puts the server's session directory — the per-session proxy
+  // logs, with a launch's connect timeline — beside the file, under
+  // logs/tests/, the path CI's Windows diagnostics artifact collects. Without
+  // it they land in os.tmpdir() and leave with the runner (issue #963). (The
+  // CLI's own early lines still go to the per-pid default log; it is the
+  // session directory that matters here.) Nothing else sweeps this directory,
+  // so entries older than a day go first: the pre-push hook runs these suites
+  // on every push.
+  const stdioLogDir = path.join(REPO_ROOT, 'logs', 'tests', 'stdio');
+  sweepStaleEntries(stdioLogDir, 24 * 60 * 60 * 1000);
+  const logFile = path.join(stdioLogDir, `${options.name}-${process.pid}-${Date.now()}.log`);
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [path.join(REPO_ROOT, 'dist/index.js'), 'stdio'],
+    args: [path.join(REPO_ROOT, 'dist/index.js'), 'stdio', '--log-file', logFile],
     cwd: options.cwd ?? REPO_ROOT,
     env: serverEnvironment(options),
     stderr: 'pipe'

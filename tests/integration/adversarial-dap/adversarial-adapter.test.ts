@@ -23,6 +23,7 @@ interface ScenarioRule {
 
 interface Scenario {
   neverListen?: boolean;
+  listenDelayMs?: number;
   commands?: Record<string, ScenarioRule>;
 }
 
@@ -124,6 +125,11 @@ describe.sequential('adversarial TCP DAP adapter', () => {
   });
 
   afterAll(() => {
+    // ADVERSARIAL_KEEP_TMP=1 keeps the scenarios and proxy logs for a look.
+    if (process.env.ADVERSARIAL_KEEP_TMP === '1') {
+      console.log(`[adversarial-adapter] kept ${tempDir}`);
+      return;
+    }
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -224,6 +230,31 @@ describe.sequential('adversarial TCP DAP adapter', () => {
     expect(Date.now() - startedAt).toBeLessThan(5000);
     expect(error.message).toMatch(/closed|disconnect|exited|terminated|proxy/i);
   });
+
+  // A slow adapter boot (rdbg on a loaded Windows runner took past 13 s): the
+  // worker's connect window used to be a fixed 60 attempts, ~12.5 s, so an
+  // adapter that started listening at 14 s failed the launch with ECONNREFUSED
+  // while it was still booting, 17.5 s before the parent's deadline. The
+  // window now ends with the adapter's exit or the parent's deadline (#963).
+  it('connects to an adapter that starts listening after the old 12.5 s window (issue #963)', async () => {
+    const { manager, config } = await createManager({
+      listenDelayMs: 14_000,
+      commands: {
+        initialize: { eventsAfterResponse: [{ event: 'initialized' }] }
+      }
+    }, 25_000);
+
+    // On a failure, the worker's connect timeline is the fact that settles it.
+    const failure = await manager.start(config).then(() => undefined, (error: Error) => error);
+    if (failure) {
+      const proxyLog = path.join(config.logDir, `proxy-${config.sessionId}.log`);
+      const timeline = fs.existsSync(proxyLog)
+        ? fs.readFileSync(proxyLog, 'utf8').split('\n').filter(line => /ConnectionManager|Adapter process|Adapter spawned/.test(line)).slice(-10).join('\n')
+        : '(no proxy log)';
+      throw new Error(`${failure.message}\n--- proxy log, connect lines:\n${timeline}`);
+    }
+    expect(manager.isRunning()).toBe(true);
+  }, 30_000);
 
   it('distinguishes an adapter process that spawned but never listened', async () => {
     const { manager, config } = await createManager({ neverListen: true }, 1800);
