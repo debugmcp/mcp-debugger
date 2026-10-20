@@ -25,10 +25,10 @@ import { forEachBounded } from '../../../utils/bounded-concurrency.js';
 
 /**
  * How many language probes run at once (issue #968). Each probe spawns its
- * toolchain's own binaries; on a cold Windows runner ten at once took 11-30 s
- * each while the same probes took seconds once warm, so a probe's timeout
- * measured its neighbours as much as its toolchain. A queued probe's clock
- * has not started yet.
+ * toolchain's own binaries; on a cold Windows runner, with ten at once, five
+ * took 11 s or more (rust past 30 s) while the same probes took seconds once
+ * warm, so a probe's timeout measured its neighbours as much as its
+ * toolchain. A queued probe's clock has not started yet.
  */
 export const DOCTOR_PROBE_CONCURRENCY = 4;
 

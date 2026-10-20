@@ -699,7 +699,10 @@ describe('diagnose', () => {
       expect(report.exitCode).toBe(0);
     });
 
-    it('ignores unknown names when choosing what to probe first', async () => {
+    // A guard on the phase split, not a red-first case: the old all-at-once
+    // code passed it too. A split that looked names up instead of filtering
+    // the registry would leave holes in the report or crash here.
+    it('still reports every language when the only name is unknown', async () => {
       const log: string[] = [];
       const deps = makeDeps(trackedAdapters(log, { now: 0, max: 0 }));
 
