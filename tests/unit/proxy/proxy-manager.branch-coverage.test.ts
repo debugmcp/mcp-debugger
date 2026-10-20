@@ -132,22 +132,6 @@ describe('ProxyManager branch coverage scenarios', () => {
     expect((manager as unknown as { isInitialized: boolean }).isInitialized).toBe(true);
   });
 
-  it('does not override dry-run snapshot when status omits data', () => {
-    (manager as unknown as { dryRunCommandSnapshot?: string | undefined }).dryRunCommandSnapshot = 'keep-command';
-    (manager as unknown as { dryRunScriptPath?: string | undefined }).dryRunScriptPath = 'keep-script';
-
-    (manager as unknown as { handleStatusMessage: (msg: unknown) => void }).handleStatusMessage({
-      type: 'status',
-      sessionId: 'session-1',
-      status: 'dry_run_complete',
-      command: '   ',
-      script: ''
-    });
-
-    expect((manager as unknown as { dryRunCommandSnapshot?: string }).dryRunCommandSnapshot).toBe('keep-command');
-    expect((manager as unknown as { dryRunScriptPath?: string }).dryRunScriptPath).toBe('keep-script');
-  });
-
   it('handles stopped events without thread information gracefully', () => {
     let emittedThread: number | undefined;
     let emittedReason: string | undefined;

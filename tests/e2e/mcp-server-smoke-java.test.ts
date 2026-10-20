@@ -182,6 +182,15 @@ describe('MCP Server Java Debugging Smoke Test @requires-java', () => {
       }));
       expect(stop.state, JSON.stringify(stop)).toBe('paused');
       expect(String(stop.note ?? ''), JSON.stringify(stop)).toMatch(/may be stale/);
+
+      // get_stack_trace is the other carrier (issue #951): its top frame is in
+      // the aged class's source, so the same sentence rides its note.
+      const stack = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'get_stack_trace',
+        arguments: { sessionId }
+      }));
+      expect(String(stack.note ?? ''), JSON.stringify(stack)).toMatch(/may be stale/);
+      expect(stack.note).toContain(classFile);
     } finally {
       utimesSync(classFile, stamp.atime, stamp.mtime);
     }

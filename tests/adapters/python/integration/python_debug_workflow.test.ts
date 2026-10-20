@@ -268,15 +268,12 @@ describe('Python Debugging Workflow - Integration Test @requires-python', () => 
       console.error('[Test] Dry run failed with error:', parsedDryRunResult.error);
     }
     expect(parsedDryRunResult.success).toBe(true);
-    // SessionManager's startDebugging for a successful dry run returns:
-    // { success: true, state: session.state (STOPPED), data: { dryRun: true, message: "Dry run spawn command logged by proxy." } };
-    expect(parsedDryRunResult.state).toBe('stopped'); // SessionManager sets state to STOPPED after dry run
+    // A dry run is a query (issue #812): it answers the debugpy adapter command
+    // the launch would spawn and leaves the fresh session as it was.
+    expect(parsedDryRunResult.state).toBe('created');
     expect(parsedDryRunResult.data?.dryRun).toBe(true);
-    expect(parsedDryRunResult.data?.message).toContain("Dry run spawn command logged by proxy.");
-
-    console.log('[Test] Dry run test completed. Manual log inspection needed for dap-proxy command.');
-    // Add a small delay if needed for logs to flush, though the proxy should exit quickly.
-    await delay(1000); 
+    expect(parsedDryRunResult.data?.message).toContain('nothing was started');
+    expect(parsedDryRunResult.data?.command).toContain('debugpy.adapter');
 
     // Clean up the dry run session
     await client.callTool({ name: 'close_debug_session', arguments: { sessionId: dryRunSessionId } });

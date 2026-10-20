@@ -3,7 +3,7 @@
  * attach_to_process, detach_from_process, redefine_classes.
  */
 import type { ToolHandler } from '../tool-context.js';
-import { attachRequestFromArgs, successWarning } from './shared.js';
+import { attachRequestFromArgs, hoistStopLanding, successWarning } from './shared.js';
 import {
   assertPlainObjectArg,
   normalizeStartDebuggingArgs,
@@ -52,6 +52,12 @@ export const startDebuggingTool: ToolHandler = async (ctx, args) => {
     if (debugResult.success && startWarnings.length > 0) {
       responsePayload.warning = startWarnings.join('; ');
     }
+    // Where the launch stopped (issue #951), the way wait_for_stop answers a
+    // stop: location, threadId and note beside state, the source line, and
+    // the stale-build sentence when the artefact the launch runs is older
+    // than the source (issue #950). Nothing for a launch that answered
+    // running or that ended: the session layer gave those no location.
+    await hoistStopLanding(ctx, responsePayload, debugResult.data, sessionId, 'launch result');
     return jsonResult(responsePayload);
   } catch (error) {
     return sessionErrorResultOrThrow(error, { state: 'stopped' });
@@ -86,6 +92,8 @@ export const restartDebuggingTool: ToolHandler = async (ctx, args) => {
       if (debugResult.data.pending) {
         responsePayload.pending = true;
       }
+      // And the same landing when it stopped (issue #951).
+      await hoistStopLanding(ctx, responsePayload, debugResult.data, args.sessionId, 'restart result');
     }
     return jsonResult(responsePayload);
   } catch (error) {

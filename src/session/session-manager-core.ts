@@ -123,8 +123,8 @@ export interface DebugResultData extends ProxyFailureDiagnostics {
 export type StopLocation = Pick<StackFrame, 'file' | 'line' | 'column'>;
 
 /**
- * What a location-bearing answer (pause, step, wait_for_stop) carries about
- * where the stop landed, read through the frame-anchor resolver (issue
+ * What a location-bearing answer (pause, step, wait_for_stop, and a launch
+ * that stopped) carries about where the stop landed, read through the frame-anchor resolver (issue
  * #904): the first visible frame when the stack could be read; the thread
  * the answer is anchored on, only when it is not the thread the stop was
  * reported on; and a note when there is something to say — a sibling
@@ -173,6 +173,17 @@ export type WaitForStopResultData = DebugResultData & StopLandingFields & {
 };
 
 /**
+ * What a launch (start_debugging, and restart_debugging, which replays one)
+ * returns: the common fields — `reason`/`stopOnEntrySuccessful` for a stop,
+ * the run-to-completion fields for a program that ended, `pending` for one
+ * still running when the hold elapsed — plus, for a stop, where it landed
+ * (issue #951): the same landing read a step, a pause or wait_for_stop makes,
+ * so the answer names the frame the program is paused in and the handler can
+ * read the line and the build behind it.
+ */
+export type LaunchResultData = DebugResultData & StopLandingFields;
+
+/**
  * What a successful attach returns on top of the common fields: a `note`
  * when the attach's stop landed where no frame is program code (an idle
  * js-debug target pauses on a sourceless frame, issue #900) or on a thread
@@ -210,7 +221,6 @@ export interface SessionManagerDependencies {
 export interface SessionManagerConfig {
   logDirBase?: string;
   defaultDapLaunchArgs?: Partial<CustomLaunchRequestArguments>;
-  dryRunTimeoutMs?: number;
 }
 
 /**
@@ -232,8 +242,7 @@ export abstract class SessionManagerCore extends EventEmitter {
   public adapterRegistry: IAdapterRegistry;
 
   protected defaultDapLaunchArgs: Partial<CustomLaunchRequestArguments>;
-  protected dryRunTimeoutMs: number;
-  
+
   // WeakMap to store event handlers for cleanup
   protected sessionEventHandlers = new WeakMap<ManagedSession, Map<string, (...args: unknown[]) => void>>();
 
@@ -274,8 +283,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       stopOnEntry: false,
       justMyCode: true
     };
-    this.dryRunTimeoutMs = config.dryRunTimeoutMs || 10000;
-    
+
     this.fileSystem.ensureDirSync(this.logDirBase);
     this.logger.info(`[SessionManager] Initialized. Session logs will be stored in: ${this.logDirBase}`);
   }
@@ -1356,21 +1364,6 @@ export abstract class SessionManagerCore extends EventEmitter {
     };
     proxyManager.on('breakpoints-synced', handleBreakpointsSynced);
     handlers.set('breakpoints-synced', handleBreakpointsSynced);
-
-    // Named function for dry run complete event
-    const handleDryRunComplete = (command: string, script: string) => {
-      clearPauseIntent(session);
-      this.logger.debug(`[SessionManager] 'dry-run-complete' event handler called for session ${sessionId}`);
-      this.logger.info(`[ProxyManager ${sessionId}] Dry run complete: ${command} ${script}`);
-      this._updateSessionState(session, SessionState.STOPPED);
-      // Don't clear proxyManager yet if we have a dry run handler waiting
-      const sessionWithSetup = session as ManagedSession & { _dryRunHandlerSetup?: boolean };
-      if (!sessionWithSetup._dryRunHandlerSetup) {
-        session.proxyManager = undefined;
-      }
-    };
-    proxyManager.on('dry-run-complete', handleDryRunComplete);
-    handlers.set('dry-run-complete', handleDryRunComplete);
 
     // Named function for error event
     const handleError = (error: Error) => {

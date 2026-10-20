@@ -27,7 +27,6 @@ export interface ProxyInitPayload {
   justMyCode?: boolean;
   initialBreakpoints?: { id?: string; file: string; line: number; condition?: string; logMessage?: string; suspendPolicy?: 'all' | 'thread' }[];
   initialFunctionBreakpoints?: { name: string; condition?: string }[];
-  dryRunSpawn?: boolean;
   /** The launcher's debugger-off decision for this launch (issues #710, #746). */
   debuggerOff?: boolean;
   /** Effective log level for the per-session proxy logger; absent on legacy

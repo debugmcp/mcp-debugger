@@ -444,6 +444,19 @@ describe.skipIf(SKIP_CPP)('MCP Server C/C++ Debugging Smoke Test @requires-cpp',
         }));
         expect(stop.state, JSON.stringify(stop)).toBe('paused');
         expect(String(stop.note ?? ''), JSON.stringify(stop)).toMatch(/may be stale/);
+
+        // get_stack_trace is the other carrier (issue #951); and when the
+        // launch itself answered the stop, that answer already said so.
+        const stack = parseSdkToolResult(await mcpClient!.callTool({
+          name: 'get_stack_trace',
+          arguments: { sessionId }
+        }));
+        expect(String(stack.note ?? ''), JSON.stringify(stack)).toMatch(/may be stale/);
+        expect(stack.note).toContain(binaryPath);
+        if (startResponse.state === 'paused') {
+          expect(startResponse.location, JSON.stringify(startResponse)).toBeDefined();
+          expect(String(startResponse.note ?? ''), JSON.stringify(startResponse)).toMatch(/may be stale/);
+        }
       } finally {
         utimesSync(binaryPath, stamp.atime, stamp.mtime);
       }

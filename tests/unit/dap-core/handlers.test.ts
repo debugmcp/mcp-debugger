@@ -65,7 +65,6 @@ describe('DAP Core Handlers', () => {
         const statuses: Array<ProxyStatusMessage['status']> = [
           'proxy_minimal_ran_ipc_test',
           'init_received',
-          'dry_run_complete',
           'adapter_connected',
           'adapter_configured_and_launched',
           'adapter_exited',
@@ -105,7 +104,6 @@ describe('DAP Core Handlers', () => {
         const statuses: Array<ProxyStatusMessage['status']> = [
           'proxy_minimal_ran_ipc_test',
           'init_received',
-          'dry_run_complete',
           'adapter_exited',
           'dap_connection_closed',
           'terminated'

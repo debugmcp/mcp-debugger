@@ -552,6 +552,19 @@ export const ErrorMessages = {
     `'mcp-debugger doctor ${language}' on the server host for a diagnosis.`,
 
   /**
+   * Refusal for a dry run of an attach-shaped start_debugging
+   * Occurs when: dryRunSpawn is true and dapLaunchArgs carries request:'attach'
+   * or __attachMode. Preparing an attach acts on the target process (js-debug
+   * signals it to open an inspector port, netcoredbg probes its architecture),
+   * which a dry run must not do (issue #812)
+   * Used in: src/session/launch/debug-launcher.ts
+   */
+  dryRunAttachShaped: () =>
+    'A dry run cannot check an attach-shaped configuration: preparing an attach acts on the target process ' +
+    '(js-debug signals it to open an inspector port, netcoredbg probes its architecture). ' +
+    'Use attach_to_process, or drop dryRunSpawn.',
+
+  /**
    * A launch-shaped call arrived while another one on the same session had
    * not returned yet (issue #711). `held` is the operation in flight.
    *

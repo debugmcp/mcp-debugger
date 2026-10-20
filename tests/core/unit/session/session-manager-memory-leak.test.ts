@@ -46,7 +46,7 @@ describe('SessionManager - Memory Leak Prevention', () => {
       // Get listener counts after setup
       const eventNames = ['stopped', 'continued', 'terminated', 'exited',
                          'initialized', 'error', 'exit', 'adapter-configured',
-                         'adapter-capabilities', 'dry-run-complete'];
+                         'adapter-capabilities'];
       
       const listenerCountsBefore: Record<string, number> = {};
       eventNames.forEach(event => {

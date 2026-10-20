@@ -7,7 +7,7 @@ import { isTerminalSessionState } from '@debugmcp/shared';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import type { DebugResult, StepResultData } from '../../session/session-manager-core.js';
 import { requireSessionId } from '../tool-validation.js';
-import { appendNote, describeStaleBuild, readLineContext } from './shared.js';
+import { hoistStopLanding } from './shared.js';
 import {
   failureResult,
   jsonResult,
@@ -78,33 +78,8 @@ export const stepTool: ToolHandler = async (ctx, args, toolName) => {
       }
     }
 
-    // Where the step landed, beyond the frame (issue #904): the thread the
-    // answer is anchored on when it is not the reported one, and the note.
-    if (typeof resultData?.threadId === 'number') {
-      response.threadId = resultData.threadId;
-    }
-    if (resultData?.note) {
-      response.note = resultData.note;
-    }
-
-    // Extract location from result data
-    const location = resultData?.location;
-
-    if (location) {
-      response.location = location;
-
-      // The line context, and whether the running code may be an older
-      // build than the source it was read from (issue #938); two reads of
-      // the same file, overlapped.
-      const [context, staleBuild] = await Promise.all([
-        readLineContext(ctx, location.file, location.line, 'step result'),
-        describeStaleBuild(ctx, args.sessionId, location.file, 'step result')
-      ]);
-      if (context) {
-        response.context = context;
-      }
-      appendNote(response, staleBuild);
-    }
+    // Where the step landed (issues #904, #938): the shape every stop answer has.
+    await hoistStopLanding(ctx, response, resultData, args.sessionId, 'step result');
 
     return jsonResult(response);
   } catch (error) {
@@ -177,24 +152,8 @@ export const waitForStopTool: ToolHandler = async (ctx, args, _toolName, extra) 
     if (typeof data?.exitCode === 'number') {
       response.exitCode = data.exitCode;
     }
-    // The landing beyond the frame (issue #904), as for pause_execution.
-    if (typeof data?.threadId === 'number') {
-      response.threadId = data.threadId;
-    }
-    if (data?.note) {
-      response.note = data.note;
-    }
-    if (data?.location) {
-      response.location = data.location;
-      const [context, staleBuild] = await Promise.all([
-        readLineContext(ctx, data.location.file, data.location.line, 'wait_for_stop result'),
-        describeStaleBuild(ctx, args.sessionId, data.location.file, 'wait_for_stop result')
-      ]);
-      if (context) {
-        response.context = context;
-      }
-      appendNote(response, staleBuild);
-    }
+    // The landing (issues #904, #938), as for pause_execution and the step tools.
+    await hoistStopLanding(ctx, response, data, args.sessionId, 'wait_for_stop result');
     return jsonResult(response);
   } catch (error) {
     // Same contract as the step tools: typed session errors and other
@@ -235,23 +194,7 @@ export async function handlePause(ctx: ToolContext, args: { sessionId: string; t
         response.rawStopReason = data.rawStopReason;
       }
     }
-    if (typeof data?.threadId === 'number') {
-      response.threadId = data.threadId;
-    }
-    if (data?.note) {
-      response.note = data.note;
-    }
-    if (data?.location) {
-      response.location = data.location;
-      const [context, staleBuild] = await Promise.all([
-        readLineContext(ctx, data.location.file, data.location.line, 'pause result'),
-        describeStaleBuild(ctx, args.sessionId, data.location.file, 'pause result')
-      ]);
-      if (context) {
-        response.context = context;
-      }
-      appendNote(response, staleBuild);
-    }
+    await hoistStopLanding(ctx, response, data, args.sessionId, 'pause result');
     return jsonResult(response);
   } catch (error) {
     ctx.logger.error('Failed to pause execution', { error });

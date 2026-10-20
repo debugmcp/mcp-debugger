@@ -1,5 +1,5 @@
 import { describe, expectTypeOf, it } from 'vitest';
-import type { DebugResultData } from '../../../../src/session/session-manager-core.js';
+import type { DebugResultData, LaunchResultData } from '../../../../src/session/session-manager-core.js';
 
 describe('DebugResultData type contract (issue #590)', () => {
   it('stays closed over the result keys written by the session layer', () => {
@@ -23,5 +23,9 @@ describe('DebugResultData type contract (issue #590)', () => {
       | 'anchorResolution'
       | 'resumedBeforeDetach'
     >();
+  });
+
+  it('the launch answer adds only the landing fields the stop answers share (issue #951)', () => {
+    expectTypeOf<keyof LaunchResultData>().toEqualTypeOf<keyof DebugResultData | 'location' | 'threadId' | 'note'>();
   });
 });
