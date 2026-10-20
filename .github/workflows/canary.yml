@@ -453,6 +453,28 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Decide whether Docker Hub credentials are available
+        # Same shape as ci.yml's container-tests: the secrets context is not
+        # available in a step's `if`, an env-bound output is (issue #891).
+        id: registry
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+        run: |
+          if [ -n "$DOCKER_USERNAME" ]; then
+            echo "login=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "login=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Log in to Docker Hub
+        # Both builds below pull the base images; authenticated pulls are not
+        # subject to the anonymous per-IP rate limit shared runners exhaust.
+        if: steps.registry.outputs.login == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
       - name: Build builder stage and assert single-platform vendoring
         # Fence for #394: a CI checkout has no vendored payloads, so the
         # Dockerfile's digest-verified fetch always runs; before the fix the
