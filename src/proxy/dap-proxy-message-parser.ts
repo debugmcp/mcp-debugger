@@ -85,6 +85,18 @@ export class MessageParser {
       throw new Error(`Init payload 'language' must be a string if provided`);
     }
 
+    // The parent's init deadline (issue #963): a positive finite number of ms,
+    // coerced from a numeric string like adapterPort.
+    if (obj.initializationTimeoutMs !== undefined) {
+      const deadline = typeof obj.initializationTimeoutMs === 'string'
+        ? Number(obj.initializationTimeoutMs)
+        : obj.initializationTimeoutMs;
+      if (typeof deadline !== 'number' || !Number.isFinite(deadline) || deadline <= 0) {
+        throw new Error(`Init payload invalid 'initializationTimeoutMs': ${obj.initializationTimeoutMs}`);
+      }
+      obj.initializationTimeoutMs = deadline;
+    }
+
     if (obj.scriptArgs !== undefined && !Array.isArray(obj.scriptArgs)) {
       throw new Error(`Init payload 'scriptArgs' must be an array if provided`);
     }

@@ -213,6 +213,8 @@ Truncation is applied in targeted locations rather than as a generic deep traver
 
 3. **Proxy stderr in errors**: stderr lines are sanitized at capture (`sanitizeStderr` redacts lines with sensitive key names like `GITHUB_PAT=...` or well-known secret value shapes like `ghp_...`, `github_pat_...`, `sk-...`, `AKIA...`, JWTs, PEM headers), the capture buffer is bounded to 100 lines, and the "Proxy exited during initialization" error embeds at most the last 10 lines (max 2000 chars)
 
+4. **Proxy stdout**: the worker's stdout carries only its console transport (active when console output is not silenced, i.e. outside the server CLI); the parent drains it so the worker can never block on a full pipe (issue #963) and logs each line as `[ProxyManager STDOUT] …` at `debug`, sanitized with the same `sanitizeStderr`. Nothing from stdout is captured into error reports.
+
 There is no generic array truncation (e.g., "show first 5 items") applied across all log entries.
 
 ## Parsing Guidelines for TUI

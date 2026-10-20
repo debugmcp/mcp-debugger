@@ -172,6 +172,14 @@ private setupEventHandlers(): void {
     this.logger.error(`[ProxyManager STDERR] ${data.toString().trim()}`);
   });
 
+  // Drain stdout as well (issue #963): the worker's protocol rides the IPC
+  // channel and stdout carries only its console transport, but a piped stream
+  // nobody reads blocks the worker solid once the OS buffer fills (64 KB on
+  // Windows). Logged at debug, sanitized like stderr.
+  this.proxyProcess.stdout?.on('data', (data: Buffer | string) => {
+    this.logger.debug(`[ProxyManager STDOUT] ${data.toString().trim()}`);
+  });
+
   // Handle exit
   this.proxyProcess.on('exit', (code: number | null, signal: string | null) => {
     this.logger.info(`[ProxyManager] Proxy exited. Code: ${code}, Signal: ${signal}`);

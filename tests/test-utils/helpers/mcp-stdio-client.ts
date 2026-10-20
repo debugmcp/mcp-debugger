@@ -106,9 +106,14 @@ export interface StdioClientHandle {
  */
 export async function startStdioClient(options: StdioClientOptions): Promise<StdioClientHandle> {
   const client = new Client({ name: options.name, version: '1' });
+  // The server's log, and beside it the per-session proxy logs, under
+  // logs/tests/ — the path CI's Windows diagnostics artifact collects. Without
+  // --log-file they land in os.tmpdir(), where a failing launch's connect
+  // timeline is lost with the runner (issue #963).
+  const logFile = path.join(REPO_ROOT, 'logs', 'tests', 'stdio', `${options.name}-${process.pid}-${Date.now()}.log`);
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [path.join(REPO_ROOT, 'dist/index.js'), 'stdio'],
+    args: [path.join(REPO_ROOT, 'dist/index.js'), 'stdio', '--log-file', logFile],
     cwd: options.cwd ?? REPO_ROOT,
     env: serverEnvironment(options),
     stderr: 'pipe'

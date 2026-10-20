@@ -117,6 +117,7 @@ describe('ProxyManager.start', () => {
     // Detach the fake first so any straggling emit finds no manager handlers.
     fakeProcess.removeAllListeners();
     (fakeProcess.stderr as unknown as EventEmitter | null)?.removeAllListeners();
+    (fakeProcess.stdout as unknown as EventEmitter | null)?.removeAllListeners();
     proxyManager.removeAllListeners();
     // Flush this test's stray macrotasks inside its own attribution window.
     await new Promise((resolve) => setImmediate(resolve));
@@ -177,6 +178,49 @@ describe('ProxyManager.start', () => {
         logLevel: 'info'
       })
     );
+  });
+
+  // The worker sizes its DAP connect window from this deadline (issue #963):
+  // the parent's stage-aware timeout is the message a slow adapter boot gets.
+  it('tells the worker the initialization deadline it is held to (issue #963)', async () => {
+    await proxyManager.start(baseConfig);
+
+    expect(fakeProcess.sendCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ cmd: 'init', initializationTimeoutMs: DEFAULT_PROXY_INITIALIZATION_TIMEOUT_MS })
+    );
+  });
+
+  it('tells the worker an injected initialization deadline (issue #963)', async () => {
+    proxyManager = new ProxyManager(null, proxyProcessLauncher, fileSystem, logger, undefined, { initializationTimeoutMs: 1250 });
+
+    await proxyManager.start(baseConfig);
+
+    expect(fakeProcess.sendCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ cmd: 'init', initializationTimeoutMs: 1250 })
+    );
+  });
+
+  // The worker is spawned with a piped stdout that only this manager can
+  // drain. Its protocol rides the IPC channel; stdout carries its console
+  // transport, active outside the server CLI (which silences console output).
+  // A pipe nobody reads blocks the worker solid once the OS buffer fills
+  // (64 KB on Windows): deaf to IPC, its DAP socket unread. Found by a 14 s
+  // connect loop that logged past the buffer (issue #963).
+  it('drains the worker stdout pipe, logging its lines, so a chatty worker cannot block on it (issue #963)', async () => {
+    const stdout = new EventEmitter();
+    fakeProcess.stdout = stdout as unknown as NodeJS.ReadableStream;
+
+    await proxyManager.start(baseConfig);
+
+    expect(stdout.listenerCount('data')).toBe(1);
+    stdout.emit('data', Buffer.from('{"level":"info","message":"[ConnectionManager] attempt 61"}\nGITHUB_PAT=github_pat_supersecret1234567890\npartial'));
+    expect(logger.debug).toHaveBeenCalledWith('[ProxyManager STDOUT] {"level":"info","message":"[ConnectionManager] attempt 61"}');
+    // Sanitized like stderr: the worker's console lines can carry a launch env.
+    expect(logger.debug).not.toHaveBeenCalledWith(expect.stringContaining('github_pat_supersecret'));
+    expect(logger.debug).toHaveBeenCalledWith('[ProxyManager STDOUT] [REDACTED — line contained sensitive data]');
+    // The trailing partial line is flushed when the stream ends.
+    stdout.emit('end');
+    expect(logger.debug).toHaveBeenCalledWith('[ProxyManager STDOUT] partial');
   });
 
   it('sends breakOnExceptions as undefined in the init command when not set', async () => {

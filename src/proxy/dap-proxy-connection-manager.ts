@@ -13,19 +13,95 @@ import {
 import type { AdapterPolicy } from '@debugmcp/shared';
 import { sanitizePayloadForLogging, toWireSourceBreakpoint, type BreakpointFields } from '@debugmcp/shared';
 
+/** Wait before the first connect attempt: most adapters are not listening yet. */
+const INITIAL_CONNECT_DELAY_MS = 500;
+/** Wait between connect attempts. */
+const CONNECT_RETRY_INTERVAL_MS = 200;
+/**
+ * The connect window when the caller names none: the historical 60-attempt
+ * equivalent (500 ms + 60 × 200 ms). Connect mode — a DAP server that is
+ * already listening (remote rdbg/debugpy attach) — and legacy init payloads
+ * without the parent's deadline still get exactly this (issue #963).
+ */
+export const DEFAULT_CONNECT_BUDGET_MS = INITIAL_CONNECT_DELAY_MS + 60 * CONNECT_RETRY_INTERVAL_MS;
+/**
+ * What spawn mode adds to the parent's init deadline for its connect window:
+ * the parent's timer was armed first and its stage-aware message is the one a
+ * slow adapter boot should get, so the loop outlives the deadline by this much
+ * and ends promptly after it (the parent's stop() kills the worker anyway).
+ */
+export const PARENT_DEADLINE_TIE_MS = 500;
+
+/**
+ * Why the adapter process ended while the connect loop was waiting for it to
+ * listen — the `reason` the worker aborts the loop's signal with (issue #963).
+ */
+export interface AdapterExitReason {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  /** The adapter's last stderr lines, when it wrote any. */
+  stderrTail?: string[];
+}
+
+export interface ConnectRetryOptions {
+  /**
+   * Wall-clock window from the call, in ms; `DEFAULT_CONNECT_BUDGET_MS` when
+   * absent. The loop makes at least one attempt however small it is.
+   */
+  budgetMs?: number;
+  /**
+   * Aborting ends the loop at once (the adapter process exited: nothing will
+   * ever listen). The signal's `reason`, an {@link AdapterExitReason} when the
+   * worker aborts it, is quoted in the error.
+   */
+  abort?: AbortSignal;
+}
+
+/** A sleep that ends early when the signal aborts. */
+function sleep(ms: number, abort?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (abort?.aborted) {
+      resolve();
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      abort?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    abort?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/**
+ * The exit, worded for the error: ` (code N[, signal S])` / ` (signal S)` /
+ * nothing, plus the stderr tail sentence. A bare `abort()` carries an
+ * AbortError (a DOMException, whose own `code` is 20), not an exit: nothing.
+ */
+function describeAdapterExit(reason: unknown): { how: string; tail: string } {
+  const exit = reason && typeof reason === 'object' && !(reason instanceof Error)
+    ? (reason as Partial<AdapterExitReason>)
+    : undefined;
+  const code = typeof exit?.code === 'number' ? exit.code : null;
+  const signal = typeof exit?.signal === 'string' ? exit.signal : null;
+  const how = code !== null ? ` (code ${code}${signal ? `, signal ${signal}` : ''})` : signal ? ` (signal ${signal})` : '';
+  const tail = Array.isArray(exit?.stderrTail) && exit.stderrTail.length > 0
+    ? `. Its last stderr lines: ${exit.stderrTail.join(' | ')}`
+    : '';
+  return { how, tail };
+}
+
 export class DapConnectionManager {
-  // Increased initial delay to give debugpy more time to start
-  // This is especially important in CI/test environments
-  private readonly INITIAL_CONNECT_DELAY = 500;  
-  private readonly MAX_CONNECT_ATTEMPTS = 60;
-  private readonly CONNECT_RETRY_INTERVAL = 200;
   private policy?: AdapterPolicy;
 
   constructor(
     private dapClientFactory: IDapClientFactory,
     private logger: ILogger
   ) {}
-  
+
   /**
    * Set the adapter policy for creating DAP clients
    */
@@ -34,28 +110,69 @@ export class DapConnectionManager {
   }
 
   /**
-   * Connect to DAP adapter with retry logic
+   * Connect to the DAP adapter, retrying every 200 ms after a 500 ms first
+   * wait, until one of three things happens (issue #963):
+   *
+   * - the connect succeeds — the client is returned;
+   * - `options.abort` fires — the adapter process exited, so the loop ends at
+   *   once and the error quotes the exit (code/signal, last stderr lines);
+   * - `options.budgetMs` runs out — the error says nothing accepted a
+   *   connection on host:port within the window, with the attempt count and
+   *   the last socket error.
+   *
+   * The window is wall clock, not an attempt count: a fixed 60 attempts
+   * (~12.5 s) used to fail a launch whose adapter was still booting on a
+   * loaded runner, 17.5 s before the parent's own 30 s deadline would have
+   * given up. In spawn mode the worker sizes the window from that deadline,
+   * so the loop has no budget of its own there; connect mode and legacy
+   * payloads keep the historical window as the default.
    */
-  async connectWithRetry(host: string, port: number): Promise<IDapClient> {
-    this.logger.info(`[ConnectionManager] Waiting ${this.INITIAL_CONNECT_DELAY}ms before first DAP connect attempt.`);
-    await new Promise(resolve => setTimeout(resolve, this.INITIAL_CONNECT_DELAY));
+  async connectWithRetry(host: string, port: number, options: ConnectRetryOptions = {}): Promise<IDapClient> {
+    const budgetMs = options.budgetMs ?? DEFAULT_CONNECT_BUDGET_MS;
+    const abort = options.abort;
+    const startedAt = Date.now();
+    const deadline = startedAt + budgetMs;
+    const budgetSeconds = (budgetMs / 1000).toFixed(1);
+
+    const initialDelay = Math.min(INITIAL_CONNECT_DELAY_MS, budgetMs);
+    this.logger.info(`[ConnectionManager] Waiting ${initialDelay}ms before first DAP connect attempt (window ${budgetSeconds}s).`);
+    await sleep(initialDelay, abort);
 
     // Create client with policy if available
-    const client = this.policy 
+    const client = this.policy
       ? this.dapClientFactory.create(host, port, this.policy)
       : this.dapClientFactory.create(host, port);
-    
+
     // Temporary error handler to prevent unhandled 'error' event crashes during connect attempts
     const tempErrorHandler = (err: Error) => {
       this.logger.debug(`[ConnectionManager] DAP client emitted 'error' during connection phase (expected for retries): ${err.message}`);
     };
     client.on('error', tempErrorHandler);
 
+    const fail = (reason: string): never => {
+      this.logger.error(`[ConnectionManager] ${reason}`);
+      client.off('error', tempErrorHandler);
+      // The failed connects' sockets have destroyed themselves; this leaves the
+      // client itself terminal so nothing can reuse it.
+      client.disconnect();
+      throw new Error(`Failed to connect DAP client: ${reason}`);
+    };
+
+    const failOnAdapterExit = (): never => {
+      const { how, tail } = describeAdapterExit(abort?.reason);
+      return fail(`the adapter process exited${how} before it started listening on ${host}:${port}${tail}`);
+    };
+
     let connectAttempts = 0;
+    let lastError = 'none';
 
     for (;;) {
+      if (abort?.aborted) {
+        failOnAdapterExit();
+      }
+      connectAttempts++;
       try {
-        this.logger.info(`[ConnectionManager] Attempting DAP client connect (attempt ${connectAttempts + 1}/${this.MAX_CONNECT_ATTEMPTS}) to ${host}:${port}`);
+        this.logger.info(`[ConnectionManager] Attempting DAP client connect (attempt ${connectAttempts}, ${Date.now() - startedAt}ms into a ${budgetSeconds}s window) to ${host}:${port}`);
         await client.connect();
         this.logger.info('[ConnectionManager] DAP client connected to adapter successfully.');
 
@@ -63,18 +180,19 @@ export class DapConnectionManager {
         client.off('error', tempErrorHandler);
         return client;
       } catch (err) {
-        connectAttempts++;
-        const errMessage = err instanceof Error ? err.message : String(err);
-
-        if (connectAttempts >= this.MAX_CONNECT_ATTEMPTS) {
-          this.logger.error(`[ConnectionManager] Failed to connect DAP client after ${this.MAX_CONNECT_ATTEMPTS} attempts. Last error: ${errMessage}`);
-          client.off('error', tempErrorHandler);
-          throw new Error(`Failed to connect DAP client: ${errMessage}`);
-        }
-
-        this.logger.warn(`[ConnectionManager] DAP client connect attempt ${connectAttempts} failed: ${errMessage}. Retrying in ${this.CONNECT_RETRY_INTERVAL}ms...`);
-        await new Promise(resolve => setTimeout(resolve, this.CONNECT_RETRY_INTERVAL));
+        lastError = err instanceof Error ? err.message : String(err);
       }
+
+      if (abort?.aborted) {
+        failOnAdapterExit();
+      }
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) {
+        fail(`nothing accepted a connection on ${host}:${port} within ${budgetSeconds}s (${connectAttempts} attempts; last error: ${lastError})`);
+      }
+
+      this.logger.warn(`[ConnectionManager] DAP client connect attempt ${connectAttempts} failed: ${lastError}. Retrying in ${CONNECT_RETRY_INTERVAL_MS}ms...`);
+      await sleep(Math.min(CONNECT_RETRY_INTERVAL_MS, remainingMs), abort);
     }
   }
 

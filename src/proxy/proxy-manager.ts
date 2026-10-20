@@ -384,6 +384,9 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       debuggerOff: config.debuggerOff,
       logLevel: config.logLevel,
       breakOnExceptions: config.breakOnExceptions,
+      // The deadline this start() is held to; the worker's DAP connect window
+      // in spawn mode ends just after it, not before (issue #963).
+      initializationTimeoutMs: this.initializationTimeoutMs,
       launchConfig: config.launchConfig,
       // Pass adapter command info for language-agnostic adapter spawning
       adapterCommand: config.adapterCommand
@@ -1039,6 +1042,30 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       const flushStderr = () => this.recordStderrLines(stderrLineBuffer.flush(), stderrLogState);
       track(stderr, 'end', flushStderr);
       track(stderr, 'close', flushStderr);
+    }
+
+    // Drain stdout too. The worker's protocol rides the IPC channel; its
+    // stdout carries only its console transport, which is active outside the
+    // server CLI (that silences console output). A piped stdout nobody reads
+    // blocks the worker solid once the OS buffer fills (64 KB on Windows):
+    // deaf to IPC, its DAP socket unread — found by a 14 s connect loop that
+    // logged past the buffer (issue #963). Logged at debug: the proxy log
+    // already carries these lines. Sanitized like stderr: a console line can
+    // quote a launch environment.
+    const stdout = this.proxyProcess.stdout as unknown as RemovableEmitter | null;
+    if (stdout) {
+      const stdoutLineBuffer = new LineBuffer();
+      const recordStdoutLines = (lines: string[]) => {
+        for (const line of sanitizeStderr(lines.filter(line => line.trim().length > 0))) {
+          this.logger.debug(`[ProxyManager STDOUT] ${line}`);
+        }
+      };
+      track(stdout, 'data', (data: Buffer | string) => {
+        recordStdoutLines(stdoutLineBuffer.append(data.toString()));
+      });
+      const flushStdout = () => recordStdoutLines(stdoutLineBuffer.flush());
+      track(stdout, 'end', flushStdout);
+      track(stdout, 'close', flushStdout);
     }
 
     // Handle exit

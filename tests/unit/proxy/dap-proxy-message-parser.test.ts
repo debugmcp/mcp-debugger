@@ -343,6 +343,16 @@ describe('MessageParser', () => {
         expect((result as any).adapterPort).toBe(58000);
       });
 
+      it('accepts initializationTimeoutMs as a positive finite number, coercing a numeric string (issue #963)', () => {
+        expect(MessageParser.validateInitPayload({ ...basePayload, initializationTimeoutMs: 30000 }).initializationTimeoutMs).toBe(30000);
+        expect(MessageParser.validateInitPayload({ ...basePayload, initializationTimeoutMs: '30000' }).initializationTimeoutMs).toBe(30000);
+        expect(MessageParser.validateInitPayload(basePayload).initializationTimeoutMs).toBeUndefined();
+        for (const invalid of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 'soon', null]) {
+          expect(() => MessageParser.validateInitPayload({ ...basePayload, initializationTimeoutMs: invalid }))
+            .toThrow("Init payload invalid 'initializationTimeoutMs'");
+        }
+      });
+
       it('should coerce stopOnEntry from string "true" to boolean', () => {
         const payload = { ...basePayload, stopOnEntry: 'true' };
         const result = MessageParser.validateInitPayload(payload);
