@@ -76,10 +76,20 @@ function sleep(ms: number, abort?: AbortSignal): Promise<void> {
   });
 }
 
+/** The stderr embedding caps the parent uses for its own init-exit error. */
+const QUOTED_STDERR_LINES = 10;
+const QUOTED_STDERR_CHARS = 2000;
+
 /**
  * The exit, worded for the error: ` (code N[, signal S])` / ` (signal S)` /
  * nothing, plus the stderr tail sentence. A bare `abort()` carries an
  * AbortError (a DOMException, whose own `code` is 20), not an exit: nothing.
+ *
+ * The tail is the worker's snapshot at the process's `exit` event; the pipe
+ * can still hold the adapter's final line then (issue #897 waits it out for
+ * the `adapter_exited` status, this error cannot without losing the race with
+ * the parent's generic exit message), so the wording says when it was taken.
+ * The whole tail is in the proxy log.
  */
 function describeAdapterExit(reason: unknown): { how: string; tail: string } {
   const exit = reason && typeof reason === 'object' && !(reason instanceof Error)
@@ -88,10 +98,14 @@ function describeAdapterExit(reason: unknown): { how: string; tail: string } {
   const code = typeof exit?.code === 'number' ? exit.code : null;
   const signal = typeof exit?.signal === 'string' ? exit.signal : null;
   const how = code !== null ? ` (code ${code}${signal ? `, signal ${signal}` : ''})` : signal ? ` (signal ${signal})` : '';
-  const tail = Array.isArray(exit?.stderrTail) && exit.stderrTail.length > 0
-    ? `. Its last stderr lines: ${exit.stderrTail.join(' | ')}`
-    : '';
-  return { how, tail };
+  if (!Array.isArray(exit?.stderrTail) || exit.stderrTail.length === 0) {
+    return { how, tail: '' };
+  }
+  let quoted = exit.stderrTail.slice(-QUOTED_STDERR_LINES).join(' | ');
+  if (quoted.length > QUOTED_STDERR_CHARS) {
+    quoted = `…${quoted.slice(quoted.length - QUOTED_STDERR_CHARS)}`;
+  }
+  return { how, tail: `. Its last stderr lines by the time it exited: ${quoted}` };
 }
 
 export class DapConnectionManager {
@@ -153,8 +167,13 @@ export class DapConnectionManager {
       this.logger.error(`[ConnectionManager] ${reason}`);
       client.off('error', tempErrorHandler);
       // The failed connects' sockets have destroyed themselves; this leaves the
-      // client itself terminal so nothing can reuse it.
-      client.disconnect();
+      // client itself terminal so nothing can reuse it. Never let it mask the
+      // reason (the same guard disconnect() below applies).
+      try {
+        client.disconnect();
+      } catch (e) {
+        this.logger.warn(`[ConnectionManager] client.disconnect() after a failed connect threw: ${e instanceof Error ? e.message : String(e)}`);
+      }
       throw new Error(`Failed to connect DAP client: ${reason}`);
     };
 
@@ -188,7 +207,12 @@ export class DapConnectionManager {
       }
       const remainingMs = deadline - Date.now();
       if (remainingMs <= 0) {
-        fail(`nothing accepted a connection on ${host}:${port} within ${budgetSeconds}s (${connectAttempts} attempts; last error: ${lastError})`);
+        // The elapsed time is stated beside the window: one attempt can
+        // outlive it (a remote host that drops SYNs answers ETIMEDOUT after
+        // the OS's own ~21 s), and the message must not read as if the loop
+        // had stopped at the window.
+        const elapsedSeconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+        fail(`nothing accepted a connection on ${host}:${port} within ${budgetSeconds}s (${elapsedSeconds}s elapsed, ${connectAttempts} attempts; last error: ${lastError})`);
       }
 
       this.logger.warn(`[ConnectionManager] DAP client connect attempt ${connectAttempts} failed: ${lastError}. Retrying in ${CONNECT_RETRY_INTERVAL_MS}ms...`);

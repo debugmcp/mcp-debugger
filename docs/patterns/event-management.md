@@ -175,9 +175,11 @@ private setupEventHandlers(): void {
   // Drain stdout as well (issue #963): the worker's protocol rides the IPC
   // channel and stdout carries only its console transport, but a piped stream
   // nobody reads blocks the worker solid once the OS buffer fills (64 KB on
-  // Windows). Logged at debug, sanitized like stderr.
+  // Windows). Logged at debug, through the same sanitizer as stderr.
   this.proxyProcess.stdout?.on('data', (data: Buffer | string) => {
-    this.logger.debug(`[ProxyManager STDOUT] ${data.toString().trim()}`);
+    for (const line of sanitizeStderr([data.toString().trim()])) {
+      this.logger.debug(`[ProxyManager STDOUT] ${line}`);
+    }
   });
 
   // Handle exit

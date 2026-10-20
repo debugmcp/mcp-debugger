@@ -1936,6 +1936,9 @@ describe('ProxyManager.start', () => {
     it('detaches proxy process listeners when start times out awaiting readiness', async () => {
       vi.useFakeTimers();
       try {
+        // The stdout drain's listeners are tracked like every other (issue #963).
+        const stdout = new EventEmitter();
+        fakeProcess.stdout = stdout as unknown as NodeJS.ReadableStream;
         fakeProcess.sendCommand.mockImplementation((cmd: { cmd?: string; sessionId?: string }) => {
           if (cmd.cmd === 'init') {
             setTimeout(() => {
@@ -1955,6 +1958,9 @@ describe('ProxyManager.start', () => {
 
         expect(fakeProcess.listenerCount('exit')).toBe(0);
         expect(fakeProcess.listenerCount('message')).toBe(0);
+        expect(stdout.listenerCount('data')).toBe(0);
+        expect(stdout.listenerCount('end')).toBe(0);
+        expect(stdout.listenerCount('close')).toBe(0);
       } finally {
         vi.useRealTimers();
       }
