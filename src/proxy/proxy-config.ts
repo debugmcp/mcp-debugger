@@ -21,7 +21,6 @@ export interface ProxyConfig {
    *  breakpoints_synced status for exact store matching (issue #439) */
   initialBreakpoints?: Array<{ id?: string; file: string; line: number; condition?: string; logMessage?: string; suspendPolicy?: 'all' | 'thread' }>;
   initialFunctionBreakpoints?: Array<{ name: string; condition?: string }>;
-  dryRunSpawn?: boolean;
   /**
    * The launcher's decision that this launch runs with the debugger off —
    * an honoured `noDebug` (issue #710) — stamped once so the worker never

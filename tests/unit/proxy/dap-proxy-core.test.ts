@@ -357,6 +357,24 @@ describe('ProxyRunner IPC communication', () => {
     );
   });
 
+  it('exits the process on the next tick once a command leaves the worker TERMINATED', async () => {
+    runner = new ProxyRunner(deps, logger, { useIPC: true, proc: fakeProc });
+    await runner.start();
+    const worker = runner.getWorker();
+    vi.spyOn(worker, 'handleCommand').mockResolvedValue(undefined);
+    vi.spyOn(worker, 'getState').mockReturnValue(ProxyState.TERMINATED);
+
+    const ipcHandler = fakeProc.lastListener('message');
+    await ipcHandler(JSON.stringify({ cmd: 'terminate', sessionId: 'test-exit' }));
+    // The exit is scheduled, not immediate: the status the worker wrote while
+    // handling the command gets this turn to leave the IPC channel.
+    expect(fakeProc.exit).not.toHaveBeenCalled();
+    await new Promise(r => setTimeout(r, 10));
+
+    expect(logger.info).toHaveBeenCalledWith('[ProxyRunner] Worker state is TERMINATED. Exiting.');
+    expect(fakeProc.exit).toHaveBeenCalledWith(0);
+  });
+
   it('disconnect handler triggers worker shutdown and process exit', async () => {
     runner = new ProxyRunner(deps, logger, { useIPC: true, onMessage: vi.fn(), proc: fakeProc });
     await runner.start();

@@ -81,12 +81,13 @@ describe('SessionManager - Debug Session Workflow', () => {
       expect(sessionManager.getSession(session.id)).toBeUndefined();
     });
 
-    it('should handle dry run workflow correctly', async () => {
-      const session = await sessionManager.createSession({ 
+    it('answers a dry run from the launch preparation without starting a proxy (issue #812)', async () => {
+      const session = await sessionManager.createSession({
         language: DebugLanguage.MOCK,
         name: 'Dry Run Test'
       });
-      
+      const stateBefore = sessionManager.getSession(session.id)?.state;
+
       const startPromise = sessionManager.startDebugging(
         session.id,
         'test.py',
@@ -94,21 +95,24 @@ describe('SessionManager - Debug Session Workflow', () => {
         {},
         true // dry run
       );
-      
+
       await vi.runAllTimersAsync();
-      
+
       const result = await startPromise;
       expect(result.success).toBe(true);
       expect((result.data as any)?.dryRun).toBe(true);
-      expect(result.state).toBe(SessionState.STOPPED);
-      
+      expect(typeof (result.data as any)?.command).toBe('string');
+      // The session is as it was: the answer's state is the session's.
+      expect(result.state).toBe(stateBefore);
+      expect(sessionManager.getSession(session.id)?.state).toBe(stateBefore);
+
       // Verify no "proxy exited before initialization" errors
       expect(dependencies.mockLogger.error).not.toHaveBeenCalledWith(
         expect.stringContaining('proxy exited before initialization')
       );
-      
-      // Verify proxy was configured for dry run
-      expect(dependencies.mockProxyManager.startCalls[0].dryRunSpawn).toBe(true);
+
+      // No proxy is involved in a dry run.
+      expect(dependencies.mockProxyManager.startCalls).toHaveLength(0);
     });
 
     it('propagates the effective log level into the proxy config (issue #403)', async () => {
@@ -117,7 +121,7 @@ describe('SessionManager - Debug Session Workflow', () => {
         language: DebugLanguage.MOCK
       });
 
-      const startPromise = sessionManager.startDebugging(session.id, 'test.py', [], {}, true);
+      const startPromise = sessionManager.startDebugging(session.id, 'test.py', [], {});
       await vi.runAllTimersAsync();
       await startPromise;
 

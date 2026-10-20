@@ -524,12 +524,6 @@ export class DapProxyWorker {
 
       this.logger.info(`[Worker] Script path to debug: ${payload.scriptPath}`);
 
-      // Handle dry run
-      if (payload.dryRunSpawn) {
-        this.handleDryRun(payload);
-        return;
-      }
-
       // Start adapter and connect
       await this.startAdapterAndConnect(payload);
     } catch (error) {
@@ -556,54 +550,6 @@ export class DapProxyWorker {
         }, 100);
       });
     }
-  }
-
-  /**
-   * Handle dry run mode
-   * Includes Windows IPC message flushing fixes
-   */
-  private handleDryRun(payload: ProxyInitPayload): void {
-    // Get adapter spawn config from policy
-    const spawnConfig = this.adapterPolicy.getAdapterSpawnConfig?.({
-      executablePath: payload.executablePath,
-      adapterHost: payload.adapterHost,
-      adapterPort: payload.adapterPort,
-      logDir: payload.logDir,
-      scriptPath: payload.scriptPath,
-      launchConfig: payload.launchConfig,
-      adapterCommand: payload.adapterCommand
-    });
-    
-    if (!spawnConfig) {
-      throw new Error(`Cannot determine adapter command for dry run (policy: ${this.adapterPolicy.name})`);
-    }
-    
-    const fullCommand = spawnConfig.mode === 'connect'
-      ? `[connect] ${spawnConfig.host}:${spawnConfig.port}`
-      : `${spawnConfig.command} ${spawnConfig.args.join(' ')}`;
-    
-    this.logger!.warn(`[Worker DRY_RUN] Would execute: ${fullCommand}`);
-    this.logger!.warn(`[Worker DRY_RUN] Script to debug: ${payload.scriptPath}`);
-    
-    // Send dry run complete status
-    this.sendStatus('dry_run_complete', { 
-      command: fullCommand, 
-      script: payload.scriptPath 
-    });
-    
-    // For IPC, ensure the message is flushed before terminating
-    // Use setImmediate to allow the event loop to process the IPC send
-    // This is crucial on Windows where IPC messages can be lost if the process exits too quickly
-    setImmediate(() => {
-      this.state = ProxyState.TERMINATED;
-      this.logger!.info('[Worker DRY_RUN] Dry run complete. State set to TERMINATED after message flush.');
-
-      // Give a bit more time for IPC to flush on Windows
-      // Use the exit hook to allow tests to override this behavior
-      setTimeout(() => {
-        this.exitHook(0);
-      }, 100);
-    });
   }
 
   /**

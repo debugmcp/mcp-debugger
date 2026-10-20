@@ -273,18 +273,12 @@ When a 'stopped' event fires with `reason='entry'` and `stopOnEntry=false`, the 
 const cleanup = () => {
   clearTimeout(timeout);
   this.removeListener('initialized', handleInitialized);
-  this.removeListener('dry-run-complete', handleDryRun);
   this.removeListener('error', handleError);
   this.removeListener('exit', handleExit);
 };
 
 const handleInitialized = () => {
   this.isInitialized = true;
-  cleanup();
-  resolve();
-};
-
-const handleDryRun = () => {
   cleanup();
   resolve();
 };
@@ -297,8 +291,7 @@ const handleError = (error: Error) => {
 const handleExit = (code: number | null, signal?: string) => {
   cleanup();
   // Unconditional: an exit during initialization is always a failure, including a
-  // code-0 one. A clean dry run is acknowledged by an explicit dry_run_complete
-  // status, not by the process merely exiting quietly (issue #596).
+  // code-0 one — a quiet exit never counts as a completed start (issue #596).
   let errorMessage = `Proxy exited during initialization. Code: ${code}, Signal: ${signal}`;
   // ... the last few stderr lines are appended here, capped (issue #146)
   reject(new Error(errorMessage));

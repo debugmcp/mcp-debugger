@@ -109,7 +109,6 @@ describe('MessageParser', () => {
         scriptArgs: ['arg1', 'arg2'],
         stopOnEntry: true,
         justMyCode: false,
-        dryRunSpawn: true,
         initialBreakpoints: [
           { file: 'test.py', line: 10 },
           { file: 'test.py', line: 20, condition: 'x > 5' }
@@ -201,7 +200,6 @@ describe('MessageParser', () => {
         { scriptArgs: 'not-an-array', error: 'scriptArgs' },
         { stopOnEntry: 'not-a-boolean', error: 'stopOnEntry' },
         { justMyCode: 123, error: 'justMyCode' },
-        { dryRunSpawn: [], error: 'dryRunSpawn' },
         { breakOnExceptions: 'sometimes', error: 'breakOnExceptions' },
         { initialBreakpoints: 'not-an-array', error: 'initialBreakpoints' }
       ];
@@ -362,12 +360,6 @@ describe('MessageParser', () => {
         expect((parsed as any).debuggerOff).toBe(true);
         expect(() => MessageParser.validateInitPayload({ ...basePayload, debuggerOff: 'yes' }))
           .toThrow("Init payload 'debuggerOff' must be a boolean if provided");
-      });
-
-      it('should coerce dryRunSpawn from string "true" to boolean', () => {
-        const payload = { ...basePayload, dryRunSpawn: 'true' };
-        const result = MessageParser.validateInitPayload(payload);
-        expect((result as any).dryRunSpawn).toBe(true);
       });
 
       it('should reject non-numeric adapterPort string', () => {
