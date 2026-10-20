@@ -40,7 +40,8 @@ Usage notes:
 
 - **`doctor [languages...]`** gates the exit code on the named languages: exit `0` when every requested language is `ok` or `warn`, `1` when any is `broken`, `missing`, or `disabled` (or a name is unknown). With no languages the run is informational and always exits `0`. `2` means doctor itself failed. CI can gate a job with `mcp-debugger doctor python go`.
 - **`--json`** emits a machine-readable report (`schemaVersion: 1`) with each language's verdict, errors/warnings, launch/attach availability, raw probe details, and per-probe timing.
-- **`--timeout <ms>`** caps each language's probe (default 10000). A timed-out probe is reported as `broken` with `probe.timedOut: true`.
+- **`--timeout <ms>`** caps each language's probe (default 10000), counted from that probe's own start. A timed-out probe is reported as `broken` with `probe.timedOut: true`.
+- **Probe order:** doctor probes four languages at a time. Named languages are probed first, beside each other only, and the rest of the report after them, so a gated verdict never waits on an unrelated toolchain. On a freshly booted machine or CI runner, the first run of each toolchain can be many times slower than later runs (a cold Windows runner has taken over 20 s per probe); if a probe times out there, raise `--timeout` rather than reading it as a broken toolchain.
 - **Doctor vs the server:** `list_supported_languages` and the launch gate *fail open* — when a toolchain probe crashes, the server assumes the language is available rather than blocking a launch it could not assess. Doctor reports the same probe honestly (`broken` + `probe.failed`), so doctor may say `broken` where `list_supported_languages` says available. The verdict rails are otherwise identical: both run the same per-adapter validation.
 - **Source checkouts:** doctor reports `missing` for adapters whose `dist/` is not built. Run `pnpm install && pnpm run build` first.
 

@@ -21,6 +21,16 @@ import {
   type PlatformCheckResult
 } from './platform-checks.js';
 import { isContainerMode } from '../../../utils/container-path-utils.js';
+import { forEachBounded } from '../../../utils/bounded-concurrency.js';
+
+/**
+ * How many language probes run at once (issue #968). Each probe spawns its
+ * toolchain's own binaries; on a cold Windows runner ten at once took 11-30 s
+ * each while the same probes took seconds once warm, so a probe's timeout
+ * measured its neighbours as much as its toolchain. A queued probe's clock
+ * has not started yet.
+ */
+export const DOCTOR_PROBE_CONCURRENCY = 4;
 
 export type DoctorVerdict = 'ok' | 'warn' | 'missing' | 'disabled' | 'broken';
 
@@ -117,9 +127,17 @@ export async function diagnose(requested: string[], deps: DiagnoseDeps): Promise
   const unknownLanguages = requestedNormalized.filter((name) => !knownNames.has(name));
   const disabledSet = getDisabledLanguages(env);
 
-  const languages = await Promise.all(
-    entries.map((entry) => diagnoseLanguage(entry, disabledSet, deps))
-  );
+  // The named languages are probed first and on their own, so a gated verdict
+  // never waits on an unrelated toolchain; the rest of the report follows.
+  // The report keeps the registry's order whatever order the probes ran in.
+  const languages = new Array<LanguageDiagnosis>(entries.length);
+  const indexed = entries.map((entry, index) => ({ entry, index }));
+  const isNamed = ({ entry }: { entry: AdapterManifestEntry }) => requestedNormalized.includes(entry.name);
+  for (const phase of [indexed.filter(isNamed), indexed.filter((item) => !isNamed(item))]) {
+    await forEachBounded(phase, DOCTOR_PROBE_CONCURRENCY, async ({ entry, index }) => {
+      languages[index] = await diagnoseLanguage(entry, disabledSet, deps);
+    });
+  }
 
   const platformChecks: PlatformCheckResult[] = [
     ...(await checkContainerWorkspace(deps.environment, deps.fileSystem)),
