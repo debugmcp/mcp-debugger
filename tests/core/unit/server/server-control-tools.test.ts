@@ -697,9 +697,11 @@ describe('Server Control Tools Tests', () => {
         id: 'test-session',
         sessionLifecycle: 'ACTIVE' // Not terminated
       });
+      // A dry run answers with the session's own state (issue #812); the
+      // handler passes it and the data through.
       mockSessionManager.startDebugging.mockResolvedValue({
         success: true,
-        state: 'stopped',
+        state: 'created',
         data: { dryRun: true, command: 'python /path/to/test.py' }
       });
       
@@ -727,6 +729,7 @@ describe('Server Control Tools Tests', () => {
       
       const content = JSON.parse(result.content[0].text);
       expect(content.data.dryRun).toBe(true);
+      expect(content.state).toBe('created');
     });
 
     it('should handle SessionManager errors', async () => {

@@ -39,7 +39,6 @@ describe('ProxyManager Message Handling', () => {
       scriptPath: '/path/to/script.py',
       scriptArgs: ['arg1'],
       initialBreakpoints: [],
-      dryRunSpawn: false,
       stopOnEntry: true
     };
 
@@ -126,11 +125,11 @@ describe('ProxyManager Message Handling', () => {
       // Every status message reaches both the imperative handler and the
       // functional core, but only the imperative handler emits: the core
       // returns state transitions and no commands. Before #713 it pushed
-      // emitEvent commands too, re-firing adapter-configured, init-received,
-      // dry-run-complete and initialized on every listener, so a
-      // non-idempotent listener ran twice per launch.
+      // emitEvent commands too, re-firing adapter-configured, init-received
+      // and initialized on every listener, so a non-idempotent listener ran
+      // twice per launch.
       const counts: Record<string, number> = {};
-      const events = ['init-received', 'dry-run-complete', 'initialized', 'adapter-configured', 'exit'] as const;
+      const events = ['init-received', 'initialized', 'adapter-configured', 'exit'] as const;
       for (const event of events) {
         proxyManager.on(event, () => {
           counts[event] = (counts[event] ?? 0) + 1;
@@ -140,14 +139,12 @@ describe('ProxyManager Message Handling', () => {
         proxyManager.simulateMessage({ type: 'status', sessionId: 'test-session', status, ...extra });
 
       send('init_received');
-      send('dry_run_complete', { command: 'python', script: '/path/to/script.py' });
       send('adapter_connected');
       send('adapter_configured_and_launched');
       send('adapter_exited', { code: 0 });
 
       expect(counts).toEqual({
         'init-received': 1,
-        'dry-run-complete': 1,
         initialized: 1,
         'adapter-configured': 1,
         exit: 1
@@ -197,32 +194,6 @@ describe('ProxyManager Message Handling', () => {
       });
 
       expect(received).toEqual(['setBreakpoints refused under noDebug: Not supported in noDebug mode.']);
-    });
-
-    it('should handle dry-run complete status messages', () => {
-      const dryRunMessage = {
-        type: 'status',
-        sessionId: 'test-session',
-        status: 'dry_run_complete',
-        command: 'python3 -m debugpy.adapter',
-        script: '/path/to/script.py'
-      };
-
-      let dryRunEmitted = false;
-      let capturedCommand: string | undefined;
-      let capturedScript: string | undefined;
-
-      proxyManager.on('dry-run-complete', (command: string, script: string) => {
-        dryRunEmitted = true;
-        capturedCommand = command;
-        capturedScript = script;
-      });
-
-      proxyManager.simulateMessage(dryRunMessage);
-
-      expect(dryRunEmitted).toBe(true);
-      expect(capturedCommand).toBe('python3 -m debugpy.adapter');
-      expect(capturedScript).toBe('/path/to/script.py');
     });
 
     it('should handle DAP event messages', () => {
@@ -847,19 +818,6 @@ describe('ProxyManager Message Handling', () => {
       // Then continue
       proxyManager.simulateContinuedEvent();
       expect(proxyManager.getCurrentThreadId()).toBeNull();
-    });
-
-    it('should handle dry-run mode state changes', async () => {
-      const dryRunConfig = {
-        ...mockConfig,
-        dryRunSpawn: true
-      };
-
-      // Create new manager for dry-run test
-      const dryRunManager = new TestProxyManager(mockLogger);
-
-      // In dry-run mode, manager should complete immediately
-      await expect(dryRunManager.start(dryRunConfig)).resolves.not.toThrow();
     });
   });
 

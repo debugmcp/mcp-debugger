@@ -76,8 +76,8 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
     // flips `connected` to false (`disconnect`, or `close` when the channel was
     // the last open handle). handleEarlyExit() tears the message forwarder down
     // on our own `exit`, so reporting the exit while the channel was still open
-    // dropped those late messages — a dry run's `dry_run_complete` among them
-    // (issue #729). Hold the exit until the channel has drained instead.
+    // dropped those late messages — a status the worker wrote just before it
+    // exited (issue #729). Hold the exit until the channel has drained instead.
     const exitHandler = (code: number | null, signal: string | null) => {
       this.rawExit = { code, signal };
       if (childProcess.connected === true) {
@@ -167,9 +167,7 @@ class ProxyProcessAdapter extends EventEmitter implements IProxyProcess {
       // Set up message handler
       const messageHandler = (message: unknown) => {
         const msg = message as { type?: string; status?: string } | null;
-        if (msg?.type === 'status' &&
-            (msg.status === 'adapter_configured_and_launched' ||
-             msg.status === 'dry_run_complete')) {
+        if (msg?.type === 'status' && msg.status === 'adapter_configured_and_launched') {
           this.completeInitialization();
         }
       };

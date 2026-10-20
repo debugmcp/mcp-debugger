@@ -4,6 +4,7 @@
  * extras, the attach warning both attach paths surface, and the one
  * AttachRequest both attach entry points send.
  */
+import * as path from 'path';
 import { isSettledSessionState, REDACTION_NOTICE, SessionState, Variable } from '@debugmcp/shared';
 import type { LineContext } from '../../utils/line-reader.js';
 import { buildTruncationNotice, VariableTruncationSummary } from '../../session/variable-caps.js';
@@ -11,7 +12,7 @@ import type { ToolContext } from '../tool-context.js';
 import type { ToolArguments } from '../tool-arguments.js';
 import { validateBreakOnExceptions } from '../tool-validation.js';
 import { debuggerOffWhy } from '../../session/debugger-off.js';
-import type { DebugResult } from '../../session/session-manager-core.js';
+import type { DebugResult, StopLandingFields } from '../../session/session-manager-core.js';
 import type { AttachRequest } from '../../session/attach/attach-controller.js';
 import type { ManagedSession } from '../../session/session-store.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
@@ -134,6 +135,66 @@ export function appendNote(response: Record<string, unknown>, note: string | und
   }
   const existing = response.note;
   response.note = typeof existing === 'string' && existing.length > 0 ? `${existing} ${note}` : note;
+}
+
+/**
+ * Whether a frame's `file` is a path this host can open: not a `<…>` label,
+ * and not the relative spelling an adapter uses for a source it could not
+ * locate (a JDI package path such as `java/io/PrintStream.java`, a runtime
+ * built elsewhere under CodeLLDB). Such a frame names no file here, so
+ * neither the line context nor the stale-build check is read for it — a
+ * relative path would otherwise be resolved against the server's cwd.
+ */
+export function hasOpenableSourcePath(file: string): boolean {
+  return !file.startsWith('<') && path.isAbsolute(file);
+}
+
+/**
+ * Hoist where a stop landed to the top level of a tool answer and annotate
+ * it — the one shape every stop answer has: the step tools, pause_execution,
+ * wait_for_stop, and a launch or relaunch that stopped (issue #951).
+ *
+ * Beyond the frame (issue #904): the thread the answer is anchored on when it
+ * is not the reported one, and the note about it — copied whenever the
+ * session layer set them, location or not (a resolver note on a stack that
+ * came back empty). Then the location and, when its file is a path this host
+ * can open, two reads of it, overlapped: the source line around it, and
+ * whether the running code may be an older build than the source it was read
+ * from (issues #938/#950) — that sentence is appended to the note, so it
+ * always comes after what the session layer had to say. The launch handlers
+ * call this on every answer: a pending one, a dry run, a failed launch or a
+ * program's end carries none of these fields, so it keeps exactly the fields
+ * it had.
+ */
+export async function hoistStopLanding(
+  ctx: ToolContext,
+  response: Record<string, unknown>,
+  data: StopLandingFields | undefined,
+  sessionId: string,
+  logLabel: string
+): Promise<void> {
+  if (typeof data?.threadId === 'number') {
+    response.threadId = data.threadId;
+  }
+  if (data?.note) {
+    response.note = data.note;
+  }
+  const location = data?.location;
+  if (!location) {
+    return;
+  }
+  response.location = location;
+  if (!hasOpenableSourcePath(location.file)) {
+    return;
+  }
+  const [context, staleBuild] = await Promise.all([
+    readLineContext(ctx, location.file, location.line, logLabel),
+    describeStaleBuild(ctx, sessionId, location.file, logLabel)
+  ]);
+  if (context) {
+    response.context = context;
+  }
+  appendNote(response, staleBuild);
 }
 
 /**

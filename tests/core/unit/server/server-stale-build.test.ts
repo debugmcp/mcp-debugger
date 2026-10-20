@@ -5,6 +5,8 @@
  * source gets a hedged warning naming both files; a current build, a
  * non-TypeScript file, or a session whose adapter does not bind through a
  * map gets none. The warning rides beside the loud-snapping one, after it.
+ * The compiled languages' cases (issue #950) and the two carriers #951 added
+ * (the launch answer, get_stack_trace) are at the end.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as path from 'path';
@@ -203,6 +205,62 @@ describe('set_breakpoint stale-build warning (#938)', () => {
         id: 'test-session', sessionLifecycle: 'active', attachMode: true, attachLocality: 'pid', transformedLaunch: launched
       });
       expect((await setBreakpoint(CS, {})).warning ?? '').not.toMatch(/may be stale/);
+    });
+
+    // The two carriers #951 added, through the full server and the real
+    // checker: the launch answer, when the program is paused in the source
+    // as the launch answers, and the stack, when its top frame is there.
+    it('start_debugging carries the sentence as note when the launch answers paused in the source (issue #951)', async () => {
+      mockSessionManager.getSession.mockReturnValue({ id: 'test-session', sessionLifecycle: 'active', transformedLaunch: launched });
+      mockSessionManager.startDebugging.mockResolvedValue({
+        success: true,
+        state: 'paused',
+        data: { message: 'Debugging started', reason: 'breakpoint', location: { file: CS, line: 4, column: 1 } }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'start_debugging', arguments: { sessionId: 'test-session', scriptPath: DLL } }
+      });
+      const content = JSON.parse(result.content[0].text);
+
+      expect(content.success, JSON.stringify(content)).toBe(true);
+      expect(content.state).toBe('paused');
+      expect(content.location).toEqual({ file: CS, line: 4, column: 1 });
+      expect(content.context?.lineContent).toBe('  for (const p of prices) sum += p;');
+      expect(content.note).toMatch(/may be stale/);
+      expect(content.note).toContain(DLL);
+      expect(content.note).toContain(CS);
+    });
+
+    it('get_stack_trace carries the sentence as note when its top frame is in the source (issue #951)', async () => {
+      // Paused with a current thread: the server reads the stack through the
+      // session layer's detailed read, which the mock answers below.
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'active',
+        state: 'paused',
+        proxyManager: { getCurrentThreadId: () => 1, setCurrentThreadId: vi.fn() },
+        transformedLaunch: launched
+      });
+      mockSessionManager.getStackTraceDetailed.mockResolvedValue({
+        frames: [{ id: 1, name: 'HelloWorld.Add', file: CS, line: 4, column: 1 }],
+        threadId: 1,
+        totalFrameCount: 1,
+        hiddenFrameCount: 0,
+        allFramesInternal: false
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'get_stack_trace', arguments: { sessionId: 'test-session' } }
+      });
+      const content = JSON.parse(result.content[0].text);
+
+      expect(content.success, JSON.stringify(content)).toBe(true);
+      expect(content.stackFrames[0].file).toBe(CS);
+      expect(content.note).toMatch(/may be stale/);
+      expect(content.note).toContain(DLL);
     });
   });
 });

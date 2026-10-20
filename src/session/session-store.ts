@@ -185,11 +185,12 @@ export interface ManagedSession extends DebugSessionInfo {
   // The most recent real launch, replayed by restart_debugging (issue #238).
   lastLaunch?: LastLaunchSpec;
   // The current launch as the adapter's transform handed it to the engine
-  // (issue #950). Written by ProxyLauncher.start after the transform (dry runs
-  // included: the transform ran), cleared when a start begins and left clear
-  // by an attach; read by the stale-build check, which hands it to the policy
-  // so a source can be compared with the artefact it binds through. Not part
-  // of lastLaunch, which is the caller's replayable request.
+  // (issue #950). Written by ProxyLauncher.start after the transform, cleared
+  // when a start begins and left clear by an attach; a dry run leaves it as it
+  // was, so it always names the last real launch (issue #812). Read by the
+  // stale-build check, which hands it to the policy so a source can be
+  // compared with the artefact it binds through. Not part of lastLaunch,
+  // which is the caller's replayable request.
   transformedLaunch?: TransformedLaunch;
   // Live DAP mirror endpoint, when exposed via expose_session (issue #217).
   exposure?: SessionExposure;

@@ -357,8 +357,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       await internals(operations).proxyLauncher.start(mockSession, {
         scriptPath: 'script.py',
         scriptArgs,
-        dapLaunchArgs: dapArgs,
-        dryRunSpawn: false
+        dapLaunchArgs: dapArgs
       });
 
       expect(mockDependencies.fileSystem.ensureDir).toHaveBeenCalled();
@@ -374,7 +373,6 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(proxyInstance.start).toHaveBeenCalledWith(
         expect.objectContaining({
           sessionId: mockSession.id,
-          dryRunSpawn: false,
           scriptPath: 'script.py',
           scriptArgs,
           stopOnEntry: true
@@ -1134,76 +1132,24 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
   });
 
   describe('Start Debugging Error Scenarios', () => {
-    it('should return timeout result when dry run never completes', async () => {
+    it('answers a dry run from the launch preparation without starting a proxy (issue #812)', async () => {
       vi.stubEnv('CI', 'true');
       vi.stubEnv('GITHUB_ACTIONS', undefined);
-
-      const dryRunProxy = {
-        ...mockProxyManager,
-        hasDryRunCompleted: vi.fn().mockReturnValue(false),
-        getDryRunSnapshot: vi.fn().mockReturnValue({ command: 'python -m debugpy', script: 'dry-run.py' })
-      };
-      mockSession.proxyManager = dryRunProxy;
-      mockSession.state = SessionState.INITIALIZING;
-      mockSession.logDir = '/tmp/session-logs';
-      vi.mocked(mockDependencies.fileSystem.readTail).mockResolvedValueOnce('adapter never answered');
-
-      vi.spyOn(internals(operations).proxyLauncher, 'start').mockResolvedValue({});
-      vi.spyOn(internals(operations).launcher, 'waitForDryRunCompletion').mockResolvedValue(false);
-
-      const result = await operations.startDebugging('test-session', 'dry-run.py', undefined, undefined, true);
-
-      expect(internals(operations).proxyLauncher.start).toHaveBeenCalledTimes(1);
-      expect(internals(operations).launcher.waitForDryRunCompletion).toHaveBeenCalledWith(
-        expect.objectContaining({ id: 'test-session' }),
-        expect.any(Number)
-      );
-      expect(result!.success).toBe(false);
-      expect(result!.error).toContain('Dry run timed out');
-      // A dry run that never reports back gets the same proxy-log pointer and
-      // full failure record a thrown launch failure gets. The timeout path
-      // itself tears nothing down: the one stop() is the pre-launch teardown
-      // of the proxy this session already had.
-      expect(result!.data).toEqual({
-        proxyLogPath: path.join('/tmp/session-logs', 'proxy-test-session.log'),
-        proxyLogResource: 'debug://sessions/test-session/proxy-log'
-      });
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        expect.stringContaining('Detailed error in startDebugging'),
-        expect.objectContaining({
-          message: expect.stringContaining('Dry run timed out'),
-          proxyLogTail: expect.stringContaining('adapter never answered')
-        })
-      );
-      expect(dryRunProxy.stop).toHaveBeenCalledTimes(1);
-    });
-
-    it('returns success immediately when dry run already completed', async () => {
-      vi.stubEnv('CI', 'true');
-      vi.stubEnv('GITHUB_ACTIONS', undefined);
-
-      const dryRunProxy = {
-        ...mockProxyManager,
-        hasDryRunCompleted: vi.fn().mockReturnValue(true),
-        getDryRunSnapshot: vi.fn().mockReturnValue({ command: 'python -m debugpy', script: 'dry-run.py' }),
-      };
       mockSession.proxyManager = undefined;
-      mockSession.state = SessionState.STOPPED;
+      mockSession.state = SessionState.CREATED;
       mockSessionStore.getOrThrow.mockReturnValue(mockSession);
-
-      const waitSpy = vi.spyOn(internals(operations).launcher, 'waitForDryRunCompletion');
-      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
-        mockSession.proxyManager = dryRunProxy as any;
-        return {};
-      });
+      const startSpy = vi.spyOn(internals(operations).proxyLauncher, 'start');
 
       const result = await operations.startDebugging('test-session', 'dry-run.py', undefined, undefined, true);
 
+      expect(startSpy).not.toHaveBeenCalled();
       expect(result!.success).toBe(true);
-      expect(result!.state).toBe(SessionState.STOPPED);
+      // The answer's state is the session's own, and the session is as it was.
+      expect(result!.state).toBe(SessionState.CREATED);
       expect(result!.data?.dryRun).toBe(true);
-      expect(dryRunProxy.getDryRunSnapshot).toHaveBeenCalled();
-      expect(waitSpy).not.toHaveBeenCalled();
+      expect(typeof result!.data?.command).toBe('string');
+      expect(mockSession.proxyManager).toBeUndefined();
+      expect(mockSession.state).toBe(SessionState.CREATED);
     });
 
     it('should handle startDebugging with proxy creation failure', async () => {
@@ -1516,7 +1462,6 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       vi.stubEnv('GITHUB_ACTIONS', undefined);
 
       const proxyStub: any = {
-        hasDryRunCompleted: vi.fn().mockReturnValue(false),
         once: vi.fn(),
         removeListener: vi.fn(),
         on: vi.fn(),
@@ -1566,7 +1511,6 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       vi.stubEnv('GITHUB_ACTIONS', undefined);
 
       const proxyStub: any = {
-        hasDryRunCompleted: vi.fn().mockReturnValue(false),
         once: vi.fn(),
         removeListener: vi.fn(),
         on: vi.fn(),
@@ -1605,7 +1549,6 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       vi.stubEnv('GITHUB_ACTIONS', undefined);
 
       const proxyStub: any = {
-        hasDryRunCompleted: vi.fn().mockReturnValue(false),
         once: vi.fn(),
         removeListener: vi.fn(),
         on: vi.fn(),
@@ -1636,42 +1579,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result?.data?.reason).toBe('breakpoint');
     });
 
-    it('handles dry run completion after waiting', async () => {
-      vi.stubEnv('CI', 'true');
-      vi.stubEnv('GITHUB_ACTIONS', undefined);
-
-      const dryRunProxy: any = {
-        getDryRunSnapshot: vi.fn().mockReturnValue({ command: 'python -m debugpy', script: 'wait.py' }),
-        hasDryRunCompleted: vi.fn().mockReturnValue(false),
-      };
-      mockSession.proxyManager = undefined;
-      mockSession.state = SessionState.INITIALIZING;
-
-      const startProxySpy = vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
-        mockSession.proxyManager = dryRunProxy;
-        return {};
-      });
-      const waitSpy = vi.spyOn(internals(operations).launcher, 'waitForDryRunCompletion').mockResolvedValue(true);
-
-      let result: any;
-      try {
-        result = await operations.startDebugging('test-session', 'wait.py', undefined, undefined, true);
-      } finally {
-        startProxySpy.mockRestore();
-      }
-
-      expect(waitSpy).toHaveBeenCalled();
-      waitSpy.mockRestore();
-      expect(result?.success).toBe(true);
-      expect(result?.data?.dryRun).toBe(true);
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Dry run completed for session test-session')
-      );
-    });
-
     it('answers at once when the handshake left the session paused: there is nothing to hold for', async () => {
       const proxyStub: any = {
-        hasDryRunCompleted: vi.fn().mockReturnValue(false),
         once: vi.fn(),
         removeListener: vi.fn(),
         sendDapRequest: vi.fn().mockResolvedValue(undefined),
@@ -1717,7 +1626,6 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('logs warning when handshake throws but continues', async () => {
       const proxyStub: any = {
-        hasDryRunCompleted: vi.fn().mockReturnValue(false),
         once: vi.fn(),
         removeListener: vi.fn(),
         sendDapRequest: vi.fn().mockResolvedValue(undefined),
@@ -1757,7 +1665,6 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     it('warns when adapter readiness wait times out', async () => {
       vi.useFakeTimers();
       const proxyStub: any = {
-        hasDryRunCompleted: vi.fn().mockReturnValue(false),
         once: vi.fn(),
         removeListener: vi.fn(),
         on: vi.fn(),
@@ -1813,7 +1720,6 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     describe('the hold for a launch that does not stop (issues #815, #823, #826)', () => {
       function proxyThatConfiguresAndRuns(): any {
         const proxyStub: any = {
-          hasDryRunCompleted: vi.fn().mockReturnValue(false),
           once: vi.fn(),
           removeListener: vi.fn(),
           on: vi.fn(),
@@ -1897,7 +1803,9 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
           const startPromise = operations.startDebugging('test-session', 'server.py');
           await vi.advanceTimersByTimeAsync(Math.floor(holdMs() / 2));
           moveSessionTo(SessionState.PAUSED, { reason: 'breakpoint', threadId: 1, timestamp: Date.now() });
-          await vi.advanceTimersByTimeAsync(0);
+          // A launch that stopped reads where (issue #951): the landing read's
+          // short settle has to elapse before the answer is built.
+          await vi.advanceTimersByTimeAsync(50);
           const result = await startPromise;
 
           expect(result.state).toBe(SessionState.PAUSED);
@@ -1927,78 +1835,6 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
           restore();
         }
       });
-    });
-  });
-
-  describe('waitForDryRunCompletion behaviour', () => {
-    it('returns true immediately if already completed', async () => {
-      const proxyStub = {
-        hasDryRunCompleted: vi.fn().mockReturnValue(true),
-        once: vi.fn(),
-        removeListener: vi.fn(),
-      };
-      const session = { ...mockSession, proxyManager: proxyStub } as any;
-      const result = await internals(operations).launcher.waitForDryRunCompletion(session, 500);
-      expect(result).toBe(true);
-      expect(proxyStub.once).not.toHaveBeenCalled();
-    });
-
-    it('resolves true when dry-run-complete event fires', async () => {
-      let capturedHandler: (() => void) | undefined;
-      const proxyStub = {
-        hasDryRunCompleted: vi.fn().mockReturnValue(false),
-        once: vi.fn((event: string, handler: () => void) => {
-          if (event === 'dry-run-complete') {
-            capturedHandler = handler;
-          }
-        }),
-        removeListener: vi.fn(),
-      };
-      const session = { ...mockSession, proxyManager: proxyStub } as any;
-
-      const waitPromise = internals(operations).launcher.waitForDryRunCompletion(session, 1000);
-      expect(capturedHandler).toBeDefined();
-      capturedHandler?.();
-      const result = await waitPromise;
-      expect(result).toBe(true);
-      expect(proxyStub.removeListener).toHaveBeenCalledWith('dry-run-complete', expect.any(Function));
-    });
-
-    it('resolves true when completion detected during timeout window', async () => {
-      vi.useFakeTimers();
-      let callCount = 0;
-      const proxyStub = {
-        hasDryRunCompleted: vi.fn().mockImplementation(() => {
-          callCount += 1;
-          return callCount > 1;
-        }),
-        once: vi.fn(),
-        removeListener: vi.fn(),
-      };
-      const session = { ...mockSession, proxyManager: proxyStub } as any;
-
-      const waitPromise = internals(operations).launcher.waitForDryRunCompletion(session, 400);
-      await vi.advanceTimersByTimeAsync(400);
-      const result = await waitPromise;
-      expect(result).toBe(true);
-      expect(proxyStub.removeListener).toHaveBeenCalledWith('dry-run-complete', expect.any(Function));
-      vi.useRealTimers();
-    });
-
-    it('returns false when timeout elapses without completion', async () => {
-      vi.useFakeTimers();
-      const proxyStub = {
-        hasDryRunCompleted: vi.fn().mockReturnValue(false),
-        once: vi.fn(),
-        removeListener: vi.fn(),
-      };
-      const session = { ...mockSession, proxyManager: proxyStub } as any;
-
-      const waitPromise = internals(operations).launcher.waitForDryRunCompletion(session, 400);
-      await vi.advanceTimersByTimeAsync(400);
-      const result = await waitPromise;
-      expect(result).toBe(false);
-      vi.useRealTimers();
     });
   });
 

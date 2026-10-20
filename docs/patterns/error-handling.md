@@ -147,7 +147,7 @@ async startDebugging(
 
   try {
     // Launch the proxy; adapter creation inside runs under an AdapterLease
-    await this.proxyLauncher.start(session, { scriptPath, scriptArgs, dapLaunchArgs, dryRunSpawn });
+    await this.proxyLauncher.start(session, { scriptPath, scriptArgs, dapLaunchArgs });
 
     // ... wait for readiness, re-apply breakpoints, build the success result
 
@@ -611,7 +611,7 @@ it("rejects with the worker's init-failure report when it precedes the adapter e
     }, 0);
   });
 
-  const startPromise = proxyManager.start({ ...baseConfig, dryRunSpawn: false });
+  const startPromise = proxyManager.start(baseConfig);
   await expect(startPromise).rejects.toThrow(report);
   await expect(startPromise).rejects.not.toThrow(/Proxy exited during initialization/);
 });

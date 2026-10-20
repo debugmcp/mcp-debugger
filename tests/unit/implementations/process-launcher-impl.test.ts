@@ -255,8 +255,8 @@ describe('ProxyProcessLauncherImpl', () => {
 // pipe and are delivered as `message` events afterwards, right up to the
 // channel EOF that flips `connected` to false (`disconnect`, or `close` when
 // the channel was the last open handle). Tearing the adapter down on the raw
-// `exit` dropped those late messages — a dry run's `dry_run_complete` among
-// them (issue #729).
+// `exit` dropped those late messages — a status the worker wrote just before
+// exiting among them (issue #729).
 describe('ProxyProcessAdapter exit ordering with an open IPC channel (issue #729)', () => {
   let processManager: IProcessManager;
   let child: FakeChildProcess;
@@ -291,11 +291,11 @@ describe('ProxyProcessAdapter exit ordering with an open IPC channel (issue #729
     const { order } = adapterWithOrder();
 
     child.emit('exit', 0, null);
-    child.emit('message', { type: 'status', status: 'dry_run_complete' });
+    child.emit('message', { type: 'status', status: 'adapter_connected' });
     child.connected = false;
     child.emit('disconnect');
 
-    expect(order).toEqual(['message:dry_run_complete', 'exit:0']);
+    expect(order).toEqual(['message:adapter_connected', 'exit:0']);
   });
 
   it('delivers the held exit on close when close arrives before disconnect, exactly once', () => {
@@ -303,12 +303,12 @@ describe('ProxyProcessAdapter exit ordering with an open IPC channel (issue #729
     const { order } = adapterWithOrder();
 
     child.emit('exit', 0, null);
-    child.emit('message', { type: 'status', status: 'dry_run_complete' });
+    child.emit('message', { type: 'status', status: 'adapter_connected' });
     child.emit('close', 0, null);
 
     // Asserted before the disconnect below: with the trailing disconnect
     // first, this passed even when `close` delivered nothing at all.
-    expect(order).toEqual(['message:dry_run_complete', 'exit:0']);
+    expect(order).toEqual(['message:adapter_connected', 'exit:0']);
 
     child.connected = false;
     child.emit('disconnect');
@@ -316,14 +316,14 @@ describe('ProxyProcessAdapter exit ordering with an open IPC channel (issue #729
     expect(order.filter(entry => entry.startsWith('exit:'))).toEqual(['exit:0']);
   });
 
-  it('resolves a pending initialization when dry_run_complete lands after the raw exit', async () => {
+  it('resolves a pending initialization when the completing status lands after the raw exit', async () => {
     child.connected = true;
     const launcher = new ProxyProcessLauncherImpl(processManager);
     const proxyProcess = launcher.launchProxy('./dist/proxy.js', 'session-729-init');
     const pending = proxyProcess.waitForInitialization(1000);
 
     child.emit('exit', 0, null);
-    child.emit('message', { type: 'status', status: 'dry_run_complete' });
+    child.emit('message', { type: 'status', status: 'adapter_configured_and_launched' });
     child.connected = false;
     child.emit('disconnect');
 
