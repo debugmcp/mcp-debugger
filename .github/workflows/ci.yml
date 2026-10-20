@@ -357,9 +357,51 @@ jobs:
       env:
         SKIP_ADAPTER_VENDOR: 'true'
 
+    - name: Decide whether Docker Hub credentials are available
+      # The secrets context is not available in a step's `if`; an env-bound
+      # step output is. Fork and Dependabot PRs have no secrets and keep
+      # building anonymously, as before (issue #891).
+      id: registry
+      env:
+        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      run: |
+        if [ -n "$DOCKER_USERNAME" ]; then
+          echo "login=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "login=false" >> "$GITHUB_OUTPUT"
+          echo "::notice::No Docker Hub credentials in this run; the image build pulls anonymously (issue #891)"
+        fi
+
+    - name: Log in to Docker Hub
+      # Authenticated pulls are not subject to the per-IP anonymous rate limit
+      # that shared runners exhaust — 429 Too Many Requests on the base-image
+      # manifests, four times on 2026-10-09 (issue #891).
+      if: steps.registry.outputs.login == 'true'
+      uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
     - name: Build Docker image
-      run: docker build -t mcp-debugger:local .
-    
+      # A 429 from Docker Hub is a sliding-window limit, not a build failure:
+      # one retry after a pause (issue #891). Any other failure fails at once.
+      run: |
+        set -o pipefail
+        for attempt in 1 2; do
+          if docker build -t mcp-debugger:local . 2>&1 | tee docker-build.log; then
+            exit 0
+          fi
+          if ! grep -q '429 Too Many Requests' docker-build.log; then
+            exit 1
+          fi
+          if [ "$attempt" = 2 ]; then
+            echo "::error::Docker Hub rate limit (429 Too Many Requests) on both build attempts"
+            exit 1
+          fi
+          echo "::warning::Docker Hub rate limit (429 Too Many Requests) on build attempt $attempt; retrying in 60 s"
+          sleep 60
+        done
+
     - name: Run container tests
       run: |
         mkdir -p artifacts/cobol
