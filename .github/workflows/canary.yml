@@ -174,8 +174,14 @@ jobs:
           else
             EXPECT="vendored"
           fi
+          # The timeout is generous on purpose (#968): this step asserts where
+          # CodeLLDB resolves from, and a timed-out rust row carries no
+          # backend.source to assert on. doctor is the first thing to run each
+          # toolchain on a fresh runner, and on Windows the same published
+          # 0.25.1 took 5 s here on 2026-09-29 and 37 s on 2026-10-20, when
+          # rust timed out at 30 s.
           set +e
-          node "$CLI" doctor rust --json --timeout 30000 \
+          node "$CLI" doctor rust --json --timeout 120000 \
             > "$TRANSCRIPTS/doctor.json" 2> "$TRANSCRIPTS/doctor.err"
           DOCTOR_EXIT=$?
           set -e
