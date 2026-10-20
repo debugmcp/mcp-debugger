@@ -87,18 +87,6 @@ describe('rust-utils process checks', () => {
     await expect(rustUtils.checkRustInstallation()).resolves.toBe(false);
   });
 
-  it('parses cargo version output', async () => {
-    spawnMock.mockImplementation(() =>
-      createMockProcess({ stdoutChunks: ['cargo 1.74.1 (abc123 2023-01-01)'], exitCode: 0 })
-    );
-    await expect(rustUtils.getCargoVersion()).resolves.toBe('1.74.1');
-
-    spawnMock.mockImplementation(() =>
-      createMockProcess({ stdoutChunks: ['unexpected'], exitCode: 0 })
-    );
-    await expect(rustUtils.getCargoVersion()).resolves.toBeNull();
-  });
-
   it('builds rust project and captures failure', async () => {
     spawnMock
       .mockImplementationOnce(() =>
@@ -150,6 +138,66 @@ describe('rust-utils process checks', () => {
 
     spawnMock.mockImplementation(() => createMockProcess({ stdoutChunks: [], exitCode: 0 }));
     await expect(rustUtils.getRustHostTriple()).resolves.toBeNull();
+  });
+});
+
+// Issue #968: one direct `cargo -vV` replaces two shell-spawned `cargo
+// --version` runs and a `rustc -Vv` that loads the 183 MB rustc_driver DLL.
+describe('getCargoVerboseVersion (issue #968)', () => {
+  const CARGO_VV =
+    'cargo 1.94.1 (29ea6fb6a 2026-03-24)\nrelease: 1.94.1\ncommit-hash: 29ea6fb6a5db279426f4cc4e17aa385f05a0cfbc\n' +
+    'commit-date: 2026-03-24\nhost: x86_64-pc-windows-msvc\nlibgit2: 1.9.2 (sys:0.20.3 vendored)\n';
+
+  /** A child that exits before its stdout is drained, as a real one may. */
+  const exitThenDrain = (chunks: string[], code: number) => {
+    const proc = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter };
+    proc.stdout = new EventEmitter();
+    proc.stderr = new EventEmitter();
+    queueMicrotask(() => {
+      proc.emit('exit', code, null);
+      chunks.forEach((chunk) => proc.stdout.emit('data', Buffer.from(chunk)));
+      proc.emit('close', code, null);
+    });
+    return proc;
+  };
+
+  it('spawns cargo -vV directly, without a shell', async () => {
+    spawnMock.mockImplementation(() => exitThenDrain([CARGO_VV], 0));
+
+    await rustUtils.getCargoVerboseVersion();
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    const [command, args, options] = spawnMock.mock.calls[0];
+    expect(command).toBe('cargo');
+    expect(args).toEqual(['-vV']);
+    expect(options.shell).toBeUndefined();
+    expect(options.windowsHide).toBe(true);
+  });
+
+  it('reads the version and host triple from output that arrives after exit', async () => {
+    spawnMock.mockImplementation(() => exitThenDrain([CARGO_VV.slice(0, 20), CARGO_VV.slice(20)], 0));
+
+    await expect(rustUtils.getCargoVerboseVersion()).resolves.toEqual({
+      version: '1.94.1',
+      hostTriple: 'x86_64-pc-windows-msvc'
+    });
+  });
+
+  it('keeps what it can parse when a line is missing', async () => {
+    spawnMock.mockImplementation(() => exitThenDrain(['cargo 1.70.0 (abc 2023-01-01)\n'], 0));
+
+    await expect(rustUtils.getCargoVerboseVersion()).resolves.toEqual({
+      version: '1.70.0',
+      hostTriple: undefined
+    });
+  });
+
+  it('returns null when cargo cannot be spawned or fails', async () => {
+    spawnMock.mockImplementation(() => createMockProcess({ error: new Error('spawn cargo ENOENT') }));
+    await expect(rustUtils.getCargoVerboseVersion()).resolves.toBeNull();
+
+    spawnMock.mockImplementation(() => exitThenDrain(['error: no default toolchain configured\n'], 1));
+    await expect(rustUtils.getCargoVerboseVersion()).resolves.toBeNull();
   });
 });
 

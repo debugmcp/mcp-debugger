@@ -9,7 +9,7 @@ import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidatio
 import { toolchainComponent } from '@debugmcp/shared';
 import { RustDebugAdapter } from './rust-debug-adapter.js';
 import { DebugLanguage } from '@debugmcp/shared';
-import { checkCargoInstallation, getCargoVersion, getRustHostTriple } from './utils/rust-utils.js';
+import { getCargoVerboseVersion } from './utils/rust-utils.js';
 import { resolveCodeLLDBExecutableWithSource, getCodeLLDBVersion } from './utils/codelldb-resolver.js';
 
 /**
@@ -80,18 +80,14 @@ export class RustAdapterFactory implements IAdapterFactory {
       codelldbVersion = await getCodeLLDBVersion() || undefined;
     }
     
-    // Check Cargo
-    const cargoInstalled = await checkCargoInstallation();
-    if (!cargoInstalled) {
+    // Check Cargo: one `cargo -vV` gives the version and the host triple (issue #968)
+    const cargo = await getCargoVerboseVersion();
+    if (!cargo) {
       warnings.push('Cargo not found. Install Rust from https://rustup.rs/');
     } else {
-      cargoVersion = await getCargoVersion() || undefined;
-    }
-    
-    const rustHost = await getRustHostTriple();
-    if (rustHost) {
-      hostTriple = rustHost;
-      if (/-pc-windows-msvc/i.test(rustHost)) {
+      cargoVersion = cargo.version;
+      hostTriple = cargo.hostTriple;
+      if (hostTriple && /-pc-windows-msvc/i.test(hostTriple)) {
         warnings.push('Rust MSVC toolchain detected. CodeLLDB works best with the GNU toolchain (x86_64-pc-windows-gnu) or DWARF debug info.');
       }
     }

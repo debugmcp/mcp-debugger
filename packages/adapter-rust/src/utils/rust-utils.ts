@@ -42,29 +42,41 @@ export async function checkRustInstallation(): Promise<boolean> {
 }
 
 /**
- * Get Cargo version
+ * The toolchain probe behind RustAdapterFactory.validate() (issue #968): one
+ * `cargo -vV`, which prints both the version and the `host:` triple. It spawns
+ * cargo directly (no shell), reads stdout on 'close' (a child may exit before
+ * its pipe is drained), and does not load rustc's rustc_driver library
+ * (183 MB on Windows) the way the `rustc -Vv` it replaces did.
+ *
+ * Resolves null when cargo cannot be spawned or exits non-zero; a field the
+ * output does not carry is undefined.
  */
-export async function getCargoVersion(): Promise<string | null> {
+export async function getCargoVerboseVersion(): Promise<{ version?: string; hostTriple?: string } | null> {
   return new Promise((resolve) => {
-    const cargoProcess = spawn('cargo', ['--version'], {
-      shell: true,
-      windowsHide: true
-    });
-    
+    let settled = false;
+    const settle = (value: { version?: string; hostTriple?: string } | null) => {
+      if (!settled) {
+        settled = true;
+        resolve(value);
+      }
+    };
+    const cargoProcess = spawn('cargo', ['-vV'], { windowsHide: true });
+
     let output = '';
     cargoProcess.stdout?.on('data', (data) => {
       output += data.toString();
     });
-    
-    cargoProcess.on('error', () => resolve(null));
-    cargoProcess.on('exit', (code) => {
-      if (code === 0 && output) {
-        // Parse version from "cargo 1.73.0 (9c4383fb5 2023-08-26)"
-        const match = output.match(/cargo (\d+\.\d+\.\d+)/);
-        resolve(match ? match[1] : null);
-      } else {
-        resolve(null);
+
+    cargoProcess.on('error', () => settle(null));
+    cargoProcess.on('close', (code) => {
+      if (code !== 0) {
+        settle(null);
+        return;
       }
+      settle({
+        version: output.match(/^cargo (\d+\.\d+\.\d+)/m)?.[1],
+        hostTriple: output.match(/^host:\s*(\S+)/m)?.[1]
+      });
     });
   });
 }

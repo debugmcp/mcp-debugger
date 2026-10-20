@@ -7,7 +7,12 @@
  */
 import { describe, it, expect, vi, afterEach, type Mock } from 'vitest';
 import type { IEnvironment, IFileSystem } from '@debugmcp/shared';
-import { diagnose, type DiagnoseDeps, type DoctorRegistry } from '../../../../src/cli/commands/doctor/diagnose.js';
+import {
+  diagnose,
+  DOCTOR_PROBE_CONCURRENCY,
+  type DiagnoseDeps,
+  type DoctorRegistry
+} from '../../../../src/cli/commands/doctor/diagnose.js';
 
 const makeEnvironment = (env: Record<string, string | undefined> = {}): IEnvironment => ({
   get: (key: string) => env[key],
@@ -645,6 +650,68 @@ describe('diagnose', () => {
     await diagnose([], deps);
 
     expect(maxInFlight).toBeGreaterThan(1);
+  });
+
+  // Issue #968: on a cold Windows runner ten concurrent probes took 11-30 s
+  // each, so `doctor rust` failed on the cost of probing Ruby, Go and Java.
+  describe('probe scheduling (issue #968)', () => {
+    const NAMES = ['mock', 'python', 'ruby', 'rust', 'go', 'java'];
+
+    function trackedAdapters(log: string[], inFlight: { now: number; max: number }): FakeAdapterSpec[] {
+      return NAMES.map((name) => ({
+        name,
+        validate: async () => {
+          log.push(`start:${name}`);
+          inFlight.now += 1;
+          inFlight.max = Math.max(inFlight.max, inFlight.now);
+          await new Promise((resolve) => setTimeout(resolve, 15));
+          inFlight.now -= 1;
+          log.push(`end:${name}`);
+          return { valid: true, errors: [], warnings: [] };
+        }
+      }));
+    }
+
+    it(`never has more than ${DOCTOR_PROBE_CONCURRENCY} probes in flight`, async () => {
+      const inFlight = { now: 0, max: 0 };
+      const deps = makeDeps(trackedAdapters([], inFlight));
+
+      await diagnose([], deps);
+
+      expect(inFlight.max).toBe(DOCTOR_PROBE_CONCURRENCY);
+    });
+
+    it('settles every named language before any other language starts', async () => {
+      const log: string[] = [];
+      const deps = makeDeps(trackedAdapters(log, { now: 0, max: 0 }));
+
+      const report = await diagnose(['java', 'rust'], deps);
+
+      const lastNamedEnd = Math.max(log.indexOf('end:java'), log.indexOf('end:rust'));
+      const firstOtherStart = Math.min(
+        ...NAMES.filter((name) => name !== 'java' && name !== 'rust').map((name) => log.indexOf(`start:${name}`))
+      );
+      expect(lastNamedEnd).toBeLessThan(firstOtherStart);
+      // The named languages still run beside each other.
+      expect(log.slice(0, 2).sort()).toEqual(['start:java', 'start:rust']);
+      // Still the same report: every language, in the registry's order.
+      expect(report.languages.map((l) => l.language)).toEqual(NAMES);
+      expect(report.exitCode).toBe(0);
+    });
+
+    // A guard on the phase split, not a red-first case: the old all-at-once
+    // code passed it too. A split that looked names up instead of filtering
+    // the registry would leave holes in the report or crash here.
+    it('still reports every language when the only name is unknown', async () => {
+      const log: string[] = [];
+      const deps = makeDeps(trackedAdapters(log, { now: 0, max: 0 }));
+
+      const report = await diagnose(['nosuchlang'], deps);
+
+      expect(report.unknownLanguages).toEqual(['nosuchlang']);
+      expect(report.languages.map((l) => l.language)).toEqual(NAMES);
+      expect(report.exitCode).toBe(1);
+    });
   });
 
   it('includes platform checks and platform info in the report', async () => {

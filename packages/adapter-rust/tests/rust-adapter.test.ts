@@ -29,9 +29,7 @@ vi.mock('../src/utils/codelldb-resolver.js', async (importOriginal) => ({
 }));
 vi.mock('../src/utils/rust-utils.js', async (importOriginal) => ({
   ...(await importOriginal<object>()),
-  checkCargoInstallation: vi.fn(async () => true),
-  getCargoVersion: vi.fn(async () => 'cargo 1.99.0'),
-  getRustHostTriple: vi.fn(async () => 'x86_64-unknown-linux-gnu')
+  getCargoVerboseVersion: vi.fn(async () => ({ version: '1.99.0', hostTriple: 'x86_64-unknown-linux-gnu' }))
 }));
 vi.mock('@debugmcp/codelldb-common', async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -392,7 +390,7 @@ describe('RustAdapterFactory', () => {
     expect(result.details).toMatchObject({
       codelldbPath: '/mock/vendor/codelldb',
       codelldbVersion: '1.11.0',
-      cargoVersion: 'cargo 1.99.0',
+      cargoVersion: '1.99.0',
       hostTriple: 'x86_64-unknown-linux-gnu',
       platform: process.platform,
       arch: process.arch
@@ -410,9 +408,9 @@ describe('RustAdapterFactory', () => {
 
   it('should report an error when CodeLLDB is missing and a warning when cargo is missing', async () => {
     const { resolveCodeLLDBExecutableWithSource } = await import('../src/utils/codelldb-resolver.js');
-    const { checkCargoInstallation } = await import('../src/utils/rust-utils.js');
+    const { getCargoVerboseVersion } = await import('../src/utils/rust-utils.js');
     vi.mocked(resolveCodeLLDBExecutableWithSource).mockResolvedValueOnce(null);
-    vi.mocked(checkCargoInstallation).mockResolvedValueOnce(false);
+    vi.mocked(getCargoVerboseVersion).mockResolvedValueOnce(null);
 
     const result = await factory.validate();
 
