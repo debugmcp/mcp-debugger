@@ -11,7 +11,7 @@ import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidatio
 import { toolchainComponent } from '@debugmcp/shared';
 import { PythonDebugAdapter } from './python-debug-adapter.js';
 import { DebugLanguage } from '@debugmcp/shared';
-import { findPythonExecutable, getPythonVersion, getDebugpyVersion } from './utils/python-utils.js';
+import { findPythonWithDebugpy, getPythonVersion, getDebugpyVersion } from './utils/python-utils.js';
 
 /**
  * The details shape validate() emits and describeToolchain() reads — keeping
@@ -76,8 +76,10 @@ export class PythonAdapterFactory implements IAdapterFactory {
     let debugpyVersion: string | undefined;
 
     try {
-      // Check Python executable
-      pythonPath = await findPythonExecutable();
+      // Check Python executable. Auto-detection already imports debugpy on
+      // the interpreter it picks (issue #969); reuse that answer when it has one.
+      const discovered = await findPythonWithDebugpy();
+      pythonPath = discovered.pythonPath;
 
       // Check Python version
       pythonVersion = await getPythonVersion(pythonPath) || undefined;
@@ -92,7 +94,8 @@ export class PythonAdapterFactory implements IAdapterFactory {
 
       // Check debugpy installation (warning only — debugpy may be available in the
       // user's virtualenv even if missing from system Python. See issue #16.)
-      debugpyVersion = await getDebugpyVersion(pythonPath) || undefined;
+      const knownDebugpy = discovered.debugpyVersion;
+      debugpyVersion = (knownDebugpy !== undefined ? knownDebugpy : await getDebugpyVersion(pythonPath)) || undefined;
       if (!debugpyVersion) {
         warnings.push('debugpy not found in system Python. If using a virtualenv, debugpy will be checked at launch time. Otherwise run: pip install debugpy');
       }

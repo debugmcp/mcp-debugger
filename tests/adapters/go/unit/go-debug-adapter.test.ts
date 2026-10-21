@@ -98,6 +98,7 @@ describe('GoDebugAdapter', () => {
             // DAP support check
           }
           proc.emit('exit', 0);
+          proc.emit('close', 0);
         });
 
         return proc;
@@ -118,6 +119,7 @@ describe('GoDebugAdapter', () => {
         process.nextTick(() => {
           proc.stdout.emit('data', Buffer.from('go version go1.21.0 darwin/arm64\n'));
           proc.emit('exit', 0);
+          proc.emit('close', 0);
         });
         return proc;
       });
@@ -148,6 +150,7 @@ describe('GoDebugAdapter', () => {
         process.nextTick(() => {
           proc.stdout.emit('data', Buffer.from('go version go1.21.0\n'));
           proc.emit('exit', 0);
+          proc.emit('close', 0);
         });
         return proc;
       });
@@ -452,6 +455,7 @@ describe('GoDebugAdapter', () => {
         process.nextTick(() => {
           proc.stdout.emit('data', Buffer.from('Version: 1.21.0\n'));
           proc.emit('exit', 0);
+          proc.emit('close', 0);
         });
         return proc;
       });
@@ -517,13 +521,16 @@ describe('GoDebugAdapter', () => {
           if (args?.[0] === 'version') {
             proc.stdout.emit('data', Buffer.from(opts.goOutput ?? 'go version go1.21.0 linux/amd64\n'));
             proc.emit('exit', 0);
+            proc.emit('close', 0);
           } else if (args?.[0] === 'dap') {
             if (opts.dapStderr) {
               proc.stderr.emit('data', Buffer.from(opts.dapStderr));
             }
             proc.emit('exit', opts.dapExit ?? 0);
+            proc.emit('close', opts.dapExit ?? 0);
           } else {
             proc.emit('exit', 0);
+            proc.emit('close', 0);
           }
         });
         return proc;
@@ -599,6 +606,7 @@ describe('GoDebugAdapter', () => {
         process.nextTick(() => {
           proc.stdout.emit('data', Buffer.from('Delve Debugger\nVersion: 1.26.3\nBuild: abc\n'));
           proc.emit('exit', 0);
+          proc.emit('close', 0);
         });
         return proc;
       }) as never);

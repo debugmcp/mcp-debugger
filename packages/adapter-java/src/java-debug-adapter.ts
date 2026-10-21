@@ -29,7 +29,7 @@ import {
 } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
 import { AdapterDependencies } from '@debugmcp/shared';
-import { findJavaExecutable, getJavaVersion, getJavaSearchPaths } from './utils/java-utils.js';
+import { findJavaExecutable, findJavaWithVersion, getJavaSearchPaths } from './utils/java-utils.js';
 import { resolveJdiBridgeClassDir, ensureJdiBridge, isJdiBridgeStale } from './utils/jdi-resolver.js';
 
 /**
@@ -144,11 +144,9 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
     const warnings: ValidationWarning[] = [];
 
     try {
-      // Check Java executable
-      await findJavaExecutable();
-
-      // Check Java version
-      const javaVersion = await getJavaVersion();
+      // Check the Java executable and its version with one `java -version`
+      // (issue #969); the version is the found executable's, not PATH's.
+      const { version: javaVersion } = await findJavaWithVersion();
       if (javaVersion) {
         const parts = javaVersion.split('.');
         const major = parseInt(parts[0], 10);

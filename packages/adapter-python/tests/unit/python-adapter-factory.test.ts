@@ -7,15 +7,22 @@ import {
 import { DebugLanguage } from '@debugmcp/shared';
 import { PythonAdapterFactory } from '../../src/python-adapter-factory.js';
 import { PythonDebugAdapter } from '../../src/python-debug-adapter.js';
-import { findPythonExecutable, getPythonVersion, getDebugpyVersion } from '../../src/utils/python-utils.js';
+import {
+  findPythonExecutable,
+  findPythonWithDebugpy,
+  getPythonVersion,
+  getDebugpyVersion
+} from '../../src/utils/python-utils.js';
 
 vi.mock('../../src/utils/python-utils.js', () => ({
   findPythonExecutable: vi.fn(),
+  findPythonWithDebugpy: vi.fn(),
   getPythonVersion: vi.fn(),
   getDebugpyVersion: vi.fn()
 }));
 
 const findPythonExecutableMock = vi.mocked(findPythonExecutable);
+const findPythonWithDebugpyMock = vi.mocked(findPythonWithDebugpy);
 const getPythonVersionMock = vi.mocked(getPythonVersion);
 const getDebugpyVersionMock = vi.mocked(getDebugpyVersion);
 
@@ -33,6 +40,34 @@ describe('PythonAdapterFactory', () => {
     findPythonExecutableMock.mockReset();
     getPythonVersionMock.mockReset();
     getDebugpyVersionMock.mockReset();
+    // Discovery that learned nothing about debugpy (the preferred-path and
+    // env-var routes): the factory probes it itself, as before #969.
+    findPythonWithDebugpyMock.mockReset().mockImplementation(async () => ({
+      pythonPath: await findPythonExecutableMock()
+    }));
+  });
+
+  // Issue #969: discovery already imported debugpy on the interpreter it chose;
+  // the factory used to import it a second time.
+  it('reuses the debugpy version discovery already read, instead of probing again', async () => {
+    findPythonWithDebugpyMock.mockResolvedValue({ pythonPath: '/usr/bin/python3', debugpyVersion: '1.8.20' });
+    getPythonVersionMock.mockResolvedValue('3.12.1');
+
+    const result = await new PythonAdapterFactory().validate();
+
+    expect(getDebugpyVersionMock).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ valid: true, warnings: [] });
+    expect(result.details).toMatchObject({ pythonPath: '/usr/bin/python3', debugpyVersion: '1.8.20' });
+  });
+
+  it('keeps the missing-debugpy warning when discovery found none', async () => {
+    findPythonWithDebugpyMock.mockResolvedValue({ pythonPath: '/usr/bin/python3', debugpyVersion: null });
+    getPythonVersionMock.mockResolvedValue('3.12.1');
+
+    const result = await new PythonAdapterFactory().validate();
+
+    expect(getDebugpyVersionMock).not.toHaveBeenCalled();
+    expect(result.warnings.some((w) => w.includes('debugpy not found'))).toBe(true);
   });
 
   it('creates PythonDebugAdapter instances with provided dependencies', () => {

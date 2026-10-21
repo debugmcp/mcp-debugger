@@ -42,6 +42,8 @@ const createMockProcess = (options: {
     stdoutChunks.forEach(chunk => stdout.emit('data', chunk));
     stderrChunks.forEach(chunk => stderr.emit('data', chunk));
     proc.emit('exit', exitCode);
+    // Real children emit 'close' after 'exit' once stdio drains
+    proc.emit('close', exitCode);
   });
 
   return proc;
