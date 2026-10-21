@@ -168,6 +168,22 @@ export const ErrorMessages = {
     (opts?.backAtOrigin ? ' The program is back at the line the step was issued from.' : ''),
 
   /**
+   * A step_over the core repeated because the adapter stops once per token
+   * position (issue #879, the Dart SDK adapter): the answer says how many
+   * steps it took, and, when the cap was reached, that the line has not
+   * changed yet.
+   * Used in: src/session/execution/execution-controller.ts
+   * @param stepped - The step flavour's own completion message ("Stepped over")
+   * @param steps - How many DAP steps were sent
+   * @param opts.stillOnLine - The cap was reached on the same line
+   */
+  stepRepeatedOnSameLine: (stepped: string, steps: number, opts?: { stillOnLine?: boolean }) =>
+    opts?.stillOnLine
+      ? `${stepped} ${steps} times and is still on the same line: this adapter stops once per expression on a line. ` +
+        'step_over again to go on, or set a breakpoint on the next line.'
+      : `${stepped} in ${steps} steps: this adapter stops once per expression on a line, so the step was repeated until the line changed.`,
+
+  /**
    * Informational message for pause requests not yet honored within the grace window
    * Occurs when: A pause request is acknowledged but no 'stopped' event arrives within the grace
    * window — the target may be blocked in native code or a syscall, which is not an error

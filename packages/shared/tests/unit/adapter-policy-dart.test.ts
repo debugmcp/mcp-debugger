@@ -24,6 +24,8 @@ describe('DartAdapterPolicy', () => {
     expect(DartAdapterPolicy.supportsLogPoints).toBe(true);
     expect(DartAdapterPolicy.supportsFunctionBreakpoints).toBe(false);
     expect(DartAdapterPolicy.honoursNoDebug).toBe(true);
+    // `next` stops once per token position (issue #879)
+    expect(DartAdapterPolicy.stepsByTokenPosition).toBe(true);
     expect(DartAdapterPolicy.childSessionStrategy).toBe('none');
     expect(DartAdapterPolicy.requiresCommandQueueing()).toBe(false);
   });

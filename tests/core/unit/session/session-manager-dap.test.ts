@@ -1744,6 +1744,139 @@ describe('SessionManager - DAP Operations', () => {
       expect(data.message).toMatch(/back at the line the step was issued from/);
     });
 
+    // Issue #879: the Dart SDK adapter's `next` stops once per token position
+    // (measured: app.dart:29 took three step_overs, columns 16, 26, 32).
+    describe('an adapter that steps by token position (issue #879)', () => {
+      function withTokenStepping(manager: SessionManager): void {
+        const original = (manager as unknown as { selectPolicy: (language: string) => AdapterPolicy }).selectPolicy.bind(manager);
+        vi.spyOn(manager as unknown as { selectPolicy: (language: string) => AdapterPolicy }, 'selectPolicy')
+          .mockImplementation((language: string) => ({ ...original(language), stepsByTokenPosition: true }));
+      }
+
+      /**
+       * A program whose position advances on each `next`: `landings[i]` is
+       * where the i-th step stops ({line, depth}); `landings[0]` is the origin.
+       * `reasons[i]` is the i-th step's stop reason (default 'step').
+       */
+      function scriptSteps(
+        landings: Array<{ line: number; depth?: number }>,
+        reasons: string[] = [],
+        afterStop?: () => void
+      ): { nexts: () => number } {
+        let position = 0;
+        let nexts = 0;
+        dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+          if (command === 'next') {
+            nexts += 1;
+            position = Math.min(position + 1, landings.length - 1);
+            const reason = reasons[nexts - 1] ?? 'step';
+            process.nextTick(() => {
+              dependencies.mockProxyManager.simulateStopped(1, reason, { reason, threadId: 1 });
+              afterStop?.();
+            });
+          }
+          if (command === 'stackTrace') {
+            const { line, depth = 2 } = landings[position]!;
+            const frames = [
+              { id: 10, name: 'main', source: { path: '/app/bin/app.dart' }, line, column: 3 },
+              { id: 11, name: 'caller', source: { path: '/app/bin/app.dart' }, line: 50, column: 3 }
+            ].slice(0, depth);
+            return { success: true, body: { stackFrames: frames, totalFrames: frames.length } };
+          }
+          return { success: true };
+        });
+        return { nexts: () => nexts };
+      }
+
+      async function stepOver(sessionId: string) {
+        const stepPromise = sessionManager.stepOver(sessionId);
+        await vi.runAllTimersAsync();
+        return (await stepPromise).data as { message?: string; stopReason?: string; location?: { line: number } };
+      }
+
+      it('repeats the step while it stops on the line it left, and says how many it took', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        withTokenStepping(sessionManager);
+        const steps = scriptSteps([{ line: 29 }, { line: 29 }, { line: 29 }, { line: 30 }]);
+
+        const data = await stepOver(session.id);
+
+        expect(steps.nexts()).toBe(3);
+        expect(data.location?.line).toBe(30);
+        expect(data.message).toBe(ErrorMessages.stepRepeatedOnSameLine('Stepped over', 3));
+      });
+
+      it('keeps stepping the thread the caller stepped, even when another thread becomes current', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        withTokenStepping(sessionManager);
+        // Another isolate stops right after each step: the proxy's current thread moves to 2.
+        scriptSteps([{ line: 29 }, { line: 29 }, { line: 30 }], [], () => dependencies.mockProxyManager.setCurrentThreadId(2));
+
+        await stepOver(session.id);
+
+        const send = vi.mocked(dependencies.mockProxyManager.sendDapRequest);
+        const nextThreads = send.mock.calls.filter(([command]) => command === 'next').map(([, args]) => (args as { threadId: number }).threadId);
+        expect(nextThreads).toEqual([1, 1]);
+      });
+
+      it('does not call a same-line breakpoint after a repeat "back at the line the step was issued from"', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        withTokenStepping(sessionManager);
+        scriptSteps([{ line: 29 }, { line: 29 }, { line: 29 }], ['step', 'breakpoint']);
+
+        const data = await stepOver(session.id);
+
+        expect(data.stopReason).toBe('breakpoint');
+        expect(data.message).toBe(ErrorMessages.stepStoppedOn('Stepped over', 'breakpoint'));
+      });
+
+      it('lets a breakpoint on the same line end the step at once', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        withTokenStepping(sessionManager);
+        const steps = scriptSteps([{ line: 29 }, { line: 29 }, { line: 30 }], ['breakpoint']);
+
+        const data = await stepOver(session.id);
+
+        expect(steps.nexts()).toBe(1);
+        expect(data.stopReason).toBe('breakpoint');
+      });
+
+      it('takes a same-line landing in a shallower frame as a real landing (a recursive call returning)', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        withTokenStepping(sessionManager);
+        const steps = scriptSteps([{ line: 29, depth: 2 }, { line: 29, depth: 1 }, { line: 30, depth: 1 }]);
+
+        const data = await stepOver(session.id);
+
+        expect(steps.nexts()).toBe(1);
+        expect(data.location?.line).toBe(29);
+        expect(data.message).toBe('Stepped over');
+      });
+
+      it('gives up after eight steps on the same line and says so', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        withTokenStepping(sessionManager);
+        const steps = scriptSteps(Array.from({ length: 20 }, () => ({ line: 29 })));
+
+        const data = await stepOver(session.id);
+
+        expect(steps.nexts()).toBe(8);
+        expect(data.location?.line).toBe(29);
+        expect(data.message).toBe(ErrorMessages.stepRepeatedOnSameLine('Stepped over', 8, { stillOnLine: true }));
+      });
+
+      it('leaves an adapter without the pin to stop once per step, as before', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        const steps = scriptSteps([{ line: 29 }, { line: 29 }, { line: 30 }]);
+
+        const data = await stepOver(session.id);
+
+        expect(steps.nexts()).toBe(1);
+        expect(data.location?.line).toBe(29);
+        expect(data.message).toBe('Stepped over');
+      });
+    });
+
     it('omits the back-at-origin sentence when the breakpoint stop is on another line (issue #678)', async () => {
       const session = await createPausedSession(sessionManager, dependencies);
       withPendingStopHook(sessionManager);

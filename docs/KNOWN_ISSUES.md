@@ -92,9 +92,11 @@ The Dart adapter drives the SDK's own `dart debug_adapter` / `flutter debug-adap
 these are the SDK's behaviours — measured in [the spike](./dart/spike-notes.md) against
 Dart 3.13 and Flutter 3.47 — and none of them is a session error.
 
-- **`step_over` stops twice per source line.** The VM steps per token position (`next` on
-  one line stops at column 26, then at column 32); the `granularity` the adapter accepts is
-  ignored. Expect two `step_over` calls per line, or set a breakpoint on the line you want.
+- **The VM steps per token position, so one `step_over` sends several DAP steps.** `next` on
+  one line stops at column 16, then 26, then 32 (the `granularity` the adapter accepts is
+  ignored). mcp-debugger repeats the step while it lands on the same line in the same frame,
+  up to eight times, and the answer says how many it took ("Stepped over in 3 steps"); a
+  breakpoint or exception on that line still ends the step at once (#879).
 - **A logpoint's `condition` is ignored.** `logMessage` works (interpolated `{expr}` values
   arrive in `get_output` without pausing), but a `condition` on the same breakpoint does not
   gate it — every hit logs. Put the filter in the message, or use a conditional breakpoint.

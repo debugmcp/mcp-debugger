@@ -78,6 +78,9 @@ export const DartAdapterPolicy = {
   supportsFunctionBreakpoints: false,
   honoursNoDebug: true,
   terminateBeforeDisconnect: true,
+  // `next` stops once per token position: app.dart:29 (`counter.value + 2`)
+  // took three step_overs, columns 16, 26 and 32 (issue #879).
+  stepsByTokenPosition: true,
   // The adapter pauses each new isolate at start, reports it as an entry stop and resumes it
   // itself 1 ms later (measured) — the worker holds it and drops it with that resume; a durable
   // one (a VM started with --pause_isolates_on_start) is still reported.
