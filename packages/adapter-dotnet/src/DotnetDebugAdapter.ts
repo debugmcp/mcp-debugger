@@ -70,6 +70,7 @@ import { DebugLanguage } from '@debugmcp/shared';
 import { AdapterDependencies } from '@debugmcp/shared';
 import { findNetcoredbgExecutable, findPdb2PdbExecutable, convertPdbsToTemp, getProcessExecutableDir, getProcessArchitecture } from './utils/dotnet-utils.js';
 import { bridgePathCandidates } from './utils/bridge-path.js';
+import { describeSourceProgram, isDotnetSourceFile } from './utils/source-program.js';
 
 /**
  * Cache entry for debugger executable paths
@@ -345,6 +346,17 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
   // ===== Debug Configuration =====
 
   async transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig> {
+    // A source file as the program reaches netcoredbg only to fail at
+    // configurationDone with a bare 0x800700c1 (issue #959): refuse it here,
+    // before anything is spawned, and name the convention.
+    const program = (config as { program?: unknown }).program;
+    if (typeof program === 'string' && isDotnetSourceFile(program)) {
+      throw new AdapterError(
+        describeSourceProgram(program, typeof config.cwd === 'string' ? config.cwd : undefined),
+        AdapterErrorCode.SCRIPT_NOT_FOUND
+      );
+    }
+
     const dotnetConfig: DotnetLaunchConfig = {
       ...config,
       type: 'coreclr',

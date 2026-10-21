@@ -244,6 +244,30 @@ describe('DotnetDebugAdapter', () => {
 
       expect(result.justMyCode).toBe(true);
     });
+
+    // Issue #959: a .cs program reached netcoredbg and failed at
+    // configurationDone with a bare 0x800700c1.
+    it.each(['/app/Program.cs', 'C:\\app\\Library.FS', '/app/Module1.vb'])(
+      'refuses the source file %s as the program, before anything is spawned',
+      async (program) => {
+        const refusal = adapter.transformLaunchConfig({ program } as never);
+
+        await expect(refusal).rejects.toMatchObject({
+          name: 'AdapterError',
+          code: 'SCRIPT_NOT_FOUND'
+        });
+        await expect(refusal).rejects.toThrow(/compiled assembly.*dapLaunchArgs\.program/s);
+      }
+    );
+
+    it.each(['/app/bin/Debug/net8.0/App.dll', 'C:\\app\\bin\\Debug\\net8.0\\App.exe', 'dotnet'])(
+      'passes the program %s through',
+      async (program) => {
+        const result = await adapter.transformLaunchConfig({ program } as never);
+
+        expect(result).toMatchObject({ program, type: 'coreclr' });
+      }
+    );
   });
 
   // ===== Attach Configuration =====
