@@ -17,6 +17,10 @@ describe('DotnetAdapterPolicy', () => {
     expect(DotnetAdapterPolicy.childSessionStrategy).toBe('none');
   });
 
+  it('names stopAtEntry as the launch key netcoredbg reads for an entry stop (issue #973)', () => {
+    expect(DotnetAdapterPolicy.entryStopLaunchKey).toBe('stopAtEntry');
+  });
+
   // ===== Refusals explained (issue #959) =====
 
   it('explains 0x800700c1 as a program netcoredbg could not start as a .NET assembly', () => {

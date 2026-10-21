@@ -5,6 +5,7 @@ import type {
   ILogger
 } from '../../../src/proxy/dap-proxy-interfaces.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
+import { DefaultAdapterPolicy } from '@debugmcp/shared';
 import { createMockDapClient } from '../../test-utils/mocks/dap-client.js';
 
 describe('DapConnectionManager', () => {
@@ -636,6 +637,40 @@ describe('DapConnectionManager', () => {
         console: 'internalConsole',
         justMyCode: false
       });
+    });
+
+    // Issue #973: netcoredbg reads `stopAtEntry`, not `stopOnEntry`, so a .NET
+    // launch asked to stop at entry ran to completion.
+    it("also sends the entry-stop decision under the key the policy's adapter reads", async () => {
+      mockDapClient.sendRequest.mockResolvedValue(undefined);
+      connectionManager.setAdapterPolicy({ ...DefaultAdapterPolicy, entryStopLaunchKey: 'stopAtEntry' });
+
+      await connectionManager.sendLaunchRequest(mockDapClient, scriptPath, [], false, true, { stopOnEntry: true });
+
+      expect(mockDapClient.sendRequest).toHaveBeenCalledWith(
+        'launch',
+        expect.objectContaining({ stopOnEntry: true, stopAtEntry: true })
+      );
+    });
+
+    it('carries a false decision too, and leaves a key the caller set alone', async () => {
+      mockDapClient.sendRequest.mockResolvedValue(undefined);
+      connectionManager.setAdapterPolicy({ ...DefaultAdapterPolicy, entryStopLaunchKey: 'stopAtEntry' });
+
+      await connectionManager.sendLaunchRequest(mockDapClient, scriptPath, [], false, true, {});
+      await connectionManager.sendLaunchRequest(mockDapClient, scriptPath, [], false, true, { stopAtEntry: true });
+
+      expect(mockDapClient.sendRequest.mock.calls[0][1]).toMatchObject({ stopOnEntry: false, stopAtEntry: false });
+      expect(mockDapClient.sendRequest.mock.calls[1][1]).toMatchObject({ stopOnEntry: false, stopAtEntry: true });
+    });
+
+    it('adds no other key for a policy that names none', async () => {
+      mockDapClient.sendRequest.mockResolvedValue(undefined);
+      connectionManager.setAdapterPolicy(DefaultAdapterPolicy);
+
+      await connectionManager.sendLaunchRequest(mockDapClient, scriptPath, [], true, true);
+
+      expect(mockDapClient.sendRequest.mock.calls[0][1]).not.toHaveProperty('stopAtEntry');
     });
 
     it('should handle launch request failure', async () => {
