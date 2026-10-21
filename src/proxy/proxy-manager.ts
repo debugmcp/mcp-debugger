@@ -1044,14 +1044,13 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       track(stderr, 'close', flushStderr);
     }
 
-    // Drain stdout too. The worker's protocol rides the IPC channel; its
-    // stdout carries only its console transport, which is active outside the
-    // server CLI (that silences console output). A piped stdout nobody reads
+    // Drain stdout too. The worker's protocol rides the IPC channel and its
+    // own loggers write nothing to stdout (issue #967), but an embedder's
+    // launcher or a dependency still can, and a piped stdout nobody reads
     // blocks the worker solid once the OS buffer fills (64 KB on Windows):
-    // deaf to IPC, its DAP socket unread — found by a 14 s connect loop that
-    // logged past the buffer (issue #963). Logged at debug: the proxy log
-    // already carries these lines. Sanitized like stderr: a console line can
-    // quote a launch environment.
+    // deaf to IPC, its DAP socket unread — found by a 14 s connect loop whose
+    // console logging filled the buffer (issue #963). Logged at debug.
+    // Sanitized like stderr: a stray line can quote a launch environment.
     const stdout = this.proxyProcess.stdout as unknown as RemovableEmitter | null;
     if (stdout) {
       const stdoutLineBuffer = new LineBuffer();

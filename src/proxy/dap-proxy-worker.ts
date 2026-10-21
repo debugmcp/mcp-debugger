@@ -539,12 +539,15 @@ export class DapProxyWorker {
       if (!this.shutdownPromise) {
         this.state = ProxyState.UNINITIALIZED;
       }
-      const report = this.describeInitFailure(payload, error);
-      this.logger?.error(`[Worker] ${report}`, error);
       // Already on the wire when startAdapterAndConnect failed after the
       // adapter was up — it reports before its teardown so the reason beats
-      // the adapter's exit to the parent (see there). Send it here otherwise.
-      if (this.initFailureReported !== report) {
+      // the adapter's exit to the parent (see there). Rebuilding the report
+      // here would read the process shutdown() has since dropped (PID=none)
+      // and send a second, degraded copy (issue #966). Send it here otherwise.
+      const alreadyReported = this.initFailureReported;
+      const report = alreadyReported ?? this.describeInitFailure(payload, error);
+      this.logger?.error(`[Worker] ${report}`, error);
+      if (alreadyReported === null) {
         this.sendError(report);
       }
       await this.shutdown();
