@@ -94,6 +94,36 @@ describe('logger utility', () => {
     expect(mkdirSpy).not.toHaveBeenCalled();
   });
 
+  // Issue #967: the proxy worker's stdout is a pipe nobody reads by design
+  // (its protocol rides IPC), so a console transport there only fills it.
+  it('adds no console transport in the proxy worker, whatever the silence flag says', () => {
+    vi.stubEnv('DAP_PROXY_WORKER', 'true');
+    vi.stubEnv('CONSOLE_OUTPUT_SILENCED', '');
+    stubFs();
+
+    loggerModule.createLogger('dap-proxy:test-session', { level: 'debug' });
+
+    expect(consoleTransportSpy).not.toHaveBeenCalled();
+    expect(fileTransportSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the stderr fallback in the proxy worker (its stderr has a reader)', () => {
+    vi.stubEnv('DAP_PROXY_WORKER', 'true');
+    vi.stubEnv('CONSOLE_OUTPUT_SILENCED', '');
+    vi.spyOn(fs, 'existsSync').mockReturnValue(false);
+    vi.spyOn(fs, 'mkdirSync').mockImplementation(() => {
+      throw new Error('permission denied');
+    });
+    vi.spyOn(fs, 'readdirSync').mockReturnValue([]);
+
+    loggerModule.createLogger('dap-proxy:test-session');
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to ensure log directory'),
+      expect.any(Error)
+    );
+  });
+
   it('uses a per-process default log file name on the host', () => {
     stubFs();
 
