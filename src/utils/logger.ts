@@ -154,8 +154,13 @@ export function createLogger(namespace: string, options: LoggerOptions = {}): Wi
   
   // When console output is silenced we MUST NOT write to stdout as it corrupts transports
   const isConsoleSilenced = process.env.CONSOLE_OUTPUT_SILENCED === '1';
-  
-  if (!isConsoleSilenced) {
+  // The proxy worker's stdout is a pipe nobody reads by design: its protocol
+  // rides IPC, and its per-session file transport is the log that matters
+  // (issue #967; a full pipe once blocked the worker solid, #963). Its stderr
+  // does have a reader, so the console.error fallbacks below stay.
+  const isProxyWorker = process.env.DAP_PROXY_WORKER === 'true';
+
+  if (!isConsoleSilenced && !isProxyWorker) {
     // Only add console transport when NOT silencing console output
     transports.push(
       new winston.transports.Console({
