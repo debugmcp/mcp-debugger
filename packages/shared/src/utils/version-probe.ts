@@ -37,25 +37,16 @@ export function runVersionProbe(
   args: readonly string[],
   options: VersionProbeOptions = {}
 ): Promise<VersionProbeResult> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const notRun = (error: unknown): VersionProbeResult => ({
-      code: null,
-      stdout: '',
-      stderr: '',
-      timedOut: false,
-      error: error instanceof Error ? error.message : String(error)
-    });
-    const settle = (value: VersionProbeResult) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timer);
-        resolve(value);
-      }
-    };
+  const notRun = (error: unknown): VersionProbeResult => ({
+    code: null,
+    stdout: '',
+    stderr: '',
+    timedOut: false,
+    error: error instanceof Error ? error.message : String(error)
+  });
 
+  return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
-    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       child = spawn(command, [...args], {
         windowsHide: true,
@@ -63,7 +54,7 @@ export function runVersionProbe(
         ...(options.cwd ? { cwd: options.cwd } : {})
       });
     } catch (error) {
-      settle(notRun(error));
+      resolve(notRun(error));
       return;
     }
 
@@ -77,7 +68,7 @@ export function runVersionProbe(
       stderr += data.toString();
     });
 
-    timer = setTimeout(() => {
+    const timer = setTimeout(() => {
       timedOut = true;
       try {
         child.kill('SIGKILL');
@@ -86,6 +77,14 @@ export function runVersionProbe(
       }
     }, options.timeoutMs ?? VERSION_PROBE_TIMEOUT_MS);
 
+    let settled = false;
+    const settle = (value: VersionProbeResult) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      }
+    };
     child.on('error', (error) => settle(notRun(error)));
     child.on('close', (code: number | null) => settle({ code, stdout, stderr, timedOut }));
   });
