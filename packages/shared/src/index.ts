@@ -286,6 +286,13 @@ export { LineBuffer } from './utils/line-buffer.js';
 export { isLoopbackHost } from './utils/loopback-host.js';
 // Doctor-row helpers for IAdapterFactory.describeToolchain (issue #435).
 export { toolchainComponent, normalizeToolchainDescription, probeWithinBudget } from './utils/toolchain-description.js';
+// The shared toolchain version probe for validate() (issue #969).
+export {
+  runVersionProbe,
+  VERSION_PROBE_TIMEOUT_MS,
+  type VersionProbeOptions,
+  type VersionProbeResult
+} from './utils/version-probe.js';
 export { toSourceBreakpoint, toWireSourceBreakpoint, type BreakpointFields, toFunctionBreakpoint, type FunctionBreakpointFields } from './utils/to-source-breakpoint.js';
 export {
   JS_LOGPOINT_BINDING,

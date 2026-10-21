@@ -3,8 +3,8 @@
  *
  * Provides Java runtime detection, version checking, and path resolution.
  */
-import { spawn } from 'child_process';
 import * as path from 'path';
+import { runVersionProbe } from '@debugmcp/shared';
 
 /**
  * Find the Java executable path.
@@ -12,9 +12,20 @@ import * as path from 'path';
  * Priority: provided path > JAVA_HOME/bin/java > 'java' in PATH
  */
 export async function findJavaExecutable(preferredPath?: string): Promise<string> {
+  return (await findJavaWithVersion(preferredPath)).path;
+}
+
+/**
+ * Find the Java executable and read its version from the same
+ * `java -version` that validates it (issue #969: the factory used to start a
+ * second JVM just for the version). Same search order and errors as
+ * findJavaExecutable.
+ */
+export async function findJavaWithVersion(preferredPath?: string): Promise<{ path: string; version: string | null }> {
   if (preferredPath) {
-    if (await validateJavaExecutable(preferredPath)) {
-      return preferredPath;
+    const probed = await probeJava(preferredPath);
+    if (probed) {
+      return { path: preferredPath, version: probed.version };
     }
     throw new Error(`Specified Java executable not valid: ${preferredPath}`);
   }
@@ -24,14 +35,16 @@ export async function findJavaExecutable(preferredPath?: string): Promise<string
     /* istanbul ignore next -- platform-specific executable extension */
     const ext = process.platform === 'win32' ? '.exe' : '';
     const javaHome = path.join(process.env.JAVA_HOME, 'bin', `java${ext}`);
-    if (await validateJavaExecutable(javaHome)) {
-      return javaHome;
+    const probed = await probeJava(javaHome);
+    if (probed) {
+      return { path: javaHome, version: probed.version };
     }
   }
 
   // Try PATH
-  if (await validateJavaExecutable('java')) {
-    return 'java';
+  const probed = await probeJava('java');
+  if (probed) {
+    return { path: 'java', version: probed.version };
   }
 
   throw new Error(
@@ -39,112 +52,39 @@ export async function findJavaExecutable(preferredPath?: string): Promise<string
   );
 }
 
-/** Upper bound for a single toolchain probe child before it is killed. */
-const PROBE_KILL_TIMEOUT_MS = 10_000;
+/**
+ * Run `<exe> -version` once (the shared probe: no shell, read on close,
+ * killed after 10 s). Null when the executable does not run, exits non-zero
+ * or prints nothing; otherwise its version, when the output carries one.
+ */
+async function probeJava(javaPath: string): Promise<{ version: string | null } | null> {
+  const result = await runVersionProbe(javaPath, ['-version']);
+  if (!result || result.code !== 0) {
+    return null;
+  }
+  // java -version prints to stderr
+  const output = result.stderr + result.stdout;
+  if (output.length === 0) {
+    return null;
+  }
+  // "java version "17.0.1"" or "openjdk version "21.0.1""; else the first dotted number
+  const match = output.match(/(?:java|openjdk)\s+version\s+"([^"]+)"/i) ?? output.match(/(\d+(?:\.\d+)*)/);
+  return { version: match ? match[1]! : null };
+}
 
 /**
  * Validate that a Java-family executable (java or javac) works by running
- * `<exe> -version`. Reads on 'close' (not 'exit') so late stdio chunks still
- * count as output, and kills the child if it hangs past the guard timeout.
+ * `<exe> -version`.
  */
 export async function validateJavaExecutable(javaPath: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    let settled = false;
-    try {
-      const child = spawn(javaPath, ['-version'], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true,
-      });
-
-      let hasOutput = false;
-      child.stderr?.on('data', () => { hasOutput = true; });
-      child.stdout?.on('data', () => { hasOutput = true; });
-
-      const killTimer = setTimeout(() => {
-        try { child.kill(); } catch { /* already gone */ }
-      }, PROBE_KILL_TIMEOUT_MS);
-      killTimer.unref?.();
-
-      child.on('error', () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(killTimer);
-        resolve(false);
-      });
-      child.on('close', (code) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(killTimer);
-        resolve(code === 0 && hasOutput);
-      });
-    } catch {
-      if (settled) return;
-      settled = true;
-      resolve(false);
-    }
-  });
+  return (await probeJava(javaPath)) !== null;
 }
 
 /**
  * Get the Java version string.
  */
 export async function getJavaVersion(javaPath?: string): Promise<string | null> {
-  const cmd = javaPath || 'java';
-
-  return new Promise((resolve) => {
-    let settled = false;
-    try {
-      const child = spawn(cmd, ['-version'], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true,
-      });
-
-      let output = '';
-      // java -version outputs to stderr
-      child.stderr?.on('data', (data: Buffer) => {
-        output += data.toString();
-      });
-      child.stdout?.on('data', (data: Buffer) => {
-        output += data.toString();
-      });
-
-      const killTimer = setTimeout(() => {
-        try { child.kill(); } catch { /* already gone */ }
-      }, PROBE_KILL_TIMEOUT_MS);
-      killTimer.unref?.();
-
-      child.on('error', () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(killTimer);
-        resolve(null);
-      });
-      // 'close' (not 'exit') so stdio is fully drained before parsing
-      child.on('close', (code) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(killTimer);
-        if (code !== 0) {
-          resolve(null);
-          return;
-        }
-
-        // Parse version from output like: java version "17.0.1" or openjdk version "21.0.1"
-        const match = output.match(/(?:java|openjdk)\s+version\s+"([^"]+)"/i);
-        if (match) {
-          resolve(match[1]);
-        } else {
-          // Try simpler pattern
-          const simpleMatch = output.match(/(\d+(?:\.\d+)*)/);
-          resolve(simpleMatch ? simpleMatch[1] : null);
-        }
-      });
-    } catch {
-      if (settled) return;
-      settled = true;
-      resolve(null);
-    }
-  });
+  return (await probeJava(javaPath || 'java'))?.version ?? null;
 }
 
 /**

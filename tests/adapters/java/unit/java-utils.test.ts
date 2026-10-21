@@ -4,6 +4,7 @@ import { EventEmitter } from 'events';
 import path from 'path';
 import {
   findJavaExecutable,
+  findJavaWithVersion,
   getJavaVersion,
   getJavaSearchPaths
 } from '@debugmcp/adapter-java';
@@ -112,6 +113,42 @@ describe('java-utils', () => {
       });
 
       await expect(findJavaExecutable()).rejects.toThrow('Java not found');
+    });
+  });
+
+  // Issue #969: the factory's probe used to start one JVM to validate the
+  // executable and a second for the same `java -version` to read the version.
+  describe('findJavaWithVersion', () => {
+    it('validates the executable and reads its version from one java -version', async () => {
+      vi.stubEnv('JAVA_HOME', '');
+      mockSpawn.mockImplementation(() => {
+        const proc = new EventEmitter() as any;
+        proc.stdout = new EventEmitter();
+        proc.stderr = new EventEmitter();
+        process.nextTick(() => {
+          proc.emit('exit', 0);
+          proc.stderr.emit('data', Buffer.from('openjdk version "21.0.10" 2026-01-20\n'));
+          proc.emit('close', 0);
+        });
+        return proc;
+      });
+
+      await expect(findJavaWithVersion()).resolves.toEqual({ path: 'java', version: '21.0.10' });
+      expect(mockSpawn).toHaveBeenCalledTimes(1);
+      expect(mockSpawn.mock.calls[0].slice(0, 2)).toEqual(['java', ['-version']]);
+    });
+
+    it('rejects as findJavaExecutable does when nothing answers', async () => {
+      vi.stubEnv('JAVA_HOME', '');
+      mockSpawn.mockImplementation(() => {
+        const proc = new EventEmitter() as any;
+        proc.stdout = new EventEmitter();
+        proc.stderr = new EventEmitter();
+        process.nextTick(() => proc.emit('error', new Error('ENOENT')));
+        return proc;
+      });
+
+      await expect(findJavaWithVersion()).rejects.toThrow('Java not found');
     });
   });
 
