@@ -4595,6 +4595,54 @@ describe('DapProxyWorker', () => {
       }
     });
 
+    // Issue #966: startAdapterAndConnect reports the failure before its
+    // teardown; handleInitCommand's catch used to rebuild the report after
+    // shutdown() had dropped the adapter process, so a second, degraded
+    // report (PID=none) went out and overwrote the first in the parent.
+    it('reports a failed init once, with the adapter PID it had when it failed', async () => {
+      vi.useFakeTimers();
+
+      const connectSpy = vi
+        .spyOn(DapConnectionManager.prototype, 'connectWithRetry')
+        .mockRejectedValue(new Error('connect failed'));
+      // What the real shutdown() does to the field the report reads.
+      const shutdownSpy = vi
+        .spyOn(worker as unknown as { shutdown: () => Promise<void> }, 'shutdown')
+        .mockImplementation(async () => {
+          (worker as unknown as { adapterProcess: unknown }).adapterProcess = null;
+        });
+
+      const payload: ProxyInitPayload = {
+        cmd: 'init',
+        sessionId: 'single-report-session',
+        scriptPath: '/path/to/script.py',
+        adapterHost: 'localhost',
+        adapterPort: 5678,
+        logDir: '/logs',
+        executablePath: 'python',
+        adapterCommand: { command: 'python', args: ['-m', 'debugpy.adapter'] }
+      };
+
+      try {
+        await worker.handleCommand(payload);
+        await vi.advanceTimersByTimeAsync(200);
+
+        const errors = mockMessageSender.send.mock.calls
+          .map(([message]) => message as { type: string; message?: string })
+          .filter((message) => message.type === 'error');
+        expect(errors).toHaveLength(1);
+        expect(errors[0].message).toContain('Critical initialization error: connect failed');
+        expect(errors[0].message).toMatch(/adapter PID=\d+/);
+        expect(errors[0].message).not.toContain('PID=none');
+        // The worker's own log line is the same report, not the degraded one.
+        expect(mockLogger.error).toHaveBeenCalledWith(`[Worker] ${errors[0].message}`, expect.any(Error));
+      } finally {
+        connectSpy.mockRestore();
+        shutdownSpy.mockRestore();
+        vi.useRealTimers();
+      }
+    });
+
     it('should handle DAP command errors', async () => {
       // Setup connected state
       const initPayload: ProxyInitPayload = {
