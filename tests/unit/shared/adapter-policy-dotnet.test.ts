@@ -17,6 +17,30 @@ describe('DotnetAdapterPolicy', () => {
     expect(DotnetAdapterPolicy.childSessionStrategy).toBe('none');
   });
 
+  // ===== Refusals explained (issue #959) =====
+
+  it('explains 0x800700c1 as a program netcoredbg could not start as a .NET assembly', () => {
+    const sentence = DotnetAdapterPolicy.explainRequestFailure(
+      'configurationDone',
+      "Failed command 'configurationDone' : 0x800700C1",
+      { program: '/app/bin/Debug/net8.0/App.dll' }
+    );
+
+    expect(sentence).toBe(
+      'netcoredbg could not start /app/bin/Debug/net8.0/App.dll as a .NET assembly (0x800700c1, ERROR_BAD_EXE_FORMAT); ' +
+        'check that it is a managed assembly built by dotnet build for this runtime.'
+    );
+  });
+
+  it('says "the program" when it does not know which, and nothing for other failures', () => {
+    expect(
+      DotnetAdapterPolicy.explainRequestFailure('launch', "Failed command 'launch' : 0x800700c1", {})
+    ).toContain('netcoredbg could not start the program as a .NET assembly');
+    expect(
+      DotnetAdapterPolicy.explainRequestFailure('configurationDone', "Failed command 'configurationDone' : 0x80004005", {})
+    ).toBeUndefined();
+  });
+
   // ===== Child sessions =====
 
   it('rejects child session support', () => {

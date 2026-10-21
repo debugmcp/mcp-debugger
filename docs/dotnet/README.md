@@ -231,6 +231,12 @@ The adapter never builds your project: netcoredbg binds a breakpoint through the
 
 ## Troubleshooting
 
+### "The .NET program must be the compiled assembly, not the source file …"
+- `start_debugging` was given a `.cs`/`.fs`/`.vb` as the program, usually because `dapLaunchArgs.program` was left out and the launch fell back to `scriptPath`. Pass the built DLL as `dapLaunchArgs.program` (`dotnet build` writes it to `bin/Debug/<framework>/<Project>.dll`); `scriptPath` can stay the source. When the project folder holds exactly one build output named after the project, the answer names it ("Found one: …"). The launch is refused before netcoredbg is started (issue #959); a session that was running is still ended by the attempt, as any new launch ends it, while `dryRunSpawn: true` touches nothing.
+
+### "netcoredbg could not start … as a .NET assembly (0x800700c1, ERROR_BAD_EXE_FORMAT)"
+- netcoredbg accepted the launch and then could not start the program: a native executable, a `.dll` that is not a managed assembly, or one built for another architecture. Point `program` at the managed `.dll` that `dotnet build` produced for this runtime.
+
 ### "netcoredbg not found" error
 - Set `NETCOREDBG_PATH` environment variable to the full path of the netcoredbg executable
 - Or add the directory containing netcoredbg to your PATH
