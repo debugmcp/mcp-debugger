@@ -320,7 +320,7 @@ After creating the package, wire it into the monorepo. A language touches far mo
   { find: '@debugmcp/adapter-<language>', replacement: path.resolve(__dirname, './packages/adapter-<language>/src/index.ts') }
   ```
 
-- **Dockerfile** — the `COPY packages/adapter-<language>/package.json` and `tsconfig*.json` lines in the builder stage, the `node_modules/@debugmcp/adapter-<language>` copy in the runtime stage, and any toolchain the image should ship (`apt-get install …`)
+- **Dockerfile** — the `COPY packages/adapter-<language>/package.json` and `tsconfig*.json` lines in the builder stage, the package's directory name in the `scripts/materialize-docker-packages.mjs` list (it copies `package.json` plus whatever the package's own `files` field names, issue #811, so list every runtime asset there), and any toolchain the image should ship (`apt-get install …`)
 - `pnpm install` to link the workspace package
 
 ### 4. Count assertions and contract tests

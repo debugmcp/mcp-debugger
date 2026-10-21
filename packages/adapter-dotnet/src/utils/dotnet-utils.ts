@@ -31,6 +31,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import which from 'which';
+import { runVersionProbe } from '@debugmcp/shared';
 
 interface Logger {
   error: (message: string) => void;
@@ -204,41 +205,14 @@ export async function findDotnetBackend(
   return { backend: 'netcoredbg', path: netcoredbgPath };
 }
 
-/** Upper bound for a single toolchain probe child before it is killed. */
-const PROBE_KILL_TIMEOUT_MS = 10_000;
-
 /**
- * Run a --version-style probe, resolving with drained stdout on 'close'
- * (never 'exit' — the final chunk can arrive after it), killing the child if
- * it hangs past the guard timeout. Null on spawn failure or non-zero exit.
+ * The stdout of a --version-style probe through the shared helper (issue
+ * #969: no shell, read on close, killed after 10 s), or null on a spawn
+ * failure, a non-zero exit or a timeout.
  */
-function runVersionProbe(command: string, args: string[]): Promise<string | null> {
-  return new Promise((resolve) => {
-    try {
-      const child = spawn(command, args, {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true
-      });
-      let output = '';
-      child.stdout?.on('data', (data) => { output += data.toString(); });
-
-      const killTimer = setTimeout(() => {
-        try { child.kill(); } catch { /* already gone */ }
-      }, PROBE_KILL_TIMEOUT_MS);
-      killTimer.unref?.();
-
-      child.on('error', () => {
-        clearTimeout(killTimer);
-        resolve(null);
-      });
-      child.on('close', (code) => {
-        clearTimeout(killTimer);
-        resolve(code === 0 ? output : null);
-      });
-    } catch {
-      resolve(null);
-    }
-  });
+async function probeStdout(command: string, args: string[]): Promise<string | null> {
+  const result = await runVersionProbe(command, args);
+  return result.code === 0 && !result.timedOut ? result.stdout : null;
 }
 
 /**
@@ -249,7 +223,7 @@ function runVersionProbe(command: string, args: string[]): Promise<string | null
  * #423) — not called from validate(), so registration cost is unchanged.
  */
 export async function getNetcoredbgVersion(netcoredbgPath: string): Promise<string | null> {
-  const output = await runVersionProbe(netcoredbgPath, ['--version']);
+  const output = await probeStdout(netcoredbgPath, ['--version']);
   if (output === null) {
     return null;
   }
@@ -267,7 +241,7 @@ export async function getNetcoredbgVersion(netcoredbgPath: string): Promise<stri
  * runtime install). Doctor-only probe (issue #423).
  */
 export async function getDotnetSdkVersion(): Promise<string | null> {
-  const output = await runVersionProbe('dotnet', ['--version']);
+  const output = await probeStdout('dotnet', ['--version']);
   if (output === null) {
     return null;
   }

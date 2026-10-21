@@ -10,7 +10,7 @@
 import { spawn } from 'child_process';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { sanitizeStderrTail } from '@debugmcp/shared';
+import { runVersionProbe, sanitizeStderrTail } from '@debugmcp/shared';
 
 export type SourceDialect = 'c' | 'cpp';
 
@@ -65,19 +65,9 @@ export function dialectForSource(filePath: string): SourceDialect {
   return path.extname(filePath).toLowerCase() === '.c' ? 'c' : 'cpp';
 }
 
-function probeCommand(command: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    try {
-      const child = spawn(command, ['--version'], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true
-      });
-      child.on('error', () => resolve(false));
-      child.on('exit', (code) => resolve(code === 0));
-    } catch {
-      resolve(false);
-    }
-  });
+/** Whether `<command> --version` runs and exits 0 (the shared probe, issue #969: bounded, read on close). */
+async function probeCommand(command: string): Promise<boolean> {
+  return (await runVersionProbe(command, ['--version'])).code === 0;
 }
 
 /** Find the first working compiler for the given dialect, or null. */
@@ -101,9 +91,6 @@ export interface CompilerInfo {
   version: string | null;
 }
 
-/** Upper bound for a single toolchain probe child before it is killed. */
-const PROBE_KILL_TIMEOUT_MS = 10_000;
-
 /**
  * The available compiler and its version banner (the first line of
  * `--version` output, e.g. "g++ (MinGW-w64 ...) 13.2.0"). Pass an already
@@ -119,36 +106,13 @@ export async function getCompilerInfo(command?: string): Promise<CompilerInfo | 
   return { command: resolved, version: await captureVersionLine(resolved) };
 }
 
-function captureVersionLine(command: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    try {
-      const child = spawn(command, ['--version'], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true
-      });
-      let output = '';
-      child.stdout?.on('data', (data) => { output += data.toString(); });
-      child.stderr?.on('data', (data) => { output += data.toString(); });
-
-      const killTimer = setTimeout(() => {
-        try { child.kill(); } catch { /* already gone */ }
-      }, PROBE_KILL_TIMEOUT_MS);
-      killTimer.unref?.();
-
-      child.on('error', () => {
-        clearTimeout(killTimer);
-        resolve(null);
-      });
-      // 'close' (not 'exit') so stdio is fully drained before reading output
-      child.on('close', (code) => {
-        clearTimeout(killTimer);
-        const firstLine = output.split(/\r?\n/).map((line) => line.trim()).find((line) => line.length > 0);
-        resolve(code === 0 && firstLine ? firstLine : null);
-      });
-    } catch {
-      resolve(null);
-    }
-  });
+async function captureVersionLine(command: string): Promise<string | null> {
+  const result = await runVersionProbe(command, ['--version']);
+  const firstLine = (result.stdout + result.stderr)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+  return result.code === 0 && firstLine ? firstLine : null;
 }
 
 /**

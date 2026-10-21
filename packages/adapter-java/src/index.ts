@@ -10,7 +10,7 @@
 
 export { JavaDebugAdapter } from './java-debug-adapter.js';
 export { JavaAdapterFactory } from './java-adapter-factory.js';
-export { findJavaExecutable, getJavaVersion, getJavaSearchPaths } from './utils/java-utils.js';
+export { findJavaExecutable, findJavaWithVersion, getJavaVersion, getJavaSearchPaths } from './utils/java-utils.js';
 export { resolveJdiBridgeClassDir, ensureJdiBridgeCompiled, ensureJdiBridge, isJdiBridgeStale } from './utils/jdi-resolver.js';
 export type { JdiBridgeStatus } from './utils/jdi-resolver.js';
 

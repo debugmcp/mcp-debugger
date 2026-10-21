@@ -3,10 +3,10 @@
  * 
  * @since 0.1.0
  */
-import { spawn } from 'child_process';
+
 import * as path from 'path';
 import * as fs from 'fs';
-import { sanitizeStderrTail } from '@debugmcp/shared';
+import { runVersionProbe, sanitizeStderrTail } from '@debugmcp/shared';
 
 interface Logger {
   debug?(message: string): void;
@@ -117,82 +117,52 @@ export async function findDelveExecutable(
 }
 
 /**
- * Get the Go version
+ * Get the Go version. Through the shared probe (issue #969): read on close,
+ * killed after 10 s.
  */
 export async function getGoVersion(goPath: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    const child = spawn(goPath, ['version'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true
-    });
-
-    let output = '';
-    child.stdout?.on('data', (data) => { output += data.toString(); });
-
-    child.on('error', () => resolve(null));
-    child.on('exit', (code) => {
-      if (code === 0) {
-        // Parse "go version go1.21.0 darwin/arm64"
-        const match = output.match(/go(\d+\.\d+(\.\d+)?)/);
-        resolve(match ? match[1] : null);
-      } else {
-        resolve(null);
-      }
-    });
-  });
+  const result = await runVersionProbe(goPath, ['version']);
+  if (result.code !== 0) {
+    return null;
+  }
+  // Parse "go version go1.21.0 darwin/arm64"
+  const match = result.stdout.match(/go(\d+\.\d+(\.\d+)?)/);
+  return match ? match[1]! : null;
 }
 
 /**
  * Get the Delve version
  */
 export async function getDelveVersion(dlvPath: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    const child = spawn(dlvPath, ['version'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true
-    });
-
-    let output = '';
-    child.stdout?.on('data', (data) => { output += data.toString(); });
-
-    child.on('error', () => resolve(null));
-    child.on('exit', (code) => {
-      if (code === 0) {
-        // Parse "Delve Debugger\nVersion: 1.21.0"
-        const match = output.match(/Version:\s*(\d+\.\d+\.\d+)/);
-        resolve(match ? match[1] : null);
-      } else {
-        resolve(null);
-      }
-    });
-  });
+  const result = await runVersionProbe(dlvPath, ['version']);
+  if (result.code !== 0) {
+    return null;
+  }
+  // Parse "Delve Debugger\nVersion: 1.21.0"
+  const match = result.stdout.match(/Version:\s*(\d+\.\d+\.\d+)/);
+  return match ? match[1]! : null;
 }
 
 /**
  * Check if Delve supports DAP.
  * Returns an object with `supported` flag and optional `stderr` for diagnostics.
+ *
+ * A second dlv run beside `dlv version` on purpose: a build that answers
+ * `version` can still fail `dap`, and this run's stderr is what the error
+ * quotes. The two are independent, so the factory runs them side by side.
  */
 export async function checkDelveDapSupport(dlvPath: string): Promise<{ supported: boolean; stderr?: string }> {
-  return new Promise((resolve) => {
-    const child = spawn(dlvPath, ['dap', '--help'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true
-    });
-
-    let stderrOutput = '';
-    child.stderr?.on('data', (data) => { stderrOutput += data.toString(); });
-
-    child.on('error', (err) => resolve({ supported: false, stderr: err.message }));
-    child.on('exit', (code) => {
-      // If dlv dap --help exits with code 0, DAP is supported.
-      // The stderr text gets embedded verbatim into validation error
-      // messages that reach MCP tool responses, so redact and cap it here.
-      resolve({
-        supported: code === 0,
-        stderr: stderrOutput.trim() ? sanitizeStderrTail(stderrOutput) : undefined
-      });
-    });
-  });
+  const result = await runVersionProbe(dlvPath, ['dap', '--help']);
+  if (result.error !== undefined) {
+    return { supported: false, stderr: result.error };
+  }
+  // If dlv dap --help exits with code 0, DAP is supported.
+  // The stderr text gets embedded verbatim into validation error
+  // messages that reach MCP tool responses, so redact and cap it here.
+  return {
+    supported: result.code === 0,
+    stderr: result.stderr.trim() ? sanitizeStderrTail(result.stderr) : undefined
+  };
 }
 
 /**

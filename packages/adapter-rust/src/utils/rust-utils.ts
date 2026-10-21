@@ -7,78 +7,41 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import os from 'os';
 import which from 'which';
-import { sanitizeStderr } from '@debugmcp/shared';
+import { runVersionProbe, sanitizeStderr } from '@debugmcp/shared';
 
 /**
- * Check if Cargo is installed and available
+ * Check if Cargo is installed and available. The probes below go through the
+ * shared runVersionProbe (issue #969): no shell, read on close, bounded.
  */
 export async function checkCargoInstallation(): Promise<boolean> {
-  return new Promise((resolve) => {
-    const cargoProcess = spawn('cargo', ['--version'], {
-      stdio: 'ignore',
-      shell: true,
-      windowsHide: true
-    });
-    
-    cargoProcess.on('error', () => resolve(false));
-    cargoProcess.on('exit', (code) => resolve(code === 0));
-  });
+  return (await runVersionProbe('cargo', ['--version'])).code === 0;
 }
 
 /**
  * Check if Rust is installed (via rustc)
  */
 export async function checkRustInstallation(): Promise<boolean> {
-  return new Promise((resolve) => {
-    const rustcProcess = spawn('rustc', ['--version'], {
-      stdio: 'ignore',
-      shell: true,
-      windowsHide: true
-    });
-    
-    rustcProcess.on('error', () => resolve(false));
-    rustcProcess.on('exit', (code) => resolve(code === 0));
-  });
+  return (await runVersionProbe('rustc', ['--version'])).code === 0;
 }
 
 /**
  * The toolchain probe behind RustAdapterFactory.validate() (issue #968): one
- * `cargo -vV`, which prints both the version and the `host:` triple. It spawns
- * cargo directly (no shell), reads stdout on 'close' (a child may exit before
- * its pipe is drained), and does not load rustc's rustc_driver library
- * (183 MB on Windows) the way the `rustc -Vv` it replaces did.
+ * `cargo -vV`, which prints both the version and the `host:` triple, and
+ * does not load rustc's rustc_driver library (183 MB on Windows) the way the
+ * `rustc -Vv` it replaced did.
  *
  * Resolves null when cargo cannot be spawned or exits non-zero; a field the
  * output does not carry is undefined.
  */
 export async function getCargoVerboseVersion(): Promise<{ version?: string; hostTriple?: string } | null> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const settle = (value: { version?: string; hostTriple?: string } | null) => {
-      if (!settled) {
-        settled = true;
-        resolve(value);
-      }
-    };
-    const cargoProcess = spawn('cargo', ['-vV'], { windowsHide: true });
-
-    let output = '';
-    cargoProcess.stdout?.on('data', (data) => {
-      output += data.toString();
-    });
-
-    cargoProcess.on('error', () => settle(null));
-    cargoProcess.on('close', (code) => {
-      if (code !== 0) {
-        settle(null);
-        return;
-      }
-      settle({
-        version: output.match(/^cargo (\d+\.\d+\.\d+)/m)?.[1],
-        hostTriple: output.match(/^host:\s*(\S+)/m)?.[1]
-      });
-    });
-  });
+  const result = await runVersionProbe('cargo', ['-vV']);
+  if (result.code !== 0) {
+    return null;
+  }
+  return {
+    version: result.stdout.match(/^cargo (\d+\.\d+\.\d+)/m)?.[1],
+    hostTriple: result.stdout.match(/^host:\s*(\S+)/m)?.[1]
+  };
 }
 
 /**
@@ -130,7 +93,6 @@ export async function buildRustProject(
     
     const buildProcess = spawn('cargo', args, {
       cwd: projectPath,
-      shell: true,
       windowsHide: true
     });
     
@@ -243,35 +205,11 @@ export function buildRustAdapterSettings(
  * Retrieve the host triple reported by rustc -Vv
  */
 export async function getRustHostTriple(): Promise<string | null> {
-  return new Promise((resolve) => {
-    const rustcProcess = spawn('rustc', ['-Vv'], {
-      shell: true,
-      windowsHide: true
-    });
-
-    let output = '';
-
-    rustcProcess.stdout?.on('data', (data) => {
-      output += data.toString();
-    });
-
-    rustcProcess.on('error', () => resolve(null));
-    rustcProcess.on('exit', (code) => {
-      if (code === 0 && output) {
-        const hostLine = output
-          .split(/\r?\n/)
-          .find(line => line.toLowerCase().startsWith('host:'));
-        if (hostLine) {
-          const [, hostValue] = hostLine.split(':');
-          if (hostValue) {
-            resolve(hostValue.trim());
-            return;
-          }
-        }
-      }
-      resolve(null);
-    });
-  });
+  const result = await runVersionProbe('rustc', ['-Vv']);
+  if (result.code !== 0) {
+    return null;
+  }
+  return result.stdout.match(/^host:\s*(\S+)/im)?.[1] ?? null;
 }
 
 /**
