@@ -109,7 +109,7 @@ empty stack until it next runs code.
 | Line breakpoints, conditions, logpoints | yes (a logpoint's `condition` is ignored by the SDK adapter) |
 | Function breakpoints, hit-count conditions | no (the SDK adapter does not implement them) |
 | Exception filters | `uncaught` / `all` |
-| Stepping | yes; `step_over` stops once per token position, so a line with two calls takes two steps; stepping across `await` lands on the next line |
+| Stepping | yes; the SDK adapter's `next` stops once per token position, so `step_over` repeats it until the line changes (at most eight times, the answer says how many; a breakpoint or exception on the line ends it at once, #879); stepping across `await` lands on the next line |
 | Variables, scopes, evaluate | `Locals`, `Globals` (+ `Exceptions`); evaluate in the frame, including method calls on objects |
 | Threads | one per isolate; a spawned isolate appears and exits as a thread |
 | Output | stdout/stderr as output events; `dart test` / `flutter test` also print `✓ name` lines and emit structured test events |
