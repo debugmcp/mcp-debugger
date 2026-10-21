@@ -155,6 +155,32 @@ describe.skipIf(SKIP_DOTNET)('.NET Adapter Smoke Test', () => {
     console.log('[.NET Smoke Test] dotnet language is available');
   });
 
+  // Issue #973: netcoredbg reads stopAtEntry; stopOnEntry alone ran the
+  // program to completion. Every other case here launches with it false.
+  it('pauses at entry when the launch asks for stopOnEntry', async (ctx) => {
+    const dllPath = ensureDotnetBuild();
+    const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'dotnet', name: 'dotnet-973-stop-on-entry' }
+    }));
+    sessionId = createResponse.sessionId as string;
+
+    const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: { sessionId, scriptPath: dllPath, dapLaunchArgs: { stopOnEntry: true } }
+    }));
+    if (!startResponse.success) {
+      skipIfSpawnBlocked(ctx, startResponse, '.NET');
+      throw new Error(`start_debugging failed: ${JSON.stringify(startResponse, null, 2)}`);
+    }
+
+    expect(startResponse.state, JSON.stringify(startResponse)).toBe('paused');
+    expect((startResponse.data as { reason?: string } | undefined)?.reason, JSON.stringify(startResponse)).toBe('entry');
+    expect(startResponse.location as { file?: string } | undefined, JSON.stringify(startResponse)).toMatchObject({
+      file: expect.stringMatching(/Program\.cs$/)
+    });
+  }, 60000);
+
   it('warns on set_breakpoint once the launch has named the DLL, and notes on the launch answer, the stop and the stack, when dotnet.dll is older than Program.cs (issues #950, #951)', async (ctx) => {
     const dllPath = ensureDotnetBuild();
     const sourceFile = path.resolve(ROOT, 'examples', 'dotnet', 'Program.cs');

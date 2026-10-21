@@ -106,6 +106,8 @@ interface PinnedCapabilities {
   honoursNoDebug: boolean | undefined;
   /** Whether shutdown sends DAP `terminate` ahead of the launch-mode `disconnect` (issue #885). */
   terminateBeforeDisconnect: boolean | undefined;
+  /** The launch key the adapter reads for an entry stop when it is not `stopOnEntry` (issue #973). */
+  entryStopLaunchKey: string | undefined;
   childSessionStrategy: ChildSessionStrategy;
   requiresCommandQueueing: boolean;
   /**
@@ -128,7 +130,7 @@ interface PinnedCapabilities {
  * shim interpolates (#759); ruby/java/dotnet are the three that reject logpoints; js, java and cobol are the three
  * that bind function breakpoints late; js, python, go, cpp, cobol and dart are the six whose debugger a
  * `noDebug` launch turns off (#710); dart is the one whose close sends DAP `terminate` ahead of the
- * disconnect (#885).
+ * disconnect (#885); dotnet is the one whose adapter reads its entry stop as `stopAtEntry` (#973).
  */
 const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
   [DebugLanguage.PYTHON]: {
@@ -139,6 +141,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     functionBreakpointsBindLate: undefined,
     honoursNoDebug: true,
     terminateBeforeDisconnect: undefined,
+    entryStopLaunchKey: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     defaultExceptionBreakMode: 'uncaught'
@@ -151,6 +154,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     functionBreakpointsBindLate: undefined,
     honoursNoDebug: undefined,
     terminateBeforeDisconnect: undefined,
+    entryStopLaunchKey: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     defaultExceptionBreakMode: undefined
@@ -163,6 +167,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     functionBreakpointsBindLate: true,
     honoursNoDebug: true,
     terminateBeforeDisconnect: undefined,
+    entryStopLaunchKey: undefined,
     childSessionStrategy: 'launchWithPendingTarget',
     requiresCommandQueueing: true,
     defaultExceptionBreakMode: 'uncaught'
@@ -175,6 +180,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     functionBreakpointsBindLate: undefined,
     honoursNoDebug: undefined,
     terminateBeforeDisconnect: undefined,
+    entryStopLaunchKey: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     defaultExceptionBreakMode: 'uncaught'
@@ -187,6 +193,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     functionBreakpointsBindLate: undefined,
     honoursNoDebug: true,
     terminateBeforeDisconnect: undefined,
+    entryStopLaunchKey: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     defaultExceptionBreakMode: 'uncaught'
@@ -199,6 +206,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     functionBreakpointsBindLate: true,
     honoursNoDebug: undefined,
     terminateBeforeDisconnect: undefined,
+    entryStopLaunchKey: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     defaultExceptionBreakMode: 'uncaught'
@@ -211,6 +219,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     functionBreakpointsBindLate: undefined,
     honoursNoDebug: undefined,
     terminateBeforeDisconnect: undefined,
+    entryStopLaunchKey: 'stopAtEntry',
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     defaultExceptionBreakMode: 'uncaught'
@@ -223,6 +232,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     functionBreakpointsBindLate: undefined,
     honoursNoDebug: true,
     terminateBeforeDisconnect: undefined,
+    entryStopLaunchKey: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     defaultExceptionBreakMode: 'uncaught'
@@ -235,6 +245,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     functionBreakpointsBindLate: true,
     honoursNoDebug: true,
     terminateBeforeDisconnect: undefined,
+    entryStopLaunchKey: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     defaultExceptionBreakMode: 'uncaught'
@@ -247,6 +258,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     functionBreakpointsBindLate: undefined,
     honoursNoDebug: true,
     terminateBeforeDisconnect: true,
+    entryStopLaunchKey: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     defaultExceptionBreakMode: 'uncaught'
@@ -259,6 +271,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     functionBreakpointsBindLate: undefined,
     honoursNoDebug: undefined,
     terminateBeforeDisconnect: undefined,
+    entryStopLaunchKey: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     defaultExceptionBreakMode: 'uncaught'
@@ -349,6 +362,10 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
 
   it('pins whether shutdown sends DAP terminate ahead of the launch-mode disconnect (issue #885)', () => {
     expect(policy.terminateBeforeDisconnect).toBe(pinned.terminateBeforeDisconnect);
+  });
+
+  it('pins the launch key the adapter reads for an entry stop (issue #973)', () => {
+    expect(policy.entryStopLaunchKey).toBe(pinned.entryStopLaunchKey);
   });
 
   it('only claims a function-breakpoint delivery quirk when it supports them at all', () => {

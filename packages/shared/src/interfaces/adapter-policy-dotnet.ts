@@ -78,6 +78,12 @@ export const DotnetAdapterPolicy = {
     return evt?.event === 'initialized';
   },
   /**
+   * netcoredbg reads `stopAtEntry` and ignores `stopOnEntry` (issue #973,
+   * measured on the dev proxy: `stopOnEntry: true` ran to completion,
+   * `stopAtEntry: true` paused at Main's opening brace, reason `entry`).
+   */
+  entryStopLaunchKey: 'stopAtEntry',
+  /**
    * netcoredbg answers a program it cannot start as a .NET assembly with a
    * bare HRESULT at configurationDone (issue #959). A source file never gets
    * this far (the adapter's transform refuses it); a native exe, a .dll that

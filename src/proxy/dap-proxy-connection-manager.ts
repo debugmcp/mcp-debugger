@@ -390,6 +390,13 @@ export class DapConnectionManager {
       justMyCode: resolvedJustMyCode,
     };
 
+    // The adapter's own name for the entry stop (netcoredbg: stopAtEntry,
+    // issue #973), carrying the same final decision; a caller's value wins.
+    const entryStopKey = this.policy?.entryStopLaunchKey;
+    if (entryStopKey && !(entryStopKey in baseLaunchArgs)) {
+      launchArgs[entryStopKey] = resolvedStopOnEntry;
+    }
+
     if (!('noDebug' in launchArgs)) {
       launchArgs.noDebug = false;
     }
