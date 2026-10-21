@@ -6,12 +6,6 @@ import { createMockAdapterDependencies } from '../../test-utils/helpers/adapter-
 const createDependencies = () => createMockAdapterDependencies();
 
 describe('JavascriptDebugAdapter runtime helpers', () => {
-  it('translates ENOENT errors into actionable guidance', () => {
-    const adapter = new JavascriptDebugAdapter(createDependencies());
-    const message = adapter.translateErrorMessage(new Error('ENOENT: spawn node ENOENT'));
-    expect(message).toContain('Node.js runtime not found');
-  });
-
   it('supports key debugging features while declining unsupported ones', () => {
     const adapter = new JavascriptDebugAdapter(createDependencies());
     expect(adapter.supportsFeature(DebugFeature.CONDITIONAL_BREAKPOINTS)).toBe(true);

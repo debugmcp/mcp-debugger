@@ -465,32 +465,6 @@ After installation, you may need to:
 You can also specify the Go path explicitly in your debug configuration.`;
   }
   
-  translateErrorMessage(error: Error): string {
-    const message = error.message.toLowerCase();
-    
-    if (message.includes('dlv') && message.includes('not found')) {
-      return 'Delve debugger not found. Install with: go install github.com/go-delve/delve/cmd/dlv@latest';
-    }
-    
-    if (message.includes('go') && message.includes('not found')) {
-      return this.getMissingExecutableError();
-    }
-    
-    if (message.includes('permission denied')) {
-      return `Permission denied. Check file permissions for Go and Delve executables.`;
-    }
-    
-    if (message.includes('could not launch process')) {
-      return `Could not launch process. Ensure the program is valid Go code and compiles successfully.`;
-    }
-    
-    if (message.includes('could not attach')) {
-      return `Could not attach to process. Ensure the process is running and you have permission to attach.`;
-    }
-    
-    return error.message;
-  }
-  
   // ===== Feature Support =====
   
   supportsFeature(feature: DebugFeature): boolean {

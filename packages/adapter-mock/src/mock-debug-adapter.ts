@@ -404,13 +404,6 @@ export class MockDebugAdapter extends EventEmitter implements IDebugAdapter {
     return 'Mock executable not found. This should not happen with the mock adapter.';
   }
   
-  translateErrorMessage(error: Error): string {
-    if (error.message.includes('ENOENT')) {
-      return 'Mock file not found: ' + error.message;
-    }
-    return error.message;
-  }
-  
   // ===== Feature Support =====
   
   supportsFeature(feature: DebugFeature): boolean {

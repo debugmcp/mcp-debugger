@@ -476,22 +476,7 @@ describe('RustDebugAdapter toolchain logic', () => {
     it('provides installation guidance and missing executable error', () => {
       expect(adapter.getInstallationInstructions()).toContain('Install Rust toolchain');
       expect(adapter.getMissingExecutableError()).toContain('Rust toolchain not found');
-    });
-
-    it('translates common error messages', () => {
-      const cases: Array<[string, string]> = [
-        ['CodeLLDB not found', 'CodeLLDB is not installed'],
-        ['cargo command not found', 'Rust toolchain not found'],
-        ['Permission denied while executing', 'Permission denied'],
-        ['target debug build missing', 'Debug binary not found'],
-        ['LLDB failed to start', 'LLDB failed to start'],
-        ['unexpected failure', 'unexpected failure']
-      ];
-
-      for (const [message, expected] of cases) {
-        const translated = adapter.translateErrorMessage(new Error(message));
-        expect(translated).toContain(expected.split(' ')[0]);
-      }
+      expect(adapter.getMissingExecutableError()).toContain('https://rustup.rs');
     });
 
     it('reports supported features and requirements', () => {

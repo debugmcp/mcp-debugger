@@ -543,28 +543,6 @@ export class RubyDebugAdapter extends EventEmitter implements IDebugAdapter {
     return `Ruby not found. Please ensure Ruby 2.7+ is installed and available in PATH.`;
   }
 
-  translateErrorMessage(error: Error): string {
-    const message = error.message.toLowerCase();
-
-    if (message.includes('rdbg') && message.includes('not found')) {
-      return 'rdbg not found. Install the debug gem with: gem install debug';
-    }
-
-    if (message.includes('ruby') && message.includes('not found')) {
-      return this.getMissingExecutableError();
-    }
-
-    if (message.includes('permission denied')) {
-      return 'Permission denied accessing Ruby or rdbg. Check file permissions.';
-    }
-
-    if (message.includes('connection refused') || message.includes('could not connect')) {
-      return 'Could not connect to the rdbg DAP server. Check for port conflicts or firewall rules.';
-    }
-
-    return error.message;
-  }
-
   supportsFeature(feature: DebugFeature): boolean {
     const supportedFeatures = [
       DebugFeature.CONDITIONAL_BREAKPOINTS,

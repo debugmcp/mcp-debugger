@@ -134,10 +134,4 @@ describe('PythonDebugAdapter', () => {
     expect(adapter.getCurrentThreadId()).toBeNull();
     expect(adapter.isReady()).toBe(false);
   });
-
-  it('translateErrorMessage provides friendly text for ENOENT', () => {
-    const adapter = new PythonDebugAdapter(deps);
-    const message = adapter.translateErrorMessage(new Error('ENOENT: no such file'));
-    expect(message).toContain('ENOENT');
-  });
 });

@@ -424,24 +424,12 @@ describe('CppDebugAdapter lifecycle and toolchain', () => {
     });
   });
 
-  describe('error translation and guidance', () => {
+  describe('installation guidance', () => {
     it('provides installation instructions and missing-executable guidance', () => {
       const adapter = new CppDebugAdapter(dependencies);
 
       expect(adapter.getInstallationInstructions()).toContain('-gdwarf-4');
       expect(adapter.getMissingExecutableError()).toContain('MCP_CPP_ALLOW_PREBUILT');
-    });
-
-    it.each([
-      ['CodeLLDB executable not found', 'build:adapter'],
-      ['C/C++ compiler not found anywhere', 'MCP_CPP_ALLOW_PREBUILT'],
-      ['attach failed: permission denied', 'ptrace_scope'],
-      ['operation failed with EPERM', 'ptrace_scope'],
-      ['LLDB failed to start somehow', 'CodeLLDB is properly installed'],
-      ['some totally novel failure', 'some totally novel failure']
-    ])('translates %s', (input, expected) => {
-      const adapter = new CppDebugAdapter(dependencies);
-      expect(adapter.translateErrorMessage(new Error(input))).toContain(expected);
     });
   });
 

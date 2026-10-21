@@ -150,7 +150,6 @@ export class FakeDebugAdapter extends EventEmitter implements IDebugAdapter {
   getMissingExecutableError = vi.fn<Impl<'getMissingExecutableError'>>(
     () => 'Fake executable not found'
   );
-  translateErrorMessage = vi.fn<Impl<'translateErrorMessage'>>((error: Error) => error.message);
 
   // ===== Feature support =====
   supportsFeature = vi.fn<Impl<'supportsFeature'>>(() => true);

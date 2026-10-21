@@ -1126,22 +1126,6 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     return "Node.js runtime not found. Install from https://nodejs.org and ensure it's on PATH. You can also set a specific executable path in config.";
   }
 
-  translateErrorMessage(error: Error): string {
-    const msg = String(error?.message ?? '');
-    const lower = msg.toLowerCase();
-
-    if (lower.includes('enoent') || lower.includes('not found')) {
-      return this.getMissingExecutableError();
-    }
-    if (lower.includes('eacces') || lower.includes('permission denied')) {
-      return 'Permission denied executing Node.js runtime';
-    }
-    if (/cannot find module ['"]ts-node['"]|cannot find module ['"]tsx['"]|ts-node.*module not found|tsx.*module not found/i.test(msg)) {
-      return 'Install tsx or ts-node: npm i -D tsx ts-node tsconfig-paths';
-    }
-    return error.message;
-  }
-
   // ===== Feature Support (conservative defaults) =====
 
   supportsFeature(feature: DebugFeature): boolean {

@@ -1064,12 +1064,9 @@ describe('CobolDebugAdapter', () => {
     });
   });
 
-  describe('error translation', () => {
-    it('explains a missing cobc, a missing dialect configuration, and leaves the rest alone', () => {
-      expect(adapter.translateErrorMessage(new Error('cobc: command not found'))).toMatch(/^GnuCOBOL compiler \(cobc\) not found/);
-      expect(adapter.translateErrorMessage(new Error('configuration error: /mingw64/share/gnucobol/config/default.conf: No such file')))
-        .toMatch(/set COB_CONFIG_DIR to <GnuCOBOL prefix>\/share\/gnucobol\/config/);
-      expect(adapter.translateErrorMessage(new Error('something else'))).toBe('something else');
+  describe('installation guidance', () => {
+    it('names the missing compiler and the MinGW DWARF flag', () => {
+      expect(adapter.getMissingExecutableError()).toMatch(/^GnuCOBOL compiler \(cobc\) not found/);
       expect(adapter.getInstallationInstructions()).toMatch(/-gdwarf-4/);
     });
   });

@@ -250,12 +250,6 @@ Error message when runtime is not found.
 
 **Returns**: Helpful error with installation hints
 
-#### `translateErrorMessage(error: Error): string`
-Converts generic errors to language-specific messages.
-
-**Parameters**: Original error  
-**Returns**: User-friendly error message
-
 ### Feature Support Methods
 
 #### `supportsFeature(feature: DebugFeature): boolean`

@@ -109,10 +109,9 @@ describe('MockDebugAdapter', () => {
     expect(requirements[0]).toMatchObject({ required: true });
   });
 
-  it('translates filesystem errors and exposes installation messaging', () => {
+  it('exposes installation messaging', () => {
     const adapter = new MockDebugAdapter(deps);
     expect(adapter.getInstallationInstructions()).toContain('built-in');
     expect(adapter.getMissingExecutableError()).toContain('Mock executable not found');
-    expect(adapter.translateErrorMessage(new Error('ENOENT: missing file'))).toContain('Mock file not found');
   });
 });

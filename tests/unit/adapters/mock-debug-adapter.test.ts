@@ -55,11 +55,6 @@ describe('MockDebugAdapter behaviour', () => {
     expect(adapter.supportsFeature(DebugFeature.DATA_BREAKPOINTS)).toBe(false);
   });
 
-  it('translates filesystem ENOENT errors into user-friendly messages', () => {
-    const message = adapter.translateErrorMessage(new Error('ENOENT: file missing'));
-    expect(message).toContain('Mock file not found');
-  });
-
   it('surfaces configured error scenarios during connect', async () => {
     adapter.setErrorScenario(MockErrorScenario.CONNECTION_TIMEOUT);
     await expect(adapter.connect('127.0.0.1', 9100)).rejects.toThrow(/Connection timeout/);

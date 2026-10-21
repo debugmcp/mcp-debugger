@@ -80,6 +80,20 @@ describe('RubyAdapterFactory', () => {
     );
   });
 
+  // Issue #974: the install hint used to live in the adapter's
+  // translateErrorMessage, which nothing called.
+  it('says how to install rdbg when it is missing', async () => {
+    vi.mocked(findRubyExecutable).mockResolvedValue('/usr/bin/ruby');
+    vi.mocked(getRubyVersion).mockResolvedValue('3.4.1');
+    vi.mocked(findRdbgExecutable).mockRejectedValue(new Error('rdbg not found. Tried: rdbg, /usr/bin/rdbg'));
+
+    const result = await new RubyAdapterFactory().validate();
+
+    expect(result.errors).toEqual([
+      'rdbg not found. Tried: rdbg, /usr/bin/rdbg; install the debug gem with: gem install debug (or set RDBG_PATH).'
+    ]);
+  });
+
   it('warns when versions cannot be determined', async () => {
     vi.mocked(findRubyExecutable).mockResolvedValue('/usr/bin/ruby');
     vi.mocked(getRubyVersion).mockResolvedValue(null);
