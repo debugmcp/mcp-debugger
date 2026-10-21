@@ -23,7 +23,7 @@ import type {
   ErrorMessage
 } from '../../src/proxy/dap-proxy-interfaces.js';
 import { ProxyState } from '../../src/proxy/dap-proxy-interfaces.js';
-import { GoAdapterPolicy, MockAdapterPolicy, PythonAdapterPolicy } from '@debugmcp/shared';
+import { DotnetAdapterPolicy, GoAdapterPolicy, MockAdapterPolicy, PythonAdapterPolicy } from '@debugmcp/shared';
 import type { AdapterPolicy } from '@debugmcp/shared';
 import { createMockDapClient } from '../test-utils/mocks/dap-client.js';
 import { createMockLogger } from '../test-utils/helpers/test-dependencies.js';
@@ -857,6 +857,52 @@ describe('noDebug launch completion (issue #746)', () => {
         | undefined;
       expect(launchArgs).toBeDefined();
       expect(launchArgs?.stopOnEntry).not.toBe(true);
+    });
+  });
+
+  // Issue #959: netcoredbg refuses configurationDone with a bare HRESULT when
+  // the program is not a .NET assembly. The policy's sentence rides along with
+  // the adapter's own words, which stay first and unchanged.
+  describe('a configuration-phase refusal the policy can explain (issue #959)', () => {
+    it("appends the policy's sentence to the adapter's message", async () => {
+      const payload = { ...payloadWith({}, false), scriptPath: 'C:\\app\\bin\\Debug\\net8.0\\App.dll' };
+      // Python-shaped launch flow (the .NET one launches before configuring),
+      // with the .NET policy's explanation: the seam is what is under test.
+      const explaining = {
+        ...PythonAdapterPolicy,
+        explainRequestFailure: DotnetAdapterPolicy.explainRequestFailure
+      } as AdapterPolicy;
+      wire(explaining, payload);
+      connectionStub.sendConfigurationDone.mockRejectedValue(
+        refusal('configurationDone', "Failed command 'configurationDone' : 0x800700c1")
+      );
+
+      await (worker as any).startAdapterAndConnect(payload);
+      mockDapClient.emit('initialized');
+      await settle();
+      await settle();
+
+      expect(errorMessages()).toHaveLength(1);
+      const message = (errorMessages()[0][0] as ErrorMessage).message;
+      expect(message).toMatch(/^Error in DAP sequence: Failed command 'configurationDone' : 0x800700c1\. /);
+      expect(message).toContain('netcoredbg could not start C:\\app\\bin\\Debug\\net8.0\\App.dll as a .NET assembly');
+    });
+
+    it('leaves the message alone when the policy has nothing to add', async () => {
+      const payload = payloadWith({}, false);
+      wire(PythonAdapterPolicy, payload);
+      connectionStub.sendConfigurationDone.mockRejectedValue(
+        refusal('configurationDone', "Failed command 'configurationDone' : 0x800700c1")
+      );
+
+      await (worker as any).startAdapterAndConnect(payload);
+      mockDapClient.emit('initialized');
+      await settle();
+      await settle();
+
+      expect((errorMessages()[0][0] as ErrorMessage).message).toBe(
+        "Error in DAP sequence: Failed command 'configurationDone' : 0x800700c1"
+      );
     });
   });
 });

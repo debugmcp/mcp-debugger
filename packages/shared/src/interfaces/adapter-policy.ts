@@ -517,6 +517,17 @@ export interface AdapterPolicy {
   describeUnresolvedSource?(info: UnresolvedSourceContext): string | undefined;
 
   /**
+   * A sentence that says what an adapter's refusal during the launch's
+   * configuration phase means (issue #959): the worker appends it to the
+   * adapter's own message, which stays first and unchanged. netcoredbg, for
+   * one, answers a program it cannot start with a bare HRESULT
+   * (`Failed command 'configurationDone' : 0x800700c1`). `program` is the
+   * launch's program when the worker knows it. Optional — absent, or
+   * undefined, leaves the adapter's words alone.
+   */
+  explainRequestFailure?(command: string, message: string, context: { program?: string }): string | undefined;
+
+  /**
    * Where the compiled file a location binds through may live (issues
    * #938/#950), most specific first. A `set_breakpoint` echoes the line from
    * the source file, while the engine binds it through a compiled one —

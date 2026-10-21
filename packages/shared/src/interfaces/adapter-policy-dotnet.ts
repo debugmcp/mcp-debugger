@@ -77,6 +77,21 @@ export const DotnetAdapterPolicy = {
   isChildReadyEvent: (evt: DebugProtocol.Event): boolean => {
     return evt?.event === 'initialized';
   },
+  /**
+   * netcoredbg answers a program it cannot start as a .NET assembly with a
+   * bare HRESULT at configurationDone (issue #959). A source file never gets
+   * this far (the adapter's transform refuses it); a native exe, a .dll that
+   * is not managed, or one built for another architecture still does.
+   */
+  explainRequestFailure: (_command: string, message: string, context: { program?: string }): string | undefined => {
+    if (!/0x800700c1/i.test(message)) {
+      return undefined;
+    }
+    return (
+      `netcoredbg could not start ${context.program ?? 'the program'} as a .NET assembly ` +
+      `(0x800700c1, ERROR_BAD_EXE_FORMAT); check that it is a managed assembly built by dotnet build for this runtime.`
+    );
+  },
 
   /**
    * netcoredbg reports a function-breakpoint hit as plain reason
