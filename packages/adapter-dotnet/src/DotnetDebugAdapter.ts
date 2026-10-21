@@ -351,7 +351,10 @@ export class DotnetDebugAdapter extends EventEmitter implements IDebugAdapter {
     // before anything is spawned, and name the convention.
     const program = (config as { program?: unknown }).program;
     if (typeof program === 'string' && isDotnetSourceFile(program)) {
-      throw new AdapterError(describeSourceProgram(program), AdapterErrorCode.SCRIPT_NOT_FOUND);
+      throw new AdapterError(
+        describeSourceProgram(program, typeof config.cwd === 'string' ? config.cwd : undefined),
+        AdapterErrorCode.SCRIPT_NOT_FOUND
+      );
     }
 
     const dotnetConfig: DotnetLaunchConfig = {

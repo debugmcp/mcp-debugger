@@ -77,6 +77,13 @@ describe('findBuiltAssembly', () => {
     expect(findBuiltAssembly(path.join(root, 'Program.cs'))).toBeUndefined();
   });
 
+  it('resolves a relative program against the launch cwd, not the server cwd', () => {
+    const root = tempProject(['App.csproj', 'Program.cs', 'bin/Debug/net8.0/App.dll']);
+
+    expect(findBuiltAssembly('Program.cs', root)).toBe(path.join(root, 'bin', 'Debug', 'net8.0', 'App.dll'));
+    expect(describeSourceProgram('Program.cs', root)).toContain('Found one:');
+  });
+
   it('says nothing without a project file above the source', () => {
     const root = tempProject(['Program.cs', 'bin/Debug/net8.0/Program.dll']);
 

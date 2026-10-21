@@ -1664,7 +1664,9 @@ export class DapProxyWorker {
     const message = error instanceof Error ? error.message : String(error);
     this.logger!.error('[Worker] Error in initialized handler:', error);
     // The adapter's own words first; its policy may say what they mean
-    // (netcoredbg's bare HRESULTs, issue #959).
+    // (netcoredbg's bare HRESULTs, issue #959). The payload's scriptPath is
+    // the launch's effective program: ProxyLauncher writes the transformed
+    // launch config's `program` there, not the session's source file.
     const explanation =
       error instanceof DapResponseError
         ? this.adapterPolicy.explainRequestFailure?.(error.command, message, {

@@ -36,10 +36,11 @@ function listDirectory(dir: string): fs.Dirent[] {
  * no build output, or more than one (Debug and Release, two frameworks): the
  * caller then names the convention without guessing. A project whose
  * `<AssemblyName>` differs from its file name is missed rather than matched
- * against some other DLL (a test host, a reference assembly).
+ * against some other DLL (a test host, a reference assembly). A relative
+ * source resolves against `baseDir`, the launch's cwd, when given.
  */
-export function findBuiltAssembly(sourcePath: string): string | undefined {
-  let dir = path.dirname(path.resolve(sourcePath));
+export function findBuiltAssembly(sourcePath: string, baseDir?: string): string | undefined {
+  let dir = path.dirname(baseDir ? path.resolve(baseDir, sourcePath) : path.resolve(sourcePath));
   for (;;) {
     const projects = listDirectory(dir).filter((entry) => entry.isFile() && PROJECT_FILE.test(entry.name));
     if (projects.length > 0) {
@@ -68,8 +69,8 @@ export function findBuiltAssembly(sourcePath: string): string | undefined {
 }
 
 /** The refusal for a source file passed as the program. */
-export function describeSourceProgram(program: string): string {
-  const found = findBuiltAssembly(program);
+export function describeSourceProgram(program: string, baseDir?: string): string {
+  const found = findBuiltAssembly(program, baseDir);
   return (
     `The .NET program must be the compiled assembly, not the source file ${path.basename(program)}: ` +
     `pass the .dll as dapLaunchArgs.program (dotnet build writes it to bin/Debug/<framework>/<Project>.dll, ` +
