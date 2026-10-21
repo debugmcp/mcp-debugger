@@ -528,6 +528,17 @@ export interface AdapterPolicy {
   explainRequestFailure?(command: string, message: string, context: { program?: string }): string | undefined;
 
   /**
+   * The launch-config key this adapter reads for "stop at the program's
+   * entry", when it is not DAP's de-facto `stopOnEntry` (issue #973):
+   * netcoredbg, like VS Code's `coreclr` configuration, reads `stopAtEntry`
+   * and ignores `stopOnEntry`, so a .NET launch asked to stop at entry ran to
+   * completion. The connection manager writes the launch's final entry-stop
+   * decision under this key too, unless the caller set the key themselves.
+   * Undefined for an adapter that reads `stopOnEntry`.
+   */
+  entryStopLaunchKey?: string;
+
+  /**
    * The adapter's DAP `next` stops once per token position rather than once
    * per line (issue #879, the Dart SDK adapter; `granularity: 'line'` is
    * ignored). The core's step_over then repeats `next` while a plain step

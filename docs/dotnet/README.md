@@ -81,7 +81,7 @@ start_debugging { "sessionId": "your-session-id", "scriptPath": "/path/to/Progra
 Key launch arguments:
 - `program` (required): Path to the compiled assembly or executable (.dll or .exe), not the source file. This is the runtime target that netcoredbg will launch.
 - `cwd`: Working directory for the launched process
-- `stopOnEntry`: Whether to pause at the program entry point
+- `stopOnEntry`: Whether to pause at the program entry point (the opening brace of `Main`, reason `entry`). netcoredbg reads this as `stopAtEntry`; the adapter sends both, and a `stopAtEntry` you pass yourself wins.
 - `args`: Command-line arguments to pass to the program
 
 **Important**: You must compile the project first with `dotnet build` before launching the debugger. The `program` path should point to the compiled output (typically `bin/Debug/net8.0/YourApp.dll`), not to a `.cs` source file.

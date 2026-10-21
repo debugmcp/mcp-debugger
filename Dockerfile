@@ -126,47 +126,20 @@ RUN echo "=== Listing dist directory after bundling ===" && \
     (command -v du >/dev/null 2>&1 && du -h dist/bundle.cjs) || true
 
 # 5) Ensure adapter packages are available in node_modules
-# pnpm uses symlinks that don't survive Docker COPY, so we need to replace them with actual files
+# pnpm uses symlinks that don't survive Docker COPY, so each package is copied in
+# for real: its package.json plus whatever its own `files` field names, the list
+# npm publishes (issue #811), so a new runtime asset reaches the image without a
+# new line here (the #796 exit-code shim was missing for want of one). Symlinks
+# are copied verbatim (CodeLLDB's relative vendor/codelldb/current must stay
+# relative). Which packages go in is decided here: go and dotnet stay out (see
+# DEBUG_MCP_DISABLE_LANGUAGES below). Runtime dependencies are not a `files`
+# concern and stay explicit: the JavaScript adapter's dotenv.
 RUN rm -rf /app/node_modules/@debugmcp && \
-    mkdir -p /app/node_modules/@debugmcp/shared && \
-    mkdir -p /app/node_modules/@debugmcp/adapter-mock && \
-    mkdir -p /app/node_modules/@debugmcp/adapter-python && \
-    mkdir -p /app/node_modules/@debugmcp/adapter-javascript && \
-    cp -r /app/packages/shared/dist /app/node_modules/@debugmcp/shared/ && \
-    cp /app/packages/shared/package.json /app/node_modules/@debugmcp/shared/ && \
-    cp -r /app/packages/adapter-mock/dist /app/node_modules/@debugmcp/adapter-mock/ && \
-    cp /app/packages/adapter-mock/package.json /app/node_modules/@debugmcp/adapter-mock/ && \
-    cp -r /app/packages/adapter-python/dist /app/node_modules/@debugmcp/adapter-python/ && \
-    cp /app/packages/adapter-python/package.json /app/node_modules/@debugmcp/adapter-python/ && \
-    cp -r /app/packages/adapter-javascript/dist /app/node_modules/@debugmcp/adapter-javascript/ && \
-    cp -r /app/packages/adapter-javascript/vendor /app/node_modules/@debugmcp/adapter-javascript/ && \
-    cp -r /app/packages/adapter-javascript/assets /app/node_modules/@debugmcp/adapter-javascript/ && \
-    cp /app/packages/adapter-javascript/package.json /app/node_modules/@debugmcp/adapter-javascript/ && \
+    node scripts/materialize-docker-packages.mjs /app /app/node_modules \
+      shared adapter-mock adapter-python adapter-javascript adapter-java adapter-ruby \
+      codelldb-common adapter-cpp adapter-rust adapter-cobol adapter-dart && \
     mkdir -p /app/node_modules/@debugmcp/adapter-javascript/node_modules && \
-    cp -rL /app/packages/adapter-javascript/node_modules/dotenv /app/node_modules/@debugmcp/adapter-javascript/node_modules/ && \
-    mkdir -p /app/node_modules/@debugmcp/adapter-java && \
-    cp -r /app/packages/adapter-java/dist /app/node_modules/@debugmcp/adapter-java/ && \
-    cp -r /app/packages/adapter-java/java /app/node_modules/@debugmcp/adapter-java/ && \
-    cp /app/packages/adapter-java/package.json /app/node_modules/@debugmcp/adapter-java/ && \
-    mkdir -p /app/node_modules/@debugmcp/adapter-ruby && \
-    cp -r /app/packages/adapter-ruby/dist /app/node_modules/@debugmcp/adapter-ruby/ && \
-    cp /app/packages/adapter-ruby/package.json /app/node_modules/@debugmcp/adapter-ruby/ && \
-    mkdir -p /app/node_modules/@debugmcp/codelldb-common && \
-    cp -r /app/packages/codelldb-common/dist /app/node_modules/@debugmcp/codelldb-common/ && \
-    cp -r /app/packages/codelldb-common/vendor /app/node_modules/@debugmcp/codelldb-common/ && \
-    cp /app/packages/codelldb-common/package.json /app/node_modules/@debugmcp/codelldb-common/ && \
-    mkdir -p /app/node_modules/@debugmcp/adapter-cpp && \
-    cp -r /app/packages/adapter-cpp/dist /app/node_modules/@debugmcp/adapter-cpp/ && \
-    cp /app/packages/adapter-cpp/package.json /app/node_modules/@debugmcp/adapter-cpp/ && \
-    mkdir -p /app/node_modules/@debugmcp/adapter-rust && \
-    cp -r /app/packages/adapter-rust/dist /app/node_modules/@debugmcp/adapter-rust/ && \
-    cp /app/packages/adapter-rust/package.json /app/node_modules/@debugmcp/adapter-rust/ && \
-    mkdir -p /app/node_modules/@debugmcp/adapter-cobol && \
-    cp -r /app/packages/adapter-cobol/dist /app/node_modules/@debugmcp/adapter-cobol/ && \
-    cp /app/packages/adapter-cobol/package.json /app/node_modules/@debugmcp/adapter-cobol/ && \
-    mkdir -p /app/node_modules/@debugmcp/adapter-dart && \
-    cp -r /app/packages/adapter-dart/dist /app/node_modules/@debugmcp/adapter-dart/ && \
-    cp /app/packages/adapter-dart/package.json /app/node_modules/@debugmcp/adapter-dart/
+    cp -rL /app/packages/adapter-javascript/node_modules/dotenv /app/node_modules/@debugmcp/adapter-javascript/node_modules/
 
 # Rust LLDB formatter scripts (issue #441): pure-Python files shipped with
 # every Rust toolchain, which CodeLLDB never bundles. The runtime image has
