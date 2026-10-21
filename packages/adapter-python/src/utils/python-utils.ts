@@ -5,7 +5,7 @@ import { spawn } from 'child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import which from 'which';
-import { sanitizeStderr, sanitizeStderrTail } from '@debugmcp/shared';
+import { runVersionProbe, sanitizeStderr, sanitizeStderrTail } from '@debugmcp/shared';
 
 // Simple logger interface (kept local to avoid external coupling)
 interface Logger {
@@ -277,20 +277,6 @@ async function isValidPythonExecutable(pythonCmd: string, logger: Logger = noopL
 }
 
 /**
- * Check if a Python executable has debugpy installed. Delegates to the shared
- * getDebugpyVersion probe so the spawn command cannot drift between callers.
- * (PythonDebugAdapter.checkDebugpyInstalled keeps its own cached copy for now
- * — its tests replace this module wholesale.)
- */
-async function hasDebugpy(pythonPath: string, logger: Logger = noopLogger): Promise<boolean> {
-  const version = await getDebugpyVersion(pythonPath);
-  if (version !== null) {
-    logger.debug?.(`[Python Detection] debugpy version: ${sanitizeStderrTail(version)}`);
-  }
-  return version !== null;
-}
-
-/**
  * Find a working Python executable
  * @param preferredPath Optional preferred Python path to check first
  * @param logger Optional logger instance for logging detection info
@@ -303,6 +289,23 @@ export async function findPythonExecutable(
   commandFinder: CommandFinder = defaultCommandFinder,
   platform: NodeJS.Platform = process.platform
 ): Promise<string> {
+  return (await findPythonWithDebugpy(preferredPath, logger, commandFinder, platform)).pythonPath;
+}
+
+/**
+ * findPythonExecutable, plus the debugpy version discovery read on the way
+ * (issue #969): auto-detection imports debugpy on each candidate to prefer
+ * one that has it, so the factory need not import it a second time.
+ * `debugpyVersion` is a string when found, null when the probe ran and found
+ * none, and undefined when discovery returned before probing (a preferred
+ * path, PYTHON_PATH/PYTHON_EXECUTABLE, pythonLocation).
+ */
+export async function findPythonWithDebugpy(
+  preferredPath?: string,
+  logger: Logger = noopLogger,
+  commandFinder: CommandFinder = defaultCommandFinder,
+  platform: NodeJS.Platform = process.platform
+): Promise<{ pythonPath: string; debugpyVersion?: string | null }> {
   const isWindows = platform === 'win32';
   const triedPaths: string[] = [];
   const validPythonPaths: string[] = [];
@@ -346,7 +349,7 @@ export async function findPythonExecutable(
       triedPaths.push(`${preferredPath} → ${resolved}`);
       if (!isWindows || await isValidPythonExecutable(resolved, logger)) {
         logger.debug?.(`[Python Detection] Using user-specified Python: ${resolved}`);
-        return resolved;
+        return { pythonPath: resolved };
       }
     } catch (error) {
       if (error instanceof CommandNotFoundError) {
@@ -365,7 +368,7 @@ export async function findPythonExecutable(
       triedPaths.push(`${envPython} → ${resolved}`);
       if (!isWindows || await isValidPythonExecutable(resolved, logger)) {
         logger.debug?.(`[Python Detection] Using environment variable Python: ${resolved}`);
-        return resolved;
+        return { pythonPath: resolved };
       }
     } catch (error) {
       if (error instanceof CommandNotFoundError) {
@@ -402,7 +405,7 @@ export async function findPythonExecutable(
       triedPaths.push(`${candidate} → exists`);
       if (!isWindows || (await isValidPythonExecutable(candidate, logger))) {
         logger.debug?.(`[Python Detection] Using pythonLocation Python: ${candidate}`);
-        return candidate;
+        return { pythonPath: candidate };
       }
     }
   }
@@ -435,9 +438,11 @@ export async function findPythonExecutable(
   // 4. Check each valid Python for debugpy and return the first one that has it
   logger.debug?.(`[Python Detection] Checking ${validPythonPaths.length} Python installations for debugpy...`);
   for (const pythonPath of validPythonPaths) {
-    if (await hasDebugpy(pythonPath, logger)) {
+    const debugpyVersion = await getDebugpyVersion(pythonPath);
+    if (debugpyVersion !== null) {
+      logger.debug?.(`[Python Detection] debugpy version: ${sanitizeStderrTail(debugpyVersion)}`);
       logger.debug?.(`[Python Detection] Found Python with debugpy installed: ${pythonPath}`);
-      return pythonPath;
+      return { pythonPath, debugpyVersion };
     } else {
       logger.debug?.(`[Python Detection] Python at ${pythonPath} does not have debugpy`);
     }
@@ -447,7 +452,7 @@ export async function findPythonExecutable(
   if (validPythonPaths.length > 0) {
     logger.debug?.(`[Python Detection] No Python with debugpy found, using first valid: ${validPythonPaths[0]}`);
     logger.debug?.(`[Python Detection] Note: debugpy will need to be installed`);
-    return validPythonPaths[0];
+    return { pythonPath: validPythonPaths[0], debugpyVersion: null };
   }
 
   // No Python found at all
@@ -476,69 +481,29 @@ export async function findPythonExecutable(
 }
 
 /**
- * Get Python version for a given executable
- */
-/** Upper bound for a single toolchain probe child before it is killed. */
-const PROBE_KILL_TIMEOUT_MS = 10_000;
-
-/**
  * Report the debugpy version importable by the given interpreter, or null when
  * debugpy is missing (or the interpreter cannot be spawned). Null is not fatal:
  * debugpy may still be available in the user's virtualenv (issue #16).
- *
- * Reads output on 'close' (not 'exit') so stdio is fully drained, and kills
- * the child if it hangs past the guard timeout — probes must never strand
- * processes (Development Guidelines #8).
+ * Through the shared probe (issue #969): read on close, killed after 10 s.
  */
 export async function getDebugpyVersion(pythonPath: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    try {
-      const child = spawn(pythonPath, ['-c', 'import debugpy; print(debugpy.__version__)'], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true
-      });
-
-      let output = '';
-      child.stdout?.on('data', (data) => { output += data.toString(); });
-
-      const killTimer = setTimeout(() => {
-        try { child.kill(); } catch { /* already gone */ }
-      }, PROBE_KILL_TIMEOUT_MS);
-      killTimer.unref?.();
-
-      child.on('error', () => {
-        clearTimeout(killTimer);
-        resolve(null);
-      });
-      child.on('close', (code) => {
-        clearTimeout(killTimer);
-        const version = output.trim();
-        resolve(code === 0 && version.length > 0 ? version : null);
-      });
-    } catch {
-      resolve(null);
-    }
-  });
+  const result = await runVersionProbe(pythonPath, ['-c', 'import debugpy; print(debugpy.__version__)']);
+  const version = result?.stdout.trim() ?? '';
+  return result?.code === 0 && version.length > 0 ? version : null;
 }
 
+/**
+ * Get Python version for a given executable (`python --version`, which
+ * prints to stdout on 3.4+ and stderr before).
+ */
 export async function getPythonVersion(pythonPath: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    const child = spawn(pythonPath, ['--version'], { stdio: 'pipe', windowsHide: true });
-    let output = '';
-
-    child.stdout?.on('data', (data) => { output += data.toString(); });
-    child.stderr?.on('data', (data) => { output += data.toString(); });
-
-    child.on('error', () => resolve(null));
-    child.on('exit', (code) => {
-      if (code === 0 && output) {
-        const match = output.match(/Python (\d+\.\d+\.\d+)/);
-        // Fallback surfaces raw child output into validation messages —
-        // keep only the first line, redacted if secret-looking
-        resolve(match ? match[1] : (sanitizeStderr([output.trim().split(/\r?\n/)[0]])[0] ?? null));
-      } else {
-        resolve(null);
-      }
-    });
-  });
+  const result = await runVersionProbe(pythonPath, ['--version']);
+  const output = (result?.stdout ?? '') + (result?.stderr ?? '');
+  if (result?.code !== 0 || !output) {
+    return null;
+  }
+  const match = output.match(/Python (\d+\.\d+\.\d+)/);
+  // Fallback surfaces raw child output into validation messages —
+  // keep only the first line, redacted if secret-looking
+  return match ? match[1]! : (sanitizeStderr([output.trim().split(/\r?\n/)[0]!])[0] ?? null);
 }
