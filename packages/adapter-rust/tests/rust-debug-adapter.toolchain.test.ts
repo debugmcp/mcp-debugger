@@ -476,6 +476,7 @@ describe('RustDebugAdapter toolchain logic', () => {
     it('provides installation guidance and missing executable error', () => {
       expect(adapter.getInstallationInstructions()).toContain('Install Rust toolchain');
       expect(adapter.getMissingExecutableError()).toContain('Rust toolchain not found');
+      expect(adapter.getMissingExecutableError()).toContain('https://rustup.rs');
     });
 
     it('reports supported features and requirements', () => {

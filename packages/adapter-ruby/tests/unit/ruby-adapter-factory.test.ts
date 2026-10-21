@@ -90,7 +90,7 @@ describe('RubyAdapterFactory', () => {
     const result = await new RubyAdapterFactory().validate();
 
     expect(result.errors).toEqual([
-      'rdbg not found. Tried: rdbg, /usr/bin/rdbg. Install the debug gem with: gem install debug (or set RDBG_PATH).'
+      'rdbg not found. Tried: rdbg, /usr/bin/rdbg; install the debug gem with: gem install debug (or set RDBG_PATH).'
     ]);
   });
 
