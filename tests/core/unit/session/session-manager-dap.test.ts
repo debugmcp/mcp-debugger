@@ -1758,7 +1758,11 @@ describe('SessionManager - DAP Operations', () => {
        * where the i-th step stops ({line, depth}); `landings[0]` is the origin.
        * `reasons[i]` is the i-th step's stop reason (default 'step').
        */
-      function scriptSteps(landings: Array<{ line: number; depth?: number }>, reasons: string[] = []): { nexts: () => number } {
+      function scriptSteps(
+        landings: Array<{ line: number; depth?: number }>,
+        reasons: string[] = [],
+        afterStop?: () => void
+      ): { nexts: () => number } {
         let position = 0;
         let nexts = 0;
         dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
@@ -1768,6 +1772,7 @@ describe('SessionManager - DAP Operations', () => {
             const reason = reasons[nexts - 1] ?? 'step';
             process.nextTick(() => {
               dependencies.mockProxyManager.simulateStopped(1, reason, { reason, threadId: 1 });
+              afterStop?.();
             });
           }
           if (command === 'stackTrace') {
@@ -1804,20 +1809,12 @@ describe('SessionManager - DAP Operations', () => {
       it('keeps stepping the thread the caller stepped, even when another thread becomes current', async () => {
         const session = await createPausedSession(sessionManager, dependencies);
         withTokenStepping(sessionManager);
-        scriptSteps([{ line: 29 }, { line: 29 }, { line: 30 }]);
-        const send = dependencies.mockProxyManager.sendDapRequest as ReturnType<typeof vi.fn>;
-        const inner = send.getMockImplementation()!;
-        send.mockImplementation(async (command: string, args?: unknown) => {
-          const answer = await inner(command, args);
-          if (command === 'next') {
-            // Another isolate stops right after this one: the proxy's current thread moves.
-            process.nextTick(() => process.nextTick(() => dependencies.mockProxyManager.setCurrentThreadId(2)));
-          }
-          return answer;
-        });
+        // Another isolate stops right after each step: the proxy's current thread moves to 2.
+        scriptSteps([{ line: 29 }, { line: 29 }, { line: 30 }], [], () => dependencies.mockProxyManager.setCurrentThreadId(2));
 
         await stepOver(session.id);
 
+        const send = vi.mocked(dependencies.mockProxyManager.sendDapRequest);
         const nextThreads = send.mock.calls.filter(([command]) => command === 'next').map(([, args]) => (args as { threadId: number }).threadId);
         expect(nextThreads).toEqual([1, 1]);
       });
