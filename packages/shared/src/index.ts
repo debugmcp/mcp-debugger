@@ -290,6 +290,7 @@ export { toolchainComponent, normalizeToolchainDescription, probeWithinBudget } 
 export {
   runVersionProbe,
   VERSION_PROBE_TIMEOUT_MS,
+  VERSION_PROBE_KILL_GRACE_MS,
   type VersionProbeOptions,
   type VersionProbeResult
 } from './utils/version-probe.js';

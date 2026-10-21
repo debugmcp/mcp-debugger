@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { EventEmitter } from 'events';
-import { runVersionProbe } from '../../src/utils/version-probe.js';
+import { runVersionProbe, VERSION_PROBE_KILL_GRACE_MS } from '../../src/utils/version-probe.js';
 
 const spawnMock: Mock = vi.fn();
 
@@ -51,7 +51,7 @@ describe('runVersionProbe', () => {
     });
     const [command, args, options] = spawnMock.mock.calls[0];
     expect([command, args]).toEqual(['java', ['-version']]);
-    expect(options).toMatchObject({ windowsHide: true });
+    expect(options).toMatchObject({ windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     expect(options.shell).toBeUndefined();
   });
 
@@ -102,5 +102,26 @@ describe('runVersionProbe', () => {
 
     await expect(probe).resolves.toMatchObject({ code: null, timedOut: true });
     expect(child.kill).toHaveBeenCalled();
+  });
+
+  it('settles a timed-out probe even when a descendant keeps the pipe open and close never comes', async () => {
+    vi.useFakeTimers();
+    const child = fakeChild();
+    spawnMock.mockReturnValue(child);
+    // The kill reaches only the direct child; whatever else holds stdout keeps it open.
+    child.kill.mockImplementation(() => true);
+
+    const probe = runVersionProbe('wrapper', ['--version'], { timeoutMs: 1000 });
+    child.stdout.emit('data', Buffer.from('partial'));
+    let settled = false;
+    void probe.then(() => {
+      settled = true;
+    });
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(VERSION_PROBE_KILL_GRACE_MS);
+
+    await expect(probe).resolves.toEqual({ code: null, stdout: 'partial', stderr: '', timedOut: true });
   });
 });

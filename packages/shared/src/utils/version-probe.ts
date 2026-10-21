@@ -31,6 +31,12 @@ export interface VersionProbeResult {
 }
 
 export const VERSION_PROBE_TIMEOUT_MS = 10_000;
+/**
+ * How long a killed probe may take to report `close` before it is settled
+ * anyway: the kill reaches only the direct child, and a descendant that
+ * inherited its stdout would otherwise hold the pipe, and the probe, open.
+ */
+export const VERSION_PROBE_KILL_GRACE_MS = 1_000;
 
 export function runVersionProbe(
   command: string,
@@ -49,6 +55,8 @@ export function runVersionProbe(
     let child: ReturnType<typeof spawn>;
     try {
       child = spawn(command, [...args], {
+        // stdin closed: a wrapper that reads it must not wait out the timeout
+        stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
         ...(options.env ? { env: options.env } : {}),
         ...(options.cwd ? { cwd: options.cwd } : {})
@@ -68,6 +76,7 @@ export function runVersionProbe(
       stderr += data.toString();
     });
 
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
     const timer = setTimeout(() => {
       timedOut = true;
       try {
@@ -75,6 +84,11 @@ export function runVersionProbe(
       } catch {
         // Already gone; close follows.
       }
+      graceTimer = setTimeout(() => {
+        child.stdout?.destroy?.();
+        child.stderr?.destroy?.();
+        settle({ code: null, stdout, stderr, timedOut: true });
+      }, VERSION_PROBE_KILL_GRACE_MS);
     }, options.timeoutMs ?? VERSION_PROBE_TIMEOUT_MS);
 
     let settled = false;
@@ -82,6 +96,7 @@ export function runVersionProbe(
       if (!settled) {
         settled = true;
         clearTimeout(timer);
+        clearTimeout(graceTimer);
         resolve(value);
       }
     };
