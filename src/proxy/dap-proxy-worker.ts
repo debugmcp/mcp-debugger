@@ -1663,7 +1663,15 @@ export class DapProxyWorker {
   private async failConfigurationPhase(error: unknown): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     this.logger!.error('[Worker] Error in initialized handler:', error);
-    this.sendError(`Error in DAP sequence: ${message}`);
+    // The adapter's own words first; its policy may say what they mean
+    // (netcoredbg's bare HRESULTs, issue #959).
+    const explanation =
+      error instanceof DapResponseError
+        ? this.adapterPolicy.explainRequestFailure?.(error.command, message, {
+            program: this.currentInitPayload?.scriptPath
+          })
+        : undefined;
+    this.sendError(`Error in DAP sequence: ${message}${explanation ? `. ${explanation}` : ''}`);
     await this.shutdown();
   }
 

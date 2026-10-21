@@ -9,7 +9,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import type { CustomLaunchRequestArguments } from '../../../../src/session/session-manager-core.js';
-import { SessionState, SessionLifecycleState, DebugLanguage, type AdapterPolicy } from '@debugmcp/shared';
+import {
+  AdapterError,
+  AdapterErrorCode,
+  SessionState,
+  SessionLifecycleState,
+  DebugLanguage,
+  type AdapterPolicy
+} from '@debugmcp/shared';
 import { FakeDebugAdapter } from '../../../test-utils/fakes/fake-debug-adapter.js';
 import { createMockDependencies } from './session-manager-test-utils.js';
 
@@ -187,6 +194,29 @@ describe('SessionManager dry run (issue #812)', () => {
     expect(after.state).toBe(SessionState.PAUSED);
     expect(after.proxyManager).toBe(before.proxyManager);
     expect(after.failureDiagnostics).toBe(before.failureDiagnostics);
+    expect(proxy().stopCalls).toBe(0);
+  });
+
+  // Issue #959: an adapter's transform refusing the launch (a .NET source file
+  // as the program) answers the dry run with its own sentence, untouched session.
+  it("answers an adapter's transform refusal with the adapter's words, leaving a paused program paused", async () => {
+    const session = await createSession('TransformRefuses');
+    await launchToEntryStop(session.id);
+    const refusal = new AdapterError(
+      'The .NET program must be the compiled assembly, not the source file Program.cs: pass the .dll as dapLaunchArgs.program',
+      AdapterErrorCode.SCRIPT_NOT_FOUND
+    );
+    vi.mocked(dependencies.adapterRegistry.create).mockImplementationOnce(async () => {
+      const adapter = new FakeDebugAdapter();
+      adapter.transformLaunchConfig.mockRejectedValueOnce(refusal);
+      return adapter;
+    });
+
+    const dry = await sessionManager.startDebugging(session.id, 'Program.cs', [], {}, true);
+
+    expect(dry).toMatchObject({ success: false, error: refusal.message, errorType: 'AdapterError' });
+    expect(dry.state).toBe(SessionState.PAUSED);
+    expect(sessionManager.getSession(session.id)!.state).toBe(SessionState.PAUSED);
     expect(proxy().stopCalls).toBe(0);
   });
 

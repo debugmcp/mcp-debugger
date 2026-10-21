@@ -66,6 +66,7 @@ attach_to_process     {"sessionId": "<id>", "processId": 12345, "sourcePaths": [
 | "netcoredbg not found" | Env var/PATH not set | Set `NETCOREDBG_PATH` to the executable (restart shell after `setx`) or add its dir to PATH |
 | Empty variables at breakpoint | Non-Portable PDB (typically .NET Framework) | Compile with `/debug:portable`; on Windows the adapter can auto-convert via Pdb2Pdb |
 | Breakpoints not firing | Stale build, missing PDB, or non-executable line | `dotnet build` after edits; keep the PDB next to the DLL; pick an executable line |
-| Launch fails / nothing starts | `program` points at `Program.cs` instead of the built assembly | Point `scriptPath` and `dapLaunchArgs.program` at `bin/Debug/netX.0/App.dll` |
+| "The .NET program must be the compiled assembly, not the source file …" | `dapLaunchArgs.program` missing, so the `.cs` became the program | Pass `bin/Debug/netX.0/App.dll` as `dapLaunchArgs.program` (the answer names it when it finds exactly one) |
+| "netcoredbg could not start … as a .NET assembly (0x800700c1 …)" | `program` is a native exe or not a managed assembly for this runtime | Point `program` at the managed `.dll` from `dotnet build` |
 | Connection timeout on start | TCP-to-stdio bridge still starting, or port conflict | Retry; check nothing else holds the bridge port |
 | Attach to 32-bit process fails | Architecture mismatch | Set `NETCOREDBG_X86_PATH` to an x86 netcoredbg |
