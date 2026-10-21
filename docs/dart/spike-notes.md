@@ -77,7 +77,7 @@ Consequence for the adapter: `stopOnEntry` = temporary breakpoint on the program
 - `evaluate` with `frameId` works for locals and member access (`counter.value`); an unknown name
   gives `Undefined name 'x'.`; `$_threadException` evaluates to the current exception object.
 - `next` stops **twice per source line** (once per token position: e.g. line 29 col 26, then col 32);
-  `granularity: 'line' | 'statement'` is accepted and ignored. Steps take 3–30 ms. Stepping over an
+  `granularity: 'line' | 'statement'` is accepted and ignored. (mcp-debugger now repeats `next` while it lands on the same line in the same frame, so one step_over leaves the line: #879; line 29 measured three stops, columns 16, 26 and 32, when stepping from its breakpoint.) Steps take 3–30 ms. Stepping over an
   `await` lands on the next line with the stack `main@32`, `<asynchronous gap>@0` (frame
   `presentationHint:'label'`, line 0).
 - Frames below `main` are SDK internals (`_delayEntrypointInvocation.<anonymous closure>`,

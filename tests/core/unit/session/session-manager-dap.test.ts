@@ -1801,6 +1801,38 @@ describe('SessionManager - DAP Operations', () => {
         expect(data.message).toBe(ErrorMessages.stepRepeatedOnSameLine('Stepped over', 3));
       });
 
+      it('keeps stepping the thread the caller stepped, even when another thread becomes current', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        withTokenStepping(sessionManager);
+        scriptSteps([{ line: 29 }, { line: 29 }, { line: 30 }]);
+        const send = dependencies.mockProxyManager.sendDapRequest as ReturnType<typeof vi.fn>;
+        const inner = send.getMockImplementation()!;
+        send.mockImplementation(async (command: string, args?: unknown) => {
+          const answer = await inner(command, args);
+          if (command === 'next') {
+            // Another isolate stops right after this one: the proxy's current thread moves.
+            process.nextTick(() => process.nextTick(() => dependencies.mockProxyManager.setCurrentThreadId(2)));
+          }
+          return answer;
+        });
+
+        await stepOver(session.id);
+
+        const nextThreads = send.mock.calls.filter(([command]) => command === 'next').map(([, args]) => (args as { threadId: number }).threadId);
+        expect(nextThreads).toEqual([1, 1]);
+      });
+
+      it('does not call a same-line breakpoint after a repeat "back at the line the step was issued from"', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        withTokenStepping(sessionManager);
+        scriptSteps([{ line: 29 }, { line: 29 }, { line: 29 }], ['step', 'breakpoint']);
+
+        const data = await stepOver(session.id);
+
+        expect(data.stopReason).toBe('breakpoint');
+        expect(data.message).toBe(ErrorMessages.stepStoppedOn('Stepped over', 'breakpoint'));
+      });
+
       it('lets a breakpoint on the same line end the step at once', async () => {
         const session = await createPausedSession(sessionManager, dependencies);
         withTokenStepping(sessionManager);

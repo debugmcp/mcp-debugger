@@ -893,8 +893,10 @@ export class ExecutionController {
           data: { ...data!, message: ErrorMessages.stepRepeatedOnSameLine(stepOptions.successMessage, steps, { stillOnLine: true }) }
         };
       }
-      const threadId = session.proxyManager?.getCurrentThreadId();
-      if (typeof threadId !== 'number' || !session.proxyManager?.isRunning()) {
+      // The thread the caller stepped, not whichever thread is current now:
+      // another isolate stopping meanwhile must not be stepped in its place.
+      const threadId = stepOptions.threadId;
+      if (!session.proxyManager?.isRunning()) {
         break;
       }
       const here = await this.readTopFrame(sessionId, threadId);
@@ -906,7 +908,11 @@ export class ExecutionController {
       this.ctx.logger.info(
         `[SM ${stepOptions.logTag} ${sessionId}] Still on ${origin.frame.file}:${origin.frame.line} after step ${steps}; stepping again (the adapter stops per token position)`
       );
-      result = await this.executeStep(session, sessionId, { ...stepOptions, threadId });
+      // No origin on a repeat: the program has moved within the line, so a
+      // breakpoint that ends it is not the lost-step "back at the line the
+      // step was issued from" signature the origin exists to name.
+      const { origin: _origin, ...repeatOptions } = stepOptions;
+      result = await this.executeStep(session, sessionId, repeatOptions);
       steps += 1;
     }
     const last = result.data;
