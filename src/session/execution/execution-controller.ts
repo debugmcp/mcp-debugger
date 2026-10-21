@@ -134,6 +134,12 @@ export interface StepOperationOptions {
   origin?: StopLocation;
 }
 
+/**
+ * The most DAP steps one step_over sends for an adapter that stops once per
+ * token position (issue #879). The longest measured line took three.
+ */
+const MAX_SAME_LINE_STEPS = 8;
+
 /** Same line of the same file, with the breakpoint layer's path equality (exact, Windows-folded). */
 function isSameLine(a: StopLocation, b: StopLocation): boolean {
   return a.line === b.line && samePath(a.file, b.file);
@@ -211,7 +217,13 @@ export class ExecutionController {
       return { success: false, error: 'No current thread ID', state: session.state };
     }
 
-    const fromFrame = await this.readStepOrigin(session, sessionId, threadId);
+    // An adapter whose `next` stops once per token position (issue #879):
+    // the step is repeated while it stops on the line it left, so the origin
+    // (and its frame depth) is read for it as well.
+    const repeatsOnSameLine =
+      kind === 'stepOver' && this.ctx.selectPolicy(session.language).stepsByTokenPosition === true;
+    const origin = await this.readStepOrigin(session, sessionId, threadId, repeatsOnSameLine);
+    const fromFrame = origin?.frame;
     const pendingHint = await this.describePendingStop(session, sessionId, 'step', fromFrame);
 
     // Re-check after the awaits — the origin read is a real DAP round trip
@@ -234,14 +246,18 @@ export class ExecutionController {
     this.ctx.logger.info(`[SM ${logTag} ${sessionId}] Sending DAP '${command}' for threadId ${threadId}`);
 
     try {
-      return await this.executeStep(session, sessionId, {
+      const stepOptions: StepOperationOptions = {
         command,
         threadId,
         logTag,
         successMessage,
         ...(pendingHint ? { pendingHint } : {}),
         ...(fromFrame ? { origin: { file: fromFrame.file, line: fromFrame.line, column: fromFrame.column } } : {}),
-      });
+      };
+      const result = await this.executeStep(session, sessionId, stepOptions);
+      return repeatsOnSameLine && origin
+        ? await this.repeatWhileOnOriginLine(session, sessionId, stepOptions, origin, result)
+        : result;
     } catch (error) {
       const errorMessage = getErrorMessage(error);
       this.ctx.logger.error(`[SM ${logTag} ${sessionId}] Error during step:`, error);
@@ -832,11 +848,80 @@ export class ExecutionController {
   private async readStepOrigin(
     session: ManagedSession,
     sessionId: string,
-    threadId: number
-  ): Promise<StackFrame | undefined> {
-    if (!this.ctx.selectPolicy(session.language).describePendingStop) {
+    threadId: number,
+    forSameLineRepeat: boolean
+  ): Promise<{ frame: StackFrame; depth: number } | undefined> {
+    if (!forSameLineRepeat && !this.ctx.selectPolicy(session.language).describePendingStop) {
       return undefined;
     }
+    return this.readTopFrame(sessionId, threadId);
+  }
+
+  /**
+   * For an adapter that stops once per token position (issue #879): send the
+   * step again while it stopped, as a plain step, on the origin's file and
+   * line at the origin's frame depth, up to MAX_SAME_LINE_STEPS. Anything
+   * else is a real landing and ends it at once: a breakpoint or exception
+   * (stopReason set), a pending step, an ended session, another line, or the
+   * same line in another frame (a recursive call returning to its caller).
+   */
+  private async repeatWhileOnOriginLine(
+    session: ManagedSession,
+    sessionId: string,
+    stepOptions: StepOperationOptions,
+    origin: { frame: StackFrame; depth: number },
+    first: DebugResult<StepResultData>
+  ): Promise<DebugResult<StepResultData>> {
+    let result = first;
+    let steps = 1;
+    for (;;) {
+      const data = result.data;
+      const onOriginLine =
+        result.success &&
+        session.state === SessionState.PAUSED &&
+        data !== undefined &&
+        !data.pending &&
+        data.stopReason === undefined &&
+        data.location !== undefined &&
+        isSameLine(origin.frame, data.location);
+      if (!onOriginLine) {
+        break;
+      }
+      if (steps >= MAX_SAME_LINE_STEPS) {
+        return {
+          ...result,
+          data: { ...data!, message: ErrorMessages.stepRepeatedOnSameLine(stepOptions.successMessage, steps, { stillOnLine: true }) }
+        };
+      }
+      const threadId = session.proxyManager?.getCurrentThreadId();
+      if (typeof threadId !== 'number' || !session.proxyManager?.isRunning()) {
+        break;
+      }
+      const here = await this.readTopFrame(sessionId, threadId);
+      // Re-check after the read, as the step preamble does: a continue or
+      // another step may have resumed the thread meanwhile.
+      if (!here || here.depth !== origin.depth || session.state !== SessionState.PAUSED) {
+        break;
+      }
+      this.ctx.logger.info(
+        `[SM ${stepOptions.logTag} ${sessionId}] Still on ${origin.frame.file}:${origin.frame.line} after step ${steps}; stepping again (the adapter stops per token position)`
+      );
+      result = await this.executeStep(session, sessionId, { ...stepOptions, threadId });
+      steps += 1;
+    }
+    const last = result.data;
+    if (steps > 1 && result.success && last !== undefined && !last.pending && last.stopReason === undefined) {
+      return { ...result, data: { ...last, message: ErrorMessages.stepRepeatedOnSameLine(stepOptions.successMessage, steps) } };
+    }
+    return result;
+  }
+
+  /**
+   * The stop's top frame and how many frames are under it, bounded to a
+   * fraction of the step grace window like the origin read; undefined when
+   * the read failed or was late.
+   */
+  private async readTopFrame(sessionId: string, threadId: number): Promise<{ frame: StackFrame; depth: number } | undefined> {
     const boundMs = Math.max(1, Math.floor(this.ctx.tunables.stepGraceMs / 5));
     let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<undefined>((resolve) => {
@@ -851,7 +936,8 @@ export class ExecutionController {
         this.ctx.logger.debug(`[SM step ${sessionId}] Origin frame read exceeded ${boundMs}ms; stepping without it`);
         return undefined;
       }
-      return detailed.frames[0];
+      const frame = detailed.frames[0];
+      return frame ? { frame, depth: detailed.frames.length } : undefined;
     } catch (error) {
       this.ctx.logger.debug(`[SM step ${sessionId}] Could not read the origin frame for the pending-stop explanation:`, error);
       return undefined;

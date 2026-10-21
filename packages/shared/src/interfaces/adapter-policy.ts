@@ -528,6 +528,16 @@ export interface AdapterPolicy {
   explainRequestFailure?(command: string, message: string, context: { program?: string }): string | undefined;
 
   /**
+   * The adapter's DAP `next` stops once per token position rather than once
+   * per line (issue #879, the Dart SDK adapter; `granularity: 'line'` is
+   * ignored). The core's step_over then repeats `next` while a plain step
+   * stop lands on the line it left, in the same frame depth, up to a cap, and
+   * says how many steps it took. A breakpoint or exception stop, or a landing
+   * in another frame, ends it at once.
+   */
+  stepsByTokenPosition?: boolean;
+
+  /**
    * Where the compiled file a location binds through may live (issues
    * #938/#950), most specific first. A `set_breakpoint` echoes the line from
    * the source file, while the engine binds it through a compiled one —

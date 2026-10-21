@@ -135,7 +135,8 @@ describe.skipIf(SKIP_DART)('MCP Server Dart Debugging Smoke Test @requires-dart'
 
     expect((await call('step_over', {})).success).toBe(true);
     await pollState('paused', 10000);
-    expect([line, line + 1]).toContain((await frames())[0].line);
+    // One step_over leaves the line even though the SDK adapter stops per token position (#879).
+    expect((await frames())[0].line).toBe(line + 1);
 
     await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
     const stopped = await pollState('stopped', 20000);
@@ -203,6 +204,23 @@ describe.skipIf(SKIP_DART)('MCP Server Dart Debugging Smoke Test @requires-dart'
     expect(out).toContain('to-stderr');
     expect(out).toContain('last line without newline');
   }, 120000);
+
+  // Issue #879: the SDK adapter's `next` stops once per token position;
+  // app.dart:29 (`counter.value + 2`) took three step_overs to leave.
+  it('leaves a multi-expression line in one step_over, and says how many steps it took', async (ctx) => {
+    const mainLine = bpLine(DART_EXAMPLES.app, 'MAIN');
+    await createSession('dart-step-line');
+    expect((await call('set_breakpoint', { file: DART_EXAMPLES.app, line: mainLine })).success).toBe(true);
+    await startOrSkip(ctx, { scriptPath: DART_EXAMPLES.app, dapLaunchArgs: { stopOnEntry: false } });
+    expect(await pollState('paused', 30000)).toBeDefined();
+    expect((await frames())[0].line).toBe(mainLine);
+
+    const step = await call('step_over', {});
+
+    expect(step.success, JSON.stringify(step)).toBe(true);
+    expect((step.location as { line?: number } | undefined)?.line, JSON.stringify(step)).toBe(mainLine + 1);
+    expect(String(step.message), JSON.stringify(step)).toMatch(/in \d+ steps/);
+  }, 90000);
 
   it('runs one package:test case under the dart-test runner with a breakpoint in its body', async (ctx) => {
     const line = bpLine(DART_EXAMPLES.mathTest, 'TEST');
