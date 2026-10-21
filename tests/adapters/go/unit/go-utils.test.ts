@@ -175,6 +175,24 @@ describe('go-utils', () => {
   });
 
   describe('getGoVersion', () => {
+    // Issue #969: the probes read on 'exit', so output a child had not yet
+    // drained when it exited was lost.
+    it('reads output that arrives after the child exited', async () => {
+      mockSpawn.mockImplementation(() => {
+        const proc = new EventEmitter() as any;
+        proc.stdout = new EventEmitter();
+        proc.stderr = new EventEmitter();
+        process.nextTick(() => {
+          proc.emit('exit', 0);
+          proc.stdout.emit('data', Buffer.from('go version go1.24.13 windows/amd64\n'));
+          proc.emit('close', 0);
+        });
+        return proc;
+      });
+
+      await expect(getGoVersion('go')).resolves.toBe('1.24.13');
+    });
+
     it('should return Go version string', async () => {
       mockSpawn.mockImplementation(() => {
         const proc = new EventEmitter() as any;
@@ -184,6 +202,7 @@ describe('go-utils', () => {
         process.nextTick(() => {
           proc.stdout.emit('data', Buffer.from('go version go1.21.0 darwin/arm64\n'));
           proc.emit('exit', 0);
+          proc.emit('close', 0);
         });
 
         return proc;
@@ -202,6 +221,7 @@ describe('go-utils', () => {
         process.nextTick(() => {
           proc.stdout.emit('data', Buffer.from('go version go1.22 linux/amd64\n'));
           proc.emit('exit', 0);
+          proc.emit('close', 0);
         });
 
         return proc;
@@ -229,7 +249,7 @@ describe('go-utils', () => {
         const proc = new EventEmitter() as any;
         proc.stdout = new EventEmitter();
         proc.stderr = new EventEmitter();
-        process.nextTick(() => proc.emit('exit', 1));
+        process.nextTick(() => { proc.emit('exit', 1); proc.emit('close', 1); });
         return proc;
       });
 
@@ -248,6 +268,7 @@ describe('go-utils', () => {
         process.nextTick(() => {
           proc.stdout.emit('data', Buffer.from('Delve Debugger\nVersion: 1.21.0\nBuild: ...\n'));
           proc.emit('exit', 0);
+          proc.emit('close', 0);
         });
 
         return proc;
@@ -275,7 +296,7 @@ describe('go-utils', () => {
         const proc = new EventEmitter() as any;
         proc.stdout = new EventEmitter();
         proc.stderr = new EventEmitter();
-        process.nextTick(() => proc.emit('exit', 1));
+        process.nextTick(() => { proc.emit('exit', 1); proc.emit('close', 1); });
         return proc;
       });
 
@@ -290,7 +311,7 @@ describe('go-utils', () => {
         const proc = new EventEmitter() as any;
         proc.stdout = new EventEmitter();
         proc.stderr = new EventEmitter();
-        process.nextTick(() => proc.emit('exit', 0));
+        process.nextTick(() => { proc.emit('exit', 0); proc.emit('close', 0); });
         return proc;
       });
 
@@ -303,7 +324,7 @@ describe('go-utils', () => {
         const proc = new EventEmitter() as any;
         proc.stdout = new EventEmitter();
         proc.stderr = new EventEmitter();
-        process.nextTick(() => proc.emit('exit', 1));
+        process.nextTick(() => { proc.emit('exit', 1); proc.emit('close', 1); });
         return proc;
       });
 
@@ -333,6 +354,7 @@ describe('go-utils', () => {
         process.nextTick(() => {
           proc.stderr.emit('data', 'GITHUB_PAT=github_pat_ABCDEFGHIJKLMNOPQRSTUV123456\nusage: dlv dap\n');
           proc.emit('exit', 1);
+          proc.emit('close', 1);
         });
         return proc;
       });
@@ -353,6 +375,7 @@ describe('go-utils', () => {
         process.nextTick(() => {
           proc.stderr.emit('data', noise + '\n');
           proc.emit('exit', 1);
+          proc.emit('close', 1);
         });
         return proc;
       });

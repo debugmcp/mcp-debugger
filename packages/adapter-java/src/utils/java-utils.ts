@@ -59,7 +59,7 @@ export async function findJavaWithVersion(preferredPath?: string): Promise<{ pat
  */
 async function probeJava(javaPath: string): Promise<{ version: string | null } | null> {
   const result = await runVersionProbe(javaPath, ['-version']);
-  if (!result || result.code !== 0) {
+  if (result.code !== 0) {
     return null;
   }
   // java -version prints to stderr

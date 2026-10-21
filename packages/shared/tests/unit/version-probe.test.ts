@@ -66,7 +66,7 @@ describe('runVersionProbe', () => {
     expect(spawnMock.mock.calls[0][2]).toMatchObject({ env: { GOFLAGS: '' }, cwd: '/work' });
   });
 
-  it('resolves null when the command cannot be spawned', async () => {
+  it('reports why when the command cannot be run', async () => {
     const child = fakeChild();
     spawnMock.mockReturnValue(child);
 
@@ -74,15 +74,21 @@ describe('runVersionProbe', () => {
     child.emit('error', Object.assign(new Error('spawn dlv ENOENT'), { code: 'ENOENT' }));
     child.emit('close', -2, null);
 
-    await expect(probe).resolves.toBeNull();
+    await expect(probe).resolves.toEqual({
+      code: null,
+      stdout: '',
+      stderr: '',
+      timedOut: false,
+      error: 'spawn dlv ENOENT'
+    });
   });
 
-  it('resolves null when spawn itself throws', async () => {
+  it('reports why when spawn itself throws', async () => {
     spawnMock.mockImplementation(() => {
       throw new Error('EINVAL');
     });
 
-    await expect(runVersionProbe('bad', [])).resolves.toBeNull();
+    await expect(runVersionProbe('bad', [])).resolves.toMatchObject({ code: null, error: 'EINVAL' });
   });
 
   it('kills a probe that outlives its timeout and reports it timed out', async () => {

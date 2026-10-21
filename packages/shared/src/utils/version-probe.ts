@@ -7,8 +7,9 @@
  * The command is spawned directly (no shell; `windowsHide` per #215), stdout
  * and stderr are collected, and the result is read on `close`, after both
  * pipes have drained. A probe that outlives `timeoutMs` is killed and reported
- * with `timedOut: true`. A command that cannot be spawned at all (ENOENT)
- * resolves null.
+ * with `timedOut: true`. A command that cannot be run at all (ENOENT, EACCES)
+ * resolves with `code: null` and the spawn error's message in `error`, so a
+ * caller can quote it.
  */
 import { spawn } from 'child_process';
 
@@ -25,6 +26,8 @@ export interface VersionProbeResult {
   stdout: string;
   stderr: string;
   timedOut: boolean;
+  /** Why the command could not be run at all; absent when it ran. */
+  error?: string;
 }
 
 export const VERSION_PROBE_TIMEOUT_MS = 10_000;
@@ -33,10 +36,17 @@ export function runVersionProbe(
   command: string,
   args: readonly string[],
   options: VersionProbeOptions = {}
-): Promise<VersionProbeResult | null> {
+): Promise<VersionProbeResult> {
   return new Promise((resolve) => {
     let settled = false;
-    const settle = (value: VersionProbeResult | null) => {
+    const notRun = (error: unknown): VersionProbeResult => ({
+      code: null,
+      stdout: '',
+      stderr: '',
+      timedOut: false,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    const settle = (value: VersionProbeResult) => {
       if (!settled) {
         settled = true;
         clearTimeout(timer);
@@ -52,8 +62,8 @@ export function runVersionProbe(
         ...(options.env ? { env: options.env } : {}),
         ...(options.cwd ? { cwd: options.cwd } : {})
       });
-    } catch {
-      settle(null);
+    } catch (error) {
+      settle(notRun(error));
       return;
     }
 
@@ -76,7 +86,7 @@ export function runVersionProbe(
       }
     }, options.timeoutMs ?? VERSION_PROBE_TIMEOUT_MS);
 
-    child.on('error', () => settle(null));
+    child.on('error', (error) => settle(notRun(error)));
     child.on('close', (code: number | null) => settle({ code, stdout, stderr, timedOut }));
   });
 }

@@ -488,8 +488,8 @@ export async function findPythonWithDebugpy(
  */
 export async function getDebugpyVersion(pythonPath: string): Promise<string | null> {
   const result = await runVersionProbe(pythonPath, ['-c', 'import debugpy; print(debugpy.__version__)']);
-  const version = result?.stdout.trim() ?? '';
-  return result?.code === 0 && version.length > 0 ? version : null;
+  const version = result.stdout.trim();
+  return result.code === 0 && version.length > 0 ? version : null;
 }
 
 /**
@@ -498,8 +498,8 @@ export async function getDebugpyVersion(pythonPath: string): Promise<string | nu
  */
 export async function getPythonVersion(pythonPath: string): Promise<string | null> {
   const result = await runVersionProbe(pythonPath, ['--version']);
-  const output = (result?.stdout ?? '') + (result?.stderr ?? '');
-  if (result?.code !== 0 || !output) {
+  const output = result.stdout + result.stderr;
+  if (result.code !== 0 || !output) {
     return null;
   }
   const match = output.match(/Python (\d+\.\d+\.\d+)/);

@@ -212,7 +212,7 @@ export async function findDotnetBackend(
  */
 async function probeStdout(command: string, args: string[]): Promise<string | null> {
   const result = await runVersionProbe(command, args);
-  return result && result.code === 0 && !result.timedOut ? result.stdout : null;
+  return result.code === 0 && !result.timedOut ? result.stdout : null;
 }
 
 /**
