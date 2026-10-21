@@ -532,32 +532,6 @@ Install from https://github.com/Samsung/netcoredbg/releases or build from source
 Supports .NET Core / .NET 5+.`;
   }
 
-  translateErrorMessage(error: Error): string {
-    const message = error.message.toLowerCase();
-
-    if (message.includes('netcoredbg') && message.includes('not found')) {
-      return this.getMissingExecutableError();
-    }
-
-    if (message.includes('attach') && message.includes('denied')) {
-      return 'Permission denied attaching to process. Try running as Administrator.';
-    }
-
-    if (message.includes('process') && message.includes('not found')) {
-      return 'Target process not found. Verify the process is running and the PID is correct.';
-    }
-
-    if (message.includes('symbol') && message.includes('load')) {
-      return 'Failed to load debug symbols. Ensure Portable PDB files are available (compile with /debug:portable or use Pdb2Pdb).';
-    }
-
-    if (message.includes('connection') && message.includes('refused')) {
-      return 'Connection to netcoredbg refused. The debugger may have failed to start.';
-    }
-
-    return error.message;
-  }
-
   // ===== Feature Support =====
 
   supportsFeature(feature: DebugFeature): boolean {

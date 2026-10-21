@@ -977,32 +977,6 @@ After installation, verify with:
 You can also specify the Rust executable path explicitly in your debug configuration.`;
   }
   
-  translateErrorMessage(error: Error): string {
-    const message = error.message.toLowerCase();
-    
-    if (message.includes('codelldb') && message.includes('not found')) {
-      return 'CodeLLDB is not installed. It normally ships via the @debugmcp/codelldb-* optional dependencies; set CODELLDB_PATH, or in a repo checkout run: npm run build:adapter';
-    }
-    
-    if (message.includes('cargo') && message.includes('not found')) {
-      return this.getMissingExecutableError();
-    }
-    
-    if (message.includes('permission denied')) {
-      return `Permission denied accessing executable. Check file permissions.`;
-    }
-    
-    if (message.includes('target') && message.includes('debug')) {
-      return `Debug binary not found. Run 'cargo build' first or enable automatic building in configuration.`;
-    }
-    
-    if (message.includes('lldb') && message.includes('failed')) {
-      return `LLDB failed to start. Ensure CodeLLDB is properly installed and your system meets requirements.`;
-    }
-    
-    return error.message;
-  }
-  
   // ===== Feature Support =====
   
   supportsFeature(feature: DebugFeature): boolean {

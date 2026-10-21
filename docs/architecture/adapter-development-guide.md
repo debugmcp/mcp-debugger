@@ -224,7 +224,7 @@ The adapter is the core component that manages the debugger lifecycle. It extend
 | Configuration | `buildAdapterCommand()`, `getAdapterModuleName()`, `getAdapterInstallCommand()`, `transformLaunchConfig()` |
 | DAP | `sendDapRequest()`, `handleDapEvent()`, `handleDapResponse()` |
 | Connection | `connect()`, `disconnect()`, `isConnected()` |
-| Error handling | `getInstallationInstructions()`, `getMissingExecutableError()`, `translateErrorMessage()` |
+| Error handling | `getInstallationInstructions()`, `getMissingExecutableError()` |
 | Features | `supportsFeature()`, `getFeatureRequirements()`, `getCapabilities()` |
 
 **Key patterns** from `packages/adapter-go/src/go-debug-adapter.ts`:

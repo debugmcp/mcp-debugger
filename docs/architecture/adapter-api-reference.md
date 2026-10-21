@@ -93,7 +93,8 @@ Connection management
 Error handling helpers
 - `getInstallationInstructions(): string`
 - `getMissingExecutableError(): string`
-- `translateErrorMessage(error: Error): string`
+
+A failure the adapter can name is reported where it is detected: `validate()` errors (the launch gate quotes them), `validateEnvironment()`, or an `AdapterError` thrown from `transformLaunchConfig`. There is no message-translation hook (removed in issue #974).
 
 Capabilities and features
 - `supportsFeature(feature: DebugFeature): boolean`
@@ -151,7 +152,6 @@ export class ExampleAdapter extends EventEmitter implements IDebugAdapter {
 
   getInstallationInstructions() { return 'Install example-adapter per your OS instructions.'; }
   getMissingExecutableError() { return 'Example executable not found'; }
-  translateErrorMessage(err: Error) { return err.message; }
 
   supportsFeature(_f: DebugFeature) { return false; }
   getFeatureRequirements(_f: DebugFeature) { return []; }

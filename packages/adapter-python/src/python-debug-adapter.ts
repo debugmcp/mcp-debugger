@@ -628,28 +628,6 @@ Linux users: Try 'sudo apt install python3'
 You can also specify the Python path explicitly in your debug configuration.`;
   }
   
-  translateErrorMessage(error: Error): string {
-    const message = error.message.toLowerCase();
-    
-    if (message.includes('debugpy') && message.includes('modulenotfounderror')) {
-      return 'debugpy is not installed. Please run: pip install debugpy';
-    }
-    
-    if (message.includes('python') && message.includes('not found')) {
-      return this.getMissingExecutableError();
-    }
-    
-    if (message.includes('permission denied')) {
-      return `Permission denied accessing Python executable. Check file permissions.`;
-    }
-    
-    if (message.includes('windows store')) {
-      return `Windows Store Python alias detected. Please install Python from https://python.org`;
-    }
-    
-    return error.message;
-  }
-  
   // ===== Feature Support =====
   
   supportsFeature(feature: DebugFeature): boolean {

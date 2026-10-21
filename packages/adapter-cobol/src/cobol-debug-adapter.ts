@@ -998,20 +998,6 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
     return 'GnuCOBOL compiler (cobc) not found. Install GnuCOBOL 3.1.2+ or set COBC_PATH. ' + this.getInstallationInstructions();
   }
 
-  translateErrorMessage(error: Error): string {
-    const message = error.message;
-    const lower = message.toLowerCase();
-    const cobcAt = lower.indexOf('cobc');
-    const noSuchFileAt = lower.indexOf('no such file');
-    if ((cobcAt >= 0 && lower.indexOf('not found', cobcAt) >= 0) || (noSuchFileAt >= 0 && lower.indexOf('cobc', noSuchFileAt) >= 0)) {
-      return this.getMissingExecutableError();
-    }
-    if (/configuration error/i.test(message) && /\.conf/.test(message)) {
-      return `${message} — cobc could not find its dialect configuration; set COB_CONFIG_DIR to <GnuCOBOL prefix>/share/gnucobol/config (the adapter does this automatically when cobc is found via COBC_PATH or a known install).`;
-    }
-    return message;
-  }
-
   // ===== Feature Support =====
 
   supportsFeature(feature: DebugFeature): boolean {

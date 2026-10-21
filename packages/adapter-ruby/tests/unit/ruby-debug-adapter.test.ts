@@ -529,19 +529,6 @@ describe('RubyDebugAdapter', () => {
     adapter.handleDapResponse({ seq: 4, type: 'response', request_seq: 1, success: true, command: 'next' });
   });
 
-  it('translates common error messages', () => {
-    const adapter = new RubyDebugAdapter(createDependencies());
-    expect(adapter.translateErrorMessage(new Error('rdbg not found anywhere')))
-      .toContain('gem install debug');
-    expect(adapter.translateErrorMessage(new Error('Ruby not found on PATH')))
-      .toContain('Ruby 2.7+');
-    expect(adapter.translateErrorMessage(new Error('Permission denied for /usr/bin/rdbg')))
-      .toContain('Permission denied');
-    expect(adapter.translateErrorMessage(new Error('connection refused by host')))
-      .toContain('rdbg DAP server');
-    expect(adapter.translateErrorMessage(new Error('something else'))).toBe('something else');
-  });
-
   it('reports feature support and requirements', () => {
     const adapter = new RubyDebugAdapter(createDependencies());
     expect(adapter.supportsFeature(DebugFeature.EXCEPTION_BREAKPOINTS)).toBe(true);

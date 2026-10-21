@@ -113,14 +113,10 @@ describe('DartDebugAdapter lifecycle', () => {
     expect(a.getCapabilities()).toMatchObject({ supportsFunctionBreakpoints: false, supportsLogPoints: true, supportsRestartRequest: false });
   });
 
-  it('words its errors: install steps, the missing-SDK line, and the three translated messages', () => {
+  it('words its errors: install steps and the missing-SDK line', () => {
     const a = adapter();
     expect(a.getInstallationInstructions()).toMatch(/flutter doctor/);
     expect(a.getMissingExecutableError()).toMatch(/DART_SDK \/ FLUTTER_ROOT/);
-    expect(a.translateErrorMessage(new Error('No Dart SDK found anywhere'))).toBe(a.getMissingExecutableError());
-    expect(a.translateErrorMessage(new Error('FLUTTER_ROOT is not set'))).toMatch(/flutter --version/);
-    expect(a.translateErrorMessage(new Error('Session terminated before debugger initialized: (1)'))).toMatch(/failed to compile or start/);
-    expect(a.translateErrorMessage(new Error('something else'))).toBe('something else');
   });
 });
 

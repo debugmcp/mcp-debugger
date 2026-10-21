@@ -478,22 +478,6 @@ describe('RustDebugAdapter toolchain logic', () => {
       expect(adapter.getMissingExecutableError()).toContain('Rust toolchain not found');
     });
 
-    it('translates common error messages', () => {
-      const cases: Array<[string, string]> = [
-        ['CodeLLDB not found', 'CodeLLDB is not installed'],
-        ['cargo command not found', 'Rust toolchain not found'],
-        ['Permission denied while executing', 'Permission denied'],
-        ['target debug build missing', 'Debug binary not found'],
-        ['LLDB failed to start', 'LLDB failed to start'],
-        ['unexpected failure', 'unexpected failure']
-      ];
-
-      for (const [message, expected] of cases) {
-        const translated = adapter.translateErrorMessage(new Error(message));
-        expect(translated).toContain(expected.split(' ')[0]);
-      }
-    });
-
     it('reports supported features and requirements', () => {
       expect(adapter.supportsFeature(DebugFeature.CONDITIONAL_BREAKPOINTS)).toBe(true);
       expect(adapter.supportsFeature(DebugFeature.REVERSE_DEBUGGING)).toBe(false);

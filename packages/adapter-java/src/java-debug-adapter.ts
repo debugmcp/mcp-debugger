@@ -465,28 +465,6 @@ After installation:
 - Restart your terminal`;
   }
 
-  translateErrorMessage(error: Error): string {
-    const message = error.message.toLowerCase();
-
-    if (message.includes('jdi') && message.includes('not compiled')) {
-      return 'JDI bridge not compiled. Run: pnpm --filter @debugmcp/adapter-java run build:adapter';
-    }
-
-    if (message.includes('java') && message.includes('not found')) {
-      return this.getMissingExecutableError();
-    }
-
-    if (message.includes('permission denied')) {
-      return 'Permission denied accessing executable. Check file permissions.';
-    }
-
-    if (message.includes('classnotfound') || message.includes('noclassdef')) {
-      return 'Java class not found. Ensure the classpath is correct and the class is compiled.';
-    }
-
-    return error.message;
-  }
-
   // ===== Feature Support =====
 
   supportsFeature(feature: DebugFeature): boolean {

@@ -654,36 +654,6 @@ describe('DotnetDebugAdapter', () => {
 
       expect(msg).toContain('netcoredbg not found');
     });
-
-    it('translates netcoredbg not found errors', () => {
-      const msg = adapter.translateErrorMessage(new Error('netcoredbg not found on this system'));
-      expect(msg).toContain('NETCOREDBG_PATH');
-    });
-
-    it('translates permission denied errors', () => {
-      const msg = adapter.translateErrorMessage(new Error('attach denied by OS'));
-      expect(msg).toContain('Administrator');
-    });
-
-    it('translates process not found errors', () => {
-      const msg = adapter.translateErrorMessage(new Error('target process not found'));
-      expect(msg).toContain('PID');
-    });
-
-    it('translates symbol loading errors', () => {
-      const msg = adapter.translateErrorMessage(new Error('failed to symbol load PDB'));
-      expect(msg).toContain('Portable PDB');
-    });
-
-    it('translates connection refused errors', () => {
-      const msg = adapter.translateErrorMessage(new Error('connection refused by debugger'));
-      expect(msg).toContain('netcoredbg');
-    });
-
-    it('passes through unrecognized errors', () => {
-      const msg = adapter.translateErrorMessage(new Error('something unexpected'));
-      expect(msg).toBe('something unexpected');
-    });
   });
 
   // ===== Feature Requirements =====

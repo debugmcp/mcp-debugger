@@ -260,44 +260,6 @@ describe('GoDebugAdapter', () => {
     });
   });
 
-  describe('translateErrorMessage', () => {
-    it('should translate dlv not found error', () => {
-      const error = new Error('dlv: command not found');
-      const translated = adapter.translateErrorMessage(error);
-      expect(translated).toContain('Delve debugger not found');
-    });
-
-    it('should translate go not found error', () => {
-      const error = new Error('go: command not found');
-      const translated = adapter.translateErrorMessage(error);
-      expect(translated).toContain('Go not found');
-    });
-
-    it('should translate permission denied error', () => {
-      const error = new Error('permission denied');
-      const translated = adapter.translateErrorMessage(error);
-      expect(translated).toContain('Permission denied');
-    });
-
-    it('should translate could not launch process error', () => {
-      const error = new Error('could not launch process: exit status 1');
-      const translated = adapter.translateErrorMessage(error);
-      expect(translated).toContain('Could not launch process');
-    });
-
-    it('should translate could not attach error', () => {
-      const error = new Error('could not attach to process');
-      const translated = adapter.translateErrorMessage(error);
-      expect(translated).toContain('Could not attach');
-    });
-
-    it('should pass through unknown errors', () => {
-      const error = new Error('some unknown error');
-      const translated = adapter.translateErrorMessage(error);
-      expect(translated).toBe('some unknown error');
-    });
-  });
-
   describe('getInstallationInstructions', () => {
     it('should return installation instructions', () => {
       const instructions = adapter.getInstallationInstructions();

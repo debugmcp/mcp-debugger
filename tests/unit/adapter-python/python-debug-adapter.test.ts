@@ -150,21 +150,6 @@ describe('PythonDebugAdapter', () => {
     expect(requirements.some(r => r.description.includes('Python 3.7+'))).toBe(true);
   });
 
-  it('translateErrorMessage handles debugpy missing', () => {
-    const adapter = new PythonDebugAdapter(createDependencies());
-    const message = adapter.translateErrorMessage(new Error('ModuleNotFoundError: No module named debugpy'));
-    expect(message).toContain('debugpy');
-  });
-
-  it('translateErrorMessage normalizes other common errors', () => {
-    const adapter = new PythonDebugAdapter(createDependencies());
-
-    expect(adapter.translateErrorMessage(new Error('python: command not found'))).toContain('Python not found');
-    expect(adapter.translateErrorMessage(new Error('Permission denied to execute python'))).toContain('Permission denied');
-    expect(adapter.translateErrorMessage(new Error('Windows Store Python cannot be used'))).toContain('Windows Store');
-    expect(adapter.translateErrorMessage(new Error('unexpected failure'))).toBe('unexpected failure');
-  });
-
   it('returns feature requirements for select features and empty for unsupported ones', () => {
     const adapter = new PythonDebugAdapter(createDependencies());
 

@@ -285,45 +285,6 @@ describe('JavaDebugAdapter', () => {
     });
   });
 
-  describe('translateErrorMessage', () => {
-    it('should translate JDI bridge not compiled error', () => {
-      const error = new Error('JDI bridge not compiled');
-      const translated = adapter.translateErrorMessage(error);
-      expect(translated).toContain('JDI bridge not compiled');
-      expect(translated).toContain('build:adapter');
-    });
-
-    it('should translate Java not found error', () => {
-      const error = new Error('java: command not found');
-      const translated = adapter.translateErrorMessage(error);
-      expect(translated).toContain('Java not found');
-    });
-
-    it('should translate permission denied error', () => {
-      const error = new Error('permission denied');
-      const translated = adapter.translateErrorMessage(error);
-      expect(translated).toContain('Permission denied');
-    });
-
-    it('should translate ClassNotFoundException', () => {
-      const error = new Error('java.lang.ClassNotFoundException: com.example.Main');
-      const translated = adapter.translateErrorMessage(error);
-      expect(translated).toContain('class not found');
-    });
-
-    it('should translate NoClassDefFoundError', () => {
-      const error = new Error('java.lang.NoClassDefFoundError: com/example/Main');
-      const translated = adapter.translateErrorMessage(error);
-      expect(translated).toContain('class not found');
-    });
-
-    it('should pass through unknown errors', () => {
-      const error = new Error('some unknown error');
-      const translated = adapter.translateErrorMessage(error);
-      expect(translated).toBe('some unknown error');
-    });
-  });
-
   describe('getInstallationInstructions', () => {
     it('should return installation instructions', () => {
       const instructions = adapter.getInstallationInstructions();

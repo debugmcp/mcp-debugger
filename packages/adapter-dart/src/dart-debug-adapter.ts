@@ -367,14 +367,6 @@ export class DartDebugAdapter extends EventEmitter implements IDebugAdapter {
     return 'Dart SDK not found. Install Dart or Flutter and put `dart` on PATH, or set DART_SDK / FLUTTER_ROOT.';
   }
 
-  translateErrorMessage(error: Error): string {
-    const m = error.message;
-    if (/no dart sdk|dart sdk not found/i.test(m)) return this.getMissingExecutableError();
-    if (/flutter_root/i.test(m)) return `${m} (run \`flutter --version\` once after installing so the tool cache is built)`;
-    if (/session terminated before debugger initialized/i.test(m)) return `${m} — the program or test file failed to compile or start; the compiler diagnostics are in the captured output`;
-    return m;
-  }
-
   // ===== Features =====
 
   supportsFeature(feature: DebugFeature): boolean {

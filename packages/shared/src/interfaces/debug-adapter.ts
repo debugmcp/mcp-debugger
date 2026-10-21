@@ -255,11 +255,6 @@ export interface IDebugAdapter extends EventEmitter {
    */
   getMissingExecutableError(): string;
   
-  /**
-   * Translate generic errors to language-specific messages
-   */
-  translateErrorMessage(error: Error): string;
-  
   // ===== Feature Support =====
   
   /**

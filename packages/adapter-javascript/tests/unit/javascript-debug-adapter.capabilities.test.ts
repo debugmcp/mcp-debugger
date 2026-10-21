@@ -100,26 +100,4 @@ describe('JavascriptDebugAdapter capabilities and error helpers', () => {
     expect(msg).toMatch(/nodejs\.org/i);
     expect(msg).toMatch(/PATH/i);
   });
-
-  it('translateErrorMessage maps ENOENT, EACCES, and ts-node/tsx missing cases', () => {
-    // ENOENT -> missing runtime
-    const enoent = new Error('spawn node ENOENT');
-    expect(adapter.translateErrorMessage(enoent)).toMatch(/Node\.js runtime not found/i);
-
-    // EACCES -> permission denied
-    const eacces = new Error('EACCES: permission denied');
-    expect(adapter.translateErrorMessage(eacces)).toMatch(/Permission denied/i);
-
-    // ts-node missing
-    const tsnodeMissing = new Error("Cannot find module 'ts-node'");
-    expect(adapter.translateErrorMessage(tsnodeMissing)).toMatch(/Install tsx or ts-node/i);
-
-    // tsx missing
-    const tsxMissing = new Error("Cannot find module 'tsx'");
-    expect(adapter.translateErrorMessage(tsxMissing)).toMatch(/Install tsx or ts-node/i);
-
-    // passthrough for other messages
-    const other = new Error('some other error');
-    expect(adapter.translateErrorMessage(other)).toBe('some other error');
-  });
 });

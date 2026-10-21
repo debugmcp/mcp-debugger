@@ -346,17 +346,6 @@ describe('RustDebugAdapter', () => {
     });
   });
   
-  describe('Error Messages', () => {
-    it('should provide helpful error messages', () => {
-      const codeError = new Error('codelldb not found');
-      const translated = adapter.translateErrorMessage(codeError);
-      expect(translated).toContain('npm run build:adapter');
-      
-      const cargoError = new Error('cargo not found');
-      const cargoTranslated = adapter.translateErrorMessage(cargoError);
-      expect(cargoTranslated).toContain('rustup.rs');
-    });
-  });
 });
 
 describe('RustAdapterFactory', () => {

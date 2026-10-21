@@ -795,28 +795,6 @@ Install:
   - macOS: xcode-select --install`;
   }
 
-  translateErrorMessage(error: Error): string {
-    const message = error.message.toLowerCase();
-
-    if (message.includes('codelldb') && message.includes('not found')) {
-      return 'CodeLLDB is not installed. It normally ships via the @debugmcp/codelldb-* optional dependencies; set CODELLDB_PATH, or in a repo checkout run: npm run build:adapter';
-    }
-
-    if (message.includes('compiler') && message.includes('not found')) {
-      return this.getMissingExecutableError();
-    }
-
-    if (message.includes('permission denied') || message.includes('eperm')) {
-      return 'Permission denied. For attach on Linux, check ptrace scope: sysctl kernel.yama.ptrace_scope (1 blocks attaching to non-child processes; 0 allows it). Otherwise check file permissions.';
-    }
-
-    if (message.includes('lldb') && message.includes('failed')) {
-      return 'LLDB failed to start. Ensure CodeLLDB is properly installed and your system meets requirements.';
-    }
-
-    return error.message;
-  }
-
   // ===== Feature Support =====
 
   supportsFeature(feature: DebugFeature): boolean {

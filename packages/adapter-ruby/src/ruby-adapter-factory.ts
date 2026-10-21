@@ -88,7 +88,8 @@ export class RubyAdapterFactory implements IAdapterFactory {
         warnings.push('Could not determine rdbg version');
       }
     } catch (error) {
-      errors.push(error instanceof Error ? error.message : 'rdbg not found');
+      const notFound = error instanceof Error ? error.message.replace(/\.?\s*$/, '.') : 'rdbg not found.';
+      errors.push(`${notFound} Install the debug gem with: gem install debug (or set RDBG_PATH).`);
     }
 
     const details: RubyToolchainDetails = {
