@@ -116,6 +116,7 @@ describe('GoAdapterFactory', () => {
             // DAP support check
           }
           proc.emit('exit', 0);
+          proc.emit('close', 0);
         });
 
         return proc;
@@ -159,6 +160,7 @@ describe('GoAdapterFactory', () => {
             }
           }
           proc.emit('exit', 0);
+          proc.emit('close', 0);
         });
 
         return proc;
@@ -188,6 +190,7 @@ describe('GoAdapterFactory', () => {
             proc.stdout.emit('data', Buffer.from('go version go1.21.0 darwin/arm64\n'));
           }
           proc.emit('exit', 0);
+          proc.emit('close', 0);
         });
 
         return proc;
@@ -214,11 +217,14 @@ describe('GoAdapterFactory', () => {
               proc.stdout.emit('data', Buffer.from('go version go1.21.0 darwin/arm64\n'));
             }
             proc.emit('exit', 0);
+            proc.emit('close', 0);
           } else if (args?.[0] === 'dap' && args?.[1] === '--help') {
             // DAP not supported in old version
             proc.emit('exit', 1);
+            proc.emit('close', 1);
           } else {
             proc.emit('exit', 0);
+            proc.emit('close', 0);
           }
         });
 
@@ -241,6 +247,7 @@ describe('GoAdapterFactory', () => {
         process.nextTick(() => {
           proc.stdout.emit('data', Buffer.from('go version go1.21.0\n'));
           proc.emit('exit', 0);
+          proc.emit('close', 0);
         });
         return proc;
       });

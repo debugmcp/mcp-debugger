@@ -9,7 +9,7 @@ import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidatio
 import { toolchainComponent } from '@debugmcp/shared';
 import { JavaDebugAdapter } from './java-debug-adapter.js';
 import { DebugLanguage } from '@debugmcp/shared';
-import { findJavaExecutable, getJavaVersion } from './utils/java-utils.js';
+import { findJavaWithVersion } from './utils/java-utils.js';
 import { resolveJdiBridgeClassDir, isJdiBridgeStale } from './utils/jdi-resolver.js';
 
 /**
@@ -92,8 +92,10 @@ export class JavaAdapterFactory implements IAdapterFactory {
 
     // Check Java
     try {
-      javaPath = await findJavaExecutable();
-      javaVersion = await getJavaVersion(javaPath) || undefined;
+      // One `java -version` validates the executable and reads its version (issue #969)
+      const java = await findJavaWithVersion();
+      javaPath = java.path;
+      javaVersion = java.version || undefined;
 
       if (javaVersion) {
         // Parse major version: "17.0.1" -> 17, "1.8.0_301" -> 8

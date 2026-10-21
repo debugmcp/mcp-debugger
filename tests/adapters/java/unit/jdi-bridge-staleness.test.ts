@@ -17,6 +17,7 @@ vi.mock('../../../../packages/adapter-java/src/utils/jdi-resolver.js', () => ({
 
 vi.mock('../../../../packages/adapter-java/src/utils/java-utils.js', () => ({
   findJavaExecutable: vi.fn(async () => '/usr/bin/java'),
+  findJavaWithVersion: vi.fn(async () => ({ path: '/usr/bin/java', version: '21.0.1' })),
   getJavaVersion: vi.fn(async () => '21.0.1'),
   getJavaSearchPaths: vi.fn(() => [])
 }));
