@@ -39,9 +39,10 @@ export function buildServerInstructions(
 
   return `mcp-debugger drives real step-through debuggers (Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET, C/C++, COBOL, Dart/Flutter) as MCP tools.
 
-Golden path: create_debug_session -> set_breakpoint (ABSOLUTE file path) -> start_debugging (ABSOLUTE scriptPath; answers paused at a breakpoint reached as the program starts, otherwise pending:true -> wait_for_stop) -> get_stack_trace -> get_scopes(frameId from the stack frame's "id" field) -> get_variables / get_local_variables / evaluate_expression -> step_* or continue_execution (+ wait_for_stop) -> get_output -> close_debug_session (always, even on failure).
+Golden path: create_debug_session -> set_breakpoint (ABSOLUTE file path) -> start_debugging (ABSOLUTE scriptPath; answers paused at a breakpoint reached as the program starts, otherwise pending:true -> wait_for_stop) -> read the answer's snapshot -> step_* or continue_execution (+ wait_for_stop) -> get_output -> close_debug_session (always, even on failure).
 
 Key rules:
+- Every paused answer (start/restart/wait_for_stop/pause/attach) already carries snapshot {exception?, frames, locals} — the exception message, top frames and the top frame's locals, redacted and capped. Read it before calling get_stack_trace/get_local_variables; call those (and get_scopes -> get_variables with a variablesReference) only to expand structures, see more frames, or fetch the full list (snapshot.truncation says when there is more). Entry stops carry no snapshot.
 - Stepping/evaluation/variable reads require the session to be PAUSED; the stop reason on each pause tells you why it stopped.
 - continue_execution returns at once, and a launch, step, pause or attach may answer pending:true when its stop has not arrived yet. Nothing is cancelled — breakpoints stay armed. Call wait_for_stop {sessionId} to block until the session pauses or ends (it reports the stop, or the exit code); a wait that runs out answers pending:true again, so call it again.
 - If a variable entry has a variablesReference, call get_variables with it to expand children.
@@ -76,13 +77,12 @@ Prefer the debugger over print-debugging whenever you would need more than one e
 1. create_debug_session {language} -> sessionId
 ${setBreakpointStep}
 3. start_debugging {sessionId, scriptPath: ABSOLUTE path} — answers paused when a breakpoint is reached as the program starts; otherwise running with pending:true, and wait_for_stop {sessionId} collects the stop (for a server: send the request first)
-4. get_stack_trace {sessionId} — use each frame's "id" field; it is adapter-assigned, never assume 0
-5. get_scopes {sessionId, frameId} -> variablesReference per scope
-6. get_variables {sessionId, scope: variablesReference} or get_local_variables {sessionId}
-7. evaluate_expression {sessionId, expression}
-8. step_over / step_into / step_out / continue_execution, then wait_for_stop {sessionId} to block until the next stop or the exit (continue_execution does not wait)
-9. get_output {sessionId} — cursor-based; pass the returned nextSince back as since for only-new output
-10. close_debug_session {sessionId} — ALWAYS, even after errors
+4. Read the paused answer's snapshot first: it already carries the exception (type/message), the top frames, and the top frame's locals (redacted, capped — snapshot.truncation says when there is more). Often that is the whole inspection.
+5. To go deeper: get_stack_trace {sessionId} for the full stack (use each frame's "id" field; it is adapter-assigned, never assume 0), get_scopes {sessionId, frameId} -> variablesReference per scope, then get_variables {sessionId, scope: variablesReference} or get_local_variables {sessionId} for the full locals
+6. evaluate_expression {sessionId, expression}
+7. step_over / step_into / step_out / continue_execution, then wait_for_stop {sessionId} to block until the next stop or the exit (continue_execution does not wait)
+8. get_output {sessionId} — cursor-based; pass the returned nextSince back as since for only-new output
+9. close_debug_session {sessionId} — ALWAYS, even after errors
 
 ## Root-cause discipline
 - State a hypothesis before setting breakpoints.
@@ -129,7 +129,7 @@ When a human wants to look around in their IDE, expose_session {sessionId} opens
 
 ## Crash diagnosis
 - Launch sessions pause at uncaught exceptions by default with stack + locals live ("none" opts out; "all" also stops on caught raises; Ruby has no uncaught filter so its crashes still terminate). Attach applies no default.
-- lastStop.description/text carry the exception class and message; where supported (Python/JS/Java/.NET), lastStop.exceptionInfo adds exceptionId/breakMode/details a moment after the pause. exitCode in list_debug_sessions distinguishes a crash (non-zero) from a clean exit.
+- The paused answer's snapshot.exception carries the class and message up front (secret-redacted), with snapshot.frames and snapshot.locals beside it — usually all you need before evaluate_expression. lastStop.description/text carry the same (redacted in answers); where supported (Python/JS/Java/.NET), lastStop.exceptionInfo adds exceptionId/breakMode/details a moment after the pause. exitCode in list_debug_sessions distinguishes a crash (non-zero) from a clean exit.
 
 The full skill (with per-language reference files) lives in skills/debugging/ of the mcp-debugger repo.`;
 }

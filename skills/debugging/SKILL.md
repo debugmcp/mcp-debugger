@@ -23,15 +23,17 @@ Do NOT reach for it when a single glance at the code or one log line would answe
 1. create_debug_session   {language: "python"}                 -> sessionId
 2. set_breakpoint         {sessionId, file: "<ABSOLUTE path>", statement: "<line text or distinctive substring>"}   (or line: N + expectedContent)
 3. start_debugging        {sessionId, scriptPath: "<ABSOLUTE path>"}   -> paused at the breakpoint, or pending: true -> wait_for_stop {sessionId}
-4. get_stack_trace        {sessionId}                          -> frames (use frame.id, never assume 0)
-5. get_scopes             {sessionId, frameId: <frame.id>}     -> scope variablesReference
-6. get_variables          {sessionId, scope: <variablesReference>}
-   ... or get_local_variables {sessionId} for the common case
-7. evaluate_expression    {sessionId, expression: "x + y"}
-8. step_over / step_into / step_out / continue_execution
+4. READ THE PAUSED ANSWER: it already carries location, the source line (context), and snapshot
+   {exception?, frames, locals} — the exception message, top frames, and the top frame's locals
+   (redacted, capped; snapshot.truncation says when there is more). Often that is the whole inspection.
+5. To go deeper: get_stack_trace {sessionId} for the full stack (use frame.id, never assume 0),
+   get_scopes {sessionId, frameId: <frame.id>} -> scope variablesReference,
+   get_variables {sessionId, scope: <variablesReference>} ... or get_local_variables {sessionId}
+6. evaluate_expression    {sessionId, expression: "x + y"}
+7. step_over / step_into / step_out / continue_execution
    wait_for_stop          {sessionId}                          -> blocks until the next stop or the exit (continue_execution does not wait)
-9. get_output             {sessionId}                          -> captured debuggee stdout/stderr
-10. close_debug_session   {sessionId}                          -> ALWAYS, even on failure
+8. get_output             {sessionId}                          -> captured debuggee stdout/stderr
+9. close_debug_session    {sessionId}                          -> ALWAYS, even on failure
 ```
 
 Rules that prevent 90% of failed sessions:
@@ -99,7 +101,7 @@ Relay the endpoint with a ready-to-paste VS Code config: `{"name": "Mirror", "ty
 ## Crash diagnosis
 
 - Launch sessions pause at uncaught exceptions **by default** (`breakOnExceptions: "uncaught"`) with the stack and locals live instead of losing the session — pass `"none"` to opt out, or `"all"` to also stop on caught raises (language-dependent). Ruby is the exception: rdbg has no uncaught-only filter, so Ruby crashes still run to termination unless you pass `"all"`. Attach sessions apply no default — pass the mode explicitly.
-- On an exception stop, `lastStop.description`/`lastStop.text` carry the exception class and message; where the adapter supports it (Python, JS, Java, .NET), `lastStop.exceptionInfo` adds `exceptionId`, `breakMode`, and details (it lands a moment after the pause — re-query if absent). After termination, `exitCode` in `list_debug_sessions` distinguishes a crash (non-zero) from a clean exit.
+- On an exception stop, the paused answer's `snapshot.exception` carries the class and message up front (secret-redacted), with `snapshot.frames` and `snapshot.locals` beside it — usually all you need before `evaluate_expression`. `lastStop.description`/`lastStop.text` carry the same (answers emit a redacted copy); where the adapter supports it (Python, JS, Java, .NET), `lastStop.exceptionInfo` adds `exceptionId`, `breakMode`, and details (it lands a moment after the pause — re-query if absent). After termination, `exitCode` in `list_debug_sessions` distinguishes a crash (non-zero) from a clean exit.
 
 ## Current limitations (be honest with yourself)
 
