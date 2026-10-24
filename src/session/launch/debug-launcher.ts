@@ -463,6 +463,7 @@ export class DebugLauncher {
     session.lastProxyError = undefined;
     session.failureDiagnostics = undefined;
     session.lastStop = undefined;
+    session.snapshotDiffBase = undefined;
     session.launchConfigNotices = [];
     session.adapterNotices = [];
     // The previous launch's debugger-off decision does not carry over
