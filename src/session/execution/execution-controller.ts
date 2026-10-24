@@ -663,6 +663,16 @@ export class ExecutionController {
       // The snapshot behind the landing (issue #982): same resolver result,
       // bounded locals; a session that moved on under the read answers none.
       const snapshot = await composeStopSnapshot(this.ctx, sessionId, landing.stackResult, 'pause');
+      // The compose is a real wait (locals read, bounded by its tunable): a
+      // debuggee that ended under it must get the ended wording, exactly as
+      // one that ended under the landing read does (#574's rule 2).
+      if (sessionEnded()) {
+        return {
+          success: true,
+          state: session.state,
+          data: { message: PAUSED_THEN_ENDED_MESSAGE, ...ownStopReason() }
+        };
+      }
       this.ctx.logger.info(
         `[SessionManager pause] Paused session ${sessionId}. Current state: ${session.state}`
       );
@@ -804,9 +814,14 @@ export class ExecutionController {
       ? await describeStopLocation(this.ctx, sessionId, 'waitForStop')
       : {};
     const location = landing.location;
+    // The stop this wait settled on, pinned at the landing read: the compose
+    // below is a real wait, and a NEW stop landing under it belongs to the
+    // next wait_for_stop, not to this answer — one answer, one stop.
+    const stopAtLanding = session.lastStop;
     // The snapshot behind the landing (issue #982). The exception section is
     // omitted on purpose: this answer carries the full (redacted) lastStop,
-    // and the same message must never ship twice.
+    // and the same message must never ship twice. The composer's own
+    // stop-identity gate answers no snapshot if the stop changed under it.
     const snapshot = await composeStopSnapshot(
       this.ctx, sessionId, landing.stackResult, 'waitForStop', { omitException: true }
     );
@@ -824,14 +839,14 @@ export class ExecutionController {
     // resumed past it.
     const stopDuringWait =
       session.lastStop && session.lastStop !== lastStopBefore ? { lastStop: emitStop(session.lastStop) } : {};
-    if (state === SessionState.PAUSED && session.lastStop) {
+    if (state === SessionState.PAUSED && stopAtLanding) {
       const where = location ? ` at ${location.file}:${location.line}` : '';
       return {
         success: true,
         state,
         data: {
-          message: `Paused (${session.lastStop.reason})${where}`,
-          lastStop: emitStop(session.lastStop),
+          message: `Paused (${stopAtLanding.reason})${where}`,
+          lastStop: emitStop(stopAtLanding),
           ...landingFields(landing),
           ...(snapshot ? { snapshot } : {})
         }

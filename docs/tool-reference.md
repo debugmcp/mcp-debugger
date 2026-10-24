@@ -411,9 +411,12 @@ crashing state costs zero extra tool calls:
   `get_local_variables` (policy scope selection, the walk-down to the first frame with locals,
   secret redaction), under tighter caps — 20 locals / 200 chars per value by default
   (`DEBUG_MCP_SNAPSHOT_MAX_LOCALS` / `DEBUG_MCP_SNAPSHOT_MAX_VALUE_CHARS`); `truncation` says what
-  was cut. The read is bounded (~2 s): if it expires or fails, the answer ships without `locals`
-  and `note` says so. The snapshot is orientation, not navigation — `get_local_variables` /
-  `get_variables` remain the way to expand structures or fetch everything.
+  was cut. The read is bounded (~2 s): if it expires or fails inside the composer, the answer ships
+  without `locals` and `note` says so. A read that comes back empty is shown as no locals — and when
+  unprobed deeper frames exist (the snapshot probes the top 3), `note` says that too; an adapter
+  error the pipeline itself absorbs looks the same as a locals-free frame, and `get_local_variables`
+  on the same stop is the deeper read. The snapshot is orientation, not navigation —
+  `get_local_variables` / `get_variables` remain the way to expand structures or fetch everything.
 - **`changedVariables`** replaces `locals` on a repeated stop in the same frame (issue #983) —
   stepping through a function, or a `continue_execution` → `wait_for_stop` loop over one
   breakpoint: only what changed since the locals were last shown, as

@@ -54,6 +54,11 @@ function capped(text: string | undefined): string | undefined {
   return text.length > EXCEPTION_FIELD_CAP ? `${text.slice(0, EXCEPTION_FIELD_CAP)}…` : text;
 }
 
+/** A bare dotted identifier, the shape of an exception class name. */
+function looksLikeTypeName(text: string): boolean {
+  return /^[A-Za-z_$][\w$.]*$/.test(text.trim());
+}
+
 /** Own enumerable assignment that survives exotic names ('__proto__'). */
 function setOwn<T>(target: Record<string, T>, key: string, value: T): void {
   Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
@@ -93,17 +98,27 @@ export async function composeStopSnapshot(
       // Redact a copy; the stored record keeps its identity (merge guards).
       const source = ctx.redactionEnabled() ? redactStopInfo(stop) : stop;
       // The merged exceptionInfo's typed fields win over the raw stopped-event
-      // pair: adapters disagree on the pair's order (debugpy follows the DAP
-      // spec reading — `text` is the exception NAME, `description` the message
-      // — while the mock/JDI convention is the reverse), but typeName /
-      // exceptionId / details.message are unambiguous. Without exceptionInfo
-      // (not merged yet, or unsupported) the pair is passed through in the
-      // model-comment order.
+      // pair: adapters disagree on the pair's orientation — the repo's own
+      // pins show debugpy and the JDI bridge putting the exception NAME in
+      // `text` (the DAP-spec reading) while the mock adapter puts it in
+      // `description` — but typeName / exceptionId / details.message are
+      // unambiguous. Without exceptionInfo (not merged yet, or unsupported)
+      // the pair is labeled by shape: the half that reads as a bare
+      // identifier (a class name) is the type; two identifiers or two
+      // sentences keep the model-comment order (description -> type).
       const details = source.exceptionInfo?.details;
+      let rawType = source.description;
+      let rawMessage = source.text;
+      if (
+        rawType !== undefined && rawMessage !== undefined &&
+        looksLikeTypeName(rawMessage) && !looksLikeTypeName(rawType)
+      ) {
+        [rawType, rawMessage] = [rawMessage, rawType];
+      }
       const type = capped(
-        details?.fullTypeName ?? details?.typeName ?? source.exceptionInfo?.exceptionId ?? source.description
+        details?.fullTypeName ?? details?.typeName ?? source.exceptionInfo?.exceptionId ?? rawType
       );
-      const message = capped(details?.message ?? source.text ?? source.exceptionInfo?.description);
+      const message = capped(details?.message ?? rawMessage ?? source.exceptionInfo?.description);
       const extra = capped(source.exceptionInfo?.description);
       const detailsOut = extra !== undefined && extra !== message ? extra : undefined;
       if (type !== undefined || message !== undefined || detailsOut !== undefined) {
@@ -129,7 +144,11 @@ export async function composeStopSnapshot(
       notes.push(
         'locals withheld (DEBUG_MCP_VARIABLE_ACCESS=explicit); use get_local_variables with names'
       );
-    } else if (!stackResult.noProgramFrame && frames[0] && !frames[0].file.startsWith('<')) {
+    } else if (!stackResult.noProgramFrame && frames[0]) {
+      // No gate on the top frame's own file: the #672 keep rule can put a
+      // sourceless internal frame at frames[0] with program frames below,
+      // and the walk-down (#468) exists exactly for that. A stack with no
+      // program frame at all is caught by noProgramFrame above.
       const timeoutMs = ctx.tunables.snapshotLocalsTimeoutMs;
       let timer: NodeJS.Timeout | undefined;
       try {
@@ -153,8 +172,20 @@ export async function composeStopSnapshot(
           );
         } else if (raced === FAILED) {
           notes.push('locals omitted: the locals read failed; get_local_variables reads them');
+        } else if (ctx.getSession(sessionId).lastStop !== stop) {
+          // The stop changed under the read: these locals belong to another
+          // stop's world. No snapshot beats a mixed one.
+          return undefined;
         } else {
           const cappedLocals = applyVariableCaps(raced.variables, snapshotLocalsLimits());
+          if (cappedLocals.variables.length === 0 && stackResult.frames.length > SNAPSHOT_FRAMES) {
+            // The capped probe may simply not have reached the frames that
+            // have locals; silence here would be indistinguishable from
+            // "locals-free frame" (review of #982).
+            notes.push(
+              `no locals in the top ${SNAPSHOT_FRAMES} frames; get_local_variables probes deeper frames`
+            );
+          }
           if (cappedLocals.variables.length > 0) {
             // First value wins on a duplicate name (scope merge order is the
             // policy's presentation order); defineProperty so exotic names
@@ -196,14 +227,36 @@ export async function composeStopSnapshot(
               }
             }
           }
-          const truncation = mergeTruncationSummaries([raced.truncation, cappedLocals.truncation]);
-          if (truncation) {
-            snapshot.truncation =
-              `${truncation.omittedCount} variable(s) omitted, ` +
-              `${truncation.valueTruncatedCount} value(s) cut — get_local_variables returns the full list`;
+          // Omissions merge from both passes; CUTS count only at the
+          // snapshot's own cap (a value cut upstream and re-cut here is one
+          // cut value, not two); unread scopes come from the pipeline.
+          const omitted =
+            (raced.truncation?.omittedCount ?? 0) + (cappedLocals.truncation?.omittedCount ?? 0);
+          const cut = cappedLocals.truncation?.valueTruncatedCount
+            ?? raced.truncation?.valueTruncatedCount ?? 0;
+          const scopesUnread = raced.truncation?.scopesSkipped ?? 0;
+          const parts: string[] = [];
+          if (omitted > 0) parts.push(`${omitted} variable(s) omitted`);
+          if (cut > 0) parts.push(`${cut} value(s) cut`);
+          if (scopesUnread > 0) parts.push(`${scopesUnread} scope(s) unread`);
+          if (parts.length > 0) {
+            snapshot.truncation = `${parts.join(', ')} — get_local_variables returns the full list`;
           }
           if (raced.anchorNote) {
-            notes.push(raced.anchorNote);
+            // The resolver's own note already rides on the answer as the
+            // landing's note; the same sentence never ships twice. The data
+            // layer always seeds anchorNote with that note first, so a
+            // prefix strip is exact (the note itself may contain '; ').
+            const resolverNote = stackResult.note;
+            const fresh =
+              resolverNote === undefined ? raced.anchorNote
+              : raced.anchorNote === resolverNote ? ''
+              : raced.anchorNote.startsWith(`${resolverNote}; `)
+                ? raced.anchorNote.slice(resolverNote.length + 2)
+                : raced.anchorNote;
+            if (fresh) {
+              notes.push(fresh);
+            }
           }
         }
       } finally {

@@ -404,3 +404,89 @@ describe('step answers join the snapshot with changedVariables (issue #983)', ()
     expect(result.data?.snapshot?.changedVariables).toBeUndefined();
   });
 });
+
+describe('review fixes: answers stay coherent across the locals read (issue #982 review)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  function stubHangingLocals(dependencies: ReturnType<typeof createMockDependencies>) {
+    dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: any) => {
+      if (command === 'stackTrace') {
+        return {
+          success: true,
+          body: { stackFrames: [{ id: 1, name: 'main', source: { path: 'test.py' }, line: 10, column: 0 }] }
+        };
+      }
+      if (command === 'scopes') {
+        return { success: true, body: { scopes: [{ name: 'Locals', variablesReference: 100, expensive: false }] } };
+      }
+      if (command === 'variables') {
+        return new Promise(() => {}); // hangs across the compose window
+      }
+      return { success: true, args };
+    });
+  }
+
+  it('a pause whose debuggee ends during the locals read answers the ended wording, not "Paused"', async () => {
+    const { sessionManager, dependencies } = makeManager();
+    const session = await sessionManager.createSession({
+      language: DebugLanguage.MOCK,
+      executablePath: 'python'
+    });
+    await sessionManager.startDebugging(session.id, 'test.py', [], { stopOnEntry: false });
+    await vi.runAllTimersAsync();
+    stubHangingLocals(dependencies);
+    (sessionManager as unknown as { snapshotLocalsTimeoutMs: number }).snapshotLocalsTimeoutMs = 100;
+
+    const pause = sessionManager.pause(session.id);
+    await vi.advanceTimersByTimeAsync(20);
+    dependencies.mockProxyManager.simulateStopped(1, 'pause');
+    await vi.advanceTimersByTimeAsync(30); // landing read done; locals hanging
+    dependencies.mockProxyManager.simulateEvent('terminated');
+    await vi.advanceTimersByTimeAsync(200); // compose window expires
+    const result = await pause;
+
+    expect(result.success).toBe(true);
+    expect(['stopped', 'error']).toContain(result.state);
+    expect(result.data?.message).toContain('ended');
+    expect(result.data?.message).not.toBe('Paused');
+    expect(result.data?.snapshot).toBeUndefined();
+    expect(result.data?.location).toBeUndefined();
+  });
+
+  it('a wait_for_stop answer describes ONE stop even when another lands during the locals read', async () => {
+    const { sessionManager, dependencies } = makeManager();
+    const session = await sessionManager.createSession({
+      language: DebugLanguage.MOCK,
+      executablePath: 'python'
+    });
+    await sessionManager.startDebugging(session.id, 'test.py', [], { stopOnEntry: false });
+    await vi.runAllTimersAsync();
+    stubHangingLocals(dependencies);
+    (sessionManager as unknown as { snapshotLocalsTimeoutMs: number }).snapshotLocalsTimeoutMs = 100;
+
+    dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+    await vi.advanceTimersByTimeAsync(20);
+    const wait = sessionManager.waitForStop(session.id, 1000);
+    await vi.advanceTimersByTimeAsync(30); // landing read of stop A done; locals hanging
+    dependencies.mockProxyManager.simulateStopped(2, 'exception'); // stop B lands mid-read
+    await vi.advanceTimersByTimeAsync(200);
+    const result = await wait;
+
+    expect(result.success).toBe(true);
+    // The wait settled on stop A: the whole answer speaks about A.
+    expect(result.data?.lastStop?.reason).toBe('breakpoint');
+    expect(result.data?.message).toContain('(breakpoint)');
+    // The snapshot never mixes stops: A's frames may ship (they are this
+    // answer's stop), but locals read under B's world may not.
+    expect(result.data?.snapshot?.locals).toBeUndefined();
+    expect(result.data?.snapshot?.changedVariables).toBeUndefined();
+  });
+});
+

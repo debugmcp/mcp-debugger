@@ -394,7 +394,7 @@ Closes the mirror endpoint via the `mirrorUnexpose` pseudo-command and disconnec
 Lists all threads in the debug session.
 
 #### `getLocalVariables(sessionId: string, includeSpecial?: boolean, names?: string[]): Promise<{ variables: Variable[]; frame: { name: string; file: string; line: number } | null; scopeName: string | null; anchorNote?: string; truncation?: VariableTruncationSummary }>`
-Orchestrates stack trace → scopes → variables, then delegates to the language adapter's policy to extract just the locals. If `includeSpecial` is false (default), internal/special variables are filtered out; `names` is an optional exact-match, case-sensitive filter applied to the extracted locals. The return type is an inline object literal (there is no named result type). `anchorNote` explains any departure from "the top frame's local scope" (a lower frame was anchored, and/or a sibling scope supplied the variables); `truncation` appears when the size guards cut the response.
+Orchestrates stack trace → scopes → variables, then delegates to the language adapter's policy to extract just the locals. If `includeSpecial` is false (default), internal/special variables are filtered out; `names` is an optional exact-match, case-sensitive filter applied to the extracted locals. The return type is the exported `LocalVariablesResult` (issue #982 named it; also what the protected `extractLocalsFromResolved` — the same pipeline behind an already-resolved stack, which the stop snapshot uses — returns). `anchorNote` explains any departure from "the top frame's local scope" (a lower frame was anchored, and/or a sibling scope supplied the variables); `truncation` appears when the size guards cut the response.
 
 ### Session Management
 
