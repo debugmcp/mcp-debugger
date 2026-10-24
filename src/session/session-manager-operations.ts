@@ -135,6 +135,15 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   protected waitForStopDefaultMs = 30000;
 
   /**
+   * Bound on the stop snapshot's locals read (issue #982): how long a PAUSED
+   * answer waits for scopes+variables before shipping without `locals` (the
+   * snapshot note then says what expired). Not a deadline on the debuggee —
+   * the underlying DAP request keeps its own timeout and merely outlives the
+   * answer. Protected so tests can shrink the window.
+   */
+  protected snapshotLocalsTimeoutMs = 2000;
+
+  /**
    * The view of this facade that the operation collaborators get. Every member
    * is late bound (arrows for methods, getters for fields and tunables) so that
    * reassigning `selectPolicy` or writing `stepGraceMs` on a live instance —
@@ -160,7 +169,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         get pauseGraceMs() { return facade().pauseGraceMs; },
         get launchReadyCeilingMs() { return facade().launchReadyCeilingMs; },
         get launchHoldMs() { return facade().launchHoldMs; },
-        get waitForStopDefaultMs() { return facade().waitForStopDefaultMs; }
+        get waitForStopDefaultMs() { return facade().waitForStopDefaultMs; },
+        get snapshotLocalsTimeoutMs() { return facade().snapshotLocalsTimeoutMs; }
       },
       getSession: (sessionId) => this._getSessionById(sessionId),
       updateSession: (sessionId, updates) => this.sessionStore.update(sessionId, updates),
@@ -179,7 +189,11 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         this.getStackTrace(sessionId, threadId, includeInternals),
       getStackTraceDetailed: (sessionId, threadId, includeInternals, opts) =>
         this.getStackTraceDetailed(sessionId, threadId, includeInternals, opts),
-      redactionEnabled: () => this.redactionEnabled()
+      extractLocalsFromResolved: (sessionId, stackResult, opts) =>
+        this.extractLocalsFromResolved(sessionId, stackResult, opts),
+      redactionEnabled: () => this.redactionEnabled(),
+      snapshotEnabled: () => this.snapshotEnabled(),
+      variableAccessMode: () => this.variableAccessMode()
     };
   }
 
