@@ -87,9 +87,18 @@ export async function composeStopSnapshot(
     if (!opts.omitException && stop?.reason === 'exception') {
       // Redact a copy; the stored record keeps its identity (merge guards).
       const source = ctx.redactionEnabled() ? redactStopInfo(stop) : stop;
+      // The merged exceptionInfo's typed fields win over the raw stopped-event
+      // pair: adapters disagree on the pair's order (debugpy follows the DAP
+      // spec reading — `text` is the exception NAME, `description` the message
+      // — while the mock/JDI convention is the reverse), but typeName /
+      // exceptionId / details.message are unambiguous. Without exceptionInfo
+      // (not merged yet, or unsupported) the pair is passed through in the
+      // model-comment order.
       const details = source.exceptionInfo?.details;
-      const type = capped(source.description ?? details?.fullTypeName ?? details?.typeName);
-      const message = capped(source.text ?? details?.message ?? source.exceptionInfo?.description);
+      const type = capped(
+        details?.fullTypeName ?? details?.typeName ?? source.exceptionInfo?.exceptionId ?? source.description
+      );
+      const message = capped(details?.message ?? source.text ?? source.exceptionInfo?.description);
       const extra = capped(source.exceptionInfo?.description);
       const detailsOut = extra !== undefined && extra !== message ? extra : undefined;
       if (type !== undefined || message !== undefined || detailsOut !== undefined) {

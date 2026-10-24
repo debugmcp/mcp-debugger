@@ -316,6 +316,32 @@ describe('composeStopSnapshot exception mapping', () => {
     expect(JSON.stringify(snapshot)).not.toContain('Traceback');
   });
 
+  it('prefers the unambiguous exceptionInfo fields over the adapter-variant raw pair (debugpy order)', async () => {
+    // debugpy follows the DAP spec reading: text carries the exception NAME,
+    // description the message — the opposite of the model-comment convention
+    // other adapters use. Once exceptionInfo has merged, its typed fields win.
+    const { ctx } = makeCtx({
+      lastStop: {
+        reason: 'exception',
+        timestamp: 1,
+        description: 'division by zero',
+        text: 'ZeroDivisionError',
+        exceptionInfo: {
+          exceptionId: 'ZeroDivisionError',
+          breakMode: 'unhandled',
+          description: 'division by zero',
+          details: { message: 'division by zero', typeName: 'ZeroDivisionError' }
+        }
+      }
+    });
+
+    const snapshot = await composeStopSnapshot(ctx, 'sid', stack(), 'test');
+
+    expect(snapshot?.exception?.type).toBe('ZeroDivisionError');
+    expect(snapshot?.exception?.message).toBe('division by zero');
+    expect(snapshot?.exception?.details).toBeUndefined();
+  });
+
   it('omits details when it only repeats the message', async () => {
     const { ctx } = makeCtx({
       lastStop: {
