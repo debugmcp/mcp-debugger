@@ -262,6 +262,13 @@ describe('MCP Server Python Attach-Mode Smoke Test @requires-python', () => {
       expect(attachResponse.state).toBe('paused');
       console.log('[Python Attach Test] Attached successfully, state:', attachResponse.state);
 
+      // Landing parity (issue #982): a paused attach answers like every other
+      // stop answer — location at the top level and the snapshot beside it.
+      expect(attachResponse.location, 'paused attach answer carries location').toBeDefined();
+      const attachSnapshot = attachResponse.snapshot as { frames: unknown[] } | undefined;
+      expect(attachSnapshot, 'paused attach answer carries a snapshot').toBeDefined();
+      expect(Array.isArray(attachSnapshot!.frames)).toBe(true);
+
       // restart_debugging must refuse attach sessions with a clear error —
       // there is no launch configuration to replay (issue #238).
       const restartResponse = parseSdkToolResult(

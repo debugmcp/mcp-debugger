@@ -25,7 +25,9 @@ import type {
 } from '@debugmcp/shared';
 import type { ManagedSession } from './session-store.js';
 import type { StackTraceResult } from './inspection/frame-anchor-resolver.js';
+import type { LocalVariablesResult } from './session-manager-data.js';
 import type { CustomLaunchRequestArguments } from './session-manager-core.js';
+import type { VariableAccessMode } from '../utils/variable-access.js';
 import type { IProxyManager } from '../proxy/proxy-manager.js';
 import type { IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
 import type { ValidationResultCache } from '../utils/language-availability.js';
@@ -44,6 +46,12 @@ export interface OperationsTunables {
   readonly launchReadyCeilingMs: number;
   readonly launchHoldMs: number;
   readonly waitForStopDefaultMs: number;
+  /**
+   * Bound on the stop snapshot's locals read (issue #982) — a window on the
+   * answer, not a deadline on the debuggee: on expiry the answer ships
+   * without `locals` and the snapshot note says what expired.
+   */
+  readonly snapshotLocalsTimeoutMs: number;
 }
 
 /**
@@ -117,7 +125,20 @@ export interface OperationsContext {
     includeInternals?: boolean,
     opts?: { ensureStackReady?: boolean }
   ): Promise<StackTraceResult>;
+  /**
+   * The locals pipeline behind an already-resolved stack (issue #982): the
+   * stop snapshot reads locals from the landing's own resolver result.
+   */
+  extractLocalsFromResolved(
+    sessionId: string,
+    stackResult: StackTraceResult,
+    opts?: { includeSpecial?: boolean; names?: string[]; maxFrames?: number }
+  ): Promise<LocalVariablesResult>;
   redactionEnabled(): boolean;
+  /** Stop-snapshot switch (issue #982): DEBUG_MCP_NO_SNAPSHOT opts out. */
+  snapshotEnabled(): boolean;
+  /** Least-privilege mode (issue #237): 'explicit' withholds snapshot locals. */
+  variableAccessMode(): VariableAccessMode;
 }
 
 /**
@@ -161,6 +182,10 @@ export type LaunchContext = Pick<
   | 'selectPolicy'
   | 'getStackTraceDetailed'
   | 'stopProxyPreservingSession'
+  | 'extractLocalsFromResolved'
+  | 'redactionEnabled'
+  | 'snapshotEnabled'
+  | 'variableAccessMode'
 >;
 
 /**
@@ -184,6 +209,10 @@ export type AttachContext = Pick<
   | 'cleanupProxyEventHandlers'
   | 'closeSession'
   | 'tunables'
+  | 'extractLocalsFromResolved'
+  | 'redactionEnabled'
+  | 'snapshotEnabled'
+  | 'variableAccessMode'
 >;
 
 /** Breakpoint tooling: the store, the wire, and both policy sources. */
@@ -208,6 +237,10 @@ export type ExecutionContext = Pick<
   | 'selectPolicy'
   | 'tunables'
   | 'defaultDapLaunchArgs'
+  | 'extractLocalsFromResolved'
+  | 'redactionEnabled'
+  | 'snapshotEnabled'
+  | 'variableAccessMode'
 >;
 
 /** Expression evaluation, including the redaction hook. */

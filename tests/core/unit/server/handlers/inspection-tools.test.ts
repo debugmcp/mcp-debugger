@@ -460,4 +460,40 @@ describe('inspection tool handlers', () => {
       expect(payload.error).toContain('terminated');
     });
   });
+
+  describe('get_stack_trace emits a redacted lastStop (issue #982)', () => {
+    const SECRET = 'ghp_' + 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef0123';
+
+    it('masks secret-shaped values in the emitted stop record and leaves the stored one raw', async () => {
+      const stored = {
+        reason: 'exception',
+        threadId: 1,
+        timestamp: 1,
+        description: 'AuthError',
+        text: `token ${SECRET} rejected`
+      };
+      ctx.sessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE,
+        state: 'paused',
+        lastStop: stored
+      });
+      ctx.getStackTrace = vi.fn().mockResolvedValue({
+        frames: [],
+        threadId: 1,
+        totalFrameCount: 0,
+        hiddenFrameCount: 0,
+        allFramesInternal: false
+      });
+
+      const result = await getStackTraceTool(ctx, { sessionId: 'test-session' }, 'get_stack_trace');
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.lastStop.text).toContain('<redacted:github-pat>');
+      expect(payload.lastStop.text).not.toContain(SECRET);
+      expect(payload.stopReason).toBe('exception');
+      expect(stored.text).toContain(SECRET);
+    });
+  });
 });
+

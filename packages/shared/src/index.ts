@@ -279,6 +279,7 @@ export {
   isTrivialValue,
   redactVariableValue,
   redactSecretsDeep,
+  redactStopInfo,
   buildRedactionNotice
 } from './utils/secret-redaction.js';
 export type { SecretRule, RedactionHit, RedactionResult } from './utils/secret-redaction.js';

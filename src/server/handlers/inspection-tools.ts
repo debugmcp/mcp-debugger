@@ -12,6 +12,7 @@ import {
   carriesLastStop,
   debuggerOffWhyFor,
   describeStaleBuild,
+  emittableStopInfo,
   hasOpenableSourcePath,
   variablePayloadExtras
 } from './shared.js';
@@ -71,7 +72,9 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
     // read below stays post-await on purpose — it describes the failure the
     // fetch itself may have recorded.
     const sessionBefore = ctx.sessionManager.getSession(args.sessionId);
-    const lastStop = carriesLastStop(sessionBefore?.state) ? sessionBefore?.lastStop : undefined;
+    // A redacted copy (issue #982); the stored record is never mutated.
+    const storedStop = carriesLastStop(sessionBefore?.state) ? sessionBefore?.lastStop : undefined;
+    const lastStop = storedStop ? emittableStopInfo(ctx, storedStop) : undefined;
     const stackTrace = await ctx.getStackTrace(args.sessionId, includeInternals, args.threadId);
     const payload: Record<string, unknown> = {
       success: true,

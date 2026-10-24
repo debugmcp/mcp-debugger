@@ -27,6 +27,8 @@
  *   the line-scoped stderr sanitizer.
  */
 
+import type { SessionStopInfo } from '../models/index.js';
+
 export interface SecretRule {
   /** Stable rule id; becomes the placeholder label (`<redacted:${id}>`). */
   id: string;
@@ -351,6 +353,16 @@ function redactDeep(value: unknown, ancestors: WeakSet<object>, totals: Map<stri
   } finally {
     ancestors.delete(value);
   }
+}
+
+/**
+ * Deep redacted copy of a stop record for emission in tool answers
+ * (issue #982). The stored record is never mutated: stop-identity guards
+ * (the exceptionInfo merge, `lastStop !== before` checks) depend on the
+ * session's own object staying stable.
+ */
+export function redactStopInfo(stop: SessionStopInfo): SessionStopInfo {
+  return redactSecretsDeep(stop).value;
 }
 
 /**

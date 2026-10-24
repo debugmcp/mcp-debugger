@@ -31,7 +31,8 @@ import { failProxySetup, sessionRemovedDuringTeardown } from '../launch/proxy-fa
 import type { ProxyLauncher } from '../launch/proxy-launcher.js';
 import { verifyAttachThreads } from './attach-verification.js';
 import { ATTACH_ANCHOR_BOUNDS, selectStopAnchor } from '../inspection/stop-anchor.js';
-import { describeStopLocation } from '../inspection/stop-location.js';
+import { describeStopLocation, landingFields } from '../inspection/stop-location.js';
+import { composeStopSnapshot } from '../inspection/stop-snapshot.js';
 import type { PauseCoordinator } from '../execution/pause-coordinator.js';
 import type { InFlightGuard } from '../in-flight-guard.js';
 
@@ -430,6 +431,11 @@ export class AttachController {
       const landing = session.state === SessionState.PAUSED
         ? await describeStopLocation(this.ctx, sessionId, 'attach')
         : undefined;
+      // The snapshot behind the landing (issue #982): attach parity with the
+      // other stop answers — same resolver result, bounded locals.
+      const snapshot = landing
+        ? await composeStopSnapshot(this.ctx, sessionId, landing.stackResult, 'attach')
+        : undefined;
       assertTargetPresent();
 
       // Named the way the request addressed it: a PID, a host:port, or a
@@ -448,12 +454,16 @@ export class AttachController {
       // A late-landing pause must be named in the message, not only flagged:
       // pending:true next to state "running" reads as "nothing happened" to
       // an agent, and the target still freezes on its next dispatch (#654).
+      // Landing parity with the other stop answers (issue #982): location,
+      // threadId and note — not just the note (issue #900's shape) — plus the
+      // snapshot.
       const attachData: AttachResultData = {
         message: attachPausePending
           ? `${attachedTo}; ${ErrorMessages.attachPausePending}`
           : attachedTo,
         ...(attachPausePending ? { pending: true } : {}),
-        ...(landing?.note ? { note: landing.note } : {})
+        ...(landing ? landingFields(landing) : {}),
+        ...(snapshot ? { snapshot } : {})
       };
       // Surface adapterConfig keys the adapter's attach transform dropped
       // (issue #450) and keys forwarded to the adapter unrecognized (issue

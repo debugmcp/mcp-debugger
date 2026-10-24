@@ -569,6 +569,11 @@ describe('SessionManagerOperations attach modes', () => {
       expect(result.success).toBe(true);
       expect(result.data?.note).toMatch(/^No program frame is active on thread 6660: all 2 frames are internal\/runtime \(top: 'DbgBreakPoint' <unknown_source>:0\)/);
       expect(result.data?.note).toMatch(/continue_execution and trigger activity, or set a breakpoint/);
+      // Landing parity (issue #982): the attach answer carries the location —
+      // and the snapshot, frames-only here (sourceless stop: no locals read).
+      expect(result.data?.location).toBeDefined();
+      expect(Array.isArray(result.data?.snapshot?.frames)).toBe(true);
+      expect(result.data?.snapshot?.locals).toBeUndefined();
     });
 
     it('falls back to the thread named main, else the first thread, when no stop was observed', async () => {

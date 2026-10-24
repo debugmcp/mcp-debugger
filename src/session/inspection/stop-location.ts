@@ -10,6 +10,7 @@
 import { SessionState } from '@debugmcp/shared';
 import type { OperationsContext } from '../operations-context.js';
 import type { StopLandingFields } from '../session-manager-core.js';
+import type { StackTraceResult } from './frame-anchor-resolver.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import { isProgramNeutralStopReason } from './stop-anchor.js';
 
@@ -20,6 +21,14 @@ import { isProgramNeutralStopReason } from './stop-anchor.js';
 export interface StopLanding extends StopLandingFields {
   /** True when no frame of the shown stack is program code. */
   noProgramFrame?: true;
+  /**
+   * INTERNAL: the resolver read behind this landing, carried so the stop
+   * snapshot (issue #982) composes from the same stack instead of
+   * re-resolving. Never emitted — `landingFields()` strips it. Absent when
+   * the read itself failed, which is what "no snapshot on a failed landing"
+   * hangs off.
+   */
+  stackResult?: StackTraceResult;
 }
 
 export type StopLandingContext = Pick<OperationsContext, 'getStackTraceDetailed' | 'getSession' | 'logger'>;
@@ -44,7 +53,7 @@ export async function describeStopLocation(
       ? await ctx.getStackTraceDetailed(sessionId, undefined, false, { ensureStackReady: true })
       : await ctx.getStackTraceDetailed(sessionId);
     const top = result.frames[0];
-    const landing: StopLanding = {};
+    const landing: StopLanding = { stackResult: result };
     // The frames read are the landing even if the session left PAUSED under
     // the read (a concurrent continue, an adapter's own bookkeeping); the
     // resolver's "not paused" note is not, so it never rides on an answer

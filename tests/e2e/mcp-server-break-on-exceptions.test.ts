@@ -155,6 +155,20 @@ describe('Break-on-exception (issue #220)', () => {
       expect(enriched!.lastStop!.exceptionInfo!.breakMode).toBe('unhandled');
       expect(enriched!.lastStop!.exceptionInfo!.details?.typeName).toBe('MockError');
 
+      // The paused wait_for_stop answer carries the stop snapshot (issue #982)
+      // beside lastStop — and no snapshot.exception: lastStop already is the
+      // exception, and the same message never ships twice.
+      const waitAnswer = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'wait_for_stop',
+        arguments: { sessionId, timeout: 5000 }
+      }));
+      expect(waitAnswer.state).toBe('paused');
+      expect((waitAnswer.lastStop as { text?: string }).text).toBe('Mock uncaught exception');
+      const waitSnapshot = waitAnswer.snapshot as { exception?: unknown; frames: unknown[] } | undefined;
+      expect(waitSnapshot, 'paused wait_for_stop answer carries a snapshot').toBeDefined();
+      expect(Array.isArray(waitSnapshot!.frames)).toBe(true);
+      expect(waitSnapshot!.exception).toBeUndefined();
+
       // get_stack_trace surfaces the stop reason (issue #214 surface)
       const stack = parseSdkToolResult(await mcpClient!.callTool({
         name: 'get_stack_trace',

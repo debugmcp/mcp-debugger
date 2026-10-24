@@ -11,6 +11,9 @@ import type { Breakpoint, FunctionBreakpoint, SessionStopInfo, StackFrame } from
 import { USER_BREAK_REASONS } from '@debugmcp/shared';
 import { stopProvesDebuggerOn } from './debugger-off.js';
 import { isRedactionEnabled } from '../utils/redaction-mode.js';
+import { isSnapshotEnabled } from '../utils/snapshot-mode.js';
+import { getVariableAccessMode, type VariableAccessMode } from '../utils/variable-access.js';
+import type { FrameSummary } from './inspection/frame-anchor-resolver.js';
 import { ValidationResultCache } from '../utils/language-availability.js';
 import { SessionStore, ManagedSession } from './session-store.js';
 import type { UnhitBreakpointSummary } from './breakpoints/launch-warnings.js';
@@ -137,6 +140,40 @@ export type StopLandingFields = {
 };
 
 /**
+ * The exception half of a stop snapshot (issue #982): what the adapter
+ * reported, secret-redacted — the stop event's description/text, topped up
+ * with whatever exceptionInfo had merged by the time the answer was built
+ * (never awaited). All fields optional: a CodeLLDB panic relabel reports
+ * nothing, and then the whole object is omitted.
+ */
+export interface SnapshotException {
+  type?: string;
+  message?: string;
+  /** exceptionInfo's description, only when it adds to `message`. */
+  details?: string;
+}
+
+/**
+ * The bounded state snapshot a PAUSED answer carries (issue #982), composed
+ * from the landing read's own stack: top visible frames, flat redacted
+ * top-frame locals under tight caps, and the exception when the stop is one.
+ * Orientation, not navigation — get_local_variables / get_variables remain
+ * the way to go deeper.
+ */
+export interface StopSnapshot {
+  exception?: SnapshotException;
+  frames: FrameSummary[];
+  locals?: Record<string, string>;
+  /** What was cut, pointing at get_local_variables for the full list. */
+  truncation?: string;
+  /** What expired or was withheld, and any locals anchor note. */
+  note?: string;
+}
+
+/** The landing fields plus the snapshot: what every stop answer may carry. */
+export type StopAnswerFields = StopLandingFields & { snapshot?: StopSnapshot };
+
+/**
  * What a step operation returns: `message` is always set, plus where it
  * landed. `stopReason`/`rawStopReason` are present only when the stop that
  * ended the step was recorded and was not the step itself (issue #678) — a
@@ -153,7 +190,7 @@ export type StepResultData = DebugResultData & StopLandingFields & {
  * this pause's own stop was recorded (never a stale earlier one), and
  * `location` only when the stack was readable by the time it settled.
  */
-export type PauseResultData = DebugResultData & StopLandingFields & {
+export type PauseResultData = DebugResultData & StopAnswerFields & {
   message: string;
   stopReason?: string;
   rawStopReason?: string;
@@ -167,7 +204,7 @@ export type PauseResultData = DebugResultData & StopLandingFields & {
  * `DebugResultData`'s own fields: `exitCode` for a session that ended and
  * reported one, `pending` when the timeout passed first.
  */
-export type WaitForStopResultData = DebugResultData & StopLandingFields & {
+export type WaitForStopResultData = DebugResultData & StopAnswerFields & {
   message: string;
   lastStop?: SessionStopInfo;
 };
@@ -181,15 +218,15 @@ export type WaitForStopResultData = DebugResultData & StopLandingFields & {
  * so the answer names the frame the program is paused in and the handler can
  * read the line and the build behind it.
  */
-export type LaunchResultData = DebugResultData & StopLandingFields;
+export type LaunchResultData = DebugResultData & StopAnswerFields;
 
 /**
- * What a successful attach returns on top of the common fields: a `note`
- * when the attach's stop landed where no frame is program code (an idle
- * js-debug target pauses on a sourceless frame, issue #900) or on a thread
- * other than the one reported.
+ * What a successful attach returns on top of the common fields: the same
+ * landing an ordinary stop answer carries (issue #982 gave attach parity —
+ * location/threadId/note/snapshot; before that only the `note` survived,
+ * issue #900).
  */
-export type AttachResultData = DebugResultData & { note?: string };
+export type AttachResultData = DebugResultData & StopAnswerFields;
 
 export interface DebugResult<TData extends DebugResultData = DebugResultData> {
   success: boolean;
@@ -295,6 +332,19 @@ export abstract class SessionManagerCore extends EventEmitter {
    */
   protected redactionEnabled(): boolean {
     return isRedactionEnabled(this.environment);
+  }
+
+  /** Stop-snapshot switch (issue #982): on unless DEBUG_MCP_NO_SNAPSHOT opts out. */
+  protected snapshotEnabled(): boolean {
+    return isSnapshotEnabled(this.environment);
+  }
+
+  /**
+   * Least-privilege variable access mode (issue #237). The snapshot reads it
+   * so auto-locals never bypass what the inspection tools enforce.
+   */
+  protected variableAccessMode(): VariableAccessMode {
+    return getVariableAccessMode(this.environment);
   }
 
   /**

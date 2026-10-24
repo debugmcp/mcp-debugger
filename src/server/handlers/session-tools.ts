@@ -9,7 +9,7 @@ import { checkLaunchToolchain } from '../../utils/language-availability.js';
 import { isContainerRuntime } from '../../utils/container-path-utils.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { assertPlainObjectArg, requireSessionId } from '../tool-validation.js';
-import { attachRequestFromArgs, carriesLastStop, successWarning } from './shared.js';
+import { attachRequestFromArgs, carriesLastStop, emittableStopInfo, hoistStopLanding, successWarning } from './shared.js';
 import { namesAttachTarget } from '../../session/attach/attach-addressing.js';
 import { failureResult, jsonResult, rethrowAsMcpError, type ToolResult } from '../tool-result.js';
 
@@ -113,7 +113,7 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
       // warning (issue #450) must reach this entry point too.
       const attachData = attachResult.data;
       const warning = successWarning(attachResult);
-      return jsonResult({
+      const responsePayload: Record<string, unknown> = {
         success: attachResult.success,
         sessionId: sessionInfo.id,
         state: attachResult.state,
@@ -124,10 +124,13 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
             (attachData?.pending ? `; ${ErrorMessages.attachPausePending}` : '')
           : `Created session but attach failed: ${attachResult.error || 'Unknown error'}`,
         ...(attachData?.pending ? { pending: true } : {}),
-        ...(attachData?.note ? { note: attachData.note } : {}),
         ...(attachData ? { data: attachData } : {}),
         ...(warning ? { warning } : {})
-      });
+      };
+      // Landing parity with attach_to_process (issues #904/#982): location,
+      // threadId, note, snapshot, line context and the stale-build sentence.
+      await hoistStopLanding(ctx, responsePayload, attachData, sessionInfo.id, 'create+attach result');
+      return jsonResult(responsePayload);
     } catch (error) {
       ctx.logger.error('session:attach-failed', {
         sessionId: sessionInfo.id,
@@ -167,7 +170,8 @@ export async function handleListDebugSessions(ctx: ToolContext): Promise<ToolRes
           mappedSession.updatedAt = session.updatedAt.toISOString();
       }
       if (session.lastStop && carriesLastStop(session.state)) {
-          mappedSession.lastStop = session.lastStop;
+          // A redacted copy (issue #982): the listing is a tool answer too.
+          mappedSession.lastStop = emittableStopInfo(ctx, session.lastStop);
       }
       if (session.exitCode !== undefined) {
           mappedSession.exitCode = session.exitCode;

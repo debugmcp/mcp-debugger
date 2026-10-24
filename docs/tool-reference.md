@@ -14,6 +14,7 @@ This document provides a complete reference for all tools available in mcp-debug
    - [remove_breakpoint](#remove_breakpoint)
    - [clear_breakpoints](#clear_breakpoints)
 3. [Execution Control](#execution-control)
+   - [The stop snapshot](#the-stop-snapshot)
    - [start_debugging](#start_debugging)
    - [restart_debugging](#restart_debugging)
    - [step_over](#step_over)
@@ -377,6 +378,47 @@ Removes all breakpoints in a session, or all breakpoints in one file. Clearing z
 
 ## Execution Control
 
+### The stop snapshot
+
+Every answer that reports the session `paused` — `start_debugging`, `restart_debugging`,
+`wait_for_stop`, `pause_execution`, `attach_to_process` and the `create_debug_session` attach
+shortcut — additionally carries a bounded **`snapshot`** of the stopped program's state (issue #982),
+so reading the crashing state costs zero extra tool calls:
+
+```json
+"snapshot": {
+  "exception": { "type": "ZeroDivisionError", "message": "division by zero" },
+  "frames": [
+    { "name": "compute", "file": "/abs/path/app.py", "line": 44 },
+    { "name": "main", "file": "/abs/path/app.py", "line": 61 }
+  ],
+  "locals": { "subtotal": "125.0", "user": "'ada'" },
+  "truncation": "3 variable(s) omitted, 1 value(s) cut — get_local_variables returns the full list",
+  "note": "…"
+}
+```
+
+- **`exception`** appears only on an exception stop: the class/message the adapter reported
+  (secret-redacted), topped up with whatever DAP `exceptionInfo` had merged by the time the answer
+  was built — never awaited, and never its adapter-side stack trace (`frames` covers the stack). An
+  adapter that reported nothing (e.g. a CodeLLDB panic relabel) gets no `exception` key — the
+  answer's stop reason already says it was one. `wait_for_stop` omits the key by design: its answer
+  carries the full (redacted) `lastStop`, and the same message never ships twice.
+- **`frames`** are the top ≤3 frames of the same policy-filtered stack the answer's `location` was
+  read from (no second stack fetch).
+- **`locals`** is a flat name → value map of the top frame's locals through the same pipeline as
+  `get_local_variables` (policy scope selection, the walk-down to the first frame with locals,
+  secret redaction), under tighter caps — 20 locals / 200 chars per value by default
+  (`DEBUG_MCP_SNAPSHOT_MAX_LOCALS` / `DEBUG_MCP_SNAPSHOT_MAX_VALUE_CHARS`); `truncation` says what
+  was cut. The read is bounded (~2 s): if it expires or fails, the answer ships without `locals`
+  and `note` says so. The snapshot is orientation, not navigation — `get_local_variables` /
+  `get_variables` remain the way to expand structures or fetch everything.
+- **Not carried** on: entry stops (module scaffolding, not state), dry runs, `pending: true`
+  answers, the `pause_execution` "Already paused" fast path (call `wait_for_stop` for the full
+  snapshot of the current stop), `continue_execution` (answers `running`), and any stop whose
+  landing read failed. Under `DEBUG_MCP_VARIABLE_ACCESS=explicit` the `locals` half is withheld
+  (exception and frames stay). `DEBUG_MCP_NO_SNAPSHOT=1` turns the snapshot off entirely.
+
 ### start_debugging
 
 Starts debugging a script.
@@ -411,6 +453,10 @@ Starts debugging a script.
       { "line": 12, "content": "    " }
     ]
   },
+  "snapshot": {
+    "frames": [ { "name": "swap", "file": "/abs/path/examples/python_simple_swap/swap_vars.py", "line": 10 } ],
+    "locals": { "a": "10", "b": "20" }
+  },
   "data": {
     "message": "Debugging started for /abs/path/examples/python_simple_swap/swap_vars.py. Current state: paused",
     "reason": "breakpoint",
@@ -421,7 +467,7 @@ Starts debugging a script.
 
 **When the launch answers:** once the program is launched, `start_debugging` holds its answer for a short window and reports the session as it is when the first of three things happens — the same way in every language (issues #815, #823, #826):
 
-- **The program stops** — `state: "paused"` with `reason`, and where, the way `wait_for_stop` answers a stop (issue #951): `location` is the first visible frame, `context` the source line around it, and `threadId` and `note` appear when there is something to say — the answer anchored on a thread other than the reported one, no frame of the stack being program code (as for `pause_execution`), or the compiled file the debugger binds the location through being older than its source (the stale-build sentence `set_breakpoint` warns with, issues #938/#950). `location` and `threadId` sit at the top level and in `data`; `context` and the full `note` at the top level (`data.note` is the session layer's part of the note, without the stale-build sentence the handler appends). A breakpoint reached as the program starts is answered here, in the one call (the example above).
+- **The program stops** — `state: "paused"` with `reason`, and where, the way `wait_for_stop` answers a stop (issue #951): `location` is the first visible frame, `context` the source line around it, and `threadId` and `note` appear when there is something to say — the answer anchored on a thread other than the reported one, no frame of the stack being program code (as for `pause_execution`), or the compiled file the debugger binds the location through being older than its source (the stale-build sentence `set_breakpoint` warns with, issues #938/#950). The [stop snapshot](#the-stop-snapshot) rides beside them — exception, top frames and bounded locals in the same answer (issue #982; not on an entry stop). `location` and `threadId` sit at the top level and in `data`; `context`, `snapshot` and the full `note` at the top level (`data.note` is the session layer's part of the note, without the stale-build sentence the handler appends). A breakpoint reached as the program starts is answered here, in the one call (the example above).
 - **The program ends** — `state: "stopped"` with the run-to-completion summary and `exitCode` below.
 - **The hold elapses** — `state: "running"` with **`pending: true`** (top level and in `data`, like `step_over`) and a `message` that says what is armed: `…has not reached 2 breakpoint(s) yet. Nothing was cancelled: what is armed stays armed…`; or, with nothing armed (the `"uncaught"` default does not count — a crash is not a stop you are waiting for), `…nothing is armed to stop it (no breakpoints, no entry stop, no caught-exception filter)…`; or, for a `noDebug` launch, that the debugger is off. Logpoints the adapter runs on never stop the program, so they are named apart: `…1 logpoint(s) that log without stopping is armed (read get_output for the messages), and nothing is armed to stop it (no pausing breakpoints, …)…`. What is armed is read when the answer is built, so a breakpoint set while the launch was in flight is named.
 
@@ -451,7 +497,7 @@ See the [JavaScript configuration guide](javascript/README.md#custom-configurati
 - `"breakpoint"`: Stopped at a breakpoint
 - `"step"`: Stopped after a step operation
 - `"entry"`: Stopped on entry (if configured)
-- `"exception"`: Stopped at an exception (the launch default for most languages; see `breakOnExceptions`). `lastStop.description`/`lastStop.text` carry the exception class and message where the adapter reports them. Where the adapter supports the DAP `exceptionInfo` request (Python, JavaScript, Java, .NET, mock), `lastStop.exceptionInfo` is additionally populated best-effort with `exceptionId`, `breakMode`, and optional `details` (message, type names, adapter-side stack trace). The enrichment is requested asynchronously right after the pause, so it may appear in `list_debug_sessions`/`get_stack_trace` a moment after the stop itself — re-query if it is absent immediately after pausing.
+- `"exception"`: Stopped at an exception (the launch default for most languages; see `breakOnExceptions`). `lastStop.description`/`lastStop.text` carry the exception class and message where the adapter reports them — secret-redacted wherever an answer emits them (`wait_for_stop`, `get_stack_trace`, `list_debug_sessions`), like variable values (issue #982). Where the adapter supports the DAP `exceptionInfo` request (Python, JavaScript, Java, .NET, mock), `lastStop.exceptionInfo` is additionally populated best-effort with `exceptionId`, `breakMode`, and optional `details` (message, type names, adapter-side stack trace). The enrichment is requested asynchronously right after the pause, so it may appear in `list_debug_sessions`/`get_stack_trace` a moment after the stop itself — re-query if it is absent immediately after pausing.
 
 **A launch that ends before it can report a pause** answers `state: "stopped"` and says how the program ended (issue #701):
 
@@ -506,7 +552,7 @@ Restarts the debuggee in one call: terminates the current program (if still runn
 - Restart is implemented uniformly as terminate + relaunch (the DAP-spec-blessed emulation; no adapter advertises native restart), so every launch-mode language works identically. Native DAP `restart` is a possible future optimization.
 - The launch configuration is replayed verbatim (script, args, `dapLaunchArgs`, `adapterLaunchConfig`, `breakOnExceptions`); there are no per-restart overrides — call `start_debugging` for a different configuration.
 - **The output buffer starts fresh**: `outputReset: true` signals that `get_output` cursors from the previous launch are stale — read from `since: 0`.
-- The hold and its `pending: true` answer are the same as `start_debugging`'s ("When the launch answers" above): a relaunch that has not stopped when the hold elapses answers `running`, and `wait_for_stop` collects its stop.
+- The hold and its `pending: true` answer are the same as `start_debugging`'s ("When the launch answers" above): a relaunch that has not stopped when the hold elapses answers `running`, and `wait_for_stop` collects its stop. A relaunch that stopped carries the same [stop snapshot](#the-stop-snapshot) (issue #982).
 - Not available for **attach sessions** (no launch configuration to replay — detach and re-attach instead) or for sessions that were never launched, including dry-run-only sessions — call `start_debugging` on the same session instead.
 
 ---
@@ -669,6 +715,10 @@ Blocks until the session next pauses or ends, then says why and where. This is t
       { "line": 42, "content": "    total = price * qty" },
       { "line": 43, "content": "    return total" }
     ]
+  },
+  "snapshot": {
+    "frames": [ { "name": "subtotal", "file": "/abs/path/app.py", "line": 42 } ],
+    "locals": { "price": "25.0", "qty": "5" }
   }
 }
 ```
@@ -696,7 +746,7 @@ Blocks until the session next pauses or ends, then says why and where. This is t
 **Notes:**
 - The wait is on the session's state, not on the adapter's raw `stopped` event, so a stop the server resumes by itself — the entry stop of a `stopOnEntry: false` launch — is never reported. The answer is the first stop `list_debug_sessions` would also show.
 - A session that is already paused answers at once with its current stop, and asking twice without resuming returns the same stop twice. After `continue_execution` (or a step that answered `pending: true`) the session is `running`, so the next call waits for the next stop.
-- `lastStop` is the record `list_debug_sessions` reports: `reason`, `rawReason` when the adapter's own reason was normalized, `threadId`, and `description`/`text` for an exception. `lastStop.exceptionInfo` is filled in a moment after an exception stop — re-query `list_debug_sessions` if it is absent. `location` and `context` are best-effort: they appear when the stack could be read, and `location` is the first visible frame, as for the step tools; `threadId` and `note` appear as for `pause_execution` (a pause collected by the wait is anchored the same way).
+- `lastStop` is the record `list_debug_sessions` reports: `reason`, `rawReason` when the adapter's own reason was normalized, `threadId`, and `description`/`text` for an exception — emitted as a secret-redacted copy, like variable values (issue #982). `lastStop.exceptionInfo` is filled in a moment after an exception stop — re-query `list_debug_sessions` if it is absent. `location` and `context` are best-effort: they appear when the stack could be read, and `location` is the first visible frame, as for the step tools; `threadId` and `note` appear as for `pause_execution` (a pause collected by the wait is anchored the same way). The [stop snapshot](#the-stop-snapshot) rides on every paused answer; here it carries no `exception` key — `lastStop.description`/`text` already are the exception.
 - `exitCode` is present only when the debuggee reported one. A session that ended in an error answers `state: "error"` with the reason in `message`. A finished session keeps answering the same way until it is closed. When a stop landed during the wait and the program ended before it could be inspected — an uncaught exception and the exit arriving together — the ended answer carries that stop as `lastStop`; a stop from before the wait is not repeated.
 - `pending: true` sits at the top level, as for the step tools. The message says what the wait is still for: with breakpoints (or `breakOnExceptions: "all"`) armed it names them and says they stay armed; with nothing armed it promises no pause — the program will stop only for an uncaught exception the debugger catches, or report its exit — so a caller is not sent round a loop that cannot end in a stop. When the launch runs with the debugger off (`dapLaunchArgs.noDebug`, honoured), the message says so and that the wait is for the program's exit; when the launch or attach itself has not completed, it says the session is still starting.
 - A session that was never started answers `success: false` (`Nothing to wait for: this session has not been started…`). So does a session closed while the call was waiting, and a `timeout` that is not a positive number.
@@ -721,6 +771,7 @@ Pauses a running program. The DAP pause request only acknowledges that the debug
   "stopReason": "pause",
   "location": { "file": "/path/app.py", "line": 42, "column": 1 },  // the first visible frame; if the pause landed inside a hidden internal frame, get_stack_trace's pausedFrame names it
   "context": { "lineContent": "    total += price", "surrounding": ["…"] },
+  "snapshot": { "frames": [ { "name": "loop", "file": "/path/app.py", "line": 42 } ], "locals": { "total": "75.0", "price": "25.0" } },
   "data": { "message": "Paused", "stopReason": "pause", "location": { "file": "/path/app.py", "line": 42, "column": 1 } }
 }
 ```
@@ -763,7 +814,8 @@ by its `pending: true` flag, not by the message text.
 - `pending`, `message`, `stopReason`/`rawStopReason`, `location`, `threadId`, `note` and `context` sit at the top level, as for the step tools and `wait_for_stop`; `data` keeps the controller's own copy (issue #906).
 - `location` is best-effort: it appears on the observed path when the post-stop stack trace could be read, and is the first visible frame. `threadId` is present only when the answer is anchored on a thread other than the one the stop was reported on (and the stop named a thread), and `note` says why: a `pause` reported on a thread with no program frame moves to the first sibling whose stack reaches the program (issue #898), or, when no thread has one, says that no program frame is active (issue #900). Breakpoint, step, exception and entry stops stay on the thread they were reported on.
 - When the stop is observed before the tool returns, `data.stopReason` carries the (normalized) stop reason and — if the adapter reported a misleading raw reason that was normalized — `data.rawStopReason` carries the original. Example: CodeLLDB delivers an explicit pause via SIGSTOP and reports `"exception"`; the result is `stopReason: "pause", rawStopReason: "exception"`. js-debug similarly reports pauses as `"step"`. The same raw reason appears as `lastStop.rawReason` in `list_debug_sessions`. Stale stops from before the pause request are never echoed.
-- The session must be in a `"running"` state; pausing an already-paused session returns success immediately with `"Already paused"` (plus the current `stopReason`). Any other state fails with `Cannot pause in state: <state>`.
+- The observed path carries the [stop snapshot](#the-stop-snapshot) beside the landing (issue #982).
+- The session must be in a `"running"` state; pausing an already-paused session returns success immediately with `"Already paused"` (plus the current `stopReason`) — no landing read and no snapshot on that fast path; `wait_for_stop` answers at once with both for the current stop. Any other state fails with `Cannot pause in state: <state>`.
 - If the debuggee ends before the pause takes effect, the call still succeeds, reporting `"Session ended before pause took effect"`.
 - A session with no debuggable target to pause (e.g. a JavaScript attach whose target session was never adopted, or has ended) fails with an actionable error instead of hanging.
 - After pausing, you can inspect variables, evaluate expressions, and step through code
@@ -774,7 +826,7 @@ by its `pending: true` flag, not by the message text.
 
 ### Secret redaction
 
-Debuggers see everything in scope — including credentials — and when the debugging driver is an AI agent, variable values flow into model context and transcripts. By default, mcp-debugger masks credential-shaped values in every value-bearing surface: `get_variables`, `get_local_variables`, `evaluate_expression` results, and captured output (`get_output` and the `debug://sessions/{id}/output` resource).
+Debuggers see everything in scope — including credentials — and when the debugging driver is an AI agent, variable values flow into model context and transcripts. By default, mcp-debugger masks credential-shaped values in every value-bearing surface: `get_variables`, `get_local_variables`, `evaluate_expression` results, captured output (`get_output` and the `debug://sessions/{id}/output` resource), the [stop snapshot](#the-stop-snapshot)'s locals and exception, and the stop record (`lastStop` as `wait_for_stop`, `get_stack_trace` and `list_debug_sessions` emit it — an exception message can carry a token too, issue #982).
 
 Masking is per-token and labeled, so the rest of the value stays legible:
 
@@ -1355,11 +1407,17 @@ The same pass records where the target lives (`processId` → this host; `port` 
   "success": true,
   "state": "paused",
   "message": "Attached to process at 127.0.0.1:5678",
+  "location": { "file": "/abs/path/app.py", "line": 42, "column": 1 },
+  "context": { "lineContent": "    total += price", "surrounding": ["…"] },
+  "snapshot": { "frames": [ { "name": "loop", "file": "/abs/path/app.py", "line": 42 } ], "locals": { "total": "75.0" } },
   "data": {
-    "message": "Attached to process at 127.0.0.1:5678"
+    "message": "Attached to process at 127.0.0.1:5678",
+    "location": { "file": "/abs/path/app.py", "line": 42, "column": 1 }
   }
 }
 ```
+
+A paused attach answer carries the same landing every stop answer carries (issue #982): `location`, `threadId`/`note` when there is something to say, the source line as `context`, the stale-build sentence, and the [stop snapshot](#the-stop-snapshot) — the same shape as `pause_execution`, and `create_debug_session`'s attach shortcut answers identically.
 
 When the requested pause has not landed by the time the tool answers (an idle Node server, say — js-debug's pause lands on the next event-loop dispatch), the response says so:
 ```json

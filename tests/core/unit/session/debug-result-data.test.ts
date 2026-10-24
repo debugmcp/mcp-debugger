@@ -25,7 +25,9 @@ describe('DebugResultData type contract (issue #590)', () => {
     >();
   });
 
-  it('the launch answer adds only the landing fields the stop answers share (issue #951)', () => {
-    expectTypeOf<keyof LaunchResultData>().toEqualTypeOf<keyof DebugResultData | 'location' | 'threadId' | 'note'>();
+  it('the launch answer adds only the stop-answer fields: the landing plus the snapshot (issues #951/#982)', () => {
+    expectTypeOf<keyof LaunchResultData>().toEqualTypeOf<
+      keyof DebugResultData | 'location' | 'threadId' | 'note' | 'snapshot'
+    >();
   });
 });

@@ -65,22 +65,25 @@ describe('describeStopLocation (issue #904)', () => {
     expect(getStackTraceDetailed).toHaveBeenCalledWith('sid');
   });
 
-  it('answers the first visible frame as location and nothing else on an ordinary landing', async () => {
-    const { ctx } = context({ reason: 'step', stopThreadId: 1, read: result({ threadId: 1 }) });
+  it('answers the first visible frame as location, carrying the read itself for the snapshot (issue #982)', async () => {
+    const read = result({ threadId: 1 });
+    const { ctx } = context({ reason: 'step', stopThreadId: 1, read });
 
     const landing = await describeStopLocation(ctx, 'sid', 'stepOver');
 
-    expect(landing).toEqual({ location: { file: '/proj/pause_test.cpp', line: 20, column: 36 } });
+    expect(landing).toEqual({ location: { file: '/proj/pause_test.cpp', line: 20, column: 36 }, stackResult: read });
+    // The answer's spread stays exactly the three landing fields: the read is internal.
     expect(landingFields(landing)).toEqual({ location: { file: '/proj/pause_test.cpp', line: 20, column: 36 } });
   });
 
   it('names the thread and passes the note when the resolver anchored off the reported thread', async () => {
     const note = "The stop was reported on thread 20256, whose 4 frames are all internal/runtime (top: 'DbgBreakPoint'); showing thread 15896, which is in 'main'.";
-    const { ctx } = context({ reason: 'pause', stopThreadId: 20256, read: result({ threadId: 15896, note }) });
+    const read = result({ threadId: 15896, note });
+    const { ctx } = context({ reason: 'pause', stopThreadId: 20256, read });
 
     const landing = await describeStopLocation(ctx, 'sid', 'pause');
 
-    expect(landing).toEqual({ location: { file: '/proj/pause_test.cpp', line: 20, column: 36 }, threadId: 15896, note });
+    expect(landing).toEqual({ location: { file: '/proj/pause_test.cpp', line: 20, column: 36 }, threadId: 15896, note, stackResult: read });
   });
 
   it('omits threadId when the answer is on the reported thread, and when the stop named no thread', async () => {
@@ -114,22 +117,26 @@ describe('describeStopLocation (issue #904)', () => {
 
   it('keeps the resolver note for a frameless landing while the session is still paused', async () => {
     const note = 'The stopped thread reported no stack frames within 3000ms; the target may be paused in native code.';
-    const { ctx } = context({ reason: 'pause', stopThreadId: 1, read: result({ frames: [], totalFrameCount: 0, threadId: 1, note }) });
+    const read = result({ frames: [], totalFrameCount: 0, threadId: 1, note });
+    const { ctx } = context({ reason: 'pause', stopThreadId: 1, read });
 
     const landing = await describeStopLocation(ctx, 'sid', 'pause');
 
-    expect(landing).toEqual({ note });
+    expect(landing).toEqual({ note, stackResult: read });
   });
 
   it('drops the resolver note once the session left PAUSED under the read, so a "not paused" note never rides on a Paused answer', async () => {
+    const read = result({ frames: [], totalFrameCount: 0, note: 'Cannot get stack trace: session is running.' });
     const { ctx } = context({
       reason: 'pause',
       stopThreadId: 1,
       stateAfterRead: SessionState.RUNNING,
-      read: result({ frames: [], totalFrameCount: 0, note: 'Cannot get stack trace: session is running.' })
+      read
     });
 
-    expect(await describeStopLocation(ctx, 'sid', 'pause')).toEqual({});
+    // The read still rides along internally; the snapshot's own PAUSED gate is
+    // what keeps it out of any answer for a session that moved on.
+    expect(await describeStopLocation(ctx, 'sid', 'pause')).toEqual({ stackResult: read });
   });
 
   it('answers nothing when the read throws, and logs at debug level', async () => {

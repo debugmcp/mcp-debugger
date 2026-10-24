@@ -31,6 +31,22 @@ import {
 
 export type { FrameSummary, StackTraceResult } from './inspection/frame-anchor-resolver.js';
 
+/** What getLocalVariables / extractLocalsFromResolved return (issue #982 named it). */
+export interface LocalVariablesResult {
+  variables: Variable[];
+  frame: FrameSummary | null;
+  scopeName: string | null;
+  /**
+   * Explains any departure from "the top frame's local scope": the top
+   * frame had no locals and a lower frame was anchored instead (issue
+   * #468), and/or a sibling scope on the anchor frame supplied the
+   * variables because the canonical local scope was empty (issue #548).
+   * Both notes may apply; they are joined with '; '.
+   */
+  anchorNote?: string;
+  truncation?: VariableTruncationSummary;
+}
+
 /**
  * Stack trace frames plus filtering metadata (issue #346): how many frames the
  * adapter reported, how many the language policy hid, and whether the
@@ -273,50 +289,63 @@ export abstract class SessionManagerData extends SessionManagerCore {
    * applied to the final extracted locals — the policy's scope traversal
    * still sees everything it needs to pick the right scopes.
    */
-  async getLocalVariables(sessionId: string, includeSpecial: boolean = false, names?: string[]): Promise<{
-    variables: Variable[];
-    frame: FrameSummary | null;
-    scopeName: string | null;
-    /**
-     * Explains any departure from "the top frame's local scope": the top
-     * frame had no locals and a lower frame was anchored instead (issue
-     * #468), and/or a sibling scope on the anchor frame supplied the
-     * variables because the canonical local scope was empty (issue #548).
-     * Both notes may apply; they are joined with '; '.
-     */
-    anchorNote?: string;
-    truncation?: VariableTruncationSummary;
-  }> {
+  async getLocalVariables(sessionId: string, includeSpecial: boolean = false, names?: string[]): Promise<LocalVariablesResult> {
     const session = this._getSessionById(sessionId);
     this.logger.info(`[SM getLocalVariables ${sessionId}] Entered. includeSpecial: ${includeSpecial}, Current state: ${session.state}`);
-    
+
     // Validate session state
-    if (!session.proxyManager || !session.proxyManager.isRunning()) { 
-      this.logger.warn(`[SM getLocalVariables ${sessionId}] No active proxy.`); 
-      return { variables: [], frame: null, scopeName: null }; 
+    if (!session.proxyManager || !session.proxyManager.isRunning()) {
+      this.logger.warn(`[SM getLocalVariables ${sessionId}] No active proxy.`);
+      return { variables: [], frame: null, scopeName: null };
     }
-    if (session.state !== SessionState.PAUSED) { 
-      this.logger.warn(`[SM getLocalVariables ${sessionId}] Session not paused. State: ${session.state}.`); 
-      return { variables: [], frame: null, scopeName: null }; 
+    if (session.state !== SessionState.PAUSED) {
+      this.logger.warn(`[SM getLocalVariables ${sessionId}] Session not paused. State: ${session.state}.`);
+      return { variables: [], frame: null, scopeName: null };
     }
-    
+
+    let stackResult: StackTraceResult;
     try {
-      // Step 1: Get stack trace
-      const stackResult = await this.frameAnchorResolver.resolve(
+      stackResult = await this.frameAnchorResolver.resolve(
         sessionId,
         undefined,
         false,
         { ensureStackReady: true }
       );
-      const stackFrames = stackResult.frames;
+    } catch (error) {
+      // Do not flatten failures (e.g. a stack trace that could not be
+      // retrieved) into an empty-but-successful result (issue #124).
+      this.logger.error(`[SM getLocalVariables ${sessionId}] Error getting local variables:`, error);
+      throw error instanceof Error ? error : new Error(String(error));
+    }
+    return this.extractLocalsFromResolved(sessionId, stackResult, { includeSpecial, names });
+  }
+
+  /**
+   * The body of getLocalVariables behind an already-resolved stack (issue
+   * #982): the stop snapshot composes locals from the landing read's own
+   * resolver result, so nothing re-resolves. `maxFrames` caps both the
+   * per-frame scopes probe and the #468 walk-down — a snapshot on a deep
+   * stack must not fan out a scopes request per frame.
+   */
+  protected async extractLocalsFromResolved(
+    sessionId: string,
+    stackResult: StackTraceResult,
+    opts: { includeSpecial?: boolean; names?: string[]; maxFrames?: number } = {}
+  ): Promise<LocalVariablesResult> {
+    const session = this._getSessionById(sessionId);
+    const includeSpecial = opts.includeSpecial ?? false;
+    const names = opts.names;
+    try {
+      const allFrames = stackResult.frames;
+      const stackFrames = opts.maxFrames !== undefined ? allFrames.slice(0, opts.maxFrames) : allFrames;
       if (!stackFrames || stackFrames.length === 0) {
         this.logger.warn(`[SM getLocalVariables ${sessionId}] No stack frames available.`);
         return { variables: [], frame: null, scopeName: null };
       }
-      
+
       const topFrame = stackFrames[0];
       this.logger.info(`[SM getLocalVariables ${sessionId}] Top frame: ${topFrame.name} at ${topFrame.file}:${topFrame.line}`);
-      
+
       // Step 2: Collect all scopes for all frames (may need multiple frames for closures)
       const scopesMap: Record<number, DebugProtocol.Scope[]> = {};
       for (const frame of stackFrames) {

@@ -5,14 +5,22 @@
  * AttachRequest both attach entry points send.
  */
 import * as path from 'path';
-import { isSettledSessionState, REDACTION_NOTICE, SessionState, Variable } from '@debugmcp/shared';
+import {
+  isSettledSessionState,
+  redactStopInfo,
+  REDACTION_NOTICE,
+  SessionState,
+  Variable,
+  type SessionStopInfo
+} from '@debugmcp/shared';
+import { isRedactionEnabled } from '../../utils/redaction-mode.js';
 import type { LineContext } from '../../utils/line-reader.js';
 import { buildTruncationNotice, VariableTruncationSummary } from '../../session/variable-caps.js';
 import type { ToolContext } from '../tool-context.js';
 import type { ToolArguments } from '../tool-arguments.js';
 import { validateBreakOnExceptions } from '../tool-validation.js';
 import { debuggerOffWhy } from '../../session/debugger-off.js';
-import type { DebugResult, StopLandingFields } from '../../session/session-manager-core.js';
+import type { DebugResult, StopAnswerFields } from '../../session/session-manager-core.js';
 import type { AttachRequest } from '../../session/attach/attach-controller.js';
 import type { ManagedSession } from '../../session/session-store.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
@@ -169,7 +177,7 @@ export function hasOpenableSourcePath(file: string): boolean {
 export async function hoistStopLanding(
   ctx: ToolContext,
   response: Record<string, unknown>,
-  data: StopLandingFields | undefined,
+  data: StopAnswerFields | undefined,
   sessionId: string,
   logLabel: string
 ): Promise<void> {
@@ -178,6 +186,17 @@ export async function hoistStopLanding(
   }
   if (data?.note) {
     response.note = data.note;
+  }
+  // The snapshot (issue #982) hoists like the landing — and leaves the
+  // embedded copy: a 20-local payload must not ship twice in one answer.
+  // The session layer's object is never mutated; the embed gets a copy.
+  if (data?.snapshot) {
+    response.snapshot = data.snapshot;
+    const embedded = response.data;
+    if (embedded && typeof embedded === 'object' && 'snapshot' in embedded) {
+      const { snapshot: _omitted, ...rest } = embedded as Record<string, unknown>;
+      response.data = rest;
+    }
   }
   const location = data?.location;
   if (!location) {
@@ -195,6 +214,18 @@ export async function hoistStopLanding(
     response.context = context;
   }
   appendNote(response, staleBuild);
+}
+
+/**
+ * The stop record as an answer may carry it (issue #982): a deep redacted
+ * copy unless redaction is off. The stored record is never mutated — the
+ * exceptionInfo merge guard and `lastStop !== before` checks compare by
+ * identity. wait_for_stop redacts in the session layer (its snapshot is
+ * built from the same copy); this helper serves the handlers that read
+ * `session.lastStop` directly (get_stack_trace, list_debug_sessions).
+ */
+export function emittableStopInfo(ctx: ToolContext, stop: SessionStopInfo): SessionStopInfo {
+  return isRedactionEnabled(ctx.environment) ? redactStopInfo(stop) : stop;
 }
 
 /**
