@@ -154,6 +154,28 @@ describe('MCP Server Python Debugging Smoke Test', () => {
     // Wait for breakpoint hit
     await new Promise(resolve => setTimeout(resolve, 3000));
 
+    // 3b. The paused answer carries the stop snapshot (issue #982): frames and
+    // top-frame locals in the same call — zero extra round trips. The launch
+    // itself may have answered paused (breakpoint inside the hold) or pending;
+    // wait_for_stop answers at once for an already-paused session.
+    const stoppedAnswer = startResponse.state === 'paused'
+      ? startResponse
+      : parseSdkToolResult(await mcpClient!.callTool({
+          name: 'wait_for_stop',
+          arguments: { sessionId, timeout: 10000 }
+        }));
+    expect(stoppedAnswer.state).toBe('paused');
+    const snapshot = stoppedAnswer.snapshot as {
+      frames: Array<{ file: string; line: number }>;
+      locals?: Record<string, string>;
+    };
+    expect(snapshot, 'paused answer carries a snapshot').toBeDefined();
+    expect(snapshot.frames.length).toBeGreaterThan(0);
+    expect(Math.abs(snapshot.frames[0].line - 32)).toBeLessThanOrEqual(1);
+    expect(snapshot.locals, 'snapshot carries top-frame locals').toBeDefined();
+    expect(Object.keys(snapshot.locals!).length).toBeGreaterThan(0);
+    console.log('[Python Smoke Test] Snapshot locals:', JSON.stringify(snapshot.locals));
+
     // 4. Get stack trace (Python: clean, no internal frames)
     console.log('[Python Smoke Test] Getting stack trace...');
     const stackResult = await callToolSafely(mcpClient!, 'get_stack_trace', { sessionId });
