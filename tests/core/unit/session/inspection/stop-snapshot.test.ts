@@ -61,19 +61,22 @@ function makeCtx(opts: {
     return Promise.resolve(locals.value);
   });
   const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+  // One stable session object: the diff cache (issue #983) lives on it and
+  // the stop-identity rule compares lastStop by reference.
+  const session: Record<string, unknown> = {
+    state: opts.state ?? SessionState.PAUSED,
+    lastStop: opts.lastStop ?? { reason: 'breakpoint', timestamp: 1, threadId: 1 }
+  };
   const ctx = {
     logger,
     tunables: { snapshotLocalsTimeoutMs: opts.timeoutMs ?? 2000 },
-    getSession: vi.fn(() => ({
-      state: opts.state ?? SessionState.PAUSED,
-      lastStop: opts.lastStop ?? { reason: 'breakpoint', timestamp: 1, threadId: 1 }
-    })),
+    getSession: vi.fn(() => session),
     redactionEnabled: () => opts.redaction ?? true,
     snapshotEnabled: () => opts.snapshot ?? true,
     variableAccessMode: () => opts.mode ?? 'open',
     extractLocalsFromResolved
   } as unknown as StopSnapshotContext;
-  return { ctx, extractLocalsFromResolved, logger };
+  return { ctx, extractLocalsFromResolved, logger, session };
 }
 
 afterEach(() => {
@@ -400,5 +403,120 @@ describe('composeStopSnapshot exception mapping', () => {
 
     expect(snapshot?.exception).toBeUndefined();
     expect(snapshot?.frames).toHaveLength(3);
+  });
+});
+
+describe('composeStopSnapshot diff cache (issue #983)', () => {
+  type Extract = ReturnType<typeof vi.fn>;
+  const localsResult = (
+    vals: Record<string, string>,
+    frame: { name: string; file: string; line: number } = { name: 'compute', file: '/proj/app.py', line: 44 }
+  ) => ({
+    variables: Object.entries(vals).map(([name, value]) => ({ name, value, type: 'str', variablesReference: 0 })),
+    frame,
+    scopeName: 'Locals'
+  });
+  const newStop = (session: Record<string, unknown>) => {
+    session.lastStop = { reason: 'breakpoint', timestamp: Date.now(), threadId: 1 };
+  };
+
+  it('first stop emits full locals and seeds the cache; the next stop in the same frame emits only what changed', async () => {
+    const { ctx, extractLocalsFromResolved, session } = makeCtx();
+    (extractLocalsFromResolved as Extract)
+      .mockResolvedValueOnce(localsResult({ subtotal: '100.0', user: "'ada'" }))
+      .mockResolvedValueOnce(localsResult({ subtotal: '125.0', user: "'ada'", discount: '15.0' }));
+
+    const first = await composeStopSnapshot(ctx, 'sid', stack(), 'test');
+    expect(first?.locals).toEqual({ subtotal: '100.0', user: "'ada'" });
+    expect(first?.changedVariables).toBeUndefined();
+
+    newStop(session);
+    const second = await composeStopSnapshot(ctx, 'sid', stack(), 'test');
+    expect(second?.locals).toBeUndefined();
+    expect(second?.changedVariables).toEqual({
+      subtotal: { before: '100.0', after: '125.0' },
+      discount: { before: '<undefined>', after: '15.0' }
+    });
+  });
+
+  it('a stop where nothing visible changed emits an empty changedVariables — that is information', async () => {
+    const { ctx, extractLocalsFromResolved, session } = makeCtx();
+    (extractLocalsFromResolved as Extract)
+      .mockResolvedValueOnce(localsResult({ x: '1' }))
+      .mockResolvedValueOnce(localsResult({ x: '1' }));
+
+    await composeStopSnapshot(ctx, 'sid', stack(), 'test');
+    newStop(session);
+    const second = await composeStopSnapshot(ctx, 'sid', stack(), 'test');
+
+    expect(second?.changedVariables).toEqual({});
+    expect(second?.locals).toBeUndefined();
+  });
+
+  it('the same stop answered twice re-emits full locals and leaves the base untouched (no self-diff)', async () => {
+    const { ctx, extractLocalsFromResolved, session } = makeCtx();
+    (extractLocalsFromResolved as Extract)
+      .mockResolvedValueOnce(localsResult({ x: '1' }))
+      .mockResolvedValueOnce(localsResult({ x: '1' }))
+      .mockResolvedValueOnce(localsResult({ x: '2' }));
+
+    await composeStopSnapshot(ctx, 'sid', stack(), 'test');          // seeds on stop A
+    const reanswered = await composeStopSnapshot(ctx, 'sid', stack(), 'test'); // stop A again
+    expect(reanswered?.locals).toEqual({ x: '1' });
+    expect(reanswered?.changedVariables).toBeUndefined();
+
+    newStop(session);
+    const third = await composeStopSnapshot(ctx, 'sid', stack(), 'test'); // stop B diffs vs A
+    expect(third?.changedVariables).toEqual({ x: { before: '1', after: '2' } });
+  });
+
+  it('a frame-key mismatch re-emits full locals and rebases (never a wrong diff)', async () => {
+    const { ctx, extractLocalsFromResolved, session } = makeCtx();
+    const bill = { name: 'bill', file: '/proj/billing.py', line: 12 };
+    (extractLocalsFromResolved as Extract)
+      .mockResolvedValueOnce(localsResult({ x: '1' }))                 // compute
+      .mockResolvedValueOnce(localsResult({ y: '9' }, bill))           // different anchor
+      .mockResolvedValueOnce(localsResult({ y: '10' }, bill));         // bill again
+
+    await composeStopSnapshot(ctx, 'sid', stack(), 'test');
+    newStop(session);
+    const atBill = await composeStopSnapshot(ctx, 'sid', stack(), 'test');
+    expect(atBill?.locals).toEqual({ y: '9' });
+    expect(atBill?.changedVariables).toBeUndefined();
+
+    newStop(session);
+    const atBillAgain = await composeStopSnapshot(ctx, 'sid', stack(), 'test');
+    expect(atBillAgain?.changedVariables).toEqual({ y: { before: '9', after: '10' } });
+  });
+
+  it('a changed visible depth is a frame-key mismatch too (recursion-safe)', async () => {
+    const { ctx, extractLocalsFromResolved, session } = makeCtx();
+    (extractLocalsFromResolved as Extract)
+      .mockResolvedValueOnce(localsResult({ x: '1' }))
+      .mockResolvedValueOnce(localsResult({ x: '2' }));
+
+    await composeStopSnapshot(ctx, 'sid', stack(), 'test');            // depth 4
+    newStop(session);
+    const shallower = await composeStopSnapshot(ctx, 'sid', stack({ frames: FRAMES.slice(0, 2) as never }), 'test'); // depth 2
+    expect(shallower?.locals).toEqual({ x: '2' });
+    expect(shallower?.changedVariables).toBeUndefined();
+  });
+
+  it('a failed locals read leaves the cache untouched, so the next diff is against the last SHOWN values', async () => {
+    const { ctx, extractLocalsFromResolved, session } = makeCtx();
+    (extractLocalsFromResolved as Extract)
+      .mockResolvedValueOnce(localsResult({ x: '1' }))
+      .mockRejectedValueOnce(new Error('scopes failed'))
+      .mockResolvedValueOnce(localsResult({ x: '3' }));
+
+    await composeStopSnapshot(ctx, 'sid', stack(), 'test');
+    newStop(session);
+    const failed = await composeStopSnapshot(ctx, 'sid', stack(), 'test');
+    expect(failed?.locals).toBeUndefined();
+    expect(failed?.note).toContain('locals omitted');
+
+    newStop(session);
+    const third = await composeStopSnapshot(ctx, 'sid', stack(), 'test');
+    expect(third?.changedVariables).toEqual({ x: { before: '1', after: '3' } });
   });
 });

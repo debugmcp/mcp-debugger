@@ -164,6 +164,13 @@ export interface StopSnapshot {
   exception?: SnapshotException;
   frames: FrameSummary[];
   locals?: Record<string, string>;
+  /**
+   * In place of `locals` on a repeated stop in the same frame (issue #983):
+   * only what changed since the last shown locals (new variables appear with
+   * before "<undefined>"; one that left scope simply drops out). An empty
+   * object means nothing visible changed — that is information.
+   */
+  changedVariables?: Record<string, { before: string; after: string }>;
   /** What was cut, pointing at get_local_variables for the full list. */
   truncation?: string;
   /** What expired or was withheld, and any locals anchor note. */
@@ -179,7 +186,7 @@ export type StopAnswerFields = StopLandingFields & { snapshot?: StopSnapshot };
  * ended the step was recorded and was not the step itself (issue #678) — a
  * breakpoint or exception that fired first, or a pause from elsewhere.
  */
-export type StepResultData = DebugResultData & StopLandingFields & {
+export type StepResultData = DebugResultData & StopAnswerFields & {
   message: string;
   stopReason?: string;
   rawStopReason?: string;
@@ -626,6 +633,10 @@ export abstract class SessionManagerCore extends EventEmitter {
     // Reset first-stop tracking for this launch — a session may be re-launched.
     session.firstStopHandled = false;
     session.lastStop = undefined;
+    // A new run's first stop shows full locals, never a diff against the old
+    // run (issue #983). The transient entry-stop erase below is NOT a launch
+    // boundary: the cache deliberately survives ordinary resumes.
+    session.snapshotDiffBase = undefined;
     session.exitCode = undefined;
     session.adapterCapabilities = undefined;
     session.failureDiagnostics = undefined;

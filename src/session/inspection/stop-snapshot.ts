@@ -54,6 +54,11 @@ function capped(text: string | undefined): string | undefined {
   return text.length > EXCEPTION_FIELD_CAP ? `${text.slice(0, EXCEPTION_FIELD_CAP)}…` : text;
 }
 
+/** Own enumerable assignment that survives exotic names ('__proto__'). */
+function setOwn<T>(target: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
+}
+
 /**
  * Compose the snapshot for one answer. Call it once per ANSWER — a step that
  * repeats on the same line (Dart) reads the landing per attempt but composes
@@ -157,15 +162,39 @@ export async function composeStopSnapshot(
             const flat: Record<string, string> = {};
             for (const variable of cappedLocals.variables) {
               if (!Object.prototype.hasOwnProperty.call(flat, variable.name)) {
-                Object.defineProperty(flat, variable.name, {
-                  value: variable.value,
-                  enumerable: true,
-                  writable: true,
-                  configurable: true
-                });
+                setOwn(flat, variable.name, variable.value);
               }
             }
-            snapshot.locals = flat;
+            // The diff cache (issue #983): a later stop in the same frame
+            // reports only what changed since the locals were last SHOWN.
+            // Identity rules, each load-bearing: the same stop re-answered
+            // never diffs against itself (base untouched); a frame-key
+            // mismatch — anchor name/file or visible depth — re-emits full
+            // locals and rebases, never a wrong diff. Only a successful,
+            // non-empty read touches the cache.
+            const anchor = raced.frame ?? frames[0];
+            const frameKey = `${anchor.name}|${anchor.file}|${stackResult.frames.length}`;
+            const base = session.snapshotDiffBase;
+            if (stop && base && base.stopRef === stop) {
+              snapshot.locals = flat;
+            } else if (stop && base && base.frameKey === frameKey) {
+              const changed: Record<string, { before: string; after: string }> = {};
+              for (const name of Object.keys(flat)) {
+                const before = Object.prototype.hasOwnProperty.call(base.rendered, name)
+                  ? base.rendered[name]
+                  : '<undefined>';
+                if (before !== flat[name]) {
+                  setOwn(changed, name, { before, after: flat[name] });
+                }
+              }
+              snapshot.changedVariables = changed;
+              session.snapshotDiffBase = { stopRef: stop, frameKey, rendered: flat };
+            } else {
+              snapshot.locals = flat;
+              if (stop) {
+                session.snapshotDiffBase = { stopRef: stop, frameKey, rendered: flat };
+              }
+            }
           }
           const truncation = mergeTruncationSummaries([raced.truncation, cappedLocals.truncation]);
           if (truncation) {

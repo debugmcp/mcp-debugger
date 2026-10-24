@@ -18,7 +18,7 @@ import {
   getPolicyForLanguage,
   isSettledSessionState
 } from '@debugmcp/shared';
-import type { AttachLocality, ExceptionBreakMode } from '@debugmcp/shared';
+import type { AttachLocality, ExceptionBreakMode, SessionStopInfo } from '@debugmcp/shared';
 import { SessionNotFoundError } from '../errors/debug-errors.js';
 
 /**
@@ -129,6 +129,19 @@ export interface ManagedSession extends DebugSessionInfo {
   // even when the adapter reports a non-'entry' reason (e.g., js-debug
   // emits 'pause' from its post-attach forced pause).
   firstStopHandled?: boolean;
+  /**
+   * The last snapshot's rendered locals, for changedVariables diffs (issue
+   * #983): a later stop in the same frame (frameKey = anchor name|file|
+   * visible depth) reports only what changed. `stopRef` is the lastStop the
+   * base was read at, compared by identity so the same stop answered twice
+   * never diffs against itself. Cleared at the launch/attach boundaries;
+   * survives ordinary resumes on purpose.
+   */
+  snapshotDiffBase?: {
+    stopRef: SessionStopInfo;
+    frameKey: string;
+    rendered: Record<string, string>;
+  };
   // Monotonic identity for each proxy installed on this session. A late event
   // from an older worker cannot satisfy intent armed against a newer one.
   proxyGeneration?: number;

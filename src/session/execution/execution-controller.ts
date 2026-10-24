@@ -135,6 +135,13 @@ export interface StepOperationOptions {
    * response then names.
    */
   origin?: StopLocation;
+  /**
+   * Hands each landing read to the caller (issue #983). A same-line-repeating
+   * step (Dart, issue #879) reads a landing per attempt; the step snapshot
+   * must be composed ONCE, from the final one — so `step()` sinks them here
+   * and composes after the repeat loop, never inside it.
+   */
+  onLanding?: (landing: StopLanding) => void;
 }
 
 /**
@@ -249,6 +256,9 @@ export class ExecutionController {
     this.ctx.logger.info(`[SM ${logTag} ${sessionId}] Sending DAP '${command}' for threadId ${threadId}`);
 
     try {
+      // The last landing read, whatever attempt made it (issue #983): the
+      // snapshot is composed once per ANSWER, after any same-line repeats.
+      let finalLanding: StopLanding | undefined;
       const stepOptions: StepOperationOptions = {
         command,
         threadId,
@@ -256,11 +266,26 @@ export class ExecutionController {
         successMessage,
         ...(pendingHint ? { pendingHint } : {}),
         ...(fromFrame ? { origin: { file: fromFrame.file, line: fromFrame.line, column: fromFrame.column } } : {}),
+        onLanding: (landing) => { finalLanding = landing; },
       };
-      const result = await this.executeStep(session, sessionId, stepOptions);
-      return repeatsOnSameLine && origin
-        ? await this.repeatWhileOnOriginLine(session, sessionId, stepOptions, origin, result)
-        : result;
+      const first = await this.executeStep(session, sessionId, stepOptions);
+      const result = repeatsOnSameLine && origin
+        ? await this.repeatWhileOnOriginLine(session, sessionId, stepOptions, origin, first)
+        : first;
+      if (
+        result.success &&
+        result.data !== undefined &&
+        !result.data.pending &&
+        session.state === SessionState.PAUSED
+      ) {
+        const snapshot = await composeStopSnapshot(
+          this.ctx, sessionId, finalLanding?.stackResult, logTag
+        );
+        if (snapshot) {
+          return { ...result, data: { ...result.data, snapshot } };
+        }
+      }
+      return result;
     } catch (error) {
       const errorMessage = getErrorMessage(error);
       this.ctx.logger.error(`[SM ${logTag} ${sessionId}] Error during step:`, error);
@@ -346,6 +371,7 @@ export class ExecutionController {
         // Where the step landed, through the resolver (issue #904): a failed
         // read answers no location and never fails the step.
         const landing = await describeStopLocation(this.ctx, sessionId, options.logTag);
+        options.onLanding?.(landing);
         const location = landing.location;
         // Rule 2. An ended event that reached the listeners below has already
         // settled with its own wording; this covers the endings that did not
