@@ -42,7 +42,7 @@ export function buildServerInstructions(
 Golden path: create_debug_session -> set_breakpoint (ABSOLUTE file path) -> start_debugging (ABSOLUTE scriptPath; answers paused at a breakpoint reached as the program starts, otherwise pending:true -> wait_for_stop) -> read the answer's snapshot -> step_* or continue_execution (+ wait_for_stop) -> get_output -> close_debug_session (always, even on failure).
 
 Key rules:
-- Every paused answer (start/restart/wait_for_stop/pause/attach) already carries snapshot {exception?, frames, locals} — the exception message, top frames and the top frame's locals, redacted and capped. Read it before calling get_stack_trace/get_local_variables; call those (and get_scopes -> get_variables with a variablesReference) only to expand structures, see more frames, or fetch the full list (snapshot.truncation says when there is more). Entry stops carry no snapshot.
+- Every paused answer (start/restart/wait_for_stop/pause/attach and the steps) already carries snapshot {exception?, frames, locals | changedVariables} — the exception message, top frames and the top frame's locals, redacted and capped. A repeated stop in the same frame (stepping, a continue+wait loop over one breakpoint) carries changedVariables {name: {before, after}} instead of locals — an empty {} means the line changed nothing visible. Read it before calling get_stack_trace/get_local_variables; call those (and get_scopes -> get_variables with a variablesReference) only to expand structures, see more frames, or fetch the full list (snapshot.truncation says when there is more). Entry stops carry no snapshot.
 - Stepping/evaluation/variable reads require the session to be PAUSED; the stop reason on each pause tells you why it stopped.
 - continue_execution returns at once, and a launch, step, pause or attach may answer pending:true when its stop has not arrived yet. Nothing is cancelled — breakpoints stay armed. Call wait_for_stop {sessionId} to block until the session pauses or ends (it reports the stop, or the exit code); a wait that runs out answers pending:true again, so call it again.
 - If a variable entry has a variablesReference, call get_variables with it to expand children.
@@ -80,7 +80,7 @@ ${setBreakpointStep}
 4. Read the paused answer's snapshot first: it already carries the exception (type/message), the top frames, and the top frame's locals (redacted, capped — snapshot.truncation says when there is more). Often that is the whole inspection.
 5. To go deeper: get_stack_trace {sessionId} for the full stack (use each frame's "id" field; it is adapter-assigned, never assume 0), get_scopes {sessionId, frameId} -> variablesReference per scope, then get_variables {sessionId, scope: variablesReference} or get_local_variables {sessionId} for the full locals
 6. evaluate_expression {sessionId, expression}
-7. step_over / step_into / step_out / continue_execution, then wait_for_stop {sessionId} to block until the next stop or the exit (continue_execution does not wait)
+7. step_over / step_into / step_out / continue_execution, then wait_for_stop {sessionId} to block until the next stop or the exit (continue_execution does not wait). Each landed step's snapshot.changedVariables shows exactly what the executed line changed — no get_local_variables needed between steps
 8. get_output {sessionId} — cursor-based; pass the returned nextSince back as since for only-new output
 9. close_debug_session {sessionId} — ALWAYS, even after errors
 
