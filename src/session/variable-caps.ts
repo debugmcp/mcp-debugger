@@ -60,16 +60,34 @@ export interface CappedVariables {
   truncation?: VariableTruncationSummary;
 }
 
+/** Explicit caps for one applyVariableCaps call; unset members use the env defaults. */
+export interface VariableCapLimits {
+  valueCap?: number;
+  countCap?: number;
+  totalCap?: number;
+}
+
+/**
+ * The tighter caps for the stop snapshot's locals (issue #982) — a snapshot
+ * is orientation, not navigation, so it stays small and points at
+ * get_local_variables for the full list.
+ */
+export function snapshotLocalsLimits(): Required<VariableCapLimits> {
+  const countCap = envInt('DEBUG_MCP_SNAPSHOT_MAX_LOCALS', 20);
+  const valueCap = envInt('DEBUG_MCP_SNAPSHOT_MAX_VALUE_CHARS', 200);
+  return { valueCap, countCap, totalCap: countCap * valueCap };
+}
+
 /**
  * Apply the caps to an already-filtered, already-redacted variable list.
  * Order matters upstream: run AFTER the names filter (so an explicit request
  * is never starved by unrelated variables) and AFTER redaction (so a cut
  * value can never leak a secret prefix that redaction would have masked).
  */
-export function applyVariableCaps(vars: Variable[]): CappedVariables {
-  const valueCap = maxVariableValueChars();
-  const countCap = maxVariablesPerCall();
-  const totalCap = maxVariablesTotalChars();
+export function applyVariableCaps(vars: Variable[], limits?: VariableCapLimits): CappedVariables {
+  const valueCap = limits?.valueCap ?? maxVariableValueChars();
+  const countCap = limits?.countCap ?? maxVariablesPerCall();
+  const totalCap = limits?.totalCap ?? maxVariablesTotalChars();
 
   const kept: Variable[] = [];
   let valueTruncatedCount = 0;

@@ -8,7 +8,8 @@ import {
   buildTruncationNotice,
   maxVariableValueChars,
   maxVariablesPerCall,
-  maxVariablesTotalChars
+  maxVariablesTotalChars,
+  snapshotLocalsLimits
 } from '../../../../src/session/variable-caps.js';
 import type { Variable } from '@debugmcp/shared';
 
@@ -127,5 +128,45 @@ describe('buildTruncationNotice', () => {
     expect(notice).not.toContain('["a","b"]');
     expect(notice).toContain('names: [...]');
     expect(notice).toContain('DEBUG_MCP_MAX_VARIABLES');
+  });
+});
+
+describe('caller-supplied limits + snapshotLocalsLimits (issue #982)', () => {
+  const v = (name: string, value: string) => ({ name, value, type: 'string' });
+
+  it('applyVariableCaps honours explicit limits over the env defaults', () => {
+    const result = applyVariableCaps(
+      [v('a', 'abcdefghij'), v('b', 'ok'), v('c', 'dropped')],
+      { valueCap: 4, countCap: 2, totalCap: 100 }
+    );
+    expect(result.variables.map(x => x.name)).toEqual(['a', 'b']);
+    expect(result.variables[0].value).toBe('abcd');
+    expect(result.variables[0].truncated).toBe(true);
+    expect(result.truncation).toEqual({ omittedCount: 1, valueTruncatedCount: 1 });
+  });
+
+  it('partial limits fall back to the env defaults for the rest', () => {
+    const long = 'x'.repeat(2000);
+    const result = applyVariableCaps([v('a', long)], { countCap: 10 });
+    // valueCap unspecified -> default 1024 still applies
+    expect(result.variables[0].value.length).toBe(1024);
+  });
+
+  it('snapshotLocalsLimits defaults to 20 locals / 200 chars', () => {
+    expect(snapshotLocalsLimits()).toEqual({ valueCap: 200, countCap: 20, totalCap: 4000 });
+  });
+
+  it('snapshotLocalsLimits honours its env overrides', () => {
+    const saved = { ...process.env };
+    try {
+      process.env.DEBUG_MCP_SNAPSHOT_MAX_LOCALS = '5';
+      process.env.DEBUG_MCP_SNAPSHOT_MAX_VALUE_CHARS = '50';
+      expect(snapshotLocalsLimits()).toEqual({ valueCap: 50, countCap: 5, totalCap: 250 });
+    } finally {
+      delete process.env.DEBUG_MCP_SNAPSHOT_MAX_LOCALS;
+      delete process.env.DEBUG_MCP_SNAPSHOT_MAX_VALUE_CHARS;
+      if (saved.DEBUG_MCP_SNAPSHOT_MAX_LOCALS) process.env.DEBUG_MCP_SNAPSHOT_MAX_LOCALS = saved.DEBUG_MCP_SNAPSHOT_MAX_LOCALS;
+      if (saved.DEBUG_MCP_SNAPSHOT_MAX_VALUE_CHARS) process.env.DEBUG_MCP_SNAPSHOT_MAX_VALUE_CHARS = saved.DEBUG_MCP_SNAPSHOT_MAX_VALUE_CHARS;
+    }
   });
 });

@@ -15,6 +15,7 @@ import {
   isTrivialValue,
   redactVariableValue,
   redactSecretsDeep,
+  redactStopInfo,
   buildRedactionNotice
 } from '../../src/utils/secret-redaction.js';
 
@@ -326,5 +327,42 @@ describe('SECRET_VALUE_RULES / SECRET_VALUE_ALTERNATION', () => {
       expect(SECRET_VALUE_ALTERNATION.test(line), `${token} (second call)`).toBe(true);
     }
     expect(SECRET_VALUE_ALTERNATION.test('PATH=/usr/bin')).toBe(false);
+  });
+});
+
+describe('redactStopInfo (issue #982)', () => {
+  const stop = () => ({
+    reason: 'exception',
+    threadId: 7,
+    timestamp: 1234,
+    description: 'AuthError',
+    text: 'token ghp_' + 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef0123' + ' rejected',
+    exceptionInfo: {
+      exceptionId: 'AuthError',
+      breakMode: 'unhandled',
+      details: { message: 'token ghp_' + 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef0123' + ' rejected' }
+    }
+  });
+
+  it('masks secret-shaped values in text and exceptionInfo details', () => {
+    const redacted = redactStopInfo(stop());
+    expect(redacted.text).toContain(mask('github-pat'));
+    expect(redacted.text).not.toContain('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef0123');
+    expect(redacted.exceptionInfo?.details?.message).toContain(mask('github-pat'));
+  });
+
+  it('returns a copy and never mutates the stored record', () => {
+    const original = stop();
+    const originalText = original.text;
+    const redacted = redactStopInfo(original);
+    expect(redacted).not.toBe(original);
+    expect(redacted.exceptionInfo).not.toBe(original.exceptionInfo);
+    expect(original.text).toBe(originalText);
+  });
+
+  it('preserves non-string fields and leaves benign text alone', () => {
+    const benign = { reason: 'breakpoint', threadId: 3, timestamp: 42, text: 'hit at main.py:10' };
+    const redacted = redactStopInfo(benign);
+    expect(redacted).toEqual(benign);
   });
 });
