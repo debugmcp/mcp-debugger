@@ -132,7 +132,7 @@ describe('buildTruncationNotice', () => {
 });
 
 describe('caller-supplied limits + snapshotLocalsLimits (issue #982)', () => {
-  const v = (name: string, value: string) => ({ name, value, type: 'string' });
+  const v = (name: string, value: string): Variable => ({ name, value, type: 'string', expandable: false });
 
   it('applyVariableCaps honours explicit limits over the env defaults', () => {
     const result = applyVariableCaps(
