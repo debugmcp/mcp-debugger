@@ -18,3 +18,10 @@ overrides:
   qs: ^6.15.2
   ip-address: ^10.1.1
   esbuild: ^0.28.2
+  # GHSA-27r3-jxmh-p828: body-parser 2.x DoS via trailing bytes; patched 2.4.0.
+  # Transitive via express and @modelcontextprotocol/sdk, both accepting ^2.
+  body-parser: ^2.4.0
+  # GHSA-mrhx-c7xc-m3w5: zod <4.6.6 memory exhaustion; no patched 3.x line.
+  # In-range for every consumer: the MCP SDK declares `^3.25 || ^4.0` and
+  # zod-to-json-schema `^3.25.28 || ^4`.
+  zod: ^4.6.7
