@@ -131,3 +131,134 @@ describe('extractLocalsFromResolved (issue #982)', () => {
     expect(result.scopeName).toBe('Locals');
   });
 });
+
+describe('stop snapshot on arrival answers (issue #982)', () => {
+  const SECRET = 'ghp_' + 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef0123';
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  it('a launch paused on a breakpoint carries data.snapshot with frames and locals', async () => {
+    const { sessionManager, dependencies } = makeManager();
+    const session = await sessionManager.createSession({
+      language: DebugLanguage.MOCK,
+      executablePath: 'python'
+    });
+    stubDeepStack(dependencies);
+
+    const launch = sessionManager.startDebugging(session.id, 'test.py', [], { stopOnEntry: false });
+    await vi.advanceTimersByTimeAsync(100);
+    dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+    const result = await launch;
+
+    expect(result.state).toBe('paused');
+    expect(result.data?.snapshot?.frames?.[0]).toEqual({ name: 'fn_0', file: 'test.py', line: 10 });
+    expect(result.data?.snapshot?.frames).toHaveLength(3);
+    expect(result.data?.snapshot?.locals).toEqual({ x: '1' });
+    expect(result.data?.snapshot?.exception).toBeUndefined();
+    expect(result.data?.location).toEqual({ file: 'test.py', line: 10, column: 0 });
+  });
+
+  it('an entry stop carries the landing but no snapshot', async () => {
+    const { sessionManager, dependencies } = makeManager();
+    const session = await sessionManager.createSession({
+      language: DebugLanguage.MOCK,
+      executablePath: 'python'
+    });
+    stubDeepStack(dependencies);
+
+    const launch = sessionManager.startDebugging(session.id, 'test.py', [], { stopOnEntry: true });
+    await vi.advanceTimersByTimeAsync(100);
+    dependencies.mockProxyManager.simulateStopped(1, 'entry');
+    const result = await launch;
+
+    expect(result.state).toBe('paused');
+    expect(result.data?.reason).toBe('entry');
+    expect(result.data?.location).toBeDefined();
+    expect(result.data?.snapshot).toBeUndefined();
+  });
+
+  async function pausedOnException(env: Record<string, string> = {}) {
+    const { sessionManager, dependencies } = makeManager(env);
+    const session = await sessionManager.createSession({
+      language: DebugLanguage.MOCK,
+      executablePath: 'python'
+    });
+    await sessionManager.startDebugging(session.id, 'test.py');
+    await vi.runAllTimersAsync();
+    stubDeepStack(dependencies);
+    dependencies.mockProxyManager.simulateStopped(1, 'exception', {
+      reason: 'exception',
+      description: 'AuthError',
+      text: `token ${SECRET} rejected`
+    });
+    await vi.advanceTimersByTimeAsync(20);
+    return { sessionManager, dependencies, sessionId: session.id };
+  }
+
+  it('wait_for_stop redacts the emitted lastStop, keeps the stored record raw, and never ships the exception twice', async () => {
+    const { sessionManager, sessionId } = await pausedOnException();
+
+    const result = await sessionManager.waitForStop(sessionId, 1000);
+
+    expect(result.success).toBe(true);
+    expect(result.data?.lastStop?.text).toContain('<redacted:github-pat>');
+    expect(result.data?.lastStop?.text).not.toContain(SECRET);
+    // The stored record is untouched: identity guards depend on it.
+    expect(sessionManager.getSession(sessionId)?.lastStop?.text).toContain(SECRET);
+    // The snapshot rides along, without an exception section: lastStop is it.
+    expect(result.data?.snapshot?.frames).toHaveLength(3);
+    expect(result.data?.snapshot?.locals).toEqual({ x: '1' });
+    expect(result.data?.snapshot?.exception).toBeUndefined();
+  });
+
+  it('DEBUG_MCP_NO_SNAPSHOT=1 keeps every answer snapshot-free (lastStop still redacted)', async () => {
+    const { sessionManager, sessionId } = await pausedOnException({ DEBUG_MCP_NO_SNAPSHOT: '1' });
+
+    const result = await sessionManager.waitForStop(sessionId, 1000);
+
+    expect(result.data?.snapshot).toBeUndefined();
+    expect(result.data?.lastStop?.text).toContain('<redacted:github-pat>');
+  });
+
+  it('a locals read that outlives snapshotLocalsTimeoutMs ships the snapshot without locals and says what expired', async () => {
+    const { sessionManager, dependencies } = makeManager();
+    const session = await sessionManager.createSession({
+      language: DebugLanguage.MOCK,
+      executablePath: 'python'
+    });
+    await sessionManager.startDebugging(session.id, 'test.py');
+    await vi.runAllTimersAsync();
+    (sessionManager as unknown as { snapshotLocalsTimeoutMs: number }).snapshotLocalsTimeoutMs = 50;
+    dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: any) => {
+      if (command === 'stackTrace') {
+        return {
+          success: true,
+          body: { stackFrames: [{ id: 1, name: 'main', source: { path: 'test.py' }, line: 10, column: 0 }] }
+        };
+      }
+      if (command === 'scopes') {
+        return { success: true, body: { scopes: [{ name: 'Locals', variablesReference: 100, expensive: false }] } };
+      }
+      if (command === 'variables') {
+        return new Promise(() => {}); // hangs past the window
+      }
+      return { success: true, args };
+    });
+    dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+    await vi.advanceTimersByTimeAsync(20);
+
+    const result = await sessionManager.waitForStop(session.id, 1000);
+
+    expect(result.data?.snapshot?.frames).toHaveLength(1);
+    expect(result.data?.snapshot?.locals).toBeUndefined();
+    expect(result.data?.snapshot?.note).toContain('50ms');
+    expect(result.data?.snapshot?.note).toContain('get_local_variables');
+  });
+});

@@ -45,8 +45,10 @@ import {
   isSettledSessionState,
   isTerminalSessionState,
   NO_DEBUG_TARGET_MARKER,
+  redactStopInfo,
   SessionState,
   USER_BREAK_REASONS,
+  type SessionStopInfo,
   type StackFrame
 } from '@debugmcp/shared';
 import { DebugProtocol } from '@vscode/debugprotocol';
@@ -64,6 +66,7 @@ import { debuggerOffWhy, isDebuggerOff, type DebuggerOffView } from '../debugger
 import { samePath } from '../breakpoints/hit-verification.js';
 import type { ExecutionContext } from '../operations-context.js';
 import { describeStopLocation, landingFields, type StopLanding } from '../inspection/stop-location.js';
+import { composeStopSnapshot } from '../inspection/stop-snapshot.js';
 import type { PauseCoordinator } from './pause-coordinator.js';
 import { waitForSessionState } from './session-state-wait.js';
 import { resolveDapTimeoutOverride } from '../dap-request-helpers.js';
@@ -631,6 +634,9 @@ export class ExecutionController {
           data: { message: PAUSED_THEN_ENDED_MESSAGE, ...ownStopReason() }
         };
       }
+      // The snapshot behind the landing (issue #982): same resolver result,
+      // bounded locals; a session that moved on under the read answers none.
+      const snapshot = await composeStopSnapshot(this.ctx, sessionId, landing.stackResult, 'pause');
       this.ctx.logger.info(
         `[SessionManager pause] Paused session ${sessionId}. Current state: ${session.state}`
       );
@@ -640,7 +646,8 @@ export class ExecutionController {
         data: {
           message: 'Paused',
           ...ownStopReason(),
-          ...landingFields(landing)
+          ...landingFields(landing),
+          ...(snapshot ? { snapshot } : {})
         }
       };
     }
@@ -771,6 +778,17 @@ export class ExecutionController {
       ? await describeStopLocation(this.ctx, sessionId, 'waitForStop')
       : {};
     const location = landing.location;
+    // The snapshot behind the landing (issue #982). The exception section is
+    // omitted on purpose: this answer carries the full (redacted) lastStop,
+    // and the same message must never ship twice.
+    const snapshot = await composeStopSnapshot(
+      this.ctx, sessionId, landing.stackResult, 'waitForStop', { omitException: true }
+    );
+    // Emit a redacted copy of the stop record (issue #982); the stored record
+    // keeps its identity — the exceptionInfo merge and `lastStop !== before`
+    // guards depend on it.
+    const emitStop = (stop: SessionStopInfo): SessionStopInfo =>
+      this.ctx.redactionEnabled() ? redactStopInfo(stop) : stop;
 
     const state = session.state;
     // Rule 2 of the settle contract: a session that is over by now is
@@ -779,7 +797,7 @@ export class ExecutionController {
     // from before the wait is not this wait's to report: the program was
     // resumed past it.
     const stopDuringWait =
-      session.lastStop && session.lastStop !== lastStopBefore ? { lastStop: session.lastStop } : {};
+      session.lastStop && session.lastStop !== lastStopBefore ? { lastStop: emitStop(session.lastStop) } : {};
     if (state === SessionState.PAUSED && session.lastStop) {
       const where = location ? ` at ${location.file}:${location.line}` : '';
       return {
@@ -787,8 +805,9 @@ export class ExecutionController {
         state,
         data: {
           message: `Paused (${session.lastStop.reason})${where}`,
-          lastStop: session.lastStop,
-          ...landingFields(landing)
+          lastStop: emitStop(session.lastStop),
+          ...landingFields(landing),
+          ...(snapshot ? { snapshot } : {})
         }
       };
     }

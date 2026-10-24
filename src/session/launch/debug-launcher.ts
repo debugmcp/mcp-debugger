@@ -32,7 +32,8 @@ import { setCuratedMessage } from '../breakpoints/hit-verification.js';
 import type { CustomLaunchRequestArguments, DebugResult, LaunchResultData } from '../session-manager-core.js';
 import type { ManagedSession, ToolchainValidationState } from '../session-store.js';
 import type { LaunchContext } from '../operations-context.js';
-import { describeStopLocation, landingFields } from '../inspection/stop-location.js';
+import { describeStopLocation, landingFields, type StopLanding } from '../inspection/stop-location.js';
+import { composeStopSnapshot } from '../inspection/stop-snapshot.js';
 import type { BreakpointController, ResyncOutcome } from '../breakpoints/breakpoint-controller.js';
 import { reresolveAnchors } from '../breakpoints/anchor-resolution.js';
 import {
@@ -668,9 +669,13 @@ export class DebugLauncher {
       // re-read (issue #849) sees the RUNNING the continue sets in the same
       // call stack. Best effort, like every landing read: a stack that cannot
       // be read leaves the answer as it was.
-      const landing = finalState === SessionState.PAUSED
+      const landing: StopLanding = finalState === SessionState.PAUSED
         ? await describeStopLocation(this.ctx, sessionId, 'launch')
         : {};
+      // The bounded state snapshot the landing read pays for (issue #982):
+      // frames and locals from the same resolver result. An entry stop and a
+      // launch that is not paused answer no snapshot (composer gates).
+      const snapshot = await composeStopSnapshot(this.ctx, sessionId, landing.stackResult, 'launch');
 
       // The policy's word is a static pin; a stop that arrived anyway is the
       // stronger evidence (an adapter build that ignores the flag after all):
@@ -786,6 +791,7 @@ export class DebugLauncher {
               : undefined,
           stopOnEntrySuccessful: !!effectiveLaunchArgs?.stopOnEntry && finalState === SessionState.PAUSED,
           ...landingFields(landing),
+          ...(snapshot ? { snapshot } : {}),
         },
       };
     } catch (error) {
