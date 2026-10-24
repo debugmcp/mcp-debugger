@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { DotnetAdapterPolicy, SessionLifecycleState } from '@debugmcp/shared';
-import { startDebuggingTool, restartDebuggingTool } from '../../../../../src/server/handlers/debuggee-tools.js';
+import { startDebuggingTool, restartDebuggingTool, attachToProcessTool } from '../../../../../src/server/handlers/debuggee-tools.js';
 import { createMockToolContext } from '../server-test-helpers.js';
 
 // DebugMcpServer builds its dependencies in the constructor; mock the container
@@ -149,4 +149,54 @@ describe('debuggee lifecycle tool handlers', () => {
       expect(ctx.buildStaleness.check).not.toHaveBeenCalled();
     });
   });
+
+  describe('the stop snapshot on lifecycle answers (issue #982)', () => {
+    const snapshot = {
+      frames: [{ name: 'Main', file: '/app/Program.cs', line: 8 }],
+      locals: { result: '3' }
+    };
+
+    for (const [tool, answer] of answers) {
+      it(`${tool} hoists the snapshot to the top level and strips it from the embedded data`, async () => {
+        const data = { message: 'Paused', reason: 'breakpoint', location, snapshot };
+
+        const payload = JSON.parse((await answer(data)).content[0].text);
+
+        expect(payload.snapshot).toEqual(snapshot);
+        expect(payload.data).not.toHaveProperty('snapshot');
+        expect(payload.data.reason).toBe('breakpoint');
+        expect(payload.data.location).toEqual(location);
+      });
+    }
+
+    it('attach_to_process hoists the landing and the snapshot like every other stop answer (parity)', async () => {
+      ctx.sessionManager.attachToProcess = vi.fn().mockResolvedValue({
+        success: true,
+        state: 'paused',
+        data: {
+          message: 'Attached to process PID 7',
+          location,
+          threadId: 5,
+          note: 'from the session layer',
+          snapshot
+        }
+      });
+
+      const result = await attachToProcessTool(ctx, { sessionId: 'test-session', processId: 7 }, 'attach_to_process');
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload).toMatchObject({
+        success: true,
+        state: 'paused',
+        location,
+        threadId: 5,
+        context,
+        snapshot
+      });
+      expect(payload.note).toContain('from the session layer');
+      expect(payload.data).not.toHaveProperty('snapshot');
+      expect(ctx.lineReader.getLineContext).toHaveBeenCalledWith('/app/Program.cs', 8, { contextLines: 2 });
+    });
+  });
 });
+

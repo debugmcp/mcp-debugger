@@ -94,4 +94,23 @@ describe('session tool handlers', () => {
       expect(byId.on).not.toHaveProperty('debuggerDisabled');
     });
   });
+
+  describe('list_debug_sessions emits redacted lastStop records (issue #982)', () => {
+    const SECRET = 'ghp_' + 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef0123';
+
+    it('masks secret-shaped values in each listed stop record', async () => {
+      const stored = { reason: 'exception', timestamp: 1, text: `token ${SECRET}` };
+      ctx.sessionManager.getAllSessions.mockReturnValue([
+        { id: 's1', name: 'n', language: 'python', state: 'paused', createdAt: new Date(), lastStop: stored }
+      ]);
+
+      const result = await handleListDebugSessions(ctx);
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload.sessions[0].lastStop.text).toContain('<redacted:github-pat>');
+      expect(payload.sessions[0].lastStop.text).not.toContain(SECRET);
+      expect(stored.text).toContain(SECRET);
+    });
+  });
 });
+

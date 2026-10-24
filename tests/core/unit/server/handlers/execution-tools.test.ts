@@ -623,3 +623,61 @@ describe('execution tool handlers', () => {
     });
   });
 });
+
+describe('stop snapshot hoisting (issue #982)', () => {
+  let ctx: any;
+  const liveSession = { id: 'test-session', sessionLifecycle: SessionLifecycleState.ACTIVE };
+  const snapshot = {
+    frames: [{ name: 'main', file: '/app/main.py', line: 12 }],
+    locals: { x: '1' }
+  };
+
+  beforeEach(() => {
+    ctx = createMockToolContext();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('wait_for_stop hoists the snapshot to the top level', async () => {
+    ctx.sessionManager.getSession.mockReturnValue(liveSession);
+    ctx.sessionManager.waitForStop.mockResolvedValue({
+      success: true,
+      state: 'paused',
+      data: {
+        message: 'Paused (breakpoint) at /app/main.py:12',
+        lastStop: { reason: 'breakpoint', threadId: 1, timestamp: 1 },
+        location: { file: '/app/main.py', line: 12, column: 1 },
+        snapshot
+      }
+    });
+
+    const result = await waitForStopTool(ctx, { sessionId: 'test-session' }, 'wait_for_stop');
+    const payload = JSON.parse(result.content[0].text);
+
+    expect(payload.snapshot).toEqual(snapshot);
+    expect(payload).not.toHaveProperty('data');
+  });
+
+  it('pause_execution hoists the snapshot and strips it from the embedded data', async () => {
+    ctx.sessionManager.getSession.mockReturnValue(liveSession);
+    ctx.sessionManager.pause = vi.fn().mockResolvedValue({
+      success: true,
+      state: 'paused',
+      data: {
+        message: 'Paused',
+        stopReason: 'pause',
+        location: { file: '/app/main.py', line: 12, column: 1 },
+        snapshot
+      }
+    });
+
+    const result = await handlePause(ctx, { sessionId: 'test-session' });
+    const payload = JSON.parse(result.content[0].text);
+
+    expect(payload.snapshot).toEqual(snapshot);
+    expect(payload.data).not.toHaveProperty('snapshot');
+    expect(payload.data.message).toBe('Paused');
+  });
+});
