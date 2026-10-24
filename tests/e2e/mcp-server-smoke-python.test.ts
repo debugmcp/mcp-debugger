@@ -248,6 +248,22 @@ describe('MCP Server Python Debugging Smoke Test', () => {
       expect(Array.isArray((stepResult.context as any).surrounding)).toBe(true);
     }
 
+    // 6b. A second step in the same frame reports the diff, not full locals
+    // (issue #983): changedVariables says what the executed line changed —
+    // possibly {} — and `locals` stays absent.
+    if (stepResult.state === 'paused') {
+      const secondStep = await callToolSafely(mcpClient!, 'step_over', { sessionId });
+      if (secondStep.state === 'paused' && secondStep.snapshot) {
+        const stepSnapshot = secondStep.snapshot as {
+          locals?: Record<string, string>;
+          changedVariables?: Record<string, { before: string; after: string }>;
+        };
+        console.log('[Python Smoke Test] Second step changedVariables:', JSON.stringify(stepSnapshot.changedVariables));
+        expect(stepSnapshot.changedVariables, 'second step in the same frame carries the diff').toBeDefined();
+        expect(stepSnapshot.locals).toBeUndefined();
+      }
+    }
+
     // Wait for step to complete
     await new Promise(resolve => setTimeout(resolve, 2000));
 

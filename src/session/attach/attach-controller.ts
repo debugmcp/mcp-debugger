@@ -198,6 +198,7 @@ export class AttachController {
     // proxy exists emits no stop, so a stop left over from a prior run would
     // be reported as this attempt's once the session lands in ERROR (#720).
     session.lastStop = undefined;
+    session.snapshotDiffBase = undefined;
     // The previous run's proxy error and exit are not this attempt's either
     // (issue #896): assertTargetPresent below reports lastProxyError.
     session.lastProxyError = undefined;

@@ -462,6 +462,34 @@ describe('inspection tool handlers', () => {
   });
 
   describe('get_stack_trace emits a redacted lastStop (issue #982)', () => {
+  it('serializes the stop record AFTER the stack fetch, so an exceptionInfo merge landing during it is included', async () => {
+    const stored: Record<string, unknown> = {
+      reason: 'exception',
+      threadId: 1,
+      timestamp: 1,
+      description: 'AuthError',
+      text: 'bad token'
+    };
+    ctx.sessionManager.getSession.mockReturnValue({
+      id: 'test-session',
+      sessionLifecycle: SessionLifecycleState.ACTIVE,
+      state: 'paused',
+      lastStop: stored
+    });
+    ctx.getStackTrace = vi.fn().mockImplementation(async () => {
+      // The fire-and-forget enrichment merges in place during the fetch.
+      stored.exceptionInfo = { exceptionId: 'AuthError', breakMode: 'unhandled' };
+      return { frames: [], threadId: 1, totalFrameCount: 0, hiddenFrameCount: 0, allFramesInternal: false };
+    });
+
+    const result = await getStackTraceTool(ctx, { sessionId: 'test-session' }, 'get_stack_trace');
+    const payload = JSON.parse(result.content[0].text);
+
+    expect(payload.lastStop.exceptionInfo).toBeDefined();
+    expect(payload.lastStop.exceptionInfo.exceptionId).toBe('AuthError');
+  });
+
+
     const SECRET = 'ghp_' + 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef0123';
 
     it('masks secret-shaped values in the emitted stop record and leaves the stored one raw', async () => {

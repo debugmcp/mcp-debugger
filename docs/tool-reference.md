@@ -381,9 +381,10 @@ Removes all breakpoints in a session, or all breakpoints in one file. Clearing z
 ### The stop snapshot
 
 Every answer that reports the session `paused` — `start_debugging`, `restart_debugging`,
-`wait_for_stop`, `pause_execution`, `attach_to_process` and the `create_debug_session` attach
-shortcut — additionally carries a bounded **`snapshot`** of the stopped program's state (issue #982),
-so reading the crashing state costs zero extra tool calls:
+`wait_for_stop`, `pause_execution`, `attach_to_process`, the `create_debug_session` attach
+shortcut, and the step tools (`step_over`/`step_into`/`step_out`, issue #983) — additionally
+carries a bounded **`snapshot`** of the stopped program's state (issue #982), so reading the
+crashing state costs zero extra tool calls:
 
 ```json
 "snapshot": {
@@ -410,9 +411,24 @@ so reading the crashing state costs zero extra tool calls:
   `get_local_variables` (policy scope selection, the walk-down to the first frame with locals,
   secret redaction), under tighter caps — 20 locals / 200 chars per value by default
   (`DEBUG_MCP_SNAPSHOT_MAX_LOCALS` / `DEBUG_MCP_SNAPSHOT_MAX_VALUE_CHARS`); `truncation` says what
-  was cut. The read is bounded (~2 s): if it expires or fails, the answer ships without `locals`
-  and `note` says so. The snapshot is orientation, not navigation — `get_local_variables` /
-  `get_variables` remain the way to expand structures or fetch everything.
+  was cut. The read is bounded (~2 s): if it expires or fails inside the composer, the answer ships
+  without `locals` and `note` says so. A read that comes back empty is shown as no locals — and when
+  unprobed deeper frames exist (the snapshot probes the top 3), `note` says that too; an adapter
+  error the pipeline itself absorbs looks the same as a locals-free frame, and `get_local_variables`
+  on the same stop is the deeper read. The snapshot is orientation, not navigation —
+  `get_local_variables` / `get_variables` remain the way to expand structures or fetch everything.
+- **`changedVariables`** replaces `locals` on a repeated stop in the same frame (issue #983) —
+  stepping through a function, or a `continue_execution` → `wait_for_stop` loop over one
+  breakpoint: only what changed since the locals were last shown, as
+  `{ "name": { "before": "100.0", "after": "125.0" } }`. A variable new in scope appears with
+  `before: "<undefined>"`; one that left scope simply drops out; an **empty `{}` means nothing
+  visible changed** — that is information. Frame identity is the locals anchor's name + file +
+  visible stack depth: any mismatch (a different function, a recursion depth change) re-emits
+  full `locals` and rebases — never a wrong diff. The same stop answered twice (two
+  `wait_for_stop` calls without resuming) re-emits full `locals` rather than diffing against
+  itself. Two different secrets masked to the same `<redacted:…>` placeholder compare equal, so
+  a changed secret may not be listed. The cache resets on relaunch/re-attach, so a new run's
+  first stop always shows full `locals`.
 - **Not carried** on: entry stops (module scaffolding, not state), dry runs, `pending: true`
   answers, the `pause_execution` "Already paused" fast path (call `wait_for_stop` for the full
   snapshot of the current stop), `continue_execution` (answers `running`), and any stop whose
@@ -580,11 +596,21 @@ Steps over the current line, executing it without entering function calls.
       { "line": 12, "content": "    return a, b" },
       { "line": 13, "content": "" }
     ]
+  },
+  "snapshot": {
+    "frames": [ { "name": "swap", "file": "/path/app.py", "line": 11 } ],
+    "changedVariables": { "b": { "before": "20", "after": "10" } }
   }
 }
 ```
 
 `location` and `context` are best-effort: they appear when the post-step stack trace and the source file could both be read.
+
+The [stop snapshot](#the-stop-snapshot) rides on every landed step (issues #982/#983). Stepping within one
+function reports **`changedVariables`** — only what the executed line changed — instead of re-sending the
+full `locals`; stepping into a new frame (or any frame-identity change) shows that frame's full `locals`.
+An empty `changedVariables: {}` says the line changed nothing visible. On an adapter that steps once per
+token position (Dart), the snapshot is composed once, from the final landing of the repeated step.
 
 When the stop that ended the step was recorded as something other than the step — a breakpoint on the landing
 line, or a breakpoint or exception hit before the step completed — the response also carries `stopReason` (and

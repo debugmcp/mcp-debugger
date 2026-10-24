@@ -72,10 +72,14 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
     // read below stays post-await on purpose — it describes the failure the
     // fetch itself may have recorded.
     const sessionBefore = ctx.sessionManager.getSession(args.sessionId);
-    // A redacted copy (issue #982); the stored record is never mutated.
+    // Capture the record's REFERENCE before the fetch (issue #720: the stop
+    // the stack was read under), but serialize it after — the fire-and-forget
+    // exceptionInfo enrichment merges in place and an answer built during the
+    // fetch should include it. The emitted copy is redacted (issue #982); the
+    // stored record is never mutated.
     const storedStop = carriesLastStop(sessionBefore?.state) ? sessionBefore?.lastStop : undefined;
-    const lastStop = storedStop ? emittableStopInfo(ctx, storedStop) : undefined;
     const stackTrace = await ctx.getStackTrace(args.sessionId, includeInternals, args.threadId);
+    const lastStop = storedStop ? emittableStopInfo(ctx, storedStop) : undefined;
     const payload: Record<string, unknown> = {
       success: true,
       stackFrames: stackTrace.frames,
