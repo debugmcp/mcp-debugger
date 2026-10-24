@@ -20,7 +20,7 @@ import type { OperationsContext } from '../operations-context.js';
 import type { SnapshotException, StopSnapshot } from '../session-manager-core.js';
 import type { StackTraceResult } from './frame-anchor-resolver.js';
 import { frameSummary } from './frame-anchor-resolver.js';
-import { applyVariableCaps, mergeTruncationSummaries, snapshotLocalsLimits } from '../variable-caps.js';
+import { applyVariableCaps, snapshotLocalsLimits } from '../variable-caps.js';
 
 export type StopSnapshotContext = Pick<
   OperationsContext,
