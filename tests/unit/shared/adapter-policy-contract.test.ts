@@ -108,6 +108,12 @@ interface PinnedCapabilities {
   terminateBeforeDisconnect: boolean | undefined;
   /** The launch key the adapter reads for an entry stop when it is not `stopOnEntry` (issue #973). */
   entryStopLaunchKey: string | undefined;
+  /**
+   * The launch-config keys that name what the adapter runs, when `program` is not the only one
+   * (issue #985): debugpy takes `program`, `module` or `code`, exactly one of them, so the
+   * connection manager must not fill `program` beside a `module`. `undefined` means `program` only.
+   */
+  launchTargetKeys: readonly string[] | undefined;
   /** Whether `next` stops once per token position, so step_over repeats it on the same line (issue #879). */
   stepsByTokenPosition: boolean | undefined;
   childSessionStrategy: ChildSessionStrategy;
@@ -132,7 +138,7 @@ interface PinnedCapabilities {
  * shim interpolates (#759); ruby/java/dotnet are the three that reject logpoints; js, java and cobol are the three
  * that bind function breakpoints late; js, python, go, cpp, cobol and dart are the six whose debugger a
  * `noDebug` launch turns off (#710); dart is the one whose close sends DAP `terminate` ahead of the
- * disconnect (#885); dotnet is the one whose adapter reads its entry stop as `stopAtEntry` (#973); dart is the one whose `next` stops per token position (#879).
+ * disconnect (#885); dotnet is the one whose adapter reads its entry stop as `stopAtEntry` (#973); dart is the one whose `next` stops per token position (#879); python is the one whose launch target may be `module` or `code` instead of `program` (#985).
  */
 const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
   [DebugLanguage.PYTHON]: {
@@ -144,6 +150,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     honoursNoDebug: true,
     terminateBeforeDisconnect: undefined,
     entryStopLaunchKey: undefined,
+    launchTargetKeys: ['program', 'module', 'code'],
     stepsByTokenPosition: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
@@ -158,6 +165,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     honoursNoDebug: undefined,
     terminateBeforeDisconnect: undefined,
     entryStopLaunchKey: undefined,
+    launchTargetKeys: undefined,
     stepsByTokenPosition: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
@@ -172,6 +180,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     honoursNoDebug: true,
     terminateBeforeDisconnect: undefined,
     entryStopLaunchKey: undefined,
+    launchTargetKeys: undefined,
     stepsByTokenPosition: undefined,
     childSessionStrategy: 'launchWithPendingTarget',
     requiresCommandQueueing: true,
@@ -186,6 +195,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     honoursNoDebug: undefined,
     terminateBeforeDisconnect: undefined,
     entryStopLaunchKey: undefined,
+    launchTargetKeys: undefined,
     stepsByTokenPosition: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
@@ -200,6 +210,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     honoursNoDebug: true,
     terminateBeforeDisconnect: undefined,
     entryStopLaunchKey: undefined,
+    launchTargetKeys: undefined,
     stepsByTokenPosition: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
@@ -214,6 +225,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     honoursNoDebug: undefined,
     terminateBeforeDisconnect: undefined,
     entryStopLaunchKey: undefined,
+    launchTargetKeys: undefined,
     stepsByTokenPosition: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
@@ -228,6 +240,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     honoursNoDebug: undefined,
     terminateBeforeDisconnect: undefined,
     entryStopLaunchKey: 'stopAtEntry',
+    launchTargetKeys: undefined,
     stepsByTokenPosition: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
@@ -242,6 +255,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     honoursNoDebug: true,
     terminateBeforeDisconnect: undefined,
     entryStopLaunchKey: undefined,
+    launchTargetKeys: undefined,
     stepsByTokenPosition: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
@@ -256,6 +270,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     honoursNoDebug: true,
     terminateBeforeDisconnect: undefined,
     entryStopLaunchKey: undefined,
+    launchTargetKeys: undefined,
     stepsByTokenPosition: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
@@ -270,6 +285,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     honoursNoDebug: true,
     terminateBeforeDisconnect: true,
     entryStopLaunchKey: undefined,
+    launchTargetKeys: undefined,
     stepsByTokenPosition: true,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
@@ -284,6 +300,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     honoursNoDebug: undefined,
     terminateBeforeDisconnect: undefined,
     entryStopLaunchKey: undefined,
+    launchTargetKeys: undefined,
     stepsByTokenPosition: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
@@ -379,6 +396,10 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
 
   it('pins the launch key the adapter reads for an entry stop (issue #973)', () => {
     expect(policy.entryStopLaunchKey).toBe(pinned.entryStopLaunchKey);
+  });
+
+  it('pins the launch-config keys that name the launch target (issue #985)', () => {
+    expect(policy.launchTargetKeys).toEqual(pinned.launchTargetKeys);
   });
 
   it('pins whether step_over repeats a token-position step on the same line (issue #879)', () => {

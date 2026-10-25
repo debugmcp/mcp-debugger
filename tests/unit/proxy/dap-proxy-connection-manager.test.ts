@@ -673,6 +673,47 @@ describe('DapConnectionManager', () => {
       expect(mockDapClient.sendRequest.mock.calls[0][1]).not.toHaveProperty('stopAtEntry');
     });
 
+    // Issue #985 (M0): debugpy refuses a launch carrying both `program` and
+    // `module` ('"program", "module", and "code" are mutually exclusive'), and
+    // this is where `program` was always filled in from scriptPath. A policy
+    // that names its launch-target keys keeps the body as the transform
+    // shaped it when one of them is present.
+    it("leaves program out when the launch config names a target under the policy's launchTargetKeys", async () => {
+      mockDapClient.sendRequest.mockResolvedValue(undefined);
+      connectionManager.setAdapterPolicy({ ...DefaultAdapterPolicy, launchTargetKeys: ['program', 'module', 'code'] });
+
+      await connectionManager.sendLaunchRequest(
+        mockDapClient,
+        scriptPath,
+        ['-x'],
+        false,
+        true,
+        { module: 'pytest', args: ['/proj/tests/test_a.py::test_x'] }
+      );
+
+      const body = mockDapClient.sendRequest.mock.calls[0][1] as Record<string, unknown>;
+      expect(body).toMatchObject({ module: 'pytest', args: ['/proj/tests/test_a.py::test_x'] });
+      expect(body).not.toHaveProperty('program');
+    });
+
+    it('still fills program from scriptPath when none of the target keys is set', async () => {
+      mockDapClient.sendRequest.mockResolvedValue(undefined);
+      connectionManager.setAdapterPolicy({ ...DefaultAdapterPolicy, launchTargetKeys: ['program', 'module', 'code'] });
+
+      await connectionManager.sendLaunchRequest(mockDapClient, scriptPath, [], false, true, { cwd: '/proj' });
+
+      expect(mockDapClient.sendRequest.mock.calls[0][1]).toMatchObject({ program: scriptPath, cwd: '/proj' });
+    });
+
+    it('fills program for a policy that declares no launchTargetKeys, a module key or not', async () => {
+      mockDapClient.sendRequest.mockResolvedValue(undefined);
+      connectionManager.setAdapterPolicy(DefaultAdapterPolicy);
+
+      await connectionManager.sendLaunchRequest(mockDapClient, scriptPath, [], false, true, { module: 'something' });
+
+      expect(mockDapClient.sendRequest.mock.calls[0][1]).toMatchObject({ program: scriptPath, module: 'something' });
+    });
+
     it('should handle launch request failure', async () => {
       const error = new Error('Launch failed');
       mockDapClient.sendRequest.mockRejectedValue(error);

@@ -30,9 +30,10 @@ import {
   AdapterCapabilities,
   AdapterError,
   AdapterErrorCode,
-  AdapterEvents
+  AdapterEvents,
+  LaunchConfigDiagnostic
 } from '@debugmcp/shared';
-import { DebugLanguage } from '@debugmcp/shared';
+import { DebugLanguage, namesLaunchTarget } from '@debugmcp/shared';
 import { AdapterDependencies } from '@debugmcp/shared';
 import { sanitizeStderrTail } from '@debugmcp/shared';
 import { findPythonExecutable, getPythonVersion } from './utils/python-utils.js';
@@ -51,7 +52,8 @@ interface PythonPathCacheEntry {
  * Python-specific launch configuration
  */
 interface PythonLaunchConfig extends LanguageSpecificLaunchConfig {
-  module?: string;              // For -m module execution
+  module?: string;              // For -m module execution (issue #985: replaces `program`)
+  code?: string | string[];     // For -c code execution (replaces `program` too)
   pythonArgs?: string[];        // Additional Python arguments
   console?: 'integratedTerminal' | 'internalConsole' | 'externalTerminal';
   django?: boolean;             // Django debugging support
@@ -117,6 +119,8 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
   // State
   private currentThreadId: number | null = null;
   private connected = false;
+  /** The last launch transform's notes, drained by the session layer (`consumeLaunchConfigDiagnostics`). */
+  private launchDiagnostics: LaunchConfigDiagnostic[] = [];
   
   constructor(dependencies: AdapterDependencies) {
     super();
@@ -428,6 +432,7 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
   // ===== Debug Configuration =====
   
   async transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig> {
+    this.launchDiagnostics = [];
     const requestedConsole = (config as PythonLaunchConfig).console;
     const pythonConfig: PythonLaunchConfig = {
       ...config,
@@ -443,7 +448,35 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
       stopOnEntry: config.stopOnEntry ?? false
     };
 
+    // debugpy runs exactly one of `program`, `module` and `code` ('"program",
+    // "module", and "code" are mutually exclusive'), and the session layer
+    // fills `program` from scriptPath before this transform runs. A module or
+    // code target is what the caller asked to run, so `program` goes
+    // (issue #985); the caller's key carries the note.
+    const target = namesLaunchTarget(pythonConfig, ['module'])
+      ? 'module'
+      : namesLaunchTarget(pythonConfig, ['code'])
+        ? 'code'
+        : undefined;
+    if (target) {
+      this.launchDiagnostics.push({
+        key: target,
+        message:
+          target === 'module'
+            ? 'launched as a module (python -m); program is not sent — debugpy takes one target: program, module or code'
+            : 'launched as a code string (python -c); program is not sent — debugpy takes one target: program, module or code'
+      });
+      const { program: _program, ...withoutProgram } = pythonConfig;
+      return withoutProgram as LanguageSpecificLaunchConfig;
+    }
+
     return pythonConfig;
+  }
+
+  consumeLaunchConfigDiagnostics(): readonly LaunchConfigDiagnostic[] {
+    const out = this.launchDiagnostics;
+    this.launchDiagnostics = [];
+    return out;
   }
   
   supportsAttach(): boolean {

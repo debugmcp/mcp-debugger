@@ -275,6 +275,54 @@ describe('PythonDebugAdapter', () => {
     expect(config.console).toBe('integratedTerminal');
   });
 
+  // Issue #985 (M0): debugpy refuses "program" beside "module" or "code"
+  // ('"program", "module", and "code" are mutually exclusive'), and the
+  // session layer fills `program` from scriptPath before this transform runs.
+  describe('module and code launch targets (issue #985)', () => {
+    it('drops program when the launch config names a module', async () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+      const config = await adapter.transformLaunchConfig({
+        program: '/proj/tests/test_a.py',
+        module: 'pytest',
+        args: ['/proj/tests/test_a.py::test_x', '-x'],
+        cwd: '/proj'
+      } as any);
+
+      expect(config).not.toHaveProperty('program');
+      expect(config.module).toBe('pytest');
+      expect(config.args).toEqual(['/proj/tests/test_a.py::test_x', '-x']);
+      expect(config.cwd).toBe('/proj');
+    });
+
+    it('drops program when the launch config names code', async () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+      const config = await adapter.transformLaunchConfig({ program: '/proj/a.py', code: 'print(1)' } as any);
+
+      expect(config).not.toHaveProperty('program');
+      expect(config.code).toBe('print(1)');
+    });
+
+    it('keeps program when neither module nor code is set, and records nothing', async () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+      const config = await adapter.transformLaunchConfig({ program: '/proj/a.py' } as any);
+
+      expect(config.program).toBe('/proj/a.py');
+      expect(adapter.consumeLaunchConfigDiagnostics?.() ?? []).toEqual([]);
+    });
+
+    it('records one diagnostic on the module key saying program is not sent, drained once', async () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+      await adapter.transformLaunchConfig({ program: '/proj/a.py', module: 'pytest' } as any);
+
+      const diagnostics = adapter.consumeLaunchConfigDiagnostics?.() ?? [];
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0]).toMatchObject({ key: 'module' });
+      expect(diagnostics[0].message).toMatch(/python -m/);
+      expect(diagnostics[0].message).toMatch(/program/);
+      expect(adapter.consumeLaunchConfigDiagnostics?.() ?? []).toEqual([]);
+    });
+  });
+
   describe('pythonw.exe adapter interpreter preference (#215)', () => {
     const buildCommand = (adapter: PythonDebugAdapter, executablePath: string) =>
       adapter.buildAdapterCommand({
