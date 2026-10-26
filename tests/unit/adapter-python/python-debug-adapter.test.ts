@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi, type Mock } from 'vitest';
 import { EventEmitter } from 'events';
 import { PythonDebugAdapter } from '../../../packages/adapter-python/src/python-debug-adapter.js';
 import { AdapterState, AdapterError, DebugFeature } from '@debugmcp/shared';
-import type { AdapterDependencies, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
+import type { AdapterDependencies, GenericLaunchConfig, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
 import { createMockAdapterDependencies, createMockFileSystem } from '../../test-utils/helpers/adapter-dependencies.js';
 
 vi.mock('child_process', () => ({
@@ -443,7 +443,43 @@ describe('PythonDebugAdapter', () => {
     });
   });
 
-  describe('pythonw.exe adapter interpreter preference (#215)', () => {
+  // debugpy's sub-process debugging hooks every Python child the program
+  // starts and parks it until a debug client attaches, which this server does
+  // not do yet (issue #1005): the transforms turn it off unless asked.
+  describe('sub-process debugging default (issue #1005)', () => {
+    it('turns subProcess off for a launch that does not name it', async () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+      const config = await adapter.transformLaunchConfig({ program: '/proj/a.py' } as GenericLaunchConfig);
+      expect(config.subProcess).toBe(false);
+      expect(adapter.consumeLaunchConfigDiagnostics?.() ?? []).toEqual([]);
+    });
+
+    it('forwards an explicit subProcess: true and says what it costs', async () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+      const config = await adapter.transformLaunchConfig({ program: '/proj/a.py', subProcess: true } as GenericLaunchConfig);
+      expect(config.subProcess).toBe(true);
+      const diagnostics = adapter.consumeLaunchConfigDiagnostics?.() ?? [];
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0].key).toBe('subProcess');
+      expect(diagnostics[0].scope).toBeUndefined();
+      expect(diagnostics[0].message).toMatch(/#1005/);
+    });
+
+    it('keeps an explicit subProcess: false silent', async () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+      const config = await adapter.transformLaunchConfig({ program: '/proj/a.py', subProcess: false } as GenericLaunchConfig);
+      expect(config.subProcess).toBe(false);
+      expect(adapter.consumeLaunchConfigDiagnostics?.() ?? []).toEqual([]);
+    });
+
+    it('turns subProcess off for an attach too, unless asked', () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+      expect(adapter.transformAttachConfig!({ request: 'attach', port: 5678 }).subProcess).toBe(false);
+      expect(adapter.transformAttachConfig!({ request: 'attach', port: 5678, subProcess: true }).subProcess).toBe(true);
+    });
+  });
+
+  describe('adapter interpreter (#215, #993)', () => {
     const buildCommand = (adapter: PythonDebugAdapter, executablePath: string) =>
       adapter.buildAdapterCommand({
         sessionId: 's1',
@@ -465,43 +501,35 @@ describe('PythonDebugAdapter', () => {
       }
     };
 
-    it('swaps python.exe for a sibling pythonw.exe on win32', () => {
+    // debugpy's launch `python` defaults to the adapter's interpreter, so a
+    // pythonw.exe adapter made the debuggee windowless too and broke its
+    // children's inherited standard handles (issue #993). The hidden console
+    // the proxy's windowsHide spawn provides is what keeps windows off screen.
+    it('runs the adapter under python.exe on win32 even when a sibling pythonw.exe exists', () => {
       (existsSync as Mock).mockReturnValue(true);
       const adapter = new PythonDebugAdapter(createDependencies());
 
       withPlatform('win32', () => {
-        const cmd = buildCommand(adapter, 'C:\\Python313\\python.exe');
-        expect(cmd.command.toLowerCase()).toContain('pythonw.exe');
+        const cmd = buildCommand(adapter, 'C:\Python313\python.exe');
+        expect(cmd.command).toBe('C:\Python313\python.exe');
       });
     });
 
-    it('keeps python.exe when no sibling pythonw.exe exists', () => {
-      (existsSync as Mock).mockReturnValue(false);
+    it('passes an explicit pythonw.exe through unchanged', () => {
       const adapter = new PythonDebugAdapter(createDependencies());
 
       withPlatform('win32', () => {
-        const cmd = buildCommand(adapter, 'C:\\Python313\\python.exe');
-        expect(cmd.command).toBe('C:\\Python313\\python.exe');
+        const cmd = buildCommand(adapter, 'C:\Python313\pythonw.exe');
+        expect(cmd.command).toBe('C:\Python313\pythonw.exe');
       });
     });
 
     it('leaves the interpreter untouched off win32', () => {
-      (existsSync as Mock).mockReturnValue(true);
       const adapter = new PythonDebugAdapter(createDependencies());
 
       withPlatform('linux', () => {
         const cmd = buildCommand(adapter, '/usr/bin/python');
         expect(cmd.command).toBe('/usr/bin/python');
-      });
-    });
-
-    it('leaves an explicit pythonw.exe untouched', () => {
-      (existsSync as Mock).mockReturnValue(true);
-      const adapter = new PythonDebugAdapter(createDependencies());
-
-      withPlatform('win32', () => {
-        const cmd = buildCommand(adapter, 'C:\\Python313\\pythonw.exe');
-        expect(cmd.command).toBe('C:\\Python313\\pythonw.exe');
       });
     });
   });
