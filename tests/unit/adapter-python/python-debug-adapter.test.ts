@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi, type Mock } from 'vitest';
 import { EventEmitter } from 'events';
 import { PythonDebugAdapter } from '../../../packages/adapter-python/src/python-debug-adapter.js';
 import { AdapterState, AdapterError, DebugFeature } from '@debugmcp/shared';
-import type { AdapterDependencies, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
+import type { AdapterDependencies, GenericLaunchConfig, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
 import { createMockAdapterDependencies, createMockFileSystem } from '../../test-utils/helpers/adapter-dependencies.js';
 
 vi.mock('child_process', () => ({
@@ -440,6 +440,42 @@ describe('PythonDebugAdapter', () => {
         expect(config.cwd).toBe('/elsewhere');
         expect((adapter.consumeLaunchConfigDiagnostics?.() ?? []).some(d => d.scope === 'launch')).toBe(false);
       });
+    });
+  });
+
+  // debugpy's sub-process debugging hooks every Python child the program
+  // starts and parks it until a debug client attaches, which this server does
+  // not do yet (issue #1005): the transforms turn it off unless asked.
+  describe('sub-process debugging default (issue #1005)', () => {
+    it('turns subProcess off for a launch that does not name it', async () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+      const config = await adapter.transformLaunchConfig({ program: '/proj/a.py' } as GenericLaunchConfig);
+      expect(config.subProcess).toBe(false);
+      expect(adapter.consumeLaunchConfigDiagnostics?.() ?? []).toEqual([]);
+    });
+
+    it('forwards an explicit subProcess: true and says what it costs', async () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+      const config = await adapter.transformLaunchConfig({ program: '/proj/a.py', subProcess: true } as GenericLaunchConfig);
+      expect(config.subProcess).toBe(true);
+      const diagnostics = adapter.consumeLaunchConfigDiagnostics?.() ?? [];
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0].key).toBe('subProcess');
+      expect(diagnostics[0].scope).toBeUndefined();
+      expect(diagnostics[0].message).toMatch(/#1005/);
+    });
+
+    it('keeps an explicit subProcess: false silent', async () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+      const config = await adapter.transformLaunchConfig({ program: '/proj/a.py', subProcess: false } as GenericLaunchConfig);
+      expect(config.subProcess).toBe(false);
+      expect(adapter.consumeLaunchConfigDiagnostics?.() ?? []).toEqual([]);
+    });
+
+    it('turns subProcess off for an attach too, unless asked', () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+      expect(adapter.transformAttachConfig!({ request: 'attach', port: 5678 }).subProcess).toBe(false);
+      expect(adapter.transformAttachConfig!({ request: 'attach', port: 5678, subProcess: true }).subProcess).toBe(true);
     });
   });
 
