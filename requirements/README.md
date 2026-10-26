@@ -39,7 +39,7 @@ runs a real pytest under debugpy). Regenerate it with
 pip-compile --generate-hashes --no-header --no-annotate --strip-extras -o requirements/pytest.txt pytest.in
 ```
 
-from a `pytest.in` holding the pinned `pytest==<version>`, **on Windows** or
+from `requirements/pytest.in` (the pinned `pytest==<version>`), **on Windows** or
 with `--pip-args`/markers that keep `colorama` (a win32-only dependency pip
 needs on the windows-latest lane; it installs anywhere). `--no-annotate`
 keeps the generating machine's paths out of the file.
