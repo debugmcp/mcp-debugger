@@ -42,6 +42,14 @@ Whole file in one run (no `-x`), filters `['uncaught', 'userUnhandled']`, `justM
 
 After the last `continue`: exit code 1, and pytest's full report (FAILURES, ERRORS, `Captured stdout call`, the short summary) lands in `get_output`.
 
+### Python 3.11 (pydevd's frame-tracing implementation)
+
+The same matrix on a uv-managed CPython 3.11.15 with debugpy 1.8.22 and pytest 9.1.1 (the CI lane's generation), through the same launch:
+
+- `test_assert_fails`, `test_assert_in_helper`: identical — the assert in the test frame; the helper's raise site first with its locals, the test frame below it marked `(Current frame)`.
+- **`test_raises_in_body` and `test_raises_around_helper` (both passing tests) STOP** — once each, at the raise site (`:25`; `proration.py:7` with the three frames), reason exception, type `ValueError` / `KeyError` — where 3.13 did not. The frame-tracing path decides "user-unhandled" at the `exception` trace event, from a static scan of the frame's try/except regions that does not count the `with` statement's handler as a catch; the `sys.monitoring` path (3.12+) only fires on the unwind out of the frame, which a handled `pytest.raises` never does. One `continue` moves on and the test passes. Caught first by the Windows Python 3.11 CI lane of #994 (`does not stop on an exception pytest.raises expects` answered `paused`), then reproduced here.
+- CI's 3.11 lanes pass the other five end-to-end cases (the autopsy, the passing test, `"none"`, the refused runner, the dry run), so the premise holds on both implementations; the end-to-end test asserts the `pytest.raises` shape per Python version.
+
 ### What debugpy puts on the wire for these stops
 
 - `stopped.reason = "exception"`, `exceptionInfo.breakMode = "always"` (pydevd reports a caught-type stop as `always`, never `userUnhandled`).
@@ -71,4 +79,4 @@ Measured with a scratch venv (pytest 9.1.1, pytest-xdist 3.8.0, pytest-cov 7.1.0
 2. Args: `<abs test file>[::<selector>]`, `-x`, then per plugin `-p no:xdist` / `-p no:cov` — or `-n0` / `--no-cov` when the project's `addopts` turns the plugin on, nothing when the caller's args ask for it — then the caller's `args`.
 3. `cwd`: pytest's rootdir by pytest's own rule (nearest ancestor with `pytest.ini`/`.pytest.ini`, a `pyproject.toml` with `[tool.pytest.ini_options]`, a `tox.ini` with `[pytest]` or a `setup.cfg` with `[tool:pytest]`; else the nearest `setup.py`), else the top-most `conftest.py` ancestor, else the test file's directory — because `python -m` puts `cwd` on `sys.path`. A bare `pyproject.toml` (build metadata only) does not count, as it does not for pytest.
 4. Strip pydevd's `(note: full exception trace …)` suffix from the exception type in the snapshot and the stop record; keep the frame-name marker as debugpy reports it.
-5. Document: the skip stop, the `(Current frame)` marker, output capture, and that the raise site is frame 0 even when it has already unwound.
+5. Document: the skip stop, the `(Current frame)` marker, output capture, that the raise site is frame 0 even when it has already unwound, and that on Python ≤ 3.11 an exception `pytest.raises` expects pauses once.

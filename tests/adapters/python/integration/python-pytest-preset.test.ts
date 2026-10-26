@@ -24,7 +24,13 @@ const projectDir = path.resolve(currentDirName, '../../../fixtures/python/pytest
 const testFile = path.join(projectDir, 'tests', 'test_billing.py');
 const ASSERT_LINE = 16; // `assert remaining == expected` in test_assert_fails
 
-function pytestAvailable(): boolean {
+/**
+ * The minor version of the Python the server will pick (3.11 → 11), or 0 when
+ * none has pytest and debugpy. pydevd's exception machinery has two
+ * implementations — frame tracing up to 3.11, `sys.monitoring` from 3.12 —
+ * and one measured shape differs between them (see the pytest.raises case).
+ */
+function pythonMinorWithPytest(): number {
   const env: Record<string, string> = {};
   for (const key in process.env) {
     if (process.env[key] !== undefined) env[key] = process.env[key] as string;
@@ -32,14 +38,19 @@ function pytestAvailable(): boolean {
   ensurePythonOnPath(env);
   for (const python of [process.env.PYTHON_PATH, 'python', 'python3'].filter((p): p is string => Boolean(p))) {
     try {
-      const probe = spawnSync(python, ['-c', 'import pytest, debugpy'], { env, timeout: 20000, stdio: 'ignore', windowsHide: true });
-      if (probe.status === 0) return true;
+      const probe = spawnSync(python, ['-c', 'import sys, pytest, debugpy; print(sys.version_info[1])'], {
+        env, timeout: 20000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true
+      });
+      const minor = Number.parseInt(String(probe.stdout).trim(), 10);
+      if (probe.status === 0 && Number.isFinite(minor)) return minor;
     } catch {
       // try the next spelling
     }
   }
-  return false;
+  return 0;
 }
+
+const pythonMinor = pythonMinorWithPytest();
 
 let client: Client | null = null;
 
@@ -91,6 +102,14 @@ async function landed(sessionId: string, answer: Record<string, unknown>): Promi
   return waited;
 }
 
+/**
+ * The exit code wherever the answer carries it: a launch that ends within its
+ * hold answers `stopped` with `data.exitCode` (fast machines), a wait_for_stop
+ * answer carries `exitCode` at the top level.
+ */
+const exitCodeOf = (answer: Record<string, unknown>): unknown =>
+  answer.exitCode ?? (answer.data as { exitCode?: unknown } | undefined)?.exitCode;
+
 async function withSession<T>(name: string, body: (sessionId: string) => Promise<T>): Promise<T> {
   const created = await call('create_debug_session', { language: 'python', name });
   expect(created.success).toBe(true);
@@ -109,7 +128,7 @@ const preset = (testTarget: string, extra: Record<string, unknown> = {}) => ({
   ...extra
 });
 
-describe.skipIf(!pytestAvailable())('pytest preset (issue #985 M1) @requires-python', () => {
+describe.skipIf(pythonMinor === 0)('pytest preset (issue #985 M1) @requires-python', () => {
   beforeAll(async () => {
     await startTestServer();
   }, 30000);
@@ -160,17 +179,28 @@ describe.skipIf(!pytestAvailable())('pytest preset (issue #985 M1) @requires-pyt
       expect(started.success, JSON.stringify(started)).toBe(true);
       const answer = await landed(sessionId, started);
       expect(['stopped', 'terminated']).toContain(answer.state);
-      expect(answer.exitCode).toBe(0);
+      expect(exitCodeOf(answer), JSON.stringify(answer)).toBe(0);
     });
   }, 90000);
 
-  it('does not stop on an exception pytest.raises expects', async () => {
+  // Measured on both of pydevd's implementations (docs/python/spike-notes-pytest.md):
+  // `sys.monitoring` (3.12+) only sees the exception unwind out of the test
+  // frame, which a handled `pytest.raises` never does; frame tracing (≤3.11)
+  // decides at the raise and does not count the `with` handler as a catch, so
+  // the expected exception pauses once and the test then passes.
+  it('handles an exception pytest.raises expects: no stop on 3.12+, one stop then a pass on 3.11', async () => {
     await withSession('pytest-raises', async (sessionId) => {
       const started = await call('start_debugging', { sessionId, ...preset('test_raises_around_helper') });
       expect(started.success, JSON.stringify(started)).toBe(true);
-      const answer = await landed(sessionId, started);
+      let answer = await landed(sessionId, started);
+      if (pythonMinor <= 11) {
+        expect(answer.state, JSON.stringify(answer)).toBe('paused');
+        expect((answer.snapshot as { exception?: { type?: string } }).exception?.type).toBe('KeyError');
+        await call('continue_execution', { sessionId });
+        answer = await call('wait_for_stop', { sessionId, timeout: 30000 });
+      }
       expect(['stopped', 'terminated']).toContain(answer.state);
-      expect(answer.exitCode).toBe(0);
+      expect(exitCodeOf(answer), JSON.stringify(answer)).toBe(0);
     });
   }, 90000);
 
@@ -180,7 +210,7 @@ describe.skipIf(!pytestAvailable())('pytest preset (issue #985 M1) @requires-pyt
       expect(started.success, JSON.stringify(started)).toBe(true);
       const answer = await landed(sessionId, started);
       expect(['stopped', 'terminated']).toContain(answer.state);
-      expect(answer.exitCode).toBe(1);
+      expect(exitCodeOf(answer), JSON.stringify(answer)).toBe(1);
     });
   }, 90000);
 
