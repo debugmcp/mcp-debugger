@@ -182,7 +182,7 @@ jobs:
     - name: Run targeted Python integration tests
       env:
         CI: true
-      run: pnpm vitest run tests/adapters/python/integration/python-discovery.test.ts tests/adapters/python/integration/python_debug_workflow.test.ts tests/adapters/python/integration/python-module-launch.test.ts tests/adapters/python/integration/python-pytest-preset.test.ts
+      run: pnpm vitest run tests/adapters/python/integration/python-discovery.test.ts tests/adapters/python/integration/python_debug_workflow.test.ts tests/adapters/python/integration/python-module-launch.test.ts tests/adapters/python/integration/python-pytest-preset.test.ts tests/adapters/python/integration/python-subprocess-inherit.test.ts
 
     - name: Upload targeted test diagnostics
       if: failure()
