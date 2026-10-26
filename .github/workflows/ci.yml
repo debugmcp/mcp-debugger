@@ -41,7 +41,7 @@ jobs:
         cache: 'pnpm'
     
     - name: Setup Python ${{ matrix.python-version }}
-      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
       with:
         python-version: ${{ matrix.python-version }}
     
@@ -66,7 +66,7 @@ jobs:
         java-version: '21'
 
     - name: Setup Ruby
-      uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a  # v1.329.0
+      uses: ruby/setup-ruby@26e5b7d197ebf60545ee9667bcbace0be11ccaec  # v1.334.0
       with:
         ruby-version: '3.3'
 
@@ -155,7 +155,7 @@ jobs:
         cache: 'pnpm'
 
     - name: Setup Python 3.11
-      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
       with:
         python-version: '3.11'
 
@@ -182,7 +182,7 @@ jobs:
     - name: Run targeted Python integration tests
       env:
         CI: true
-      run: pnpm vitest run tests/adapters/python/integration/python-discovery.test.ts tests/adapters/python/integration/python_debug_workflow.test.ts tests/adapters/python/integration/python-module-launch.test.ts tests/adapters/python/integration/python-pytest-preset.test.ts
+      run: pnpm vitest run tests/adapters/python/integration/python-discovery.test.ts tests/adapters/python/integration/python_debug_workflow.test.ts tests/adapters/python/integration/python-module-launch.test.ts tests/adapters/python/integration/python-pytest-preset.test.ts tests/adapters/python/integration/python-subprocess-inherit.test.ts
 
     - name: Upload targeted test diagnostics
       if: failure()
@@ -379,7 +379,7 @@ jobs:
       # that shared runners exhaust — 429 Too Many Requests on the base-image
       # manifests, four times on 2026-10-09 (issue #891).
       if: steps.registry.outputs.login == 'true'
-      uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
+      uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6  # v4.7.0
       with:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_PASSWORD }}
