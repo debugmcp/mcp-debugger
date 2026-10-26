@@ -132,8 +132,10 @@ function resolveNodeId(file: string, testTarget: unknown): string {
 
 function namesSameFile(file: string, candidate: string): boolean {
   const normalize = (p: string): string => {
-    const slashed = path.posix.normalize(p.replace(/\\/g, '/')).replace(/\/+$/, '');
-    return process.platform === 'win32' ? slashed.toLowerCase() : slashed;
+    // normalize() collapses repeated separators, so at most one trailing slash remains.
+    const slashed = path.posix.normalize(p.replace(/\\/g, '/'));
+    const trimmed = slashed.length > 1 && slashed.endsWith('/') ? slashed.slice(0, -1) : slashed;
+    return process.platform === 'win32' ? trimmed.toLowerCase() : trimmed;
   };
   const f = normalize(file);
   const c = normalize(candidate);

@@ -9,6 +9,12 @@ import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-pol
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
 
+/**
+ * What pydevd appends to the exception name at a user-unhandled stop
+ * (`pydevd_comm.py`): the class ends where this begins (issue #985).
+ */
+const PYDEVD_PAUSED_AT_NOTE = '(note: full exception trace is shown but execution is paused at:';
+
 export const PythonAdapterPolicy = {
   name: 'python',
   // debugpy runs the program undebugged under noDebug (verified live) and,
@@ -278,8 +284,10 @@ export const PythonAdapterPolicy = {
   // name — on the stopped event's `text`, the exceptionInfo `exceptionId` and
   // `typeName` alike — with where execution is paused. The class is what the
   // snapshot reports (issue #985).
-  normalizeExceptionTypeName: (name: string): string =>
-    name.replace(/\s+\(note: full exception trace is shown but execution is paused at: [^)]*\)\s*$/, ''),
+  normalizeExceptionTypeName: (name: string): string => {
+    const note = name.indexOf(PYDEVD_PAUSED_AT_NOTE);
+    return note === -1 ? name : name.slice(0, note).trimEnd();
+  },
 
   // debugpy does not suspend a running target on attach, so an explicit
   // pause is required for the session to land in a truthful PAUSED state
