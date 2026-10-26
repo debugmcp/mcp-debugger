@@ -705,6 +705,17 @@ describe('DapConnectionManager', () => {
       expect(mockDapClient.sendRequest.mock.calls[0][1]).toMatchObject({ program: scriptPath, cwd: '/proj' });
     });
 
+    // A malformed `program` (an array) used to be replaced by scriptPath
+    // without a word; it now reaches the adapter, which refuses it by name.
+    it('sends a caller program as given, an array included, rather than replacing it silently', async () => {
+      mockDapClient.sendRequest.mockResolvedValue(undefined);
+      connectionManager.setAdapterPolicy(DefaultAdapterPolicy);
+
+      await connectionManager.sendLaunchRequest(mockDapClient, scriptPath, [], false, true, { program: ['a.js'] });
+
+      expect(mockDapClient.sendRequest.mock.calls[0][1]).toMatchObject({ program: ['a.js'] });
+    });
+
     it('fills program for a policy that declares no launchTargetKeys, a module key or not', async () => {
       mockDapClient.sendRequest.mockResolvedValue(undefined);
       connectionManager.setAdapterPolicy(DefaultAdapterPolicy);

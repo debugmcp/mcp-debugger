@@ -26,6 +26,8 @@ import {
   type GenericLaunchConfig,
   type GenericAttachConfig,
   type LanguageSpecificLaunchConfig,
+  launchTargetKeysOf,
+  namesLaunchTarget,
   redactSecretsInString
 } from '@debugmcp/shared';
 import { AdapterLease } from '../../adapters/adapter-lease.js';
@@ -276,6 +278,32 @@ export class ProxyLauncher {
       ...effectiveLaunchArgs
     };
 
+    // Caller's adapterConfig keys (minus reserved) — diffed against the attach
+    // transform's output to surface silently dropped keys (issue #450).
+    let adapterExtras: Record<string, unknown> = {};
+    if (adapterLaunchConfig && typeof adapterLaunchConfig === 'object') {
+      // request/__attachMode select the DAP sequence and shutdown semantics —
+      // the proxy worker re-reads them from the merged config (attach must
+      // detach with terminateDebuggee=false) — so adapter extras must never
+      // flip launch<->attach (issue #336).
+      const {
+        request: droppedRequest,
+        __attachMode: droppedAttachMode,
+        ...extras
+      } = adapterLaunchConfig as Record<string, unknown>;
+      if (droppedRequest !== undefined || droppedAttachMode !== undefined) {
+        const droppedKeys = [
+          droppedRequest !== undefined && 'request',
+          droppedAttachMode !== undefined && '__attachMode'
+        ].filter(Boolean).join(', ');
+        this.ctx.logger.warn(
+          `[SessionManager] Ignoring reserved adapter-config key(s) for session ${session.id}: ${droppedKeys}`
+        );
+      }
+      adapterExtras = extras;
+    }
+    const adapterExtraKeys = Object.keys(adapterExtras);
+
     // Only set program/cwd/args for launch mode
     if (!isAttachMode) {
       // Use scriptPath as program only if dapLaunchArgs didn't provide one
@@ -288,36 +316,21 @@ export class ProxyLauncher {
         genericLaunchConfig.args = scriptArgs;
       }
 
-      if (typeof genericLaunchConfig.cwd !== 'string' || genericLaunchConfig.cwd.length === 0) {
+      // A launch that names a target other than `program` under the policy's
+      // launch-target keys (debugpy's `module`/`code`, issue #985) does not
+      // run scriptPath, so the script's directory is the wrong cwd default
+      // (`python -m modpkg` from inside `modpkg/` fails): cwd is left for the
+      // adapter's transform to derive. `program` is still filled — the
+      // stand-in path is how the transform learns which file the launch is
+      // about — and the transform drops it before the request goes out.
+      const nonProgramTargetKeys = launchTargetKeysOf(this.ctx.selectPolicy(session.language)).filter(key => key !== 'program');
+      const namesTarget = namesLaunchTarget({ ...genericLaunchConfig, ...adapterExtras }, nonProgramTargetKeys);
+      if (!namesTarget && (typeof genericLaunchConfig.cwd !== 'string' || genericLaunchConfig.cwd.length === 0)) {
         genericLaunchConfig.cwd = path.dirname(scriptPath);
       }
     }
 
-    // Caller's adapterConfig keys (minus reserved) — diffed against the attach
-    // transform's output to surface silently dropped keys (issue #450).
-    let adapterExtraKeys: string[] = [];
-    if (adapterLaunchConfig && typeof adapterLaunchConfig === 'object') {
-      // request/__attachMode select the DAP sequence and shutdown semantics —
-      // the proxy worker re-reads them from the merged config (attach must
-      // detach with terminateDebuggee=false) — so adapter extras must never
-      // flip launch<->attach (issue #336).
-      const {
-        request: droppedRequest,
-        __attachMode: droppedAttachMode,
-        ...adapterExtras
-      } = adapterLaunchConfig as Record<string, unknown>;
-      if (droppedRequest !== undefined || droppedAttachMode !== undefined) {
-        const droppedKeys = [
-          droppedRequest !== undefined && 'request',
-          droppedAttachMode !== undefined && '__attachMode'
-        ].filter(Boolean).join(', ');
-        this.ctx.logger.warn(
-          `[SessionManager] Ignoring reserved adapter-config key(s) for session ${session.id}: ${droppedKeys}`
-        );
-      }
-      Object.assign(genericLaunchConfig, adapterExtras);
-      adapterExtraKeys = Object.keys(adapterExtras);
-    }
+    Object.assign(genericLaunchConfig, adapterExtras);
 
     // Create the adapter for this language first
     const adapterConfig: AdapterConfig = {

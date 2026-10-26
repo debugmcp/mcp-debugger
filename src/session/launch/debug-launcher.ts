@@ -50,7 +50,7 @@ import {
 import { waitForLaunchReadiness } from './launch-readiness.js';
 import { describeLaunchArming } from './launch-arming.js';
 import type { AdapterPreparationOutcome, ProxyLauncher } from './proxy-launcher.js';
-import { describeSpawnCommand } from './spawn-command.js';
+import { describeLaunchTarget, describeSpawnCommand } from './spawn-command.js';
 import type { InFlightGuard } from '../in-flight-guard.js';
 import { adapterVerifiedABreakpoint, debuggerOffWhy } from '../debugger-off.js';
 
@@ -298,7 +298,9 @@ export class DebugLauncher {
           dryRun: true,
           message: 'Dry run: nothing was started and the session is unchanged.',
           command,
-          script: outcome.plan.proxyConfig.scriptPath,
+          // The program the engine runs — or, for a module/code launch, the
+          // target it names, not the stand-in file (issue #985).
+          script: describeLaunchTarget(policy, outcome.plan.proxyConfig),
           ...(warning ? { warning } : {}),
         },
       };

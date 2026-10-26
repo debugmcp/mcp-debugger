@@ -242,6 +242,7 @@
             },
             "dapLaunchArgs": {
               "type": "object",
+              "description": "DAP launch arguments. Beyond the three below, adapter keys pass through (program, cwd, env, …). Python: module runs `python -m <module>` instead of scriptPath (the pytest shape: module \"pytest\", args [<test file>::<test>, \"-x\"]) and code runs a code string; scriptPath then only names the file the launch is about, and cwd — which `python -m` puts on sys.path — defaults to the directory above the top-most package containing scriptPath",
               "properties": {
                 "stopOnEntry": {
                   "type": "boolean",

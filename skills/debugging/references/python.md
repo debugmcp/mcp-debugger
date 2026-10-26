@@ -32,6 +32,8 @@ Shortcut: `get_local_variables { "sessionId": "<id>" }` does stack -> scopes -> 
 
 Optional launch tuning via `dapLaunchArgs`: `{ "stopOnEntry": true }` to pause on the first line, `{ "justMyCode": false }` to step into library code. `dryRunSpawn: true` answers the adapter command the launch would run and leaves the session exactly as it was, a running program included; the same session then takes the real `start_debugging`.
 
+Module launch: `dapLaunchArgs: { "module": "pytest" }` with `args: ["/abs/tests/test_x.py::test_name", "-x"]` runs `python -m pytest …` under the debugger instead of `scriptPath` (which still names the file the launch is about — the test file, or a package's `__main__.py`). debugpy takes one of `program`, `module`, `code`, so `program` is not sent; the answer's `warning` says so. `cwd` is what `python -m` puts on `sys.path`: it defaults to the directory above the top-most package containing `scriptPath`, and `dapLaunchArgs.cwd` sets it (the project root for a pytest run).
+
 ## Attach / remote
 
 Python attaches only to a listening debugpy endpoint — attaching by `processId` is not supported. Start the target yourself:

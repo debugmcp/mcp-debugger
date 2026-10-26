@@ -124,6 +124,75 @@ describe('Python module launch (issue #985 M0) @requires-python', () => {
 
       const output = await call('get_output', { sessionId });
       expect(JSON.stringify(output)).toContain('module launch: argv=1 total=42');
+
+      // restart_debugging replays the module launch and the breakpoint binds again.
+      const restarted = await call('restart_debugging', { sessionId });
+      expect(restarted.success, JSON.stringify(restarted)).toBe(true);
+      let restartedState = restarted.state as string;
+      if (restartedState !== 'paused') {
+        const waited = await call('wait_for_stop', { sessionId, timeout: 15000 });
+        restartedState = waited.state as string;
+      }
+      expect(restartedState).toBe('paused');
+      const stackAgain = await call('get_stack_trace', { sessionId });
+      expect(stackAgain.stackFrames[0].line).toBe(BREAKPOINT_LINE);
+    } finally {
+      await call('close_debug_session', { sessionId });
+    }
+  }, 90000);
+
+  // Without a caller cwd the launcher used to default it to the script's
+  // directory — inside the package — so `python -m modpkg` failed with
+  // "No module named modpkg". The transform now derives the directory above
+  // the top-most package containing the file.
+  it('resolves the module from the directory above the package when no cwd is given', async () => {
+    const created = await call('create_debug_session', { language: 'python', name: 'module-launch-default-cwd' });
+    const sessionId = created.sessionId as string;
+
+    try {
+      await call('set_breakpoint', { sessionId, file: mainPath, line: BREAKPOINT_LINE });
+      const started = await call('start_debugging', {
+        sessionId,
+        scriptPath: mainPath,
+        dapLaunchArgs: { module: 'modpkg' }
+      });
+      expect(started.success, JSON.stringify(started)).toBe(true);
+      expect(JSON.stringify(started)).toMatch(/cwd/);
+
+      let state = started.state as string;
+      if (state !== 'paused') {
+        const waited = await call('wait_for_stop', { sessionId, timeout: 15000 });
+        state = waited.state as string;
+      }
+      expect(state).toBe('paused');
+      const stack = await call('get_stack_trace', { sessionId });
+      expect(stack.stackFrames[0].line).toBe(BREAKPOINT_LINE);
+    } finally {
+      await call('close_debug_session', { sessionId });
+    }
+  }, 60000);
+
+  it('runs a code string (python -c) to completion, scriptPath only naming a file', async () => {
+    const created = await call('create_debug_session', { language: 'python', name: 'code-launch' });
+    const sessionId = created.sessionId as string;
+
+    try {
+      const started = await call('start_debugging', {
+        sessionId,
+        scriptPath: mainPath,
+        dapLaunchArgs: { code: 'import sys; print("code launch ok", len(sys.argv))' }
+      });
+      expect(started.success, JSON.stringify(started)).toBe(true);
+      expect(JSON.stringify(started)).toMatch(/dapLaunchArgs\.code/);
+
+      let state = started.state as string;
+      if (state === 'running') {
+        const waited = await call('wait_for_stop', { sessionId, timeout: 15000 });
+        state = waited.state as string;
+      }
+      expect(['stopped', 'terminated']).toContain(state);
+      const output = await call('get_output', { sessionId });
+      expect(JSON.stringify(output)).toContain('code launch ok');
     } finally {
       await call('close_debug_session', { sessionId });
     }
