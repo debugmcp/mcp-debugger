@@ -9,8 +9,12 @@
  * `multiprocessing`) then died inside `subprocess` with
  * `OSError: [WinError 6] The handle is invalid`. The adapter now runs under
  * the session's interpreter on the hidden console the proxy's `windowsHide`
- * spawn gives it (#931), which the launcher and the debuggee inherit. Off
- * Windows the case is a plain run-to-completion check.
+ * spawn gives it (#931), which the launcher and the debuggee inherit.
+ *
+ * On every platform the case also proves the sub-process default (issue
+ * #1005): with debugpy's sub-process debugging on, the child is hooked by
+ * pydevd and waits for a debug client this server does not attach, and the
+ * launch never ends; the transform turns it off unless the caller asks.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import path from 'path';
@@ -85,15 +89,14 @@ describe('Python debuggee spawning a child with an inherited stderr (issue #993)
     try {
       // No exception filter: a spawn failure must show up as the debuggee's own
       // traceback and non-zero exit, not as a pause this case would have to read.
-      // subProcess: false keeps debugpy from hooking the child, which otherwise
-      // parks waiting for a debug client this server never attaches (issue
-      // #1005 owns that default); this case is about the handles the child
-      // inherits.
+      // No subProcess key either: the transform's default (off, issue #1005) is
+      // what lets the child run instead of parking for a debug client this
+      // server never attaches — before that default this launch never ended.
       const started = await call('start_debugging', {
         sessionId,
         scriptPath: fixturePath,
         breakOnExceptions: 'none',
-        dapLaunchArgs: { stopOnEntry: false, subProcess: false }
+        dapLaunchArgs: { stopOnEntry: false }
       });
       expect(started.success, JSON.stringify(started)).toBe(true);
 
