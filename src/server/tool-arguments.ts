@@ -27,6 +27,9 @@ export interface ToolArguments {
   dryRunSpawn?: boolean;
   breakOnExceptions?: string;
   adapterLaunchConfig?: Record<string, unknown>;
+  // The test-runner preset (issue #985), folded into adapterLaunchConfig at intake
+  testRunner?: string;
+  testTarget?: string;
   scope?: number;
   frameId?: number;
   expression?: string;

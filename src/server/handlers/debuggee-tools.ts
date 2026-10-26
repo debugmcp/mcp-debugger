@@ -6,6 +6,7 @@ import type { ToolHandler } from '../tool-context.js';
 import { attachRequestFromArgs, hoistStopLanding, successWarning } from './shared.js';
 import {
   assertPlainObjectArg,
+  foldTestRunnerPreset,
   normalizeStartDebuggingArgs,
   requireSessionId,
   validateBreakOnExceptions
@@ -26,7 +27,7 @@ export const startDebuggingTool: ToolHandler = async (ctx, args) => {
       args.args,
       intake.dapLaunchArgs,
       args.dryRunSpawn,
-      args.adapterLaunchConfig,
+      foldTestRunnerPreset(args.adapterLaunchConfig, args.testRunner, args.testTarget),
       validateBreakOnExceptions(intake.breakOnExceptions)
     );
     const responsePayload: Record<string, unknown> = {

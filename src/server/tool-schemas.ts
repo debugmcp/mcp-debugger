@@ -160,6 +160,14 @@ export function buildToolDefinitions(options: BuildToolDefinitionsOptions): Tool
             description: 'Check the launch without starting anything: resolves the adapter and the program (compiling a source-file program where the language needs it), runs the launch transform, and answers with the adapter command the launch would run plus any configuration warnings. The session is left exactly as it was: the answer\'s state is the session\'s current state, a running or paused program keeps running, and the previous run\'s output, exit code and last stop stay readable. Not available for attach-shaped configs'
           },
           breakOnExceptions: { type: 'string', enum: ['uncaught', 'all', 'none'], description: 'Break when exceptions are thrown: "uncaught" pauses at uncaught exceptions at the crash site instead of terminating the session; "all" also pauses on caught/raised exceptions (language-dependent). Launch sessions default to "uncaught" (Ruby is the exception — rdbg has no uncaught-only filter, so it stays "none"); pass "none" to opt out and let crashing scripts run to termination' },
+          testRunner: {
+            type: 'string',
+            description: 'Run scriptPath under a test runner the language declares a preset for (list_supported_languages shows testRunners per language; python: "pytest"). The preset builds the launch — for pytest: python -m pytest <scriptPath>[::testTarget] -x, run from pytest\'s rootdir (the nearest pytest.ini, pyproject.toml with a [tool.pytest.ini_options] table, tox.ini or setup.cfg with a pytest section above the file, else setup.py), with pytest-xdist and pytest-cov turned off — -p no:<plugin>, or the plugin\'s inert switch (-n0 / --no-cov) when the project\'s own addopts turns it on — unless your args ask for them, and the debugger armed to pause on the first failing assert or escaping exception with the test frame live (uncaught + userUnhandled). The answer is the autopsy: snapshot.exception, frames and locals; a passing test runs to completion. Your args are appended as pytest arguments. An undeclared runner is refused by name before anything starts'
+          },
+          testTarget: {
+            type: 'string',
+            description: 'With testRunner: the test inside scriptPath to run — "test_name", "Class::test_name", "test_name[param]" — or a full node id of that file. Omit to run the whole file'
+          },
           adapterLaunchConfig: {
             type: 'object',
             description: 'Optional adapter-specific launch configuration overrides',

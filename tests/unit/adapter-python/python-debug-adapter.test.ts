@@ -333,6 +333,71 @@ describe('PythonDebugAdapter', () => {
       expect(diagnostics.find(d => d.key === 'code')?.message).toMatch(/python -c/);
     });
 
+    // The pytest preset (issue #985 M1): `testRunner: "pytest"` on the test
+    // file becomes a module launch of pytest from the project's rootdir.
+    describe('testRunner: pytest', () => {
+      const project = (...files: string[]) =>
+        createMockAdapterDependencies({
+          fileSystem: createMockFileSystem({
+            existsSync: vi.fn((p: string) => files.includes(p.replace(/\\/g, '/')))
+          })
+        });
+
+      it('expands into python -m pytest <node id> -x … from the rootdir, consuming its keys and the stand-in program', async () => {
+        const adapter = new PythonDebugAdapter(project('/proj/pytest.ini'));
+        const config = await adapter.transformLaunchConfig({
+          program: '/proj/tests/test_billing.py',
+          testRunner: 'pytest',
+          testTarget: 'test_rounding'
+        } as any);
+
+        expect(config.module).toBe('pytest');
+        expect(config.args).toEqual(['/proj/tests/test_billing.py::test_rounding', '-x', '-p', 'no:xdist', '-p', 'no:cov']);
+        expect(config.cwd).toBe('/proj');
+        expect(config).not.toHaveProperty('program');
+        expect(config).not.toHaveProperty('testRunner');
+        expect(config).not.toHaveProperty('testTarget');
+        expect(adapter.consumedLaunchKeys).toEqual(expect.arrayContaining(['testRunner', 'testTarget']));
+
+        const notes = adapter.consumeLaunchConfigDiagnostics?.() ?? [];
+        // A launch-scoped label of its own, so the note renders once, as-is.
+        const preset = notes.find(d => d.key === 'preset');
+        expect(preset?.scope).toBe('launch');
+        expect(preset?.message).toMatch(/python -m pytest/);
+        expect(preset?.message).toContain('/proj');
+        expect(preset?.message).toContain('pytest.ini');
+        // The module-launch cwd note is not added on top: the preset chose cwd itself.
+        expect(notes.filter(d => d.key === 'cwd')).toHaveLength(0);
+      });
+
+      it('keeps caller args and cwd', async () => {
+        const adapter = new PythonDebugAdapter(project('/proj/pytest.ini'));
+        const config = await adapter.transformLaunchConfig({
+          program: '/proj/tests/test_billing.py',
+          testRunner: 'pytest',
+          args: ['-vv'],
+          cwd: '/proj/src'
+        } as any);
+
+        expect(config.args).toEqual(['/proj/tests/test_billing.py', '-x', '-p', 'no:xdist', '-p', 'no:cov', '-vv']);
+        expect(config.cwd).toBe('/proj/src');
+      });
+
+      it('refuses a runner the adapter does not have, naming the ones it does', async () => {
+        const adapter = new PythonDebugAdapter(project());
+        await expect(
+          adapter.transformLaunchConfig({ program: '/proj/tests/test_a.py', testRunner: 'nose' } as any)
+        ).rejects.toThrow(/nose.*pytest/);
+      });
+
+      it('refuses a node id that names another file', async () => {
+        const adapter = new PythonDebugAdapter(project());
+        await expect(
+          adapter.transformLaunchConfig({ program: '/proj/tests/test_a.py', testRunner: 'pytest', testTarget: 'tests/test_b.py::test_x' } as any)
+        ).rejects.toThrow(/test_b\.py/);
+      });
+    });
+
     // The launcher no longer derives cwd from the stand-in file for a module
     // launch (issue #985): `python -m` resolves the module from cwd, so the
     // right default is the directory above the top-most package the file is in.

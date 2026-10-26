@@ -13,7 +13,7 @@ import type { ManagedSession } from '../session-store.js';
 
 export type ArmingSession = Pick<
   ManagedSession,
-  'breakpoints' | 'functionBreakpoints' | 'adapterCapabilities' | 'effectiveBreakOnExceptions'
+  'breakpoints' | 'functionBreakpoints' | 'adapterCapabilities' | 'effectiveBreakOnExceptions' | 'launchExceptionFilters'
 >;
 
 export interface LaunchArming {
@@ -30,6 +30,13 @@ export interface LaunchArming {
   stopOnEntry: boolean;
   /** `breakOnExceptions: 'all'` — the one mode that stops on an exception the program survives. */
   pausesOnCaughtExceptions: boolean;
+  /**
+   * Exception-filter ids the launch armed beyond its mode's table (issue
+   * #985: a pytest module launch adds `userUnhandled` to the `uncaught`
+   * default). They stop on an exception the program survives — a failing
+   * test — so they count as armed.
+   */
+  extraExceptionFilters: readonly string[];
   /** The armed clauses in one phrase ("2 breakpoint(s) and an entry stop"); '' when unarmed. */
   summary: string;
   /**
@@ -62,6 +69,7 @@ export function describeLaunchArming(session: ArmingSession, stopOnEntry: boolea
   }
   const functionBreakpoints = session.functionBreakpoints?.size ?? 0;
   const pausesOnCaughtExceptions = session.effectiveBreakOnExceptions === 'all';
+  const extraExceptionFilters = session.launchExceptionFilters?.beyondMode ?? [];
   const entry = stopOnEntry === true;
 
   const clauses: string[] = [];
@@ -80,6 +88,9 @@ export function describeLaunchArming(session: ArmingSession, stopOnEntry: boolea
   if (pausesOnCaughtExceptions) {
     clauses.push("breakOnExceptions: 'all'");
   }
+  if (extraExceptionFilters.length > 0) {
+    clauses.push(`the exception filter(s) ${extraExceptionFilters.join(', ')} the launch armed (they pause on an exception the program survives)`);
+  }
 
   return {
     armed: clauses.length > 0,
@@ -88,6 +99,7 @@ export function describeLaunchArming(session: ArmingSession, stopOnEntry: boolea
     functionBreakpoints,
     stopOnEntry: entry,
     pausesOnCaughtExceptions,
+    extraExceptionFilters,
     summary: joinClauses(clauses),
     logpoints,
     ...(logpoints > 0 ? { loggingSummary: `${logpoints} logpoint(s) that log without stopping` } : {})

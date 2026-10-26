@@ -248,7 +248,11 @@ export const PythonAdapterPolicy = {
   getInitializationBehavior: () => {
     return {
       sendAttachBeforeInitialized: true,
-      // debugpy filter IDs; 'userUnhandled' exists but is noisy in practice
+      // debugpy filter IDs. Its third filter, 'userUnhandled' ("break when an
+      // exception escapes into library code"), is armed per launch below, not
+      // here: for a plain program it fires on every exception a library
+      // catches for user code; for a pytest run it is the only filter that
+      // pauses on a test failure (issue #985).
       exceptionFilters: {
         uncaught: ['uncaught'],
         all: ['raised', 'uncaught']
@@ -257,6 +261,25 @@ export const PythonAdapterPolicy = {
       defaultExceptionBreakMode: 'uncaught'
     };
   },
+
+  // A pytest run catches every test failure (`CallInfo.from_call`), so
+  // debugpy's `uncaught` never fires on one. `userUnhandled` does — at the
+  // failing assert with the test frame live, with the raise-site frames above
+  // it when a helper raised, never inside `pytest.raises`; `pytest.skip()` is
+  // the expected noise (measured: docs/python/spike-notes-pytest.md). Armed
+  // beside `uncaught` for a pytest module launch under the default mode;
+  // 'all' (raised, which false-stops on expected exceptions) and 'none' are
+  // left alone. Keyed on the module, not the preset flag, so a hand-written
+  // `dapLaunchArgs: { module: 'pytest' }` gets it too (issue #985).
+  exceptionFiltersForLaunch: (mode, launchConfig) =>
+    mode === 'uncaught' && launchConfig?.module === 'pytest' ? ['uncaught', 'userUnhandled'] : undefined,
+
+  // At a user-unhandled stop pydevd (`pydevd_comm.py`) suffixes the exception
+  // name — on the stopped event's `text`, the exceptionInfo `exceptionId` and
+  // `typeName` alike — with where execution is paused. The class is what the
+  // snapshot reports (issue #985).
+  normalizeExceptionTypeName: (name: string): string =>
+    name.replace(/\s+\(note: full exception trace is shown but execution is paused at: [^)]*\)\s*$/, ''),
 
   // debugpy does not suspend a running target on attach, so an explicit
   // pause is required for the session to land in a truthful PAUSED state

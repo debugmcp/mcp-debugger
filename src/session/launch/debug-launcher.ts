@@ -25,6 +25,7 @@ import {
   type AdapterPolicy,
   type ExceptionBreakMode
 } from '@debugmcp/shared';
+import { resolveExceptionFilters } from '@debugmcp/shared';
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import { checkLaunchToolchain } from '../../utils/language-availability.js';
@@ -51,6 +52,7 @@ import { waitForLaunchReadiness } from './launch-readiness.js';
 import { describeLaunchArming } from './launch-arming.js';
 import type { AdapterPreparationOutcome, ProxyLauncher } from './proxy-launcher.js';
 import { describeLaunchTarget, describeSpawnCommand } from './spawn-command.js';
+import { classifyTestRunner, TEST_RUNNER_KEY } from './test-runner-gate.js';
 import type { InFlightGuard } from '../in-flight-guard.js';
 import { adapterVerifiedABreakpoint, debuggerOffWhy } from '../debugger-off.js';
 
@@ -420,6 +422,28 @@ export class DebugLauncher {
       return { success: false, state: session.state, error };
     }
 
+    // The test-runner preset gate (issue #985): a `testRunner` the language's
+    // factory does not declare is refused here — by name, with the runners it
+    // does take — before any state changes and before the dry run, so the
+    // session stays usable and a dry run of a bad preset says why.
+    if (adapterLaunchConfig?.[TEST_RUNNER_KEY] !== undefined || adapterLaunchConfig?.testTarget !== undefined) {
+      if (typeof this.ctx.adapterRegistry.getFactoryMetadata === 'function') {
+        const factoryMeta = await this.ctx.adapterRegistry.getFactoryMetadata(session.language).catch(() => undefined);
+        const verdict = classifyTestRunner(session.language, adapterLaunchConfig, factoryMeta?.modes);
+        if (!verdict.ok) {
+          this.ctx.logger.warn(`[SessionManager] ${verdict.error}`);
+          return { success: false, state: session.state, error: verdict.error };
+        }
+      } else {
+        // The same fail-open as the attach gate (#903): a registry double
+        // without metadata skips the gate; the adapter's transform re-checks
+        // the runner itself.
+        this.ctx.logger.warn(
+          `[SessionManager] adapterRegistry has no getFactoryMetadata; skipping the test-runner preset gate for '${session.language}'.`
+        );
+      }
+    }
+
     // A dry run is a query (issue #812): everything a launch prepares, nothing
     // it changes. Answered here, before the teardown of a previous proxy and
     // the per-attempt resets below, so a paused program keeps running and the
@@ -468,6 +492,7 @@ export class DebugLauncher {
     session.snapshotDiffBase = undefined;
     session.launchConfigNotices = [];
     session.adapterNotices = [];
+    session.launchExceptionFilters = undefined;
     // The previous launch's debugger-off decision does not carry over
     // (issue #749); this attempt decides again below.
     session.launchDebuggerOff = undefined;
@@ -525,6 +550,18 @@ export class DebugLauncher {
           : launchArgs?.stopOnEntry
       };
       this.ctx.logger.info(`[SessionManager] ProxyManager started for session ${sessionId}`);
+
+      // One resolver, two readers (issue #985): the same launch-aware answer
+      // the worker sends as setExceptionBreakpoints, recorded here with the
+      // ids beyond the mode's table, so the arming text cannot drift from the
+      // wire — a pytest module launch adds userUnhandled to the uncaught default.
+      const armedFilters = resolveExceptionFilters(policy, effectiveBreakOnExceptions, launchConfigData);
+      // The mode's table alone: the resolver without a launch config.
+      const tableFilters = resolveExceptionFilters(policy, effectiveBreakOnExceptions);
+      session.launchExceptionFilters = {
+        ids: armedFilters,
+        beyondMode: armedFilters.filter(id => !tableFilters.includes(id))
+      };
 
       // Perform language-specific handshake if required
       if (policy.performHandshake) {

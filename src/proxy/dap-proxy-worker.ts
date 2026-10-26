@@ -1577,7 +1577,9 @@ export class DapProxyWorker {
       stage = 'setExceptionBreakpoints';
       const exceptionMode = initPayload.breakOnExceptions;
       if (exceptionMode && exceptionMode !== 'none') {
-        const exceptionFilters = resolveExceptionFilters(this.adapterPolicy, exceptionMode);
+        // Launch-aware (issue #985): the policy may read the transformed
+        // launch config — a pytest module launch arms userUnhandled too.
+        const exceptionFilters = resolveExceptionFilters(this.adapterPolicy, exceptionMode, initPayload.launchConfig);
         if (exceptionFilters.length > 0) {
           try {
             await connectionManager.setExceptionBreakpoints(dapClient, exceptionFilters);

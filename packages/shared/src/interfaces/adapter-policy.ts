@@ -551,6 +551,28 @@ export interface AdapterPolicy {
   launchTargetKeys?: readonly string[];
 
   /**
+   * The DAP exception-filter ids a mode arms for this launch, read off the
+   * transformed launch config, when they differ from the `exceptionFilters`
+   * table (issue #985): debugpy's `uncaught` never fires on a failing test —
+   * pytest catches it — so a pytest module launch arms `userUnhandled`
+   * beside it under the `uncaught` default. Undefined, or an undefined
+   * answer, means the table applies. The worker sends what this says; the
+   * launcher records the ids the launch armed beyond the table on the
+   * session, so the "still running" answer can name them.
+   */
+  exceptionFiltersForLaunch?(mode: ExceptionBreakMode, launchConfig: Record<string, unknown> | undefined): string[] | undefined;
+
+  /**
+   * The exception class as the adapter means it, when the adapter decorates
+   * the name it reports (issue #985): at a user-unhandled stop pydevd appends
+   * "       (note: full exception trace is shown but execution is paused at:
+   * <fn>)" to the name on `text`, `exceptionId` and `typeName` alike. The
+   * stop snapshot's `exception.type` is read through this; the stored stop
+   * record keeps the adapter's words. Undefined means the name is used as is.
+   */
+  normalizeExceptionTypeName?(name: string): string;
+
+  /**
    * The adapter's DAP `next` stops once per token position rather than once
    * per line (issue #879, the Dart SDK adapter; `granularity: 'line'` is
    * ignored). The core's step_over then repeats `next` while a plain step
@@ -1120,10 +1142,17 @@ export const DefaultAdapterPolicy = {
  */
 export function resolveExceptionFilters(
   policy: AdapterPolicy,
-  mode: ExceptionBreakMode | undefined
+  mode: ExceptionBreakMode | undefined,
+  launchConfig?: Record<string, unknown>
 ): string[] {
   if (!mode || mode === 'none') {
     return [];
+  }
+  // A launch-aware answer first (issue #985: a pytest module launch arms
+  // userUnhandled beside uncaught); the table otherwise.
+  const forLaunch = policy.exceptionFiltersForLaunch?.(mode, launchConfig);
+  if (forLaunch !== undefined) {
+    return forLaunch;
   }
   return policy.getInitializationBehavior().exceptionFilters?.[mode] ?? [];
 }

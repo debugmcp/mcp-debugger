@@ -32,6 +32,8 @@ interface PinnedAttach {
   attachBy: readonly AttachAddressing[] | undefined;
   /** Which hints the declaration carries; a form the adapter lacks needs one. */
   hints: readonly ('processId' | 'port')[];
+  /** The test-runner presets `start_debugging { testRunner }` accepts (issue #985); undefined means none. */
+  testRunners: readonly string[] | undefined;
 }
 
 /**
@@ -40,17 +42,17 @@ interface PinnedAttach {
  * two top-level forms it does not accept, so the refusal can say what to do instead.
  */
 const PINNED: Record<string, PinnedAttach> = {
-  python: { attach: 'direct-connect', attachBy: ['port'], hints: ['processId'] },
-  ruby: { attach: 'direct-connect', attachBy: ['port'], hints: ['processId'] },
-  javascript: { attach: 'spawn', attachBy: ['processId', 'port', 'adapterConfig'], hints: [] },
-  java: { attach: 'spawn', attachBy: ['port'], hints: ['processId'] },
-  dotnet: { attach: 'spawn', attachBy: ['processId'], hints: ['port'] },
-  cpp: { attach: 'spawn', attachBy: ['processId'], hints: ['port'] },
-  cobol: { attach: 'spawn', attachBy: ['processId'], hints: ['port'] },
-  dart: { attach: 'spawn', attachBy: ['port', 'adapterConfig'], hints: ['processId'] },
-  go: { attach: 'none', attachBy: undefined, hints: [] },
-  rust: { attach: 'none', attachBy: undefined, hints: [] },
-  mock: { attach: 'none', attachBy: undefined, hints: [] }
+  python: { attach: 'direct-connect', attachBy: ['port'], hints: ['processId'], testRunners: ['pytest'] },
+  ruby: { attach: 'direct-connect', attachBy: ['port'], hints: ['processId'], testRunners: undefined },
+  javascript: { attach: 'spawn', attachBy: ['processId', 'port', 'adapterConfig'], hints: [], testRunners: undefined },
+  java: { attach: 'spawn', attachBy: ['port'], hints: ['processId'], testRunners: undefined },
+  dotnet: { attach: 'spawn', attachBy: ['processId'], hints: ['port'], testRunners: undefined },
+  cpp: { attach: 'spawn', attachBy: ['processId'], hints: ['port'], testRunners: undefined },
+  cobol: { attach: 'spawn', attachBy: ['processId'], hints: ['port'], testRunners: undefined },
+  dart: { attach: 'spawn', attachBy: ['port', 'adapterConfig'], hints: ['processId'], testRunners: undefined },
+  go: { attach: 'none', attachBy: undefined, hints: [], testRunners: undefined },
+  rust: { attach: 'none', attachBy: undefined, hints: [], testRunners: undefined },
+  mock: { attach: 'none', attachBy: undefined, hints: [], testRunners: undefined }
 };
 
 const FACTORIES: Record<string, () => IAdapterFactory> = {
@@ -85,6 +87,12 @@ describe('attach-addressing contract (issue #903)', () => {
       const modes = modesOf(language);
       expect(modes?.attach).toBe(pinned.attach);
       expect(modes?.attachBy).toEqual(pinned.attachBy);
+    });
+
+    // Issue #985: the runners a `start_debugging { testRunner }` preset may name,
+    // refused by the core before any state changes when undeclared.
+    it('declares the pinned test-runner presets', () => {
+      expect(modesOf(language)?.testRunners).toEqual(pinned.testRunners);
     });
 
     it('declares attachBy exactly when attach is implemented', () => {
@@ -124,6 +132,7 @@ describe('attach-addressing contract (issue #903)', () => {
       const modes = modesOf(entry.name);
       expect(entry.attach, entry.name).toBe(modes?.attach);
       expect(entry.attachBy, entry.name).toEqual(modes?.attachBy);
+      expect(entry.testRunners, entry.name).toEqual(modes?.testRunners);
     }
   });
 });

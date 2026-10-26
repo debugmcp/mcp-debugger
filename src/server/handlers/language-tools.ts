@@ -34,6 +34,7 @@ export async function handleListSupportedLanguages(ctx: ToolContext): Promise<To
       description?: string;
       attach: 'none' | 'direct-connect' | 'spawn';
       attachBy?: readonly AttachAddressing[];
+      testRunners?: readonly string[];
     }> =
       installed.map(lang => ({
         language: lang,
@@ -54,7 +55,9 @@ export async function handleListSupportedLanguages(ctx: ToolContext): Promise<To
           description: m.description,
           attach: m.attach ?? 'none',
           // The attach-addressing contract (issue #903): what attach_to_process may address
-          attachBy: m.attachBy
+          attachBy: m.attachBy,
+          // The test-runner presets start_debugging { testRunner } takes (issue #985)
+          testRunners: m.testRunners
         }));
       } catch (e) {
         ctx.logger.warn('Failed to query detailed adapter metadata; returning installed list only', { error: (e as Error)?.message });
@@ -92,7 +95,8 @@ export async function handleListSupportedLanguages(ctx: ToolContext): Promise<To
           // A package on disk whose import failed reports both modes
           // unavailable with the loader's own reason (issue #795); doctor
           // reads the same probe and calls it broken.
-          modes: probe.modes
+          modes: probe.modes,
+          ...(entry.testRunners ? { testRunners: entry.testRunners } : {})
         };
       })
     );

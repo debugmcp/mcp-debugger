@@ -81,6 +81,25 @@ Optional tuning:
 - `breakOnExceptions`: launch sessions default to `"uncaught"`, so a crashing script pauses at the crash site with stack and locals intact instead of terminating the session. `"all"` also pauses on caught/raised exceptions; `"none"` opts out. Python edge case: debugpy treats `sys.exit(n)` with a **non-zero** code as an unhandled `SystemExit` and pauses there (`sys.exit(0)` runs to completion) — pass `"none"` if your script legitimately exits non-zero that way.
 - `dryRunSpawn: true` validates the spawn configuration without starting anything, and leaves the session exactly as it was — a running program included (issue #812); the same session then takes the real launch.
 
+### Debug a failing test in one call (pytest preset)
+
+The most common entry point is a failing test, and translating it into a debug launch takes runner knowledge you should not need. `testRunner: "pytest"` does it (issue #985):
+
+```text
+start_debugging { "sessionId": "...", "scriptPath": "/abs/project/tests/test_billing.py",
+                  "testRunner": "pytest", "testTarget": "test_proration_rounding" }
+```
+
+No breakpoint is needed. The answer is the autopsy: `state: "paused"` at the failing assert, with `snapshot.exception` (`AssertionError`, pytest's rewritten explanation as the message), `snapshot.frames` and `snapshot.locals` (the test's variables, plus pytest's `@py_assert*` rewriting temporaries). A passing test runs to completion with exit code 0. `testTarget` is a selector inside the file — `test_name`, `Class::test_name`, `test_name[param]` — or a full node id of that file; omit it to run the whole file (`-x` stops at the first failure).
+
+What the preset does, measured in [spike-notes-pytest.md](spike-notes-pytest.md):
+
+- Runs `python -m pytest <file>[::<target>] -x` from pytest's rootdir — the nearest ancestor of the test file holding `pytest.ini`, a `pyproject.toml` with a `[tool.pytest.ini_options]` table, a `tox.ini` with `[pytest]` or a `setup.cfg` with `[tool:pytest]`, else the nearest `setup.py` (pytest's own rule), else the top-most `conftest.py` ancestor, else the file's directory. `dapLaunchArgs.cwd` overrides it; your `args` are appended as pytest arguments.
+- Turns pytest-xdist and pytest-cov off for the run: `-p no:xdist` / `-p no:cov` when nothing asks for them (silent when the plugin is absent), or the plugin's inert switch — `-n0` / `--no-cov` — when the project's own `addopts` turns it on (`-p no:` would make pytest reject those options with a usage error); your `args` asking for a plugin leave it alone. xdist's workers would run undebugged (and the spawn fails under the Windows debuggee, issue #993); coverage's tracer competes with the debugger's on Pythons before 3.12.
+- Arms debugpy's `userUnhandled` filter beside `uncaught` under the `breakOnExceptions` default — pytest catches every test failure, so `uncaught` alone never fires on one. `"all"` and `"none"` behave as usual (`"none"` lets the failing test run to exit code 1). Any `dapLaunchArgs: { "module": "pytest" }` launch gets the same filters.
+- Where it stops: the failing assert in the test frame; for an exception raised in a helper, the raise site is the top frame with its locals readable and the live test frame below it, marked `(Current frame)`; a fixture that raises pauses in the fixture; `pytest.raises` never pauses; `pytest.skip()` pauses once (`Skipped`, continue to move on); a decorated test lands on its assert. A `print` before the assert reaches `get_output` with pytest's report after the run, not before the pause — pass `args: ["-s"]` for live prints.
+- `restart_debugging` replays the preset; `dryRunSpawn: true` answers `data.script: "module: pytest"` with the expansion in `warning`. A runner Python has no preset for is refused by name before anything starts.
+
 ### 4. Control Execution
 
 When execution pauses at a breakpoint, you can:

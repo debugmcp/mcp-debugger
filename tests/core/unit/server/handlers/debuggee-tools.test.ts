@@ -113,6 +113,61 @@ describe('debuggee lifecycle tool handlers', () => {
     }
   });
 
+  // Issue #985: the test-runner preset rides start_debugging as two optional
+  // arguments, folded into adapterLaunchConfig at intake so the seven-argument
+  // facade signature and restart_debugging's replay stay as they are.
+  describe('the test-runner preset arguments (issue #985)', () => {
+    it('folds testRunner and testTarget into adapterLaunchConfig, the top level winning over a nested spelling', async () => {
+      ctx.sessionManager.startDebugging.mockResolvedValue({ success: true, state: 'running', data: { message: 'started' } });
+
+      await startDebuggingTool(
+        ctx,
+        {
+          sessionId: 'test-session',
+          scriptPath: '/app/Program.cs',
+          testRunner: 'pytest',
+          testTarget: 'test_x',
+          adapterLaunchConfig: { keep: true, testRunner: 'nested', testTarget: 'nested_target' }
+        },
+        'start_debugging'
+      );
+
+      expect(ctx.sessionManager.startDebugging).toHaveBeenCalledWith(
+        'test-session',
+        '/app/Program.cs',
+        undefined,
+        undefined,
+        undefined,
+        { keep: true, testRunner: 'pytest', testTarget: 'test_x' },
+        undefined
+      );
+    });
+
+    it('creates the adapterLaunchConfig when only the preset is given, and leaves it absent otherwise', async () => {
+      ctx.sessionManager.startDebugging.mockResolvedValue({ success: true, state: 'running', data: { message: 'started' } });
+
+      await startDebuggingTool(ctx, { sessionId: 'test-session', scriptPath: '/proj/tests/test_a.py', testRunner: 'pytest' }, 'start_debugging');
+      expect(ctx.sessionManager.startDebugging.mock.calls[0][5]).toEqual({ testRunner: 'pytest' });
+
+      await startDebuggingTool(ctx, { sessionId: 'test-session', scriptPath: '/proj/tests/test_a.py' }, 'start_debugging');
+      expect(ctx.sessionManager.startDebugging.mock.calls[1][5]).toBeUndefined();
+    });
+
+    it('strips the two keys from dapLaunchArgs with the misplaced-key warning', async () => {
+      ctx.sessionManager.startDebugging.mockResolvedValue({ success: true, state: 'running', data: { message: 'started' } });
+
+      const result = await startDebuggingTool(
+        ctx,
+        { sessionId: 'test-session', scriptPath: '/proj/tests/test_a.py', dapLaunchArgs: { testRunner: 'pytest', stopOnEntry: true } as never },
+        'start_debugging'
+      );
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(ctx.sessionManager.startDebugging.mock.calls[0][3]).toEqual({ stopOnEntry: true });
+      expect(payload.warning).toMatch(/testRunner.*top-level/);
+    });
+  });
+
   describe('a dry run (issue #812)', () => {
     it('passes the session\'s own state and the preparation record through, and reads nothing', async () => {
       const warning = 'adapterLaunchConfig.typo: forwarded to the adapter but unrecognized';
