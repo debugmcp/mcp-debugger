@@ -9,7 +9,6 @@
  */
 import { EventEmitter } from 'events';
 import { spawn } from 'child_process';
-import { existsSync } from 'fs';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
 import { 
@@ -72,7 +71,7 @@ interface PythonLaunchConfig extends LanguageSpecificLaunchConfig {
   jinja?: boolean;             // Jinja template debugging
   redirectOutput?: boolean;     // Redirect output to debug console
   showReturnValue?: boolean;    // Show function return values
-  subProcess?: boolean;         // Debug child processes
+  subProcess?: boolean;         // debugpy's sub-process debugging: off unless asked for (issue #1005)
   [key: string]: unknown;       // Required by LanguageSpecificLaunchConfig
 }
 
@@ -389,9 +388,23 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
   
   // ===== Adapter Configuration =====
   
+  /**
+   * The adapter runs under the session's interpreter as resolved, python.exe
+   * included. On Windows it used to be swapped for a sibling pythonw.exe
+   * (#215, when the adapter was spawned detached and its console-subsystem
+   * launcher got a visible console). debugpy's launch `python` defaults to
+   * the adapter's own interpreter, so the launcher and the debuggee ran
+   * windowless too, and a debuggee child that inherited a standard handle
+   * (pytest-xdist's execnet workers under a venv) died inside `subprocess`
+   * with `WinError 6` (issue #993). Since #931 the proxy spawns the adapter
+   * with windowsHide (CREATE_NO_WINDOW): a hidden console that the launcher
+   * and the debuggee inherit — measured at zero visible console windows per
+   * session with the #219 watcher — so the swap bought nothing and cost the
+   * debuggee its handles.
+   */
   buildAdapterCommand(config: AdapterConfig): AdapterCommand {
     return {
-      command: this.preferNoConsoleInterpreter(config.executablePath),
+      command: config.executablePath,
       args: [
         '-m', 'debugpy.adapter',
         '--host', config.adapterHost,
@@ -405,35 +418,6 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
     };
   }
 
-  /**
-   * On Windows, run the adapter under the sibling pythonw.exe when it exists.
-   *
-   * Before #889 the adapter was spawned detached, so it had no console, and
-   * debugpy's launcher (a console-subsystem grandchild that Node's windowsHide
-   * cannot reach) got a fresh *visible* console allocated by Windows — one
-   * window per debug session (#215). The adapter now runs on a hidden console
-   * (CREATE_NO_WINDOW) that the launcher inherits; pythonw stays as belt and
-   * braces. pythonw.exe is the GUI-subsystem build of the same
-   * interpreter (same directory ⇒ same version, site-packages, and venv), and
-   * since the launch config does not pin `python`, the launcher and debuggee
-   * inherit it too, so no process in the chain ever gets a console. Debuggee
-   * output is unaffected: with internalConsole it flows through pipes owned by
-   * the launcher, not a console.
-   */
-  private preferNoConsoleInterpreter(executablePath: string): string {
-    if (process.platform !== 'win32') {
-      return executablePath;
-    }
-    // path.win32 explicitly: this is Windows path logic and must behave the
-    // same when unit-tested on posix hosts.
-    const base = path.win32.basename(executablePath);
-    if (!/^python(\d+(\.\d+)*)?\.exe$/i.test(base)) {
-      return executablePath;
-    }
-    const pythonw = path.win32.join(path.win32.dirname(executablePath), base.replace(/^python/i, 'pythonw'));
-    return existsSync(pythonw) ? pythonw : executablePath;
-  }
-  
   getAdapterModuleName(): string {
     return 'debugpy.adapter';
   }
@@ -447,6 +431,7 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
   async transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig> {
     this.launchDiagnostics = [];
     const requestedConsole = (config as PythonLaunchConfig).console;
+    const requestedSubProcess = (config as PythonLaunchConfig).subProcess;
     const pythonConfig: PythonLaunchConfig = {
       ...config,
       type: 'python',
@@ -458,8 +443,20 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
       redirectOutput: true,
       showReturnValue: true,
       justMyCode: config.justMyCode ?? true,
-      stopOnEntry: config.stopOnEntry ?? false
+      stopOnEntry: config.stopOnEntry ?? false,
+      // debugpy hooks every Python child the program starts when this is on
+      // (its default when the key is absent) and parks the child until a debug
+      // client attaches to it — which this server does not do yet (issue
+      // #1005). Off by default, so children run undebugged instead of hanging
+      // the program at the spawn; a caller's explicit value is forwarded.
+      subProcess: requestedSubProcess ?? false
     };
+    if (requestedSubProcess === true) {
+      this.launchDiagnostics.push({
+        key: 'subProcess',
+        message: 'forwarded — debugpy will hook every Python child this program starts and hold it until a debugger attaches to it, which this server does not do yet (issue #1005), so the program hangs at that spawn; omit the key to let children run undebugged'
+      });
+    }
 
     // A test-runner preset (issue #985 M1) becomes a module launch of the
     // runner; the module handling below then takes over.
@@ -630,6 +627,7 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
       stopOnEntry,
       cwd,
       env,
+      subProcess,
       ...rest
     } = config as Record<string, unknown>;
     void _request; void _attachMode; void _host; void _port; void _console;
@@ -645,7 +643,11 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
       name: 'Python: Attach',
       // The adapter policy's spawn config reads connect.* too.
       connect: { host, port },
-      justMyCode: (justMyCode as boolean | undefined) ?? true
+      justMyCode: (justMyCode as boolean | undefined) ?? true,
+      // Same default as the launch transform: a by-port attach is told about
+      // the program's Python children too, and they wait for an attach this
+      // server does not perform yet (issue #1005).
+      subProcess: (subProcess as boolean | undefined) ?? false
     };
 
     if (stopOnEntry !== undefined) {
