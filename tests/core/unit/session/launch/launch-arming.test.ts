@@ -35,6 +35,27 @@ describe('describeLaunchArming', () => {
     expect(describeLaunchArming(session({ effectiveBreakOnExceptions: 'none' }), false).armed).toBe(false);
   });
 
+  // Issue #985: a pytest module launch arms userUnhandled beside the uncaught
+  // default; the launcher records the ids the launch added beyond the mode's
+  // table, and those count as armed — they stop on an exception the program
+  // survives (a failing test), which the 'uncaught' default never does.
+  it('counts an exception filter the launch armed beyond its mode as armed, and names it', () => {
+    const arming = describeLaunchArming(
+      session({ effectiveBreakOnExceptions: 'uncaught', launchExceptionFilters: { ids: ['uncaught', 'userUnhandled'], beyondMode: ['userUnhandled'] } }),
+      false
+    );
+    expect(arming.armed).toBe(true);
+    expect(arming.summary).toContain('userUnhandled');
+    // Worded by what the clause knows — nothing runner-specific.
+    expect(arming.summary).not.toMatch(/test/);
+
+    const plain = describeLaunchArming(
+      session({ effectiveBreakOnExceptions: 'uncaught', launchExceptionFilters: { ids: ['uncaught'], beyondMode: [] } }),
+      false
+    );
+    expect(plain.armed).toBe(false);
+  });
+
   it("counts breakOnExceptions 'all' as armed", () => {
     const arming = describeLaunchArming(session({ effectiveBreakOnExceptions: 'all' }), false);
     expect(arming.armed).toBe(true);

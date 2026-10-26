@@ -31,7 +31,10 @@ export type StopSnapshotContext = Pick<
   | 'redactionEnabled'
   | 'snapshotEnabled'
   | 'variableAccessMode'
->;
+> &
+  // The session's policy, for an adapter that decorates the exception name it
+  // reports (issue #985); optional so a partial context reads the name as is.
+  Partial<Pick<OperationsContext, 'selectPolicy'>>;
 
 export interface ComposeSnapshotOptions {
   /**
@@ -97,6 +100,14 @@ export async function composeStopSnapshot(
     if (!opts.omitException && stop?.reason === 'exception') {
       // Redact a copy; the stored record keeps its identity (merge guards).
       const source = ctx.redactionEnabled() ? redactStopInfo(stop) : stop;
+      // An adapter may decorate the exception name it reports (pydevd's
+      // "(note: … paused at: <fn>)" at a user-unhandled stop, issue #985):
+      // the policy says what the class is. The stored record keeps the
+      // adapter's words; the snapshot's type is the class, and the pair's
+      // shape is read through the same lens.
+      const normalizeTypeName = ctx.selectPolicy?.(session.language)?.normalizeExceptionTypeName;
+      const withoutPausedAtNote = (value: string | undefined): string | undefined =>
+        value === undefined || normalizeTypeName === undefined ? value : normalizeTypeName(value);
       // The merged exceptionInfo's typed fields win over the raw stopped-event
       // pair: adapters disagree on the pair's orientation — the repo's own
       // pins show debugpy and the JDI bridge putting the exception NAME in
@@ -107,8 +118,8 @@ export async function composeStopSnapshot(
       // identifier (a class name) is the type; two identifiers or two
       // sentences keep the model-comment order (description -> type).
       const details = source.exceptionInfo?.details;
-      let rawType = source.description;
-      let rawMessage = source.text;
+      let rawType = withoutPausedAtNote(source.description);
+      let rawMessage = withoutPausedAtNote(source.text);
       if (
         rawType !== undefined && rawMessage !== undefined &&
         looksLikeTypeName(rawMessage) && !looksLikeTypeName(rawType)
@@ -116,7 +127,7 @@ export async function composeStopSnapshot(
         [rawType, rawMessage] = [rawMessage, rawType];
       }
       const type = capped(
-        details?.fullTypeName ?? details?.typeName ?? source.exceptionInfo?.exceptionId ?? rawType
+        withoutPausedAtNote(details?.fullTypeName ?? details?.typeName ?? source.exceptionInfo?.exceptionId) ?? rawType
       );
       const message = capped(details?.message ?? rawMessage ?? source.exceptionInfo?.description);
       const extra = capped(source.exceptionInfo?.description);

@@ -6,7 +6,7 @@
  * never re-resolves, degrades to undefined on any failure.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { SessionState } from '@debugmcp/shared';
+import { SessionState, PythonAdapterPolicy } from '@debugmcp/shared';
 import type { StackTraceResult } from '../../../../../src/session/inspection/frame-anchor-resolver.js';
 import {
   composeStopSnapshot,
@@ -372,6 +372,56 @@ describe('composeStopSnapshot exception mapping', () => {
     expect(snapshot?.exception?.type).toBe('ZeroDivisionError');
     expect(snapshot?.exception?.message).toBe('division by zero');
     expect(snapshot?.exception?.details).toBeUndefined();
+  });
+
+  // Issue #985: at a userUnhandled stop pydevd appends a note to the exception
+  // name everywhere it reports it — `text`, `exceptionId`, `typeName`:
+  // "AssertionError       (note: full exception trace is shown but execution is
+  // paused at: test_x)". The stored record keeps debugpy's words; the
+  // snapshot's type is the class.
+  it("strips pydevd's paused-at note from the exception type, with exceptionInfo merged", async () => {
+    const noted = 'AssertionError       (note: full exception trace is shown but execution is paused at: test_assert_fails)';
+    const { ctx } = makeCtx({
+      lastStop: {
+        reason: 'exception',
+        timestamp: 1,
+        description: 'assert 20.0 == 21.0',
+        text: noted,
+        exceptionInfo: {
+          exceptionId: noted,
+          breakMode: 'always',
+          description: 'assert 20.0 == 21.0',
+          details: { message: 'assert 20.0 == 21.0', typeName: noted }
+        }
+      }
+    });
+
+    // The session's policy says what the class is; the composer asks it.
+    Object.assign(ctx, { selectPolicy: () => PythonAdapterPolicy });
+
+    const snapshot = await composeStopSnapshot(ctx, 'sid', stack(), 'test');
+
+    expect(snapshot?.exception?.type).toBe('AssertionError');
+    expect(snapshot?.exception?.message).toBe('assert 20.0 == 21.0');
+    expect(snapshot?.exception?.details).toBeUndefined();
+  });
+
+  it("strips the note from the raw stopped pair too, before the pair's shape is read", async () => {
+    const { ctx } = makeCtx({
+      lastStop: {
+        reason: 'exception',
+        timestamp: 1,
+        description: 'not today',
+        text: 'Skipped       (note: full exception trace is shown but execution is paused at: test_skip)'
+      }
+    });
+
+    Object.assign(ctx, { selectPolicy: () => PythonAdapterPolicy });
+
+    const snapshot = await composeStopSnapshot(ctx, 'sid', stack(), 'test');
+
+    expect(snapshot?.exception?.type).toBe('Skipped');
+    expect(snapshot?.exception?.message).toBe('not today');
   });
 
   it('omits details when it only repeats the message', async () => {

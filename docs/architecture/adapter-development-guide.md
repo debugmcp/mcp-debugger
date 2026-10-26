@@ -358,6 +358,9 @@ The policy implements the `AdapterPolicy` interface (from `adapter-policy.ts`). 
 | `exceptionFilters` | Per-mode DAP exception filter IDs (#220) | `{ uncaught: ['uncaught'], all: ['raised','uncaught'] }` for Python |
 | `defaultExceptionBreakMode` | Launch-session default when the user didn't pass `breakOnExceptions` (#244) | `'uncaught'` for every adapter with a usable uncaught filter; omit for Ruby |
 | `launchTargetKeys` | The launch-config keys that name what the adapter runs; `program` is filled from `scriptPath` only when none is present (#985) | `['program', 'module', 'code']` for Python (debugpy takes exactly one); omit for `program`-only adapters |
+| `exceptionFiltersForLaunch(mode, launchConfig)` | A launch-aware answer to a mode's filter ids, read off the transformed launch config, when it differs from the table (#985) | Python: `uncaught` + `module: 'pytest'` → `['uncaught', 'userUnhandled']` (pytest catches test failures); undefined otherwise |
+
+A test-runner preset (`start_debugging { testRunner, testTarget }`, #985) is declared on the factory metadata — `modes.testRunners: ['pytest']` for Python, mirrored in the loader's known list and pinned by `tests/unit/adapters/adapter-attach-contract.test.ts` — and gated by the core (`src/session/launch/test-runner-gate.ts`) before the session changes state. The adapter's `transformLaunchConfig` expands a declared runner into its launch config (`packages/adapter-python/src/test-runners.ts` is the shape: node id, `-x`, plugin opt-outs, the rootdir walk) and lists the two keys in `consumedLaunchKeys`.
 
 See `packages/shared/src/interfaces/adapter-policy-go.ts` for a minimal, clean policy example.
 

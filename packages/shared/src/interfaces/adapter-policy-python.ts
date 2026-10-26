@@ -9,6 +9,12 @@ import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-pol
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
 
+/**
+ * What pydevd appends to the exception name at a user-unhandled stop
+ * (`pydevd_comm.py`): the class ends where this begins (issue #985).
+ */
+const PYDEVD_PAUSED_AT_NOTE = '(note: full exception trace is shown but execution is paused at:';
+
 export const PythonAdapterPolicy = {
   name: 'python',
   // debugpy runs the program undebugged under noDebug (verified live) and,
@@ -248,7 +254,11 @@ export const PythonAdapterPolicy = {
   getInitializationBehavior: () => {
     return {
       sendAttachBeforeInitialized: true,
-      // debugpy filter IDs; 'userUnhandled' exists but is noisy in practice
+      // debugpy filter IDs. Its third filter, 'userUnhandled' ("break when an
+      // exception escapes into library code"), is armed per launch below, not
+      // here: for a plain program it fires on every exception a library
+      // catches for user code; for a pytest run it is the only filter that
+      // pauses on a test failure (issue #985).
       exceptionFilters: {
         uncaught: ['uncaught'],
         all: ['raised', 'uncaught']
@@ -256,6 +266,27 @@ export const PythonAdapterPolicy = {
       // Launch sessions pause at uncaught exceptions by default (issue #244)
       defaultExceptionBreakMode: 'uncaught'
     };
+  },
+
+  // A pytest run catches every test failure (`CallInfo.from_call`), so
+  // debugpy's `uncaught` never fires on one. `userUnhandled` does — at the
+  // failing assert with the test frame live, with the raise-site frames above
+  // it when a helper raised, never inside `pytest.raises`; `pytest.skip()` is
+  // the expected noise (measured: docs/python/spike-notes-pytest.md). Armed
+  // beside `uncaught` for a pytest module launch under the default mode;
+  // 'all' (raised, which false-stops on expected exceptions) and 'none' are
+  // left alone. Keyed on the module, not the preset flag, so a hand-written
+  // `dapLaunchArgs: { module: 'pytest' }` gets it too (issue #985).
+  exceptionFiltersForLaunch: (mode, launchConfig) =>
+    mode === 'uncaught' && launchConfig?.module === 'pytest' ? ['uncaught', 'userUnhandled'] : undefined,
+
+  // At a user-unhandled stop pydevd (`pydevd_comm.py`) suffixes the exception
+  // name — on the stopped event's `text`, the exceptionInfo `exceptionId` and
+  // `typeName` alike — with where execution is paused. The class is what the
+  // snapshot reports (issue #985).
+  normalizeExceptionTypeName: (name: string): string => {
+    const note = name.indexOf(PYDEVD_PAUSED_AT_NOTE);
+    return note === -1 ? name : name.slice(0, note).trimEnd();
   },
 
   // debugpy does not suspend a running target on attach, so an explicit

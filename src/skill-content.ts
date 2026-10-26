@@ -41,6 +41,8 @@ export function buildServerInstructions(
 
 Golden path: create_debug_session -> set_breakpoint (ABSOLUTE file path) -> start_debugging (ABSOLUTE scriptPath; answers paused at a breakpoint reached as the program starts, otherwise pending:true -> wait_for_stop) -> read the answer's snapshot -> step_* or continue_execution (+ wait_for_stop) -> get_output -> close_debug_session (always, even on failure).
 
+Failing test (Python): start_debugging {sessionId, scriptPath: ABSOLUTE test file, testRunner: "pytest", testTarget: "test_name"} — no breakpoint needed; the answer is paused at the failing assert (or the raise site of an exception that escapes the test) with snapshot.exception, frames and locals, and a passing test runs to completion (exit code 0). list_supported_languages shows testRunners per language.
+
 Key rules:
 - Every paused answer (start/restart/wait_for_stop/pause/attach and the steps) already carries snapshot {exception?, frames, locals | changedVariables} — the exception message, top frames and the top frame's locals, redacted and capped. A repeated stop in the same frame (stepping, a continue+wait loop over one breakpoint) carries changedVariables {name: {before, after}} instead of locals — an empty {} means the line changed nothing visible. Read it before calling get_stack_trace/get_local_variables; call those (and get_scopes -> get_variables with a variablesReference) only to expand structures, see more frames, or fetch the full list (snapshot.truncation says when there is more). Entry stops carry no snapshot.
 - Stepping/evaluation/variable reads require the session to be PAUSED; the stop reason on each pause tells you why it stopped.
@@ -116,7 +118,7 @@ Kubernetes pods (port-forward vs ephemeral sidecar, copy-paste per-language pres
 When a human wants to look around in their IDE, expose_session {sessionId} opens a read-only DAP endpoint (127.0.0.1, token-gated) on the live session — even mid-pause. Relay host/port/token with a VS Code launch.json snippet: {"request": "attach", "debugServer": <port>, "mirrorToken": "<token>", "type": <language's debug type>}. The IDE lands on the paused frame and can walk stacks/variables/evaluate; stepping and breakpoints stay yours. unexpose_session closes it.
 
 ## Per-language quirks (one-liners)
-- Python: expand the "special variables" container; breakpoints verify after module load.
+- Python: expand the "special variables" container; breakpoints verify after module load. A failing test: testRunner "pytest" (+ testTarget) on the test file pauses at the failing assert with the test frame live — a helper's raise site sits above it in the snapshot, pytest.skip() also pauses (one continue), expected exceptions inside pytest.raises never do on Python 3.12+ and pause once on 3.11 and older; a print before the assert reaches get_output only with pytest's report after the run (args ["-s"] for live prints).
 - JavaScript/TS: internals are filtered from stacks; entry pause auto-continues when stopOnEntry=false.
 - Ruby: launch always pauses at load then auto-continues; attach sessions capture no stdout (launch streams it) — verify state via evaluate_expression when attached.
 - Rust: scriptPath is the source file (adapter resolves the Cargo project); Windows needs the GNU toolchain.

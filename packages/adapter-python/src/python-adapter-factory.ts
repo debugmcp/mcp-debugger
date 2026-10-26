@@ -10,6 +10,7 @@ import { IDebugAdapter } from '@debugmcp/shared';
 import { IAdapterFactory, AdapterDependencies, AdapterMetadata, FactoryValidationResult, ToolchainDescription } from '@debugmcp/shared';
 import { toolchainComponent } from '@debugmcp/shared';
 import { PythonDebugAdapter } from './python-debug-adapter.js';
+import { PYTHON_TEST_RUNNERS } from './test-runners.js';
 import { DebugLanguage } from '@debugmcp/shared';
 import { findPythonWithDebugpy, getPythonVersion, getDebugpyVersion } from './utils/python-utils.js';
 
@@ -59,7 +60,9 @@ export class PythonAdapterFactory implements IAdapterFactory {
         attachBy: ['port'],
         attachHints: {
           processId: 'start the target with python -m debugpy --listen 127.0.0.1:<port> script.py and pass that port'
-        }
+        },
+        // start_debugging { testRunner: "pytest" } runs the test file under pytest (issue #985)
+        testRunners: PYTHON_TEST_RUNNERS
       },
       icon: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OCA0OCI+PHBhdGggZmlsbD0iIzE5NzZEMiIgZD0iTTI0LjA0NywyLjAyOWMtMTMuMzM5LDAtMTMuOTcyLDUuNzk0LTEzLjk3Miw1Ljc5NGwwLjAxNSw2LjAyNGgxNC4yMjN2MS44MDdINi4wODNzLTkuNTkzLTEuMDg3LTkuNTkzLDEzLjk3M2MwLDE1LjA1OSw4LjM3MywxNC41MTgsOC4zNzMsMTQuNTE4aDQuOTk2di02Ljk4OHMtMC4yNjktNy44MzcsOC4yLTguMjI1YzguNDY5LTAuMzg5LDE0LjAyNC0wLjAzOSwxNC4wMjQtMC4wMzlzOC4xNTktMC4xMjksOC4zNTItOC4yMzhjMC4xOTItOC4xMSwwLjMxOS0xMy40MzYsMC4zMTktMTMuNDM2UzM3LjM4NiwyLjAyOSwyNC4wNDcsMi4wMjl6IE0xNy41MzYsNi44MDdjMS4yNzgsMCwyLjMxNCwxLjAzNiwyLjMxNCwyLjMxNGMwLDEuMjc5LTEuMDM2LDIuMzE0LTIuMzE0LDIuMzE0cy0yLjMxNC0xLjAzNi0yLjMxNC0yLjMxNEMxNS4yMjEsNy44NDMsMTYuMjU3LDYuODA3LDE3LjUzNiw2LjgwN3oiLz48cGF0aCBmaWxsPSIjRkZDMTA3IiBkPSJNMjMuOTUzLDQ1Ljk3MWMxMy4zMzksMCwxMy45NzItNS43OTQsMTMuOTcyLTUuNzk0bC0wLjAxNS02LjAyNEgyMy42ODd2LTEuODA3SDE0MS45MTdzOS41OTMsMS4wODcsOS41OTMtMTMuOTczYzAtMTUuMDU5LTguMzczLTE0LjUxOC04LjM3My0xNC41MThoLTQuOTk2djYuOTg4czAuMjY5LDcuODM3LTguMiw4LjIyNWMtOC40NjksMC4zODktMTQuMDI0LDAuMDM5LTE0LjAyNCwwLjAzOXMtOC4xNTksMC4xMjktOC4zNTIsOC4yMzhjLTAuMTkyLDguMTEtMC4zMTksMTMuNDM2LTAuMzE5LDEzLjQzNlMxMC42MTQsNDUuOTcxLDIzLjk1Myw0NS45NzF6IE0zMC40NjQsNDEuMTkzYy0xLjI3OCwwLTIuMzE0LTEuMDM2LTIuMzE0LTIuMzE0YzAtMS4yNzksMS4wMzYtMi4zMTQsMi4zMTQtMi4zMTRzMi4zMTQsMS4wMzYsMi4zMTQsMi4zMTRDMzIuNzc5LDQwLjE1NywzMS43NDMsNDEuMTkzLDMwLjQ2NCw0MS4xOTN6Ii8+PC9zdmc+'
     };

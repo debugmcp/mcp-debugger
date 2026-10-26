@@ -49,6 +49,7 @@ jobs:
       run: |
         python -m pip install --require-hashes -r requirements/pip.txt
         python -m pip install --require-hashes -r requirements/debugpy.txt
+        python -m pip install --require-hashes -r requirements/pytest.txt
 
     - name: Setup Go
       uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
@@ -162,6 +163,7 @@ jobs:
       run: |
         python -m pip install --require-hashes -r requirements/pip.txt
         python -m pip install --require-hashes -r requirements/debugpy.txt
+        python -m pip install --require-hashes -r requirements/pytest.txt
 
     - name: Setup Java 21
       uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad  # v6.1.0
@@ -180,7 +182,7 @@ jobs:
     - name: Run targeted Python integration tests
       env:
         CI: true
-      run: pnpm vitest run tests/adapters/python/integration/python-discovery.test.ts tests/adapters/python/integration/python_debug_workflow.test.ts
+      run: pnpm vitest run tests/adapters/python/integration/python-discovery.test.ts tests/adapters/python/integration/python_debug_workflow.test.ts tests/adapters/python/integration/python-module-launch.test.ts tests/adapters/python/integration/python-pytest-preset.test.ts
 
     - name: Upload targeted test diagnostics
       if: failure()

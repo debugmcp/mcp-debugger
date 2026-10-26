@@ -3863,6 +3863,19 @@ describe('DapProxyWorker', () => {
       }
     });
 
+    // Issue #985: the policy may read the transformed launch config before
+    // answering a mode's filter ids — a pytest module launch arms
+    // userUnhandled beside uncaught, because pytest catches test failures.
+    it('resolves the filters against the launch config: a pytest module launch arms userUnhandled too', async () => {
+      const payload: ProxyInitPayload = { ...buildPayload('uncaught'), launchConfig: { module: 'pytest', cwd: '/proj' } };
+      const connectionStub = buildConnectionStub();
+      primeWorker(payload, connectionStub);
+
+      await (worker as any).handleInitializedEvent();
+
+      expect(connectionStub.setExceptionBreakpoints).toHaveBeenCalledWith(mockDapClient, ['uncaught', 'userUnhandled']);
+    });
+
     it('continues the launch when setExceptionBreakpoints fails', async () => {
       const payload = buildPayload('uncaught');
       const connectionStub = buildConnectionStub();

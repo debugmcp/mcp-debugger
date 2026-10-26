@@ -279,7 +279,7 @@ All **29 tools** below are implemented — see the [tool reference](docs/tool-re
 | `list_breakpoints` | List a session's breakpoints with verified state | ✅ Implemented |
 | `remove_breakpoint` | Remove a breakpoint by id or file+line | ✅ Implemented |
 | `clear_breakpoints` | Remove all breakpoints (optionally per file) | ✅ Implemented |
-| `start_debugging` | Start debugging a script | ✅ Implemented |
+| `start_debugging` | Start debugging a script — or a failing test in one call (`testRunner: "pytest"`) | ✅ Implemented |
 | `restart_debugging` | Relaunch with the same config, breakpoints re-applied | ✅ Implemented |
 | `attach_to_process` | Attach debugger to a running process | ✅ Implemented |
 | `detach_from_process` | Detach debugger from a process | ✅ Implemented |

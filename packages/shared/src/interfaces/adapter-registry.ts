@@ -216,6 +216,15 @@ export interface AdapterModes {
    * PID-only one. Plain text, no markup.
    */
   attachHints?: { readonly processId?: string; readonly port?: string };
+
+  /**
+   * The test-runner presets `start_debugging { testRunner }` accepts for
+   * this language (issue #985): `pytest` for Python, more per adapter later.
+   * The core refuses any other runner by name before the session changes
+   * state, the way `attachBy` gates attach; the adapter's launch transform
+   * expands a declared one into its launch config. Absent means none.
+   */
+  testRunners?: readonly string[];
 }
 
 /**
@@ -313,6 +322,9 @@ export interface AdapterManifestEntry {
 
   /** The addressing forms attach accepts (issue #903); absent when attach is 'none' or undeclared */
   attachBy?: readonly AttachAddressing[];
+
+  /** The test-runner presets start_debugging accepts (issue #985); absent when the adapter declares none */
+  testRunners?: readonly string[];
 }
 
 /**

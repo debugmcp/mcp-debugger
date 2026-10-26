@@ -23,6 +23,8 @@ Do NOT reach for it when a single glance at the code or one log line would answe
 1. create_debug_session   {language: "python"}                 -> sessionId
 2. set_breakpoint         {sessionId, file: "<ABSOLUTE path>", statement: "<line text or distinctive substring>"}   (or line: N + expectedContent)
 3. start_debugging        {sessionId, scriptPath: "<ABSOLUTE path>"}   -> paused at the breakpoint, or pending: true -> wait_for_stop {sessionId}
+   Failing test (Python)? Skip step 2: start_debugging {sessionId, scriptPath: "<ABSOLUTE test file>", testRunner: "pytest", testTarget: "test_name"}
+   -> paused at the failing assert (or the escaping exception's raise site) with the autopsy below; a passing test runs to exit code 0.
 4. READ THE PAUSED ANSWER: it already carries location, the source line (context), and snapshot
    {exception?, frames, locals} — the exception message, top frames, and the top frame's locals
    (redacted, capped; snapshot.truncation says when there is more). Often that is the whole inspection.
@@ -116,7 +118,7 @@ Read the matching reference before your first session in a language — each has
 
 | Language | Reference | Headline quirk |
 |---|---|---|
-| Python | references/python.md | expand "special variables" containers; late breakpoint verification |
+| Python | references/python.md | testRunner "pytest" debugs a failing test in one call; expand "special variables" containers; late breakpoint verification |
 | JavaScript/TS | references/javascript.md | child-session architecture; internals filtered from stacks |
 | Ruby | references/ruby.md | stops at load only with stopOnEntry (rdbg continues by itself otherwise); attach captures no stdout |
 | Rust | references/rust.md | GNU toolchain on Windows; scriptPath = source file, adapter finds Cargo project |

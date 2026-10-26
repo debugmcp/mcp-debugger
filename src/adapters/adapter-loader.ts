@@ -271,14 +271,15 @@ export class AdapterLoader {
    * List all potentially available adapters (known list for now)
    */
   async listAvailableAdapters(): Promise<AdapterMetadata[]> {
-    // `attach` and `attachBy` mirror each factory's getMetadata().modes (the
-    // attach-addressing contract, issue #903); adapter-attach-contract.test.ts
-    // fails when the two drift.
+    // `attach`, `attachBy` and `testRunners` mirror each factory's
+    // getMetadata().modes (the attach-addressing contract, issue #903; the
+    // test-runner presets, issue #985); adapter-attach-contract.test.ts fails
+    // when the two drift.
     const PID: AttachAddressing[] = ['processId'];
     const PORT: AttachAddressing[] = ['port'];
     const known: Array<Omit<AdapterMetadata, 'installed'>> = [
       { name: 'mock', packageName: '@debugmcp/adapter-mock', description: 'Mock adapter for testing', attach: 'none' },
-      { name: 'python', packageName: '@debugmcp/adapter-python', description: 'Python debugger using debugpy', attach: 'direct-connect', attachBy: PORT },
+      { name: 'python', packageName: '@debugmcp/adapter-python', description: 'Python debugger using debugpy', attach: 'direct-connect', attachBy: PORT, testRunners: ['pytest'] },
       { name: 'javascript', packageName: '@debugmcp/adapter-javascript', description: 'JavaScript/TypeScript debugger using js-debug', attach: 'spawn', attachBy: ['processId', 'port', 'adapterConfig'] },
       { name: 'ruby', packageName: '@debugmcp/adapter-ruby', description: 'Ruby debugger using rdbg', attach: 'direct-connect', attachBy: PORT },
       { name: 'rust', packageName: '@debugmcp/adapter-rust', description: 'Rust debugger using CodeLLDB', attach: 'none' },
@@ -302,7 +303,8 @@ export class AdapterLoader {
         ...a,
         installed,
         attach: factoryModes?.attach ?? a.attach,
-        attachBy: factoryModes?.attachBy ?? a.attachBy
+        attachBy: factoryModes?.attachBy ?? a.attachBy,
+        testRunners: factoryModes?.testRunners ?? a.testRunners
       });
     }
     return results;

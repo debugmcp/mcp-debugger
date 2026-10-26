@@ -30,6 +30,7 @@ import {
   namesLaunchTarget,
   redactSecretsInString
 } from '@debugmcp/shared';
+import { TEST_RUNNER_KEY } from './test-runner-gate.js';
 import { AdapterLease } from '../../adapters/adapter-lease.js';
 import { DebugSessionCreationError, PythonNotFoundError } from '../../errors/debug-errors.js';
 import { ProxyConfig } from '../../proxy/proxy-config.js';
@@ -323,7 +324,12 @@ export class ProxyLauncher {
       // adapter's transform to derive. `program` is still filled — the
       // stand-in path is how the transform learns which file the launch is
       // about — and the transform drops it before the request goes out.
-      const nonProgramTargetKeys = launchTargetKeysOf(this.ctx.selectPolicy(session.language)).filter(key => key !== 'program');
+      // A test-runner preset (`testRunner`, folded into adapterLaunchConfig)
+      // names a target too: the adapter expands it into one, with its own cwd.
+      const nonProgramTargetKeys = [
+        ...launchTargetKeysOf(this.ctx.selectPolicy(session.language)).filter(key => key !== 'program'),
+        TEST_RUNNER_KEY
+      ];
       const namesTarget = namesLaunchTarget({ ...genericLaunchConfig, ...adapterExtras }, nonProgramTargetKeys);
       if (!namesTarget && (typeof genericLaunchConfig.cwd !== 'string' || genericLaunchConfig.cwd.length === 0)) {
         genericLaunchConfig.cwd = path.dirname(scriptPath);

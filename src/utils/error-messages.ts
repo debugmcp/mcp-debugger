@@ -568,6 +568,42 @@ export const ErrorMessages = {
     `'mcp-debugger doctor ${language}' on the server host for a diagnosis.`,
 
   /**
+   * Refusal for a start_debugging testRunner preset the language's factory
+   * metadata (modes.testRunners) does not declare (issue #985)
+   * Occurs when: start_debugging names a testRunner the adapter has no preset
+   * for — before any session state changes, so the session stays usable
+   * Used in: src/session/launch/test-runner-gate.ts
+   * @param language - The session's language
+   * @param runner - The testRunner asked for
+   * @param available - The presets the language declares (empty when none)
+   */
+  testRunnerNotAccepted: (language: string, runner: string, available: readonly string[]) =>
+    available.length > 0
+      ? `'${language}' has no test-runner preset '${runner}'. Its start_debugging testRunner takes: ${available.join(', ')}.`
+      : `'${language}' has no test-runner preset (testRunner '${runner}' was asked for). ` +
+        `Launch the test file or the runner directly: start_debugging with scriptPath and args, ` +
+        `or the launch keys the adapter reads in dapLaunchArgs.`,
+
+  /**
+   * Refusal for a start_debugging testTarget without a testRunner (issue #985)
+   * Occurs when: the selector names a test inside scriptPath but no runner
+   * says how to run it
+   * Used in: src/session/launch/test-runner-gate.ts
+   */
+  testTargetWithoutRunner: () =>
+    `testTarget names a test inside scriptPath, but no testRunner says which runner runs it — pass testRunner (for example "pytest").`,
+
+  /**
+   * Refusal for a start_debugging testTarget that is not a string (issue #985)
+   * Occurs when: the selector arrives as a number, array or object — the
+   * transform would drop it and run the whole file instead of the one test
+   * Used in: src/session/launch/test-runner-gate.ts
+   * @param received - typeof the value sent
+   */
+  testTargetNotAString: (received: string) =>
+    `testTarget must be a string — a test name, "Class::test_name", "test_name[param]" or a node id of scriptPath — got ${received}.`,
+
+  /**
    * Refusal for a dry run of an attach-shaped start_debugging
    * Occurs when: dryRunSpawn is true and dapLaunchArgs carries request:'attach'
    * or __attachMode. Preparing an attach acts on the target process (js-debug

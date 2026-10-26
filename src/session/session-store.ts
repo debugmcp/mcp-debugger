@@ -205,6 +205,15 @@ export interface ManagedSession extends DebugSessionInfo {
   // compared with the artefact it binds through. Not part of lastLaunch,
   // which is the caller's replayable request.
   transformedLaunch?: TransformedLaunch;
+
+  /**
+   * The DAP exception-filter ids the last launch armed (issue #985), and the
+   * ones beyond the mode's table — a pytest module launch adds `userUnhandled`
+   * to the `uncaught` default. Those stop on an exception the program
+   * survives, so the launch counts as armed (`describeLaunchArming`). Reset
+   * per launch attempt; absent for attach.
+   */
+  launchExceptionFilters?: { readonly ids: readonly string[]; readonly beyondMode: readonly string[] };
   // Live DAP mirror endpoint, when exposed via expose_session (issue #217).
   exposure?: SessionExposure;
 }

@@ -384,7 +384,8 @@ describe('AdapterLoader', () => {
         description: 'Python debugger using debugpy',
         installed: true,
         attach: 'direct-connect',
-        attachBy: ['port']
+        attachBy: ['port'],
+        testRunners: ['pytest']
       });
 
       const mockAdapter = adapters.find(a => a.name === 'mock');
@@ -614,7 +615,8 @@ describe('AdapterLoader', () => {
         description: 'Python debugger using debugpy',
         installed: true,
         attach: 'direct-connect',
-        attachBy: ['port']
+        attachBy: ['port'],
+        testRunners: ['pytest']
       });
     });
   });

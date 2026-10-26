@@ -37,6 +37,7 @@ import { DebugLanguage, PythonAdapterPolicy, launchTargetKeysOf, namesLaunchTarg
 import { AdapterDependencies } from '@debugmcp/shared';
 import { sanitizeStderrTail } from '@debugmcp/shared';
 import { findPythonExecutable, getPythonVersion } from './utils/python-utils.js';
+import { expandPytestLaunch, PYTHON_TEST_RUNNERS } from './test-runners.js';
 
 /**
  * debugpy's launch targets other than `program`, read off the policy that
@@ -131,6 +132,8 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
   private connected = false;
   /** The last launch transform's notes, drained by the session layer (`consumeLaunchConfigDiagnostics`). */
   private launchDiagnostics: LaunchConfigDiagnostic[] = [];
+  /** The test-runner preset keys the transform turns into a pytest module launch (issue #985). */
+  readonly consumedLaunchKeys = ['testRunner', 'testTarget'] as const;
   
   constructor(dependencies: AdapterDependencies) {
     super();
@@ -458,6 +461,12 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
       stopOnEntry: config.stopOnEntry ?? false
     };
 
+    // A test-runner preset (issue #985 M1) becomes a module launch of the
+    // runner; the module handling below then takes over.
+    if (pythonConfig.testRunner !== undefined && pythonConfig.testRunner !== null) {
+      await this.applyTestRunnerPreset(pythonConfig);
+    }
+
     // debugpy runs exactly one of `program`, `module` and `code` ('"program",
     // "module", and "code" are mutually exclusive'), and the session layer
     // fills `program` from scriptPath before this transform runs. A module or
@@ -490,6 +499,56 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
       });
     }
     return withoutProgram as LanguageSpecificLaunchConfig;
+  }
+
+  /**
+   * `testRunner: "pytest"` (issue #985 M1): the stand-in `program` is the
+   * test file; the launch becomes `python -m pytest <node id> -x …` from the
+   * pytest rootdir, with `testRunner`/`testTarget` consumed. The core's gate
+   * refused an undeclared runner before the session changed state; this is
+   * the adapter's own word on the same fact, for callers that reach the
+   * transform another way.
+   */
+  private async applyTestRunnerPreset(config: PythonLaunchConfig): Promise<void> {
+    const runner = config.testRunner;
+    if (typeof runner !== 'string' || !(PYTHON_TEST_RUNNERS as readonly string[]).includes(runner)) {
+      throw new AdapterError(
+        `testRunner '${String(runner)}' is not a Python test-runner preset; this adapter takes: ${PYTHON_TEST_RUNNERS.join(', ')}`,
+        AdapterErrorCode.UNSUPPORTED_OPERATION
+      );
+    }
+    const file = typeof config.program === 'string' && config.program.length > 0 ? config.program : undefined;
+    if (file === undefined) {
+      throw new AdapterError(
+        'testRunner needs scriptPath to name the test file to run',
+        AdapterErrorCode.UNSUPPORTED_OPERATION
+      );
+    }
+    let expansion: Awaited<ReturnType<typeof expandPytestLaunch>>;
+    try {
+      expansion = await expandPytestLaunch({
+        file,
+        testTarget: config.testTarget,
+        args: config.args,
+        cwd: config.cwd,
+        existsSync: candidate => this.dependencies.fileSystem.existsSync(candidate),
+        readFile: candidate => this.dependencies.fileSystem.readFile(candidate, 'utf-8')
+      });
+    } catch (error) {
+      throw new AdapterError(error instanceof Error ? error.message : String(error), AdapterErrorCode.UNSUPPORTED_OPERATION);
+    }
+    delete config.testRunner;
+    delete config.testTarget;
+    config.module = expansion.module;
+    config.args = expansion.args;
+    config.cwd = expansion.cwd;
+    // A launch-scoped label, not the caller's `testRunner` key: the session
+    // layer would otherwise render it as `adapterLaunchConfig.testRunner: …`.
+    this.launchDiagnostics.push({
+      key: 'preset',
+      scope: 'launch',
+      message: `testRunner: ${runner} → python -m pytest ${expansion.args.join(' ')} (cwd ${expansion.cwd}: ${expansion.cwdReason})`
+    });
   }
 
   /**

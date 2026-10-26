@@ -86,8 +86,32 @@ export const NEVER_VALID_DAP_LAUNCH_KEYS = [
   'sessionId',
   'scriptPath',
   'adapterLaunchConfig',
-  'dapLaunchArgs'
+  'dapLaunchArgs',
+  'testRunner',
+  'testTarget'
 ] as const;
+
+/**
+ * The test-runner preset (issue #985) rides start_debugging as two optional
+ * top-level arguments and travels to the adapter inside adapterLaunchConfig —
+ * where the launcher's gate and the adapter's transform read it, and where
+ * restart_debugging replays it — so the seven-argument facade signature stays
+ * as it is. The top-level spelling wins over a nested one.
+ */
+export function foldTestRunnerPreset(
+  adapterLaunchConfig: Record<string, unknown> | undefined,
+  testRunner: string | undefined,
+  testTarget: string | undefined
+): Record<string, unknown> | undefined {
+  if (testRunner === undefined && testTarget === undefined) {
+    return adapterLaunchConfig;
+  }
+  return {
+    ...(adapterLaunchConfig ?? {}),
+    ...(testRunner !== undefined ? { testRunner } : {}),
+    ...(testTarget !== undefined ? { testTarget } : {})
+  };
+}
 
 /**
  * Intake normalization for start_debugging (issue #305). dapLaunchArgs is

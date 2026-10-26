@@ -221,6 +221,15 @@ describe('ProxyLauncher.prepareLaunchInputs', () => {
       adapterLaunchConfig: { code: 'print(1)' }
     });
     expect(viaAdapterConfig.genericLaunchConfig).not.toHaveProperty('cwd');
+
+    // A test-runner preset expands into a target of its own, with the cwd the
+    // runner wants (pytest's rootdir), whatever target keys the policy declares.
+    const viaPreset = await h.launcher.prepareLaunchInputs(makeSession(), {
+      scriptPath: SCRIPT,
+      adapterLaunchConfig: { testRunner: 'pytest', testTarget: 'test_x' }
+    });
+    expect(viaPreset.genericLaunchConfig.program).toBe(SCRIPT);
+    expect(viaPreset.genericLaunchConfig).not.toHaveProperty('cwd');
   });
 
   it('keeps a caller cwd beside a module target, and derives one for a policy that declares no target keys', async () => {

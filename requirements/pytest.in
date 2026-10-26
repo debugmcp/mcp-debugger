@@ -1,0 +1,3 @@
+# Input for requirements/pytest.txt (see requirements/README.md): the pytest the
+# Python test-runner preset integration test runs under debugpy (issue #985).
+pytest==9.1.1
