@@ -443,7 +443,7 @@ describe('PythonDebugAdapter', () => {
     });
   });
 
-  describe('pythonw.exe adapter interpreter preference (#215)', () => {
+  describe('adapter interpreter (#215, #993)', () => {
     const buildCommand = (adapter: PythonDebugAdapter, executablePath: string) =>
       adapter.buildAdapterCommand({
         sessionId: 's1',
@@ -465,43 +465,35 @@ describe('PythonDebugAdapter', () => {
       }
     };
 
-    it('swaps python.exe for a sibling pythonw.exe on win32', () => {
+    // debugpy's launch `python` defaults to the adapter's interpreter, so a
+    // pythonw.exe adapter made the debuggee windowless too and broke its
+    // children's inherited standard handles (issue #993). The hidden console
+    // the proxy's windowsHide spawn provides is what keeps windows off screen.
+    it('runs the adapter under python.exe on win32 even when a sibling pythonw.exe exists', () => {
       (existsSync as Mock).mockReturnValue(true);
       const adapter = new PythonDebugAdapter(createDependencies());
 
       withPlatform('win32', () => {
-        const cmd = buildCommand(adapter, 'C:\\Python313\\python.exe');
-        expect(cmd.command.toLowerCase()).toContain('pythonw.exe');
+        const cmd = buildCommand(adapter, 'C:\Python313\python.exe');
+        expect(cmd.command).toBe('C:\Python313\python.exe');
       });
     });
 
-    it('keeps python.exe when no sibling pythonw.exe exists', () => {
-      (existsSync as Mock).mockReturnValue(false);
+    it('passes an explicit pythonw.exe through unchanged', () => {
       const adapter = new PythonDebugAdapter(createDependencies());
 
       withPlatform('win32', () => {
-        const cmd = buildCommand(adapter, 'C:\\Python313\\python.exe');
-        expect(cmd.command).toBe('C:\\Python313\\python.exe');
+        const cmd = buildCommand(adapter, 'C:\Python313\pythonw.exe');
+        expect(cmd.command).toBe('C:\Python313\pythonw.exe');
       });
     });
 
     it('leaves the interpreter untouched off win32', () => {
-      (existsSync as Mock).mockReturnValue(true);
       const adapter = new PythonDebugAdapter(createDependencies());
 
       withPlatform('linux', () => {
         const cmd = buildCommand(adapter, '/usr/bin/python');
         expect(cmd.command).toBe('/usr/bin/python');
-      });
-    });
-
-    it('leaves an explicit pythonw.exe untouched', () => {
-      (existsSync as Mock).mockReturnValue(true);
-      const adapter = new PythonDebugAdapter(createDependencies());
-
-      withPlatform('win32', () => {
-        const cmd = buildCommand(adapter, 'C:\\Python313\\pythonw.exe');
-        expect(cmd.command).toBe('C:\\Python313\\pythonw.exe');
       });
     });
   });
