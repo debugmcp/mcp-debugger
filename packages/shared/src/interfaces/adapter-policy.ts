@@ -539,6 +539,18 @@ export interface AdapterPolicy {
   entryStopLaunchKey?: string;
 
   /**
+   * The launch-config keys that name what the adapter runs, when `program` is
+   * not the only one (issue #985). debugpy takes `program`, `module` or
+   * `code` — exactly one: a launch carrying `program` beside `module` is
+   * refused ('"program", "module", and "code" are mutually exclusive'). The
+   * connection manager fills `program` from the tool's scriptPath only when
+   * the launch config names no target under any of these keys, so a
+   * `module` launch (`python -m pytest`) goes out as the transform shaped it.
+   * Undefined means `program` alone.
+   */
+  launchTargetKeys?: readonly string[];
+
+  /**
    * The adapter's DAP `next` stops once per token position rather than once
    * per line (issue #879, the Dart SDK adapter; `granularity: 'line'` is
    * ignored). The core's step_over then repeats `next` while a plain step
@@ -1114,4 +1126,28 @@ export function resolveExceptionFilters(
     return [];
   }
   return policy.getInitializationBehavior().exceptionFilters?.[mode] ?? [];
+}
+
+/**
+ * The launch-config keys under which a policy's adapter takes its target:
+ * `program` alone unless the policy declares otherwise (issue #985).
+ */
+export function launchTargetKeysOf(policy: Pick<AdapterPolicy, 'launchTargetKeys'> | undefined): readonly string[] {
+  return policy?.launchTargetKeys ?? ['program'];
+}
+
+/**
+ * Whether a launch config already names a target under one of `keys`: a
+ * non-empty string, or a non-empty array (debugpy's `code` may be a list of
+ * lines). When it does, the connection manager leaves `program` out instead
+ * of filling it from scriptPath (issue #985).
+ */
+export function namesLaunchTarget(config: Record<string, unknown> | undefined, keys: readonly string[]): boolean {
+  if (!config) {
+    return false;
+  }
+  return keys.some(key => {
+    const value = config[key];
+    return (typeof value === 'string' && value.length > 0) || (Array.isArray(value) && value.length > 0);
+  });
 }

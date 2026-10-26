@@ -204,6 +204,8 @@ export { BREAKPOINT_STOP_REASONS, USER_BREAK_REASONS } from './interfaces/adapte
 export {
   DefaultAdapterPolicy,
   resolveExceptionFilters,
+  launchTargetKeysOf,
+  namesLaunchTarget,
   emptyLocalVariableExtraction,
   extractionFromScope
 } from './interfaces/adapter-policy.js';

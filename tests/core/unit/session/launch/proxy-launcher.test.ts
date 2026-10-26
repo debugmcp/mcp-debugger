@@ -201,6 +201,44 @@ describe('ProxyLauncher.prepareLaunchInputs', () => {
     expect(inputs.genericLaunchConfig.args).toBeUndefined();
   });
 
+  // Issue #985 (M0): a `module`/`code` launch does not run scriptPath, so the
+  // script's directory is the wrong cwd default (`python -m modpkg` from inside
+  // `modpkg/` fails with "No module named modpkg"). The adapter's transform
+  // derives the right one; `program` is still filled, because the stand-in
+  // path is how the transform learns which file the launch is about.
+  it("leaves cwd unset when the launch config names a target under the policy's launchTargetKeys (issue #985)", async () => {
+    (h.policy as unknown as { launchTargetKeys: string[] }).launchTargetKeys = ['program', 'module', 'code'];
+
+    const viaDapArgs = await h.launcher.prepareLaunchInputs(makeSession(), {
+      scriptPath: SCRIPT,
+      dapLaunchArgs: launchArgs({ module: 'modpkg' })
+    });
+    expect(viaDapArgs.genericLaunchConfig.program).toBe(SCRIPT);
+    expect(viaDapArgs.genericLaunchConfig).not.toHaveProperty('cwd');
+
+    const viaAdapterConfig = await h.launcher.prepareLaunchInputs(makeSession(), {
+      scriptPath: SCRIPT,
+      adapterLaunchConfig: { code: 'print(1)' }
+    });
+    expect(viaAdapterConfig.genericLaunchConfig).not.toHaveProperty('cwd');
+  });
+
+  it('keeps a caller cwd beside a module target, and derives one for a policy that declares no target keys', async () => {
+    (h.policy as unknown as { launchTargetKeys: string[] }).launchTargetKeys = ['program', 'module', 'code'];
+    const explicit = await h.launcher.prepareLaunchInputs(makeSession(), {
+      scriptPath: SCRIPT,
+      dapLaunchArgs: launchArgs({ module: 'modpkg', cwd: '/proj' })
+    });
+    expect(explicit.genericLaunchConfig.cwd).toBe('/proj');
+
+    const plain = makeHarness();
+    const derived = await plain.launcher.prepareLaunchInputs(makeSession(), {
+      scriptPath: SCRIPT,
+      dapLaunchArgs: launchArgs({ module: 'something' })
+    });
+    expect(derived.genericLaunchConfig.cwd).toBe(path.dirname(SCRIPT));
+  });
+
   it('sets no program, args or cwd for an attach-shaped request', async () => {
     const request: ProxyLaunchRequest = {
       scriptPath: 'attach://remote',

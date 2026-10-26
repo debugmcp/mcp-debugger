@@ -11,7 +11,13 @@ import {
   ExtendedInitializeArgs
 } from './dap-proxy-interfaces.js';
 import type { AdapterPolicy } from '@debugmcp/shared';
-import { sanitizePayloadForLogging, toWireSourceBreakpoint, type BreakpointFields } from '@debugmcp/shared';
+import {
+  launchTargetKeysOf,
+  namesLaunchTarget,
+  sanitizePayloadForLogging,
+  toWireSourceBreakpoint,
+  type BreakpointFields
+} from '@debugmcp/shared';
 
 /** Wait before the first connect attempt: most adapters are not listening yet. */
 const INITIAL_CONNECT_DELAY_MS = 500;
@@ -367,11 +373,6 @@ export class DapConnectionManager {
     
     const baseLaunchArgs = launchConfig ? { ...launchConfig } : {};
 
-    const resolvedProgram =
-      typeof baseLaunchArgs.program === 'string' && baseLaunchArgs.program.length > 0
-        ? (baseLaunchArgs.program as string)
-        : scriptPath;
-
     const resolvedArgs = Array.isArray(baseLaunchArgs.args)
       ? (baseLaunchArgs.args as unknown[]).filter((arg): arg is string => typeof arg === 'string')
       : scriptArgs;
@@ -384,11 +385,18 @@ export class DapConnectionManager {
 
     const launchArgs: Record<string, unknown> = {
       ...baseLaunchArgs,
-      program: resolvedProgram,
       args: resolvedArgs,
       stopOnEntry: resolvedStopOnEntry,
       justMyCode: resolvedJustMyCode,
     };
+
+    // `program` comes from the tool's scriptPath unless the launch config
+    // already names a target under one of the policy's launch-target keys
+    // (issue #985): debugpy takes `program`, `module` or `code`, exactly one,
+    // so a `module` launch must not get `program` filled in beside it.
+    if (!namesLaunchTarget(baseLaunchArgs, launchTargetKeysOf(this.policy))) {
+      launchArgs.program = scriptPath;
+    }
 
     // The adapter's own name for the entry stop (netcoredbg: stopAtEntry,
     // issue #973), carrying the same final decision; a caller's value wins.

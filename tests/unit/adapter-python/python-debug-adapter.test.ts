@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import { PythonDebugAdapter } from '../../../packages/adapter-python/src/python-debug-adapter.js';
 import { AdapterState, AdapterError, DebugFeature } from '@debugmcp/shared';
 import type { AdapterDependencies, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
-import { createMockAdapterDependencies } from '../../test-utils/helpers/adapter-dependencies.js';
+import { createMockAdapterDependencies, createMockFileSystem } from '../../test-utils/helpers/adapter-dependencies.js';
 
 vi.mock('child_process', () => ({
   spawn: vi.fn(),
@@ -273,6 +273,109 @@ describe('PythonDebugAdapter', () => {
     } as any);
 
     expect(config.console).toBe('integratedTerminal');
+  });
+
+  // Issue #985 (M0): debugpy refuses "program" beside "module" or "code"
+  // ('"program", "module", and "code" are mutually exclusive'), and the
+  // session layer fills `program` from scriptPath before this transform runs.
+  describe('module and code launch targets (issue #985)', () => {
+    it('drops program when the launch config names a module', async () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+      const config = await adapter.transformLaunchConfig({
+        program: '/proj/tests/test_a.py',
+        module: 'pytest',
+        args: ['/proj/tests/test_a.py::test_x', '-x'],
+        cwd: '/proj'
+      } as any);
+
+      expect(config).not.toHaveProperty('program');
+      expect(config.module).toBe('pytest');
+      expect(config.args).toEqual(['/proj/tests/test_a.py::test_x', '-x']);
+      expect(config.cwd).toBe('/proj');
+    });
+
+    it('drops program when the launch config names code', async () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+      const config = await adapter.transformLaunchConfig({ program: '/proj/a.py', code: 'print(1)' } as any);
+
+      expect(config).not.toHaveProperty('program');
+      expect(config.code).toBe('print(1)');
+    });
+
+    it('keeps program when neither module nor code is set, and records nothing', async () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+      const config = await adapter.transformLaunchConfig({ program: '/proj/a.py' } as any);
+
+      expect(config.program).toBe('/proj/a.py');
+      expect(adapter.consumeLaunchConfigDiagnostics?.() ?? []).toEqual([]);
+    });
+
+    it('records a diagnostic on the target key and one on program, drained once', async () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+      await adapter.transformLaunchConfig({ program: '/proj/a.py', module: 'pytest', cwd: '/proj' } as any);
+
+      const diagnostics = adapter.consumeLaunchConfigDiagnostics?.() ?? [];
+      const byKey = Object.fromEntries(diagnostics.map(d => [d.key, d]));
+      expect(byKey.module?.message).toMatch(/python -m/);
+      expect(byKey.module?.message).toMatch(/program/);
+      // A caller's own `program` beside the module is not sent either; the
+      // collector shows this one only when the caller passed the key.
+      expect(byKey.program?.message).toMatch(/not sent/);
+      expect(byKey.program?.scope).toBeUndefined();
+      expect(adapter.consumeLaunchConfigDiagnostics?.() ?? []).toEqual([]);
+    });
+
+    it('words the code target with python -c', async () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+      await adapter.transformLaunchConfig({ program: '/proj/a.py', code: 'print(1)', cwd: '/proj' } as any);
+
+      const diagnostics = adapter.consumeLaunchConfigDiagnostics?.() ?? [];
+      expect(diagnostics.find(d => d.key === 'code')?.message).toMatch(/python -c/);
+    });
+
+    // The launcher no longer derives cwd from the stand-in file for a module
+    // launch (issue #985): `python -m` resolves the module from cwd, so the
+    // right default is the directory above the top-most package the file is in.
+    describe('cwd for a module launch', () => {
+      const existsAt = (...files: string[]) =>
+        createMockAdapterDependencies({
+          fileSystem: createMockFileSystem({
+            existsSync: vi.fn((p: string) => files.includes(p.replace(/\\/g, '/')))
+          })
+        });
+
+      it('defaults cwd to the directory above the top-most package containing the file, and says so', async () => {
+        const adapter = new PythonDebugAdapter(existsAt('/proj/modpkg/__init__.py'));
+        const config = await adapter.transformLaunchConfig({ program: '/proj/modpkg/__main__.py', module: 'modpkg' } as any);
+
+        expect(config.cwd).toBe('/proj');
+        const note = (adapter.consumeLaunchConfigDiagnostics?.() ?? []).find(d => d.scope === 'launch');
+        expect(note?.message).toMatch(/cwd/);
+        expect(note?.message).toContain('/proj');
+      });
+
+      it('walks through nested packages', async () => {
+        const adapter = new PythonDebugAdapter(existsAt('/proj/pkg/__init__.py', '/proj/pkg/sub/__init__.py'));
+        const config = await adapter.transformLaunchConfig({ program: '/proj/pkg/sub/__main__.py', module: 'pkg.sub' } as any);
+
+        expect(config.cwd).toBe('/proj');
+      });
+
+      it("falls back to the file's directory when it is not inside a package", async () => {
+        const adapter = new PythonDebugAdapter(existsAt());
+        const config = await adapter.transformLaunchConfig({ program: '/proj/tests/test_a.py', module: 'pytest' } as any);
+
+        expect(config.cwd).toBe('/proj/tests');
+      });
+
+      it('keeps a cwd the caller set, without a note', async () => {
+        const adapter = new PythonDebugAdapter(existsAt('/proj/modpkg/__init__.py'));
+        const config = await adapter.transformLaunchConfig({ program: '/proj/modpkg/__main__.py', module: 'modpkg', cwd: '/elsewhere' } as any);
+
+        expect(config.cwd).toBe('/elsewhere');
+        expect((adapter.consumeLaunchConfigDiagnostics?.() ?? []).some(d => d.scope === 'launch')).toBe(false);
+      });
+    });
   });
 
   describe('pythonw.exe adapter interpreter preference (#215)', () => {

@@ -30,12 +30,23 @@ import {
   AdapterCapabilities,
   AdapterError,
   AdapterErrorCode,
-  AdapterEvents
+  AdapterEvents,
+  LaunchConfigDiagnostic
 } from '@debugmcp/shared';
-import { DebugLanguage } from '@debugmcp/shared';
+import { DebugLanguage, PythonAdapterPolicy, launchTargetKeysOf, namesLaunchTarget } from '@debugmcp/shared';
 import { AdapterDependencies } from '@debugmcp/shared';
 import { sanitizeStderrTail } from '@debugmcp/shared';
 import { findPythonExecutable, getPythonVersion } from './utils/python-utils.js';
+
+/**
+ * debugpy's launch targets other than `program`, read off the policy that
+ * declares them so the two cannot drift (issue #985): the connection manager
+ * leaves `program` out for these, and the transform here drops the stand-in.
+ */
+const PYTHON_NON_PROGRAM_TARGETS = launchTargetKeysOf(PythonAdapterPolicy).filter(key => key !== 'program');
+
+/** How each target is spelled on a python command line, for the launch notice. */
+const LAUNCH_TARGET_FLAGS: Record<string, string> = { module: 'python -m', code: 'python -c' };
 
 /**
  * Cache entry for Python executable paths
@@ -51,7 +62,8 @@ interface PythonPathCacheEntry {
  * Python-specific launch configuration
  */
 interface PythonLaunchConfig extends LanguageSpecificLaunchConfig {
-  module?: string;              // For -m module execution
+  module?: string;              // For -m module execution (issue #985: replaces `program`)
+  code?: string | string[];     // For -c code execution (replaces `program` too)
   pythonArgs?: string[];        // Additional Python arguments
   console?: 'integratedTerminal' | 'internalConsole' | 'externalTerminal';
   django?: boolean;             // Django debugging support
@@ -117,6 +129,8 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
   // State
   private currentThreadId: number | null = null;
   private connected = false;
+  /** The last launch transform's notes, drained by the session layer (`consumeLaunchConfigDiagnostics`). */
+  private launchDiagnostics: LaunchConfigDiagnostic[] = [];
   
   constructor(dependencies: AdapterDependencies) {
     super();
@@ -428,6 +442,7 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
   // ===== Debug Configuration =====
   
   async transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig> {
+    this.launchDiagnostics = [];
     const requestedConsole = (config as PythonLaunchConfig).console;
     const pythonConfig: PythonLaunchConfig = {
       ...config,
@@ -443,7 +458,64 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
       stopOnEntry: config.stopOnEntry ?? false
     };
 
-    return pythonConfig;
+    // debugpy runs exactly one of `program`, `module` and `code` ('"program",
+    // "module", and "code" are mutually exclusive'), and the session layer
+    // fills `program` from scriptPath before this transform runs. A module or
+    // code target is what the caller asked to run, so `program` goes — the
+    // stand-in path it carried says which file the launch is about, which the
+    // cwd default below needs (issue #985). Both keys get a note; the session
+    // layer shows the `program` one only when the caller passed that key.
+    const target = PYTHON_NON_PROGRAM_TARGETS.find(key => namesLaunchTarget(pythonConfig, [key]));
+    if (!target) {
+      return pythonConfig;
+    }
+    const flag = LAUNCH_TARGET_FLAGS[target] ?? target;
+    this.launchDiagnostics.push(
+      { key: target, message: `launched as a ${target} (${flag}); program is not sent — debugpy takes one target: program, module or code` },
+      { key: 'program', message: `not sent: ${target} names what runs (debugpy takes one target: program, module or code)` }
+    );
+    const { program: standIn, ...withoutProgram } = pythonConfig;
+    // `python -m` resolves the module from cwd, and the launcher leaves cwd
+    // unset for a target launch: the script's directory — its default for a
+    // program launch — is inside the package, where `python -m modpkg` fails
+    // with "No module named modpkg". Default to the directory above the
+    // top-most package the stand-in file is in; a caller's cwd wins.
+    if (withoutProgram.cwd === undefined && typeof standIn === 'string' && standIn.length > 0) {
+      const cwd = this.directoryAbovePackage(path.dirname(standIn));
+      withoutProgram.cwd = cwd;
+      this.launchDiagnostics.push({
+        key: 'cwd',
+        scope: 'launch',
+        message: `cwd: ${cwd} — the directory above the top-most package containing scriptPath, where python -m resolves the module from; pass cwd to run from elsewhere`
+      });
+    }
+    return withoutProgram as LanguageSpecificLaunchConfig;
+  }
+
+  /**
+   * Walk up while the directory is a package (holds an `__init__.py`): a
+   * package's module resolves from the directory above its top-most package.
+   * A file outside any package stays in its own directory.
+   */
+  private directoryAbovePackage(dir: string): string {
+    let current = dir;
+    for (let depth = 0; depth < 64; depth++) {
+      if (!this.dependencies.fileSystem.existsSync(path.join(current, '__init__.py'))) {
+        return current;
+      }
+      const parent = path.dirname(current);
+      if (parent === current) {
+        return current;
+      }
+      current = parent;
+    }
+    return current;
+  }
+
+  consumeLaunchConfigDiagnostics(): readonly LaunchConfigDiagnostic[] {
+    const out = this.launchDiagnostics;
+    this.launchDiagnostics = [];
+    return out;
   }
   
   supportsAttach(): boolean {

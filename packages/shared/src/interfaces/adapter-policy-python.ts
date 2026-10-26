@@ -17,6 +17,11 @@ export const PythonAdapterPolicy = {
   supportsLogPoints: true,
   supportsFunctionBreakpoints: true,
   supportsReverseStartDebugging: false,
+  // debugpy runs exactly one of these (`debugpy/adapter/clients.py`: '"program",
+  // "module", and "code" are mutually exclusive'), so a `module` launch
+  // (`python -m pytest`) must go out without the `program` the connection
+  // manager would otherwise fill from scriptPath (issue #985).
+  launchTargetKeys: ['program', 'module', 'code'],
   childSessionStrategy: 'none',
   buildChildStartArgs: () => {
     throw new Error('PythonAdapterPolicy does not support child sessions');

@@ -6,8 +6,38 @@
  * rendered as `command args…` or `[connect] host:port` — so the answer reads
  * the same as it always did.
  */
-import type { AdapterPolicy, AdapterSpawnPayload } from '@debugmcp/shared';
+import { launchTargetKeysOf, type AdapterPolicy, type AdapterSpawnPayload } from '@debugmcp/shared';
 import type { ProxyConfig } from '../../proxy/proxy-config.js';
+
+/** A code-string target longer than this is cut in the dry run's `script`. */
+const TARGET_PREVIEW_LENGTH = 60;
+
+/**
+ * What the launch runs, for the dry run's `script` (issue #985): the program
+ * when the transformed config carries one; else the first non-program target
+ * the policy's launch-target keys name (`module: pytest`, `code: …` — a long
+ * code string truncated); else the payload's scriptPath, the stand-in file a
+ * module launch only uses to say which file it is about.
+ */
+export function describeLaunchTarget(
+  policy: Pick<AdapterPolicy, 'launchTargetKeys'>,
+  config: Pick<SpawnCommandSource, 'scriptPath' | 'launchConfig'>
+): string {
+  const launchConfig = config.launchConfig ?? {};
+  for (const key of launchTargetKeysOf(policy)) {
+    const value = launchConfig[key];
+    const text = typeof value === 'string' ? value : Array.isArray(value) ? value.map(String).join(' ') : '';
+    if (text.length === 0) {
+      continue;
+    }
+    if (key === 'program') {
+      return text;
+    }
+    const preview = text.length > TARGET_PREVIEW_LENGTH ? `${text.slice(0, TARGET_PREVIEW_LENGTH)}…` : text;
+    return `${key}: ${preview}`;
+  }
+  return config.scriptPath;
+}
 
 /**
  * The ProxyConfig fields the policy's spawn config reads — the worker's init

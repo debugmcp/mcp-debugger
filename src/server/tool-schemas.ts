@@ -145,9 +145,10 @@ export function buildToolDefinitions(options: BuildToolDefinitionsOptions): Tool
           sessionId: { type: 'string' }, 
           scriptPath: { type: 'string', description: scriptPathDescription }, 
           args: { type: 'array', items: { type: 'string' } }, 
-          dapLaunchArgs: { 
-            type: 'object', 
-            properties: { 
+          dapLaunchArgs: {
+            type: 'object',
+            description: 'DAP launch arguments. Beyond the three below, adapter keys pass through (program, cwd, env, …). Python: module runs `python -m <module>` instead of scriptPath (the pytest shape: module "pytest", args [<test file>::<test>, "-x"]) and code runs a code string; scriptPath then only names the file the launch is about, and cwd — which `python -m` puts on sys.path — defaults to the directory above the top-most package containing scriptPath',
+            properties: {
               stopOnEntry: { type: 'boolean', description: 'Pause at the first line before running. Default false — the opposite of attach, which pauses unless stopOnEntry is false' },
               justMyCode: { type: 'boolean', description: 'Only debug user code (default true). JavaScript launch: true blackboxes node_modules via skipFiles and keeps js-debug\'s smart-stepper on, so a pause or step that lands in skipped code (Node internals, node_modules) is stepped through and may never land; false drops node_modules from skipFiles and turns the stepper off, so pauses and steps land inside dependencies' },
               noDebug: { type: 'boolean', description: 'DAP\'s launch-without-debugging flag (default false). Where the adapter honours it (js-debug, debugpy, Delve, CodeLLDB and the Dart SDK adapters) no breakpoint binds, no exception filter arms, no entry stop lands and no breakpoint, exception or entry stop ever arrives (a pause may still land where the runtime allows one) — the response warns when breakpoints, an explicit breakOnExceptions or stopOnEntry are set alongside it, and while the launch runs the session reports debuggerDisabled and every later surface says the debugger is off. rdbg, netcoredbg and the Java bridge ignore the flag, and the rust launch never forwards it: their debugger stays on and the response says so' }

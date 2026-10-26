@@ -357,6 +357,7 @@ The policy implements the `AdapterPolicy` interface (from `adapter-policy.ts`). 
 | `requiresCommandQueueing` | Whether commands need sequential queueing | `false` for most adapters |
 | `exceptionFilters` | Per-mode DAP exception filter IDs (#220) | `{ uncaught: ['uncaught'], all: ['raised','uncaught'] }` for Python |
 | `defaultExceptionBreakMode` | Launch-session default when the user didn't pass `breakOnExceptions` (#244) | `'uncaught'` for every adapter with a usable uncaught filter; omit for Ruby |
+| `launchTargetKeys` | The launch-config keys that name what the adapter runs; `program` is filled from `scriptPath` only when none is present (#985) | `['program', 'module', 'code']` for Python (debugpy takes exactly one); omit for `program`-only adapters |
 
 See `packages/shared/src/interfaces/adapter-policy-go.ts` for a minimal, clean policy example.
 
