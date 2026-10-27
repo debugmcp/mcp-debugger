@@ -15,7 +15,7 @@ import {
 import { toWireError } from '../errors/debug-errors.js';
 import { coerceToolArguments, ToolArguments } from './tool-arguments.js';
 import { extractPayloadSuccess, failureResult, sanitizeRequest, type ToolResult } from './tool-result.js';
-import { buildToolDefinitions, isToolName, type ToolDefinition } from './tool-schemas.js';
+import { buildToolDefinitions, isToolName, TOOL_ALIASES, type ToolDefinition } from './tool-schemas.js';
 import { assertRequiredToolArguments } from './tool-validation.js';
 import type { ToolContext } from './tool-context.js';
 import { TOOL_HANDLERS } from './handlers/index.js';
@@ -25,7 +25,7 @@ import { TOOL_HANDLERS } from './handlers/index.js';
  * fact instead of the tool's own "not found" (Streamable HTTP: one
  * DebugMcpServer per MCP client session, issue #939). Decided here, in front
  * of every handler, so all tools say it the same way — the per-tool wordings
- * (`Session not found`, `Failed to close debug session`, redefine_classes'
+ * (`Session not found`, `Failed to close debug session`, hot_reload'
  * protocol error) stay for an id nobody holds. Ownership is terminal, which is
  * why it outranks a handler's own argument gates: no argument fix can make the
  * call succeed on this server. Only tools whose schema takes a `sessionId` are
@@ -69,7 +69,10 @@ export function registerToolHandlers(server: Server, ctx: ToolContext): void {
   server.setRequestHandler(
     CallToolRequestSchema,
     async (request, extra): Promise<ServerResult> => {
-      const toolName = request.params.name;
+      // A former name resolves to its replacement; the handler sees the name the caller
+      // used, so the answer can say it is deprecated (issue #876).
+      const requestedName = request.params.name;
+      const toolName = TOOL_ALIASES[requestedName] ?? requestedName;
       const args = coerceToolArguments((request.params.arguments ?? {}) as Record<string, unknown>) as ToolArguments;
 
       // Log tool call with structured logging
@@ -83,7 +86,7 @@ export function registerToolHandlers(server: Server, ctx: ToolContext): void {
 
       try {
         if (!isToolName(toolName)) {
-          throw new McpError(McpErrorCode.MethodNotFound, `Unknown tool: ${toolName}`);
+          throw new McpError(McpErrorCode.MethodNotFound, `Unknown tool: ${requestedName}`);
         }
         const definition = dispatchDefinitions.get(toolName);
         if (!definition) {
@@ -92,7 +95,7 @@ export function registerToolHandlers(server: Server, ctx: ToolContext): void {
         assertRequiredToolArguments(definition, args as unknown as Record<string, unknown>);
         const result =
           foreignSessionResult(ctx, definition, args.sessionId) ??
-          await TOOL_HANDLERS[toolName](ctx, args, toolName, { signal: extra?.signal });
+          await TOOL_HANDLERS[toolName](ctx, args, requestedName, { signal: extra?.signal });
         
         // Log tool response; success mirrors the payload's own success flag (issue #397)
         ctx.logger.info('tool:response', {

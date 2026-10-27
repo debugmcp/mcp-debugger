@@ -72,6 +72,11 @@ const codeOnly = (line: string): string => {
   return out;
 };
 
+/** What the Dart policy learns from the Flutter adapter's events for `hot_reload` (issue #876). */
+interface DartLiveUpdateState {
+  flutterApp?: { started: boolean; launchMode?: string; supportsRestart?: boolean };
+}
+
 export const DartAdapterPolicy = {
   name: 'dart',
   supportsLogPoints: true,
@@ -83,6 +88,41 @@ export const DartAdapterPolicy = {
   // process and build() re-hits ~0.4 s later (issue #876). The Dart CLI adapter never
   // advertises it, so a Dart program keeps the relaunch.
   restartViaDapRequest: true,
+  // Flutter hot reload (issue #876): the SDK adapter's `hotReload` request, once the app has
+  // started — learned from the adapter's `flutter.appStart` / `flutter.appStarted` events,
+  // which the worker forwards for this. The reassemble runs build(), so a breakpoint there
+  // fires ~150 ms after the request, before the response on some platforms. A Dart CLI
+  // program has no Flutter app: refused by name.
+  liveUpdate: {
+    events: ['flutter.appStart', 'flutter.appStarted'],
+    resumeCommands: ['hotReload'],
+    onEvent: (state: unknown, event: string, body: unknown): DartLiveUpdateState => {
+      const current = (state ?? {}) as DartLiveUpdateState;
+      const params = (body ?? {}) as Record<string, unknown>;
+      if (event === 'flutter.appStart') {
+        return { ...current, flutterApp: { started: false, launchMode: typeof params.launchMode === 'string' ? params.launchMode : undefined, supportsRestart: params.supportsRestart === true } };
+      }
+      if (event === 'flutter.appStarted') {
+        return { ...current, flutterApp: { ...(current.flutterApp ?? { started: false }), started: true } };
+      }
+      return current;
+    },
+    request: (args, state): { command: string } | { refused: string } => {
+      if (args.classesDir !== undefined || args.sinceTimestamp !== undefined) {
+        return { refused: 'classesDir and sinceTimestamp are the Java hot-swap arguments; a Flutter hot reload takes none' };
+      }
+      const app = (state as DartLiveUpdateState | undefined)?.flutterApp;
+      if (!app) {
+        return { refused: 'this session runs `dart`, not `flutter run` or `flutter attach`: hot reload is a Flutter feature (a Dart CLI program has no widget tree to reassemble)' };
+      }
+      if (!app.started) {
+        return { refused: 'the Flutter app has not reported appStarted yet; call wait_for_stop or get_output, then retry' };
+      }
+      return { command: 'hotReload' };
+    },
+    changed: () => true,
+    mayStopDuringUpdate: true,
+  },
   // `next` stops once per token position: app.dart:29 (`counter.value + 2`)
   // took three step_overs, columns 16, 26 and 32 (issue #879).
   stepsByTokenPosition: true,

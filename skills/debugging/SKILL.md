@@ -123,7 +123,7 @@ Read the matching reference before your first session in a language — each has
 | Ruby | references/ruby.md | stops at load only with stopOnEntry (rdbg continues by itself otherwise); attach captures no stdout |
 | Rust | references/rust.md | GNU toolchain on Windows; scriptPath = source file, adapter finds Cargo project |
 | Go | references/go.md | Delve native DAP; optimized-binary locals warning |
-| Java | references/java.md | javac -g required; FQCN breakpoints; redefine_classes hot-swap |
+| Java | references/java.md | javac -g required; FQCN breakpoints; hot_reload {classesDir} hot-swap |
 | .NET/C# | references/dotnet.md | scriptPath = compiled .dll; Portable PDB required |
 | C/C++ | references/cpp.md | scriptPath = binary (-gdwarf-4 -O0) or lone .c/.cpp (auto-compiled); attach by PID; MinGW/DWARF on Windows |
 | COBOL | references/cobol.md | scriptPath = .cob/.cbl source (auto-compiled with GnuCOBOL) or prebuilt exe; dapLaunchArgs {dialect, format, copybookDirs, runtimeChecks, stdinFile}; COBOL-shaped variables; breakpoints in copybooks; paragraph function breakpoints; `{WS-NAME}` logpoints; PERFORM-aware step_over/step_out |

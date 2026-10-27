@@ -42,7 +42,7 @@ This document provides a complete reference for all tools available in mcp-debug
    - [expose_session](#expose_session)
    - [unexpose_session](#unexpose_session)
 7. [Language-Specific Tools](#language-specific-tools)
-   - [redefine_classes](#redefine_classes)
+   - [hot_reload](#hot_reload)
 
 ---
 
@@ -1616,20 +1616,38 @@ Closes the mirror endpoint and disconnects any attached IDE clients (they receiv
 
 ## Language-Specific Tools
 
-### redefine_classes
+### hot_reload
 
-Hot-swap changed Java classes into a running JVM using JDI `VirtualMachine.redefineClasses()`. **Java only.**
+Apply changed code to the running program and keep its state — the adapter's own live update. Two adapters have one today; the tool is refused by name on the others.
+
+- **Flutter** (a `flutter run` / `flutter attach` session): the SDK adapter's **hot reload**. The reassemble runs `build()`, so a breakpoint there is reported by this call as the stop, with its `location` and `snapshot` (measured: ~150 ms after the request on desktop; on web the adapter holds its response until the paused isolate resumes, which is why the call answers the stop rather than waiting for the response). Widget state, counters and timers survive. A reload sent to a *paused* program answers at once and lands when the program resumes (`note` says so). Before the app has reported `appStarted`, and on a plain Dart program, the call is refused by name.
+- **Java**: class redefinition (JDI `VirtualMachine.redefineClasses()`, HotSwap) — the former `redefine_classes` tool, whose answer is unchanged.
+
+`redefine_classes` is a **deprecated alias** of this tool: still accepted, answered with a `warning`, not advertised by `tools/list`, removed at 1.0.
 
 **Parameters:**
-- `sessionId` (string, required): The debug session ID (must be an active Java session)
-- `classesDir` (string, required): Absolute path to compiled classes directory (e.g., `build/classes/java/main/`)
-- `sinceTimestamp` (number, optional): Unix timestamp in milliseconds. Only redefine `.class` files modified after this time. `0` or omitted = scan all files.
-- `timeout` (number, optional): Maximum time in milliseconds to wait for the redefinition to complete (default: 30000, max: 600000). Increase when hot-swapping many classes at once.
+- `sessionId` (string, required): The debug session ID.
+- `classesDir` (string, Java only): Absolute path to the compiled classes directory (e.g., `build/classes/java/main/`). Required on Java; refused on Flutter.
+- `sinceTimestamp` (number, Java only, optional): Unix timestamp in milliseconds. Only redefine `.class` files modified after this time. `0` or omitted = scan all files.
+- `timeout` (number, optional): Maximum time in milliseconds to wait for the update to complete (default: 30000, max: 600000). Increase when hot-swapping many classes at once.
 
-**Response:**
+**Response (Flutter, the reassemble reached a breakpoint):**
 ```json
 {
   "success": true,
+  "state": "paused",
+  "reason": "breakpoint",
+  "location": { "file": "/app/lib/main.dart", "line": 30, "function": "_ProbeAppState.build" },
+  "snapshot": { "frames": ["…"], "locals": ["…"] }
+}
+```
+A reload whose program is still running when the hold elapses answers `state: "running"` with `pending: true` — call `wait_for_stop` for a stop it may land on.
+
+**Response (Java):**
+```json
+{
+  "success": true,
+  "state": "paused",
   "redefined": ["com.example.Foo", "com.example.Bar"],
   "redefinedCount": 2,
   "skippedNotLoaded": 3,
@@ -1642,7 +1660,12 @@ Hot-swap changed Java classes into a running JVM using JDI `VirtualMachine.redef
 }
 ```
 
-**Example — full scan:**
+**Example — Flutter:**
+```json
+{ "sessionId": "abc-123" }
+```
+
+**Example — Java, full scan:**
 ```json
 {
   "sessionId": "abc-123",
@@ -1650,7 +1673,7 @@ Hot-swap changed Java classes into a running JVM using JDI `VirtualMachine.redef
 }
 ```
 
-**Example — incremental scan (pass `newestTimestamp` from previous call):**
+**Example — Java, incremental scan (pass `newestTimestamp` from the previous call):**
 ```json
 {
   "sessionId": "abc-123",
@@ -1660,11 +1683,10 @@ Hot-swap changed Java classes into a running JVM using JDI `VirtualMachine.redef
 ```
 
 **Notes:**
-- Only works with Java debug sessions (requires JDI support)
-- Classes must already be loaded in the target JVM — unloaded classes are skipped (`skippedNotLoaded`)
-- Schema changes (adding/removing methods or fields) will fail for individual classes without blocking others
-- The `newestTimestamp` in the response enables incremental workflows: recompile, then pass it as `sinceTimestamp` on the next call to only redefine newly modified files
-- The session can be paused or running when calling this tool
+- Statement-anchored breakpoints are re-resolved against the new source after the update (`anchorResolution` reports moved/stale, as `restart_debugging` does); moved ones are re-sent so they bind against the new line table.
+- Java: classes must already be loaded in the target JVM — unloaded classes are skipped (`skippedNotLoaded`); schema changes (adding/removing methods or fields) fail for individual classes without blocking others; the `newestTimestamp` in the response enables incremental workflows.
+- Java: the session can be paused or running when calling this tool. Flutter: the app must have started.
+- Hot *restart* (re-run `main()` in the same process) is `restart_debugging` on a Flutter session.
 
 ---
 

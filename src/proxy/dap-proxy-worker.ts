@@ -1066,6 +1066,16 @@ export class DapProxyWorker {
   private setupDapEventHandlers(): void {
     if (!this.dapClient || !this.connectionManager) return;
 
+    // The custom events the policy's live update asks for (issue #876: Flutter's
+    // `flutter.appStart` / `flutter.appStarted`), forwarded as generic DAP events — the session
+    // keeps the policy's state from them. Nothing else about them is interpreted here.
+    for (const name of this.adapterPolicy.liveUpdate?.events ?? []) {
+      this.dapClient.on(name, (body: unknown) => {
+        this.logger?.info(`[Worker] DAP event: ${name} (live update; forwarded)`);
+        this.sendDapEvent(name, body as DebugProtocol.Event['body']);
+      });
+    }
+
     this.connectionManager.setupEventHandlers(this.dapClient, {
       onInitialized: async () => {
         // Nothing awaits this listener — a rejection escaping it has no
@@ -2615,8 +2625,10 @@ export class DapProxyWorker {
   }
 
   private noteResumeCommand(command: string, args: unknown, response: unknown): void {
-    // `restart` resumes too: the program re-runs from main (issue #876).
-    if (!['continue', 'next', 'stepIn', 'stepOut', 'goto', 'restart'].includes(command)) {
+    // `restart` resumes too: the program re-runs from main; so do the live-update commands the
+    // policy names (Flutter's hotReload reassembles; issue #876).
+    const resumes = ['continue', 'next', 'stepIn', 'stepOut', 'goto', 'restart', ...(this.adapterPolicy.liveUpdate?.resumeCommands ?? [])];
+    if (!resumes.includes(command)) {
       return;
     }
     if (!this.lastStop) {

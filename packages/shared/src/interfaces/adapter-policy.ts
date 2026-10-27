@@ -305,6 +305,46 @@ export function generatedFileCandidatesFrom(
   return candidates;
 }
 
+/** Arguments of a `hot_reload` call, as the policy turns them into its adapter's request (issue #876). */
+export interface HotReloadArgs {
+  /** Java: the directory of the recompiled `.class` files the JDI bridge scans. */
+  classesDir?: string;
+  /** Java: only `.class` files modified after this Unix-ms timestamp (0 or absent: all). */
+  sinceTimestamp?: number;
+}
+
+/** The DAP request a `hot_reload` call sends, or the reason the policy refuses it right now. */
+export type LiveUpdateRequest =
+  | { command: string; args?: Record<string, unknown> }
+  | { refused: string };
+
+/**
+ * The adapter's live code update behind `hot_reload` (issue #876): apply changed code to the
+ * running program and keep its state. One object, so a reader sees one feature and a new
+ * adapter implements one member: Java's is the JDI bridge's `redefineClasses` (HotSwap);
+ * Flutter's is the SDK adapter's `hotReload`, gated on the app having started, which the
+ * policy learns from the adapter's own events.
+ */
+export interface LiveUpdatePolicy {
+  /** Custom DAP events the worker forwards to the session for this feature's bookkeeping. */
+  events?: readonly string[];
+  /** DAP commands of this feature that resume the program (the worker clears its last stop). */
+  resumeCommands?: readonly string[];
+  /** Folds a forwarded event into the session's per-policy state (opaque to the core). */
+  onEvent?(state: unknown, event: string, body: unknown): unknown;
+  /** The request a `hot_reload` call sends, or why it is refused now — decided before anything reaches the adapter. */
+  request(args: HotReloadArgs, state: unknown): LiveUpdateRequest;
+  /** Whether the update changed code, so statement anchors re-resolve and moved breakpoints are re-sent (issue #464). */
+  changed(response: DebugProtocol.Response | undefined): boolean;
+  /**
+   * The update may stop the program before it answers (Flutter: the reassemble runs `build()`
+   * and a breakpoint there fires ~150 ms after the request; the response is held until the
+   * isolate resumes on some platforms — measured). The controller then races the stop against
+   * the response under the launch hold instead of awaiting the response.
+   */
+  mayStopDuringUpdate?: boolean;
+}
+
 export interface AdapterPolicy {
   /**
    * Identifying name for diagnostics (e.g., 'default', 'js-debug')
@@ -701,6 +741,9 @@ export interface AdapterPolicy {
    * ~0.4 s. Optional — absent means the relaunch.
    */
   restartViaDapRequest?: boolean;
+
+  /** The adapter's live code update behind `hot_reload` (issue #876); absent means the tool refuses this language by name. */
+  liveUpdate?: LiveUpdatePolicy;
 
   /**
    * Normalize an adapter-specific DAP stop reason into a canonical reason

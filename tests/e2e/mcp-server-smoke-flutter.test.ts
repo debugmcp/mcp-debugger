@@ -145,6 +145,7 @@ describe.skipIf(SKIP_FLUTTER)('MCP Server Flutter Debugging Smoke Test @requires
     return waitForPause(timeoutMs, 'first stop');
   }
 
+
   async function createSession(name: string) {
     sessionId = (await call('create_debug_session', { language: 'dart', name })).sessionId as string;
     expect(sessionId).toBeDefined();
@@ -295,6 +296,41 @@ describe.skipIf(SKIP_FLUTTER)('MCP Server Flutter Debugging Smoke Test @requires
       expect(await evaluate('counter')).toBe('0');
       const bps = (await call('list_breakpoints', {})).breakpoints as Array<{ verified?: boolean }>;
       expect(bps.every((b) => b.verified === true), 'breakpoints re-verified after the restart').toBe(true);
+      expect((await listPidsByImage('flutter_probe')).filter((pid) => !appsBefore.includes(pid)), 'the same app process').toEqual(appPids);
+
+      expect((await callToolSafely(mcpClient!, 'close_debug_session', { sessionId })).success).toBe(true);
+      sessionId = null;
+      const survivors = await waitForProcessesToExit(appPids, { timeoutMs: 5000, image: 'flutter_probe' });
+      if (survivors.length > 0) await killProcesses(survivors);
+      expect(survivors).toEqual([]);
+    }, 300000);
+
+    it('hot_reload: the reassemble lands on the build() breakpoint within the call, state survives, the process stays (issue #876)', async (ctx) => {
+      const line = bpLine(FLUTTER_EXAMPLES.main, 'BUILD');
+      const appsBefore = await listPidsByImage('flutter_probe');
+      await createSession('flutter-desktop-hot-reload');
+      expect((await call('set_breakpoint', { file: FLUTTER_EXAMPLES.main, line })).success).toBe(true);
+      const launched = await startOrSkip(ctx, {
+        scriptPath: FLUTTER_EXAMPLES.main, dapLaunchArgs: { stopOnEntry: false, cwd: FLUTTER_PROBE_DIR, deviceId: DESKTOP },
+      });
+      const first = await firstStop(launched, 180000);
+      expect(first.lastStop?.reason).toBe('breakpoint');
+      const appPids = (await listPidsByImage('flutter_probe')).filter((pid) => !appsBefore.includes(pid));
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      await wait(1200);
+
+      const started = Date.now();
+      const reloaded = await call('hot_reload', {});
+      expect(reloaded.success, JSON.stringify(reloaded)).toBe(true);
+      // Measured: the reassemble runs build() ~150 ms after the request, so the answer is the stop.
+      const again = reloaded.state === 'paused' ? (await getSession())! : await waitForPause(30000, 'the build() breakpoint after the hot reload');
+      expect(Date.now() - started).toBeLessThan(20000);
+      expect(again.lastStop?.reason).toBe('breakpoint');
+      expect((await frames())[0].line).toBe(line);
+      // State survives a hot reload: the timer kept counting since launch (a hot restart would
+      // have reset it), the counter kept its value.
+      expect(Number(await evaluate('ticks'))).toBeGreaterThanOrEqual(1);
+      expect(await evaluate('counter')).toBe('0');
       expect((await listPidsByImage('flutter_probe')).filter((pid) => !appsBefore.includes(pid)), 'the same app process').toEqual(appPids);
 
       expect((await callToolSafely(mcpClient!, 'close_debug_session', { sessionId })).success).toBe(true);

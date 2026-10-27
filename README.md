@@ -31,7 +31,7 @@ Microsoft's [DebugMCP](https://github.com/microsoft/DebugMCP) exposes VS Code's 
 | Distribution | npx, npm, Docker image | VS Code Marketplace extension |
 | Remote attach without an IDE | ✅ debugpy / rdbg / JDWP, incl. pods via port-forward | ❌ |
 | Per-session process isolation | ✅ one proxy process per session | shares the VS Code instance |
-| Java hot-swap (`redefine_classes`) | ✅ | ❌ |
+| Java hot-swap and Flutter hot reload (`hot_reload`) | ✅ | ❌ |
 | Debuggee output as subscribable MCP resource | ✅ | ❌ |
 | In-IDE debugging UX alongside the agent | ✅ read-only IDE mirror ([`expose_session`](docs/tool-reference.md#expose_session)) — the IDE joins the *agent's* live session | ✅ native |
 | Logpoints without pausing (prod-safe value watching) | ✅ [`logMessage` breakpoints](docs/tool-reference.md#set_breakpoint) | ✅ via VS Code |
@@ -300,7 +300,7 @@ All **29 tools** below are implemented — see the [tool reference](docs/tool-re
 | `get_source_context` | Get source code context | ✅ Implemented |
 | `get_output` | Read captured debuggee output (stdout/stderr) | ✅ Implemented |
 | `close_debug_session` | Close a session | ✅ Implemented |
-| `redefine_classes` | Hot-swap changed Java classes into a running JVM (Java only) | ✅ Implemented |
+| `hot_reload` | Apply changed code to the running program and keep its state — Flutter hot reload, Java class redefinition (`redefine_classes` is a deprecated alias) | ✅ Implemented |
 
 ## 🏗️ Architecture: Dynamic Adapter Loading
 

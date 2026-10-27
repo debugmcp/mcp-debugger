@@ -283,6 +283,17 @@ describe.skipIf(SKIP_DART)('MCP Server Dart Debugging Smoke Test @requires-dart'
     expect(await output()).toContain('hello mcp-debugger');
   }, 60000);
 
+  it('refuses hot_reload by name: a Dart CLI program has no Flutter app to reload (issue #876)', async (ctx) => {
+    const line = bpLine(DART_EXAMPLES.hello, 'HELLO');
+    await createSession('dart-hot-reload-refusal');
+    expect((await call('set_breakpoint', { file: DART_EXAMPLES.hello, line })).success).toBe(true);
+    await startOrSkip(ctx, { scriptPath: DART_EXAMPLES.hello, dapLaunchArgs: { stopOnEntry: false } });
+    expect(await pollState('paused', 30000), 'session should pause at the breakpoint').toBeDefined();
+    const refused = await call('hot_reload', {});
+    expect(refused.success).toBe(false);
+    expect(String(refused.error)).toMatch(/runs `dart`/);
+  }, 120000);
+
   it('reports the dart row in doctor', async () => {
     const { spawnSync } = await import('child_process');
     const r = spawnSync(process.execPath, [path.join(ROOT, 'dist', 'index.js'), 'doctor', 'dart', '--json'], { encoding: 'utf8', cwd: DART_PROBE_DIR, env: { ...process.env, NODE_ENV: 'test' } });

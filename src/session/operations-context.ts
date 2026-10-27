@@ -249,15 +249,6 @@ export type EvaluateContext = Pick<
   'logger' | 'getSession' | 'selectPolicy' | 'redactionEnabled'
 >;
 
-/**
- * JVM hot swap: a DAP round trip, anchor re-resolution (hence the filesystem)
- * and breakpoint re-planting.
- */
-export type HotSwapContext = Pick<
-  OperationsContext,
-  'logger' | 'fileSystem' | 'getSession'
->;
-
 /** The read-only DAP mirror endpoint, whose record lives on the session. */
 export type MirrorContext = Pick<
   OperationsContext,
