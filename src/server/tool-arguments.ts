@@ -50,7 +50,7 @@ export interface ToolArguments {
   terminateProcess?: boolean;
   suspendPolicy?: 'all' | 'thread';
   threadId?: number;
-  // redefine_classes parameters
+  // hot_reload parameters (Java: the classes directory and the incremental timestamp)
   classesDir?: string;
   sinceTimestamp?: number;
   // get_output parameters

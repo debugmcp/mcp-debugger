@@ -641,6 +641,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     session.snapshotDiffBase = undefined;
     session.exitCode = undefined;
     session.adapterCapabilities = undefined;
+    session.liveUpdateState = undefined;
     session.failureDiagnostics = undefined;
     // Adapter degradation notes are per-launch (issue #441).
     session.adapterNotices = [];
@@ -1309,6 +1310,24 @@ export abstract class SessionManagerCore extends EventEmitter {
     };
     proxyManager.on('adapter-capabilities', handleAdapterCapabilities);
     handlers.set('adapter-capabilities', handleAdapterCapabilities);
+
+    // The custom events the policy's live update asked the worker for (issue #876): folded
+    // into the session's opaque per-policy state, which `hot_reload` reads.
+    const handleDapEvent = (event: string, body: unknown) => {
+      let live;
+      try {
+        live = this.sessionStore.selectPolicy(session.language).liveUpdate;
+      } catch {
+        return;
+      }
+      if (!live?.onEvent || !live.events?.includes(event)) {
+        return;
+      }
+      session.liveUpdateState = live.onEvent(session.liveUpdateState, event, body);
+      this.logger.debug(`[SessionManager ${sessionId}] live-update event ${event} recorded`);
+    };
+    proxyManager.on('dap-event', handleDapEvent);
+    handlers.set('dap-event', handleDapEvent);
 
     // Pre-launch function-breakpoint sync results from the worker (issue
     // #302): stamp the adapter-assigned ids into the store immediately so a

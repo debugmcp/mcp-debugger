@@ -25,9 +25,10 @@ import {
   type EvaluateResult
 } from './inspection/expression-evaluator.js';
 import {
-  RedefineClassesController,
-  type RedefineClassesResult
-} from './jvm/redefine-classes-controller.js';
+  LiveUpdateController,
+  type HotReloadResult
+} from './live-update/live-update-controller.js';
+import type { HotReloadArgs } from '@debugmcp/shared';
 import {
   MirrorController,
   type ExposeSessionResult,
@@ -56,8 +57,8 @@ export type {
 /** Result type for evaluate expression operations. */
 export type { EvaluateResult } from './inspection/expression-evaluator.js';
 
-/** Result type for redefine_classes (JVM hot swap). */
-export type { RedefineClassesResult } from './jvm/redefine-classes-controller.js';
+/** Result type for hot_reload (the adapter's live code update; issue #876). */
+export type { HotReloadResult } from './live-update/live-update-controller.js';
 
 /** Result types for expose_session / unexpose_session (issue #217). */
 export type {
@@ -220,7 +221,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   protected readonly pauseCoordinator = new PauseCoordinator(this.opsContext);
   protected readonly execution = new ExecutionController(this.opsContext, this.pauseCoordinator);
   protected readonly evaluator = new ExpressionEvaluator(this.opsContext, this.frameAnchorResolver);
-  protected readonly hotSwap = new RedefineClassesController(this.opsContext, this.breakpoints);
+  protected readonly liveUpdate = new LiveUpdateController(this.opsContext, this.breakpoints);
   protected readonly mirror = new MirrorController(this.opsContext);
   protected readonly proxyLauncher = new ProxyLauncher(this.opsContext);
   protected readonly launcher = new DebugLauncher(
@@ -437,15 +438,11 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   }
 
   /**
-   * Hot-swap changed classes into a running JVM (Java only).
+   * Apply changed code to the running program and keep its state — the adapter's own live
+   * update behind `hot_reload` (issue #876): Flutter hot reload, Java class redefinition.
    */
-  async redefineClasses(
-    sessionId: string,
-    classesDir: string,
-    sinceTimestamp: number = 0,
-    timeoutMs?: number
-  ): Promise<RedefineClassesResult> {
-    return this.hotSwap.redefineClasses(sessionId, classesDir, sinceTimestamp, timeoutMs);
+  async hotReload(sessionId: string, args: HotReloadArgs = {}, timeoutMs?: number): Promise<HotReloadResult> {
+    return this.liveUpdate.hotReload(sessionId, args, timeoutMs);
   }
 
   /**

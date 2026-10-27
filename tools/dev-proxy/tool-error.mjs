@@ -60,7 +60,7 @@ export function isBackendUnavailableError(err, backendState) {
  * How long one backend tool call may take before the proxy gives up on it
  * (issue #854). The SDK client's default is 60 s, which cut off every call
  * that is slow by design: the server lets a caller ask evaluate_expression,
- * redefine_classes and wait_for_stop for up to 600 s. The MCP client in front
+ * hot_reload and wait_for_stop for up to 600 s. The MCP client in front
  * of the proxy enforces its own request timeout, so this only has to stay
  * out of the way — the tool maximum plus room for the answer to travel.
  */

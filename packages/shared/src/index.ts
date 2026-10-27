@@ -187,6 +187,9 @@ export { AdapterFactory } from './factories/adapter-factory.js';
 // Adapter Policy interfaces and implementations
 export type {
   AdapterPolicy,
+  HotReloadArgs,
+  LiveUpdatePolicy,
+  LiveUpdateRequest,
   ChildSessionStrategy,
   AdapterSpecificState,
   CommandHandling,

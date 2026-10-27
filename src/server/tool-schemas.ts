@@ -54,7 +54,7 @@ export const TOOL_NAMES = [
   'evaluate_expression',
   'get_source_context',
   'get_output',
-  'redefine_classes',
+  'hot_reload',
 ] as const;
 
 export type ToolName = (typeof TOOL_NAMES)[number];
@@ -65,6 +65,15 @@ const TOOL_NAME_SET: ReadonlySet<string> = new Set(TOOL_NAMES);
 export function isToolName(name: string): name is ToolName {
   return TOOL_NAME_SET.has(name);
 }
+
+/**
+ * Former tool names still accepted at the tools/call boundary, resolved to the tool that
+ * replaced them and answered with a deprecation warning; not advertised by tools/list. Gone at
+ * 1.0 (the tool-schema freeze). `redefine_classes` became `hot_reload` (issue #876).
+ */
+export const TOOL_ALIASES: Readonly<Record<string, ToolName>> = Object.freeze({
+  redefine_classes: 'hot_reload',
+});
 
 /** A tools/list entry, with its name constrained to the advertised set. */
 export type ToolDefinition = Tool & { name: ToolName };
@@ -222,6 +231,6 @@ export function buildToolDefinitions(options: BuildToolDefinitionsOptions): Tool
     { name: 'evaluate_expression', description: 'Evaluate expression in the current debug context. Without frameId, uses the same adopted top frame as stack and locals — at a breakpoint or step that is the frame the program stopped in even when the stack display would hide it — and discloses an automatic thread switch or a hidden paused frame in anchorNote; frame names the frame that was used, on success and on failure. Expressions can read and modify program state. Waits up to 30s by default', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, expression: { type: 'string' }, frameId: { type: 'number', description: 'Optional authoritative stack frame ID from get_stack_trace. When provided, no automatic frame/thread selection occurs' }, timeout: { type: 'number', description: 'Max time (ms) to wait for the evaluation to complete (default: 30000, max: 600000). On expiry the request fails but the expression may keep executing in the debuggee. Note: your MCP client may enforce its own overall request timeout' } }, required: ['sessionId', 'expression'] } },
     { name: 'get_source_context', description: 'Get source context around a specific line in a file', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, file: { type: 'string', description: fileDescription }, line: { type: 'number', description: 'Line number to get context for' }, linesContext: { type: 'number', description: 'Number of lines before and after to include (default: 5)' } }, required: ['sessionId', 'file', 'line'] } },
     { name: 'get_output', description: 'Get debuggee output (stdout/stderr/console) captured for a session. Buffered per launch (last 1000 entries; adapter telemetry and known adapter-internal diagnostics — e.g. LLDB DWARF-parser noise — filtered out). Works while the program is running and after it finishes, until the session is closed. Pass since=nextSince from the previous response to fetch only new output', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, since: { type: 'number', description: 'Only return entries with seq greater than this cursor (use nextSince from the previous response). Default: 0 = from the start of the buffer' }, limit: { type: 'number', description: 'Maximum entries to return (default: 100, max: 1000). hasMore:true in the response means more entries are available' } }, required: ['sessionId'] } },
-    { name: 'redefine_classes', description: 'Hot-swap changed Java classes into a running JVM. Scans a classes directory for .class files modified after sinceTimestamp, matches them against loaded classes in the target JVM, and redefines them using JDI. Returns which classes were redefined and the newest file timestamp (pass as sinceTimestamp on next call for incremental updates). Statement-anchored breakpoints are re-resolved against the new source after the swap (anchorResolution reports moved/stale). Only works with Java debug sessions.', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, classesDir: { type: 'string', description: 'Absolute path to compiled classes directory (e.g. build/classes/java/main/)' }, sinceTimestamp: { type: 'number', description: 'Unix timestamp (ms). Only redefine .class files modified after this time. 0 or omitted = all files.' }, timeout: { type: 'number', description: 'Max time (ms) to wait for the redefinition to complete (default: 30000, max: 600000). Increase when hot-swapping many classes at once' } }, required: ['sessionId', 'classesDir'] } },
+    { name: 'hot_reload', description: 'Apply changed code to the running program and keep its state — the adapter\'s own live update. Flutter: the SDK adapter\'s hot reload (the app must have started; the reassemble runs build(), so a breakpoint there is reported by this call as the stop, with its location and snapshot; widget state, counters and timers survive; a reload sent to a paused program lands when it resumes). Java: class redefinition (JDI HotSwap) — scans classesDir for .class files modified after sinceTimestamp, redefines the ones the JVM has loaded, re-plants breakpoints, and returns which classes were redefined and the newest file timestamp (pass it as sinceTimestamp next time for an incremental update). Statement-anchored breakpoints are re-resolved against the new source after the update (anchorResolution reports moved/stale). Refused by name on the other languages. redefine_classes is a deprecated alias of this tool.', inputSchema: { type: 'object', properties: { sessionId: { type: 'string' }, classesDir: { type: 'string', description: 'Java only: absolute path to the compiled classes directory (e.g. build/classes/java/main/)' }, sinceTimestamp: { type: 'number', description: 'Java only: Unix timestamp (ms). Only redefine .class files modified after this time. 0 or omitted = all files.' }, timeout: { type: 'number', description: 'Max time (ms) to wait for the update to complete (default: 30000, max: 600000). Increase when hot-swapping many classes at once' } }, required: ['sessionId'] } },
   ];
 }

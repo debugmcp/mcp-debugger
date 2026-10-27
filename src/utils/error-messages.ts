@@ -81,7 +81,7 @@ export const ErrorMessages = {
 
   /**
    * Hint appended to timeout failures on operations that accept a per-request
-   * 'timeout' tool argument (evaluate_expression, redefine_classes)
+   * 'timeout' tool argument (evaluate_expression, hot_reload)
    * Occurs when: A DAP request times out but the operation may simply need more time than the default allows
    * Used in: src/session/session-manager-operations.ts
    * Note: DAP has no cancel — the debuggee keeps executing the operation after the timeout fires
@@ -286,6 +286,13 @@ export const ErrorMessages = {
    * wait_for_stop on a session that has no debuggee yet (issue #849).
    * Used in: src/session/execution/execution-controller.ts
    */
+  /**
+   * hot_reload on a language whose policy has no live update (issue #876).
+   * Used in: src/session/live-update/live-update-controller.ts
+   */
+  hotReloadNotSupported: (language: string) =>
+    `hot_reload is not supported by the ${language} adapter: it has no live code update (Flutter hot reload and Java class redefinition are the ones today). Edit, then restart_debugging.`,
+
   waitForStopNotStarted: () =>
     'Nothing to wait for: this session has not been started. Call start_debugging (or attach_to_process) first.',
 

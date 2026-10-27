@@ -203,7 +203,7 @@ most actionable error message fires first:
 3. **Parent** (`proxy-manager.ts`) — override (or 30s default) **plus a 5s margin**, a backstop
    that only fires if the worker never responds at all
 
-`evaluate_expression` and `redefine_classes` expose the override as a `timeout` (ms) tool
+`evaluate_expression` and `hot_reload` expose the override as a `timeout` (ms) tool
 argument (issue #142). `resolveDapTimeoutOverride` (`src/session/dap-request-helpers.ts`)
 validates it — positive, finite, clamped to `MAX_DAP_TIMEOUT_MS` (600000) — and the caller
 passes `{ timeoutMs }` to `sendDapRequest`, which threads it over IPC

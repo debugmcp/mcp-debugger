@@ -60,7 +60,7 @@ mcp-debugger is a debugger, not a sandbox. It runs as a process trusted at the l
 There are really two privilege scopes the MCP client inherits:
 
 - On the **mcp-debugger host**, the MCP client can read any file the mcp-debugger process can read (`get_source_context`, DAP source requests) and spawn arbitrary processes (`create_debug_session` + `start_debugging`, `attach_to_process`).
-- On the **debuggee host** (which may be a remote machine reached via `attach_to_process`), the MCP client can execute arbitrary code inside the debuggee (`evaluate_expression`, `redefine_classes`).
+- On the **debuggee host** (which may be a remote machine reached via `attach_to_process`), the MCP client can execute arbitrary code inside the debuggee (`evaluate_expression`, `hot_reload`).
 
 These capabilities are intrinsic to being a debugger and cannot be removed without defeating the tool's purpose. In particular, `evaluate_expression` forwards a caller-supplied expression to the debug adapter, which evaluates it in the debuggee's runtime; deciding whether such an expression is "safe" is undecidable in general and not a property mcp-debugger attempts to enforce.
 

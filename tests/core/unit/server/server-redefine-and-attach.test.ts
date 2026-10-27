@@ -1,5 +1,5 @@
 ﻿/**
- * Tests for redefine_classes tool and attach stopOnEntry behavior
+ * Tests for hot_reload tool and attach stopOnEntry behavior
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { McpError, ErrorCode as McpErrorCode } from '@modelcontextprotocol/sdk/types.js';
@@ -29,7 +29,7 @@ vi.mock('@modelcontextprotocol/sdk/server/stdio.js');
 vi.mock('../../../../src/session/session-manager.js');
 vi.mock('../../../../src/container/dependencies.js');
 
-describe('redefine_classes and attach stopOnEntry tests', () => {
+describe('hot_reload and attach stopOnEntry tests', () => {
   let mockServer: MockServer;
   let mockSessionManager: MockSessionManager;
   let mockDependencies: Dependencies;
@@ -94,17 +94,18 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
     });
   });
 
-  describe('redefine_classes tool registration', () => {
+  describe('hot_reload tool registration', () => {
     it('should be listed in available tools', async () => {
       const result = await listToolsHandler({ method: 'tools/list', params: {} });
       const toolNames = result.tools.map((t) => t.name);
-      expect(toolNames).toContain('redefine_classes');
+      expect(toolNames).toContain('hot_reload');
+      expect(toolNames).not.toContain('redefine_classes');
     });
 
     it('should have correct input schema', async () => {
-      const tool = await findTool(listToolsHandler, 'redefine_classes');
-      expect(tool.inputSchema.required).toContain('sessionId');
-      expect(tool.inputSchema.required).toContain('classesDir');
+      const tool = await findTool(listToolsHandler, 'hot_reload');
+      expect(tool.inputSchema.required).toEqual(['sessionId']);
+      expect(tool.inputSchema.properties?.classesDir).toBeDefined();
       expect(tool.inputSchema.properties?.sinceTimestamp).toBeDefined();
       expect(tool.inputSchema.properties?.timeout).toBeDefined();
     });
@@ -115,9 +116,9 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
     });
   });
 
-  describe('redefine_classes tool dispatch', () => {
-    it('should call sessionManager.redefineClasses with correct args', async () => {
-      mockSessionManager.redefineClasses.mockResolvedValue({
+  describe('hot_reload tool dispatch', () => {
+    it('should call sessionManager.hotReload with correct args', async () => {
+      mockSessionManager.hotReload.mockResolvedValue({
         success: true,
         redefined: ['com.example.Foo'],
         redefinedCount: 1,
@@ -130,7 +131,7 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
       const result = await callToolHandler({
         method: 'tools/call',
         params: {
-          name: 'redefine_classes',
+          name: 'hot_reload',
           arguments: {
             sessionId: 'test-session',
             classesDir: '/path/to/classes',
@@ -139,12 +140,7 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
         },
       });
 
-      expect(mockSessionManager.redefineClasses).toHaveBeenCalledWith(
-        'test-session',
-        '/path/to/classes',
-        1000000,
-        undefined
-      );
+      expect(mockSessionManager.hotReload).toHaveBeenCalledWith('test-session', { classesDir: '/path/to/classes', sinceTimestamp: 1000000 }, undefined);
 
       const content = JSON.parse(result.content[0].text);
       expect(content.success).toBe(true);
@@ -153,8 +149,8 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
       expect(content.newestTimestamp).toBe(1234567890);
     });
 
-    it('should default sinceTimestamp to 0 when omitted', async () => {
-      mockSessionManager.redefineClasses.mockResolvedValue({
+    it('passes only the arguments given: sinceTimestamp is the policy\'s to default', async () => {
+      mockSessionManager.hotReload.mockResolvedValue({
         success: true,
         redefined: [],
         redefinedCount: 0,
@@ -167,7 +163,7 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
       await callToolHandler({
         method: 'tools/call',
         params: {
-          name: 'redefine_classes',
+          name: 'hot_reload',
           arguments: {
             sessionId: 'test-session',
             classesDir: '/path/to/classes',
@@ -175,16 +171,11 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
         },
       });
 
-      expect(mockSessionManager.redefineClasses).toHaveBeenCalledWith(
-        'test-session',
-        '/path/to/classes',
-        0,
-        undefined
-      );
+      expect(mockSessionManager.hotReload).toHaveBeenCalledWith('test-session', { classesDir: '/path/to/classes' }, undefined);
     });
 
-    it('forwards args.timeout to sessionManager.redefineClasses (issue #142)', async () => {
-      mockSessionManager.redefineClasses.mockResolvedValue({
+    it('forwards args.timeout to sessionManager.hotReload (issue #142)', async () => {
+      mockSessionManager.hotReload.mockResolvedValue({
         success: true,
         redefined: [],
         redefinedCount: 0,
@@ -197,7 +188,7 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
       await callToolHandler({
         method: 'tools/call',
         params: {
-          name: 'redefine_classes',
+          name: 'hot_reload',
           arguments: {
             sessionId: 'test-session',
             classesDir: '/path/to/classes',
@@ -207,12 +198,7 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
         },
       });
 
-      expect(mockSessionManager.redefineClasses).toHaveBeenCalledWith(
-        'test-session',
-        '/path/to/classes',
-        1000000,
-        90000
-      );
+      expect(mockSessionManager.hotReload).toHaveBeenCalledWith('test-session', { classesDir: '/path/to/classes', sinceTimestamp: 1000000 }, 90000);
     });
 
     it('forwards args.timeout to sessionManager.evaluateExpression (issue #142)', async () => {
@@ -246,13 +232,13 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
     });
 
     it('should propagate errors from sessionManager', async () => {
-      mockSessionManager.redefineClasses.mockRejectedValue(new Error('Session not found'));
+      mockSessionManager.hotReload.mockRejectedValue(new Error('Session not found'));
 
       await expect(
         callToolHandler({
           method: 'tools/call',
           params: {
-            name: 'redefine_classes',
+            name: 'hot_reload',
             arguments: {
               sessionId: 'nonexistent',
               classesDir: '/path/to/classes',

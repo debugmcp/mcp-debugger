@@ -168,6 +168,8 @@ export interface ManagedSession extends DebugSessionInfo {
   // Reset on each launch; gates best-effort requests like exceptionInfo and
   // lets tooling validate static policy tables against the real adapter.
   adapterCapabilities?: DebugProtocol.Capabilities;
+  /** The policy's live-update bookkeeping (issue #876), opaque to the core; reset per launch. */
+  liveUpdateState?: unknown;
   // The breakOnExceptions mode actually in effect for the current launch or
   // attach — the user's value, or the policy's launch default when unset
   // (issue #244). Previously write-only pass-through; recorded for read-back.

@@ -381,8 +381,8 @@ Attaches the debugger to a running process. `attachConfig` is an inline object:
 #### `detachFromProcess(sessionId: string, terminateProcess?: boolean): Promise<DebugResult>`
 Detaches the debugger from an attached process.
 
-#### `redefineClasses(sessionId: string, classesDir: string, sinceTimestamp?: number, timeoutMs?: number): Promise<RedefineClassesResult>`
-Java only. Hot-swaps changed classes into a running JVM via a custom DAP `redefineClasses` request. `sinceTimestamp` (ms) limits the scan to `.class` files modified after that time (0/omitted = all); `timeoutMs` overrides the DAP request timeout. Exposed as the `redefine_classes` MCP tool.
+#### `hotReload(sessionId: string, args?: HotReloadArgs, timeoutMs?: number): Promise<HotReloadResult>`
+The adapter's live code update behind `hot_reload` (issue #876): Flutter hot reload (`hotReload`, gated on the app having started) or Java class redefinition (a custom DAP `redefineClasses` request; `args.classesDir` required). Refused by name on the other languages. `sinceTimestamp` (ms) limits the scan to `.class` files modified after that time (0/omitted = all); `timeoutMs` overrides the DAP request timeout. Exposed as the `redefine_classes` MCP tool.
 
 #### `exposeSession(sessionId: string): Promise<ExposeSessionResult>`
 Opens the session's read-only DAP mirror endpoint (issue #217) by sending the `mirrorExpose` pseudo-command to the proxy worker, which hosts a loopback-only, token-gated DAP server multiplexed onto the live adapter connection. Returns `{host, port, token}`; idempotent while exposed (same endpoint, token unrotated). Requires a running proxy. Exposed as the `expose_session` MCP tool.

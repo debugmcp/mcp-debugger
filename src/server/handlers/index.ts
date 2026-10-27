@@ -16,7 +16,7 @@ import {
   restartDebuggingTool,
   attachToProcessTool,
   detachFromProcessTool,
-  redefineClassesTool
+  hotReloadTool
 } from './debuggee-tools.js';
 import { exposeSessionTool, unexposeSessionTool } from './mirror-tools.js';
 import {
@@ -72,5 +72,5 @@ export const TOOL_HANDLERS: Readonly<Record<ToolName, ToolHandler>> = Object.fre
   get_local_variables: getLocalVariablesTool,
   get_output: getOutputTool,
   list_supported_languages: listSupportedLanguagesTool,
-  redefine_classes: redefineClassesTool
+  hot_reload: hotReloadTool
 } satisfies Record<ToolName, ToolHandler>);

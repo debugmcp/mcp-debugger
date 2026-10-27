@@ -1,8 +1,9 @@
 /**
  * Debuggee lifecycle tools: start_debugging, restart_debugging,
- * attach_to_process, detach_from_process, redefine_classes.
+ * attach_to_process, detach_from_process, hot_reload.
  */
 import type { ToolHandler } from '../tool-context.js';
+import type { HotReloadArgs } from '@debugmcp/shared';
 import { attachRequestFromArgs, hoistStopLanding, successWarning } from './shared.js';
 import {
   assertPlainObjectArg,
@@ -186,12 +187,24 @@ export const detachFromProcessTool: ToolHandler = async (ctx, args) => {
   }
 };
 
-export const redefineClassesTool: ToolHandler = async (ctx, args) => {
-  const redefineResult = await ctx.sessionManager.redefineClasses(
-    args.sessionId as string,
-    args.classesDir as string,
-    (args.sinceTimestamp as number) || 0,
-    args.timeout
-  );
-  return prettyJsonResult(redefineResult);
+/** The deprecation `redefine_classes` callers are told about (issue #876). */
+const REDEFINE_CLASSES_ALIAS_WARNING =
+  'redefine_classes is a deprecated alias of hot_reload and is removed at 1.0: call hot_reload with the same arguments';
+
+export const hotReloadTool: ToolHandler = async (ctx, args, toolName) => {
+  requireSessionId(args);
+  try {
+    const request: HotReloadArgs = {
+      ...(args.classesDir !== undefined ? { classesDir: args.classesDir } : {}),
+      ...(args.sinceTimestamp !== undefined ? { sinceTimestamp: args.sinceTimestamp } : {}),
+    };
+    const result = await ctx.sessionManager.hotReload(args.sessionId as string, request, args.timeout);
+    const payload: Record<string, unknown> = { ...result };
+    if (toolName === 'redefine_classes') {
+      payload.warning = result.warning ? `${result.warning}; ${REDEFINE_CLASSES_ALIAS_WARNING}` : REDEFINE_CLASSES_ALIAS_WARNING;
+    }
+    return prettyJsonResult(payload);
+  } catch (error) {
+    return sessionErrorResultOrThrow(error, { state: 'stopped' });
+  }
 };

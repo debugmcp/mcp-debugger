@@ -3,7 +3,7 @@
  * fact, whatever tool named it (issue #939). Streamable HTTP runs one server
  * per MCP client session; before this gate every tool said a plain
  * `Session not found` — or `Failed to close debug session`, or a protocol
- * error from redefine_classes — and the caller read "gone" while the program
+ * error from hot_reload — and the caller read "gone" while the program
  * kept running under a client it could not reach. The gate sits in the
  * tools/call dispatch, in front of every handler, consulting the hook the
  * HTTP layer injects (`describeForeignSession`); a server without the hook
@@ -86,11 +86,11 @@ describe('tools/call on a session id another server owns (issue #939)', () => {
     expect(await answer(client, tool, { sessionId: FOREIGN_ID })).toEqual({ success: false, error: EXPLANATION });
   });
 
-  it('redefine_classes answers the explanation instead of a protocol error', async () => {
+  it('hot_reload answers the explanation instead of a protocol error', async () => {
     registerToolHandlers(server, fakeContext());
     client = await connect(server);
 
-    expect(await answer(client, 'redefine_classes', { sessionId: FOREIGN_ID, classesDir: '/classes' }))
+    expect(await answer(client, 'hot_reload', { sessionId: FOREIGN_ID, classesDir: '/classes' }))
       .toEqual({ success: false, error: EXPLANATION });
   });
 
