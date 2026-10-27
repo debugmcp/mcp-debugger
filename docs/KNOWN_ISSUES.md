@@ -126,6 +126,10 @@ Dart 3.13 and Flutter 3.47 — and none of them is a session error.
   build, not to the debugger: the launch answers `pending: true` and `wait_for_stop` collects
   the stop (in slices under your client's request cap — see the Flutter targets section of
   the Dart guide).
+- **`flutter run -d web-server` never stops.** That device serves the app for a browser with the Dart
+  Debug extension to attach to; without it no isolate ever connects, so breakpoints never bind and the
+  launch stays `running`. Use `deviceId: "chrome"` or `"edge"` (headless with
+  `toolArgs: ["--web-browser-flag=--headless=new"]`), measured to stop in `build()` in ~23 s.
 - **`dart test` fails under `%LOCALAPPDATA%\Temp` with the winget SDK (Windows).**
   package:test spawns its frontend server through a cwd-relative SDK path that does not
   resolve from there (`The system cannot find the file specified … dartaotruntime.exe`).

@@ -5,4 +5,10 @@ export interface FlutterE2eReport {
     assertionResults?: Array<{ title?: string; fullName?: string; status?: string }>;
   }>;
 }
-export function checkFlutterE2eReport(report: FlutterE2eReport): number;
+export interface FlutterE2eReportOptions {
+  /** The cases that must pass; the widget tests by default. */
+  require?: RegExp;
+  /** How those cases are named in messages. */
+  label?: string;
+}
+export function checkFlutterE2eReport(report: FlutterE2eReport, options?: FlutterE2eReportOptions): number;

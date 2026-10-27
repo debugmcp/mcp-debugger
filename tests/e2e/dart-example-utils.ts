@@ -238,6 +238,11 @@ export function prepareFlutterProbe(): void {
     const r = runFlutter(root, ['create', `--platforms=${platforms}`, '--project-name', 'flutter_probe', '.'], FLUTTER_PROBE_DIR);
     if (r.status !== 0) throw new Error(`flutter create failed: ${r.out}`);
   }
+  // A checkout generated before the web case existed has the desktop folder but no `web/`.
+  if (!existsSync(path.join(FLUTTER_PROBE_DIR, 'web'))) {
+    const r = runFlutter(root, ['create', '--platforms=web', '--project-name', 'flutter_probe', '.'], FLUTTER_PROBE_DIR);
+    if (r.status !== 0) throw new Error(`flutter create --platforms=web failed: ${r.out}`);
+  }
   if (!existsSync(path.join(FLUTTER_PROBE_DIR, '.dart_tool', 'package_config.json'))) {
     const r = runFlutter(root, ['pub', 'get'], FLUTTER_PROBE_DIR);
     if (r.status !== 0) throw new Error(`flutter pub get failed: ${r.out}`);
@@ -276,6 +281,17 @@ export function flutterDesktopDeviceId(): string | null {
   if (process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) return null;
   const want = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux';
   return flutterDeviceIds().includes(want) ? want : null;
+}
+
+/**
+ * The browser device for a Flutter web run: `chrome` when `flutter devices` lists it (the SDK
+ * finds Chrome on PATH or through CHROME_EXECUTABLE), null with `MCP_SKIP_FLUTTER_WEB=1`. The
+ * cases run it headless (`--web-browser-flag=--headless=new`), so no display is needed:
+ * measured at the same first-stop time as a windowed Chrome (~22 s, issue #790).
+ */
+export function flutterWebDeviceId(): string | null {
+  if (process.env.MCP_SKIP_FLUTTER_WEB === '1') return null;
+  return flutterDeviceIds().includes('chrome') ? 'chrome' : null;
 }
 
 // ---- Android ------------------------------------------------------------------------------------
