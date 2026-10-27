@@ -96,7 +96,14 @@ Dart attaches by VM-service URI, never by process id:
   with `--disable-service-auth-codes`; otherwise pass the full URI with its token. The attach
   response `warning` says so (issue #908); a `deviceId` given on a Dart runner is reported there as ignored.
 - A `processId` is refused by name, before the adapter starts, with a message explaining the above (issue #903); so is an attach that names no URI, info file or `host`/`port`. The test runners refuse attach.
-- Flutter attach takes `deviceId` as well (`flutter attach -d <id> --debug-uri <uri>`).
+- Flutter attach takes `deviceId` as well (`flutter attach -d <id> --debug-uri <uri>`). **For an app
+  running on an Android device or emulator, `deviceId` alone is the recipe**: with no URI,
+  `flutter attach -d <id>` finds the app's VM service through the device's log and forwards it
+  itself (measured: attach answers in ~5 s, a breakpoint hits right after). The URI another
+  `flutter run --machine` reports in `app.debugPort` is that tool's own DDS proxy and never
+  connects from a second tool (#882) — so do not pass it for a device app. A desktop app
+  (`windows`, `macos`, `linux`) has no such discovery: pass its `app.debugPort` URI, which works;
+  a desktop `deviceId` without a URI is refused up front with that hint.
 - Detach (`detach_from_process`, or closing the session) leaves the target running.
 
 After attaching to a running program the session is paused; an isolate idle in an `await` shows an
@@ -116,7 +123,7 @@ empty stack until it next runs code.
 | Exit code | reported for Dart programs; `flutter test` and `flutter run` sessions end with `terminated` only |
 | Close | `close_debug_session` (and `restart_debugging`) send DAP `terminate` before `disconnect`, so a `flutter run` app is stopped (`app.stop`); the SDK adapter's `disconnect` alone kills only its tool processes and leaves the app running (#885) |
 | `restart_debugging` | relaunches; hot reload / hot restart are not exposed yet |
-| Attach | by URI or service-info file; not by PID |
+| Attach | by URI or service-info file, or by `deviceId` alone for a Flutter app on an Android device; not by PID |
 
 ## Flutter targets
 
@@ -149,7 +156,9 @@ the first build, not to the debugger. `flutter run` stops and reinstalls the app
 launch; the e2e helper only warms the build for the device's ABI and does the first install
 ahead of the timed cases, because the first run right after a fresh install once ended without
 stopping (relaunch if that happens). Attaching to an app another `flutter run` started on the
-emulator does not connect yet (#882; see `docs/KNOWN_ISSUES.md`).
+emulator takes `adapterConfig: { runner: "flutter", deviceId: "emulator-5554", cwd }` and no
+URI (see [Attach](#attach)): measured at 5.1 s to the attach answer and 0.4 s more to the first
+breakpoint; `detach_from_process` leaves the app running.
 
 ## Troubleshooting
 
@@ -161,8 +170,9 @@ emulator does not connect yet (#882; see `docs/KNOWN_ISSUES.md`).
   not compile or start; the compiler's diagnostics are in `get_output`.
 - *`dart test` fails to load the suite from a project under `%LOCALAPPDATA%\Temp`* with a winget
   Dart SDK — an upstream package:test quirk; move the project.
-- *Flutter attach on an Android emulator never reaches `appStarted`* when the app was launched by
-  another `flutter run` — being measured; attach to Dart programs and desktop apps works.
+- *Flutter attach on an Android device hangs on "Connecting to the VM Service is taking longer
+  than expected"* — the request passed the `app.debugPort` URI of another `flutter run`, which is
+  that tool's own DDS; pass `deviceId` alone and let `flutter attach` discover the app (#882).
 - *In a container the launch answers and then nothing happens* — the SDK adapter waits for the
   VM's service-info file in the system temp dir, and a `/tmp` bind-mounted from the host under
   Docker Desktop delivers no file events. The adapter sets `TMPDIR=/var/tmp` for itself when

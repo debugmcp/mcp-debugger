@@ -375,3 +375,125 @@ Measured through `dist/index.js` with `tests/e2e/mcp-server-smoke-flutter-androi
 - Before each launch the helper force-stops a leftover instance and removes this emulator's own adb forwards (from `adb forward --list`; `adb forward --remove-all` is host-wide). Whether a stale forward ever caused the "device offline" failure is not established — the force-stop may be all that mattered.
 - The proxy log records output events by shape only (issue #852): to read the device's output
   after the fact, `get_output` before the session closes.
+
+## M4 — the follow-ups, measured through the server (2026-10-26/27)
+
+Flutter 3.47.7, Windows 11, emulator `mcp_api35` (API 35, APK prebuilt), Chrome 155 / Edge 156; the
+probe gained a periodic timer line (`BP-TICK`, fires every 500 ms without rebuilding) so an attached
+app reaches a breakpoint on its own. Raw-DAP runs drove `flutter debug-adapter` directly; the rest
+went through `dist/index.js`.
+
+### Devices (#877)
+
+- `start_debugging { deviceId: 'bogus' }` through the server: the launch answers `success: true,
+  state: running` ("nothing is armed to stop it") after the 1 s hold — the tool has not failed yet.
+  ~3 s after launch the session is `stopped` (Flutter: `terminated`, no `exited`, no exit code).
+  `get_output` carries the tool's text verbatim:
+  `No supported devices found with name or id matching 'bogus'.` / blank /
+  `The following devices were found:` / one line per device
+  (`sdk gphone64 x86 64 (mobile) • emulator-5554 • android-x64    • Android 15 (API 35) (emulator)`,
+  `Windows (desktop) • windows • windows-x64 • …`, …).
+  → The launch answer cannot carry `availableDevices` (the failure lands after the hold); the
+  program-end answers can: `wait_for_stop` (→ stopped) and `list_debug_sessions`, through a
+  policy hook applied where the program's end is summarised (the #701 exit summary), parsing the
+  `•`-separated device lines out of the output tail.
+- `start_debugging` with no `deviceId` and four targets listed (emulator, windows, chrome, edge):
+  the tool does not fail — it picked the emulator by itself ("Launching lib\main.dart on sdk
+  gphone64 x86 64 in debug mode..."). Only the wrong-id case needs the device list.
+
+### Emulator attach (#882) — measured through the server, emulator-5554 (API 35), APK prebuilt
+
+External `flutter run -d emulator-5554 --machine`: `app.debugPort` at ~7 s with
+`wsUri = ws://127.0.0.1:<ddsPort>/<ddsToken>=/ws`. That port is the host DDS the tool runs; the
+adb forward is a *different* host port (`adb forward --list`: `emulator-5554 tcp:<fwd> tcp:<dev>`),
+and the device-side VM service has its *own* token (logcat: `The Dart VM service is listening on
+http://127.0.0.1:<dev>/<devToken>=/`). Attach `adapterConfig: { runner: 'flutter', deviceId, cwd, … }`:
+
+| URI passed | result |
+|---|---|
+| the `app.debugPort` DDS URI (the issue's recipe) | hangs: no attach answer within the client's 60 s (flutter attach never connects) |
+| device-side URI from logcat (`ws://127.0.0.1:<dev>/<devToken>=/ws`) | hangs the same way |
+| **no URI at all** (`vmServiceUri: null` slipped past the addressing gate) | **works**: attach answers in 5.1 s (`Waiting for a connection from Flutter on sdk gphone64 x86 64...` → `Connecting to VM Service at ws://127.0.0.1:<ddsPort>/…` → `Connected`), the BP-TICK breakpoint hits 0.4 s later in `_ProbeAppState.initState.<anonymous closure>` main.dart:31, `detach_from_process` answers "process still running" in 0.56 s, the app stays alive |
+| no URI, key omitted | refused in 43 ms by the core's addressing gate: "Dart attach needs adapterConfig.vmServiceUri or adapterConfig.vmServiceInfoFile (or host and port …); the request named none of them." |
+
+→ `flutter attach -d <device>` with no `--debug-uri` discovers the app's VM service from logcat and
+sets up its own forward — the native Android attach. The fix is an addressing form, not a port
+flag: `deviceId` alone addresses a Flutter attach on a device (gate + factory hints + transform
+note); `--host-vmservice-port` / `--device-vmservice-port` / `--no-dds` were not needed.
+
+### Web (chrome) — raw DAP, cold-ish build
+
+- `launch { program, cwd, toolArgs: ['-d','chrome'] }`: `capabilities{supportsRestartRequest:true}` +
+  `flutter.appStart` at 1.9 s; `flutter.appStarted` + transient `stopped{entry}`/`continued` at
+  21.1 s; the `build()` breakpoint hits at 21.3 s. No `thread` events on web; threadId 1.
+- `restart` (hot restart) while running: response in 0.39 s, `continued` on a NEW threadId (2),
+  stdout `Hot restarting application from main method in: org-dartlang-app:///web_entrypoint.dart
+  (generation: 1).`, `build()` re-hit 0.58 s after the request.
+- `hotReload` while running: `continued` + `stopped{breakpoint}` (the reassemble's build()) 0.4 s
+  after the request — and **the response is held until the paused isolate resumes**: it arrived
+  85 ms after the `continue` I sent 30 s later. A tool that awaits the response before answering
+  would wait forever on a breakpoint it caused; race the stop against the response.
+- Through the server with only BP-TICK set: `main()` ran (`starting flutter_probe` printed) but no
+  stop in 240 s (see the TICK-on-web test below).
+- TICK on web (raw DAP, breakpoint set before launch): `breakpoint{verified:true}` arrives with
+  `flutter.appStarted` (20.5 s) but the timer callback never pauses in the next 15 s; right after a
+  `hotReload` (response 83 ms, `continued`, then `stopped{breakpoint}` 12 ms later) it hits. Web e2e
+  cases anchor on `build()` (fires on the first frame); the timer line is for attach on devices.
+
+### Hot reload / restart — raw DAP on `-d windows` (cold runner build 25.7 s to appStarted)
+
+- Launch: `thread started 1`, transient `stopped{entry}` + `flutter.appStarted` at 25.7 s,
+  `breakpoint{verified}` for build(), `continued` 2 ms later, `build()` hit at 25.8 s.
+- `hotReload` while running: `stopped{breakpoint}` (build() on reassemble) **156 ms** after the
+  request; the response arrived 2.16 s after the request, while still paused (on web it waited for
+  the resume — platform-dependent; race the stop against the response either way).
+- `restart` while running: `thread exited 1` + `thread started 2` at +280 ms, stdout `Restarted
+  application in 241ms.`, response at +305 ms, transient `stopped{entry}` on thread 2 + `continued`
+  3 ms later, `breakpoint` re-verified (same id), `build()` re-hit at **+376 ms**. `restart` with
+  `arguments` (the launch config): identical (230 ms). Three restarts in a row: thread ids 2 → 3 → 4.
+- `hotReload` while paused at build(): response `success` in 110 ms, **no `continued`, no stop** for
+  8 s — the reassemble waits; after a `continue` the re-sent breakpoints verify and build() hits
+  again 540 ms later. So a hot_reload answered from PAUSED must say the program is still paused and
+  the reload lands on resume (or continue first, then reload).
+- `restart` while paused: response in 308 ms; the adapter sends **`continued`** for the paused
+  thread (+194 ms) before `thread exited/started`, so the core sees RUNNING on its own; the new
+  thread's entry stop is transient; `build()` re-hit at +389 ms.
+- `restart` with a breakpoint on line 6 inside main(): after the transient entry stop, the first
+  stop is `breakpoint` at `main@6` (stack `main`, `_runMain.<anonymous closure>`,
+  `_delayEntrypointInvocation.<anonymous closure>`). → a hot restart re-runs main(), so the hidden
+  entry breakpoint of a `stopOnEntry: true` launch hits again and must be relabelled `entry` again
+  (re-arm the worker's relabel when `restart` goes out) or cleared before the restart.
+
+### Web through the server (`-d chrome`, build() breakpoint, warm-ish)
+
+- `start_debugging { deviceId: 'chrome' }`: answers `pending` at 2.5 s; `list_breakpoints` 3 s in:
+  `verified: false` ("Breakpoint has not yet been resolved", adapterId 100000); first stop at
+  **23.4 s** (`wait_for_stop`), breakpoint then `verified: true, verifiedBy: adapter`; stack
+  `build@51` → `framework.dart build@5944` → `performRebuild`; `evaluate counter` → `0`,
+  `ticks` → `0` (the timer has not fired at the first frame); `get_output` carries the DWDS
+  lines (`This app is linked to the debug service: ws://…`, `Debug service listening on …`,
+  `A Dart VM Service on Chrome is available at: http://…`, `Connecting to VM Service…`,
+  `Connected to the VM Service.`, `Starting application from main method in:
+  org-dartlang-app:///web_entrypoint.dart.`); `close_debug_session` 3.1 s.
+- Same with `toolArgs: ['--web-browser-flag=--headless=new']`: first stop at **22.0 s**, same
+  frames → the flutter-host lane can run a web case on a headless runner (Chrome is preinstalled on
+  the GitHub Ubuntu images).
+
+### Desktop attach without a URI (`-d windows`, app started by `flutter run --machine`)
+
+- `attach_to_process { adapterConfig: { runner: 'flutter', deviceId: 'windows', cwd, vmServiceUri: null } }`:
+  the tool prints `Waiting for a connection from Flutter on Windows...` and never connects; the
+  attach fails at the 20 s verification ("no threads reported"); the app stays alive. Discovery is
+  an Android (logcat) feature; desktop attach keeps the `app.debugPort` URI recipe, which works.
+
+### Devices and targets, the rest
+
+- `flutter devices --machine`: 0.87 s through `dart.exe` + the tool snapshot, 1.17 s through
+  `flutter.bat`; stdout is the JSON array alone (stderr empty here); each device carries `name`,
+  `id`, `isSupported`, `targetPlatform`, `emulator`, `sdk` and `capabilities { hotReload, hotRestart,
+  screenshot, flutterExit, hardwareRendering, startPaused }`. `flutter emulators`: 0.68 s, a text
+  table (`Id • Name • Manufacturer • Platform`), booted or not.
+- `-d edge` through the server: first `build()` stop at 24.4 s, close 3.7 s — as Chrome.
+- `-d web-server`: `Launching lib\main.dart on Web Server in debug mode...`, then `Waiting for
+  connection from Dart debug extension at http://localhost:<port>` — the tool needs the Dart Debug
+  browser extension to debug, so no stop ever comes on its own; use `chrome` or `edge`.

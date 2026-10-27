@@ -13,6 +13,7 @@ import type {
   IDebugAdapter,
   ToolchainDescription,
 } from '@debugmcp/shared';
+import { DART_ATTACH_FORMS_HINT } from './attach-hints.js';
 import { DartDebugAdapter } from './dart-debug-adapter.js';
 import { locateToolchain, realLocatorIo, type DartToolchain } from './utils/sdk-locator.js';
 import { probeDartVersion, probeFlutterVersion, type FlutterVersion } from './utils/version-probes.js';
@@ -69,11 +70,11 @@ export class DartAdapterFactory implements IAdapterFactory {
         launch: true,
         attach: 'spawn',
         // A VM-service URI (or info file) under adapterConfig, or host:port for a
-        // VM started with --disable-service-auth-codes; no PID step (issue #903)
+        // VM started with --disable-service-auth-codes, or a Flutter deviceId alone
+        // for an app on an Android device (issue #882); no PID step (issue #903)
         attachBy: ['port', 'adapterConfig'],
         attachHints: {
-          processId:
-            'Dart attaches by VM-service URI: pass adapterConfig.vmServiceUri (from dart --enable-vm-service run, the app.debugPort event of flutter run --machine, or the dart.debuggerUris answer of this server) or adapterConfig.vmServiceInfoFile (the file written by --write-service-info)'
+          processId: DART_ATTACH_FORMS_HINT
         }
       },
     };

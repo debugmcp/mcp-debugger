@@ -57,7 +57,7 @@ Creates a new debugging session.
 - `name` (string, optional): A descriptive name for the debug session. Defaults to `"<language>-debug-<timestamp>"` (e.g., `"python-debug-1711500000000"`), built from the session language and `Date.now()`.
 - `executablePath` (string, optional): Path to the language interpreter/executable (e.g., Python interpreter path).
 - `host` (string, optional): Attach mode only — host to attach to; the adapter defaults it (`127.0.0.1` for every adapter but Java, which uses `localhost`). Does not trigger attach mode by itself.
-- `port` (number, optional): Debug port to attach to. **Passing `port`, `processId` or an `adapterConfig` that names a debugger URI (`vmServiceUri`, `websocketAddress`, `vmServiceInfoFile`) switches the call into attach mode** — the session is created and immediately attached with the same request `attach_to_process` would send (see [attach_to_process](#attach_to_process) for the full attach contract; issue #905). `host` alone does not trigger it.
+- `port` (number, optional): Debug port to attach to. **Passing `port`, `processId` or an `adapterConfig` that names a target — a debugger URI (`vmServiceUri`, `websocketAddress`, `vmServiceInfoFile`), or a Flutter `deviceId` for an app running on an Android device — switches the call into attach mode** — the session is created and immediately attached with the same request `attach_to_process` would send (see [attach_to_process](#attach_to_process) for the full attach contract; issue #905). `host` alone does not trigger it.
 - `processId` (number or string, optional): Attach mode only — same as [attach_to_process](#attach_to_process)'s `processId`; triggers attach mode.
 - `sourcePaths` (string[], optional): Attach mode only — same as `attach_to_process`.
 - `justMyCode` (boolean, optional): Attach mode only — same as `attach_to_process`.
@@ -1424,7 +1424,7 @@ Which forms a language accepts is declared by its adapter (the attach-addressing
 | C/C++, COBOL, .NET | `processId` only | used | refused: CodeLLDB and netcoredbg attach to a local PID (a gdbserver-style remote target goes through C/C++ `adapterConfig.processCreateCommands`) |
 | JavaScript | `processId`, `port`, or `adapterConfig.websocketAddress` (the inspector URL from `/json/list`; js-debug dials it directly, no `port` needed — issue #896) | the running Node.js process's inspector is activated and attached on `port` (issue #871) | used |
 | Python, Ruby, Java | `port` only | refused, with the recipe for opening a port (`python -m debugpy --listen …`, `rdbg --open --port …`, `-agentlib:jdwp=…`) | used |
-| Dart | `port`, or `adapterConfig.vmServiceUri` / `vmServiceInfoFile` | refused, with the VM-service recipe | used — `host`/`port` becomes `ws://host:port/ws`, which needs `--disable-service-auth-codes` (the response `warning` says so) |
+| Dart | `port`, `adapterConfig.vmServiceUri` / `vmServiceInfoFile`, or `adapterConfig.deviceId` alone for a Flutter app on an Android device or emulator (`flutter attach` discovers it, issue #882) | refused, with the VM-service recipe | used — `host`/`port` becomes `ws://host:port/ws`, which needs `--disable-service-auth-codes` (the response `warning` says so) |
 | Go, Rust, Mock | no attach | refused (`Attach mode is not implemented`) | refused |
 
 The same pass records where the target lives (`processId` → this host; `port` → loopback or remote by its `host`; a URI → by its hostname), which is what lets `set_breakpoint` content-address a local attach (see [set_breakpoint](#set_breakpoint)).

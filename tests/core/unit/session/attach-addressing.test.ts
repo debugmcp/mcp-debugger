@@ -131,6 +131,8 @@ describe('namesAttachTarget (issue #905)', () => {
     expect(namesAttachTarget({ adapterConfig: { vmServiceUri: 'ws://127.0.0.1:8181/tok=/ws' } })).toBe(true);
     expect(namesAttachTarget({ adapterConfig: { websocketAddress: 'ws://127.0.0.1:9229/uuid' } })).toBe(true);
     expect(namesAttachTarget({ adapterConfig: { vmServiceInfoFile: '/tmp/vm.json' } })).toBe(true);
+    // A Flutter device id alone: `flutter attach -d <id>` discovers the app (issue #882).
+    expect(namesAttachTarget({ adapterConfig: { deviceId: 'emulator-5554' } })).toBe(true);
   });
 
   it('is false for a host alone, an empty processId, or an adapterConfig without a target key', () => {
@@ -138,5 +140,6 @@ describe('namesAttachTarget (issue #905)', () => {
     expect(namesAttachTarget({ host: '127.0.0.1' })).toBe(false);
     expect(namesAttachTarget({ processId: '' })).toBe(false);
     expect(namesAttachTarget({ adapterConfig: { pathMappings: [], vmServiceUri: '' } })).toBe(false);
+    expect(namesAttachTarget({ adapterConfig: { deviceId: '' } })).toBe(false);
   });
 });

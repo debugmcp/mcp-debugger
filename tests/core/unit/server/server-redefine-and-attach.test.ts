@@ -880,7 +880,8 @@ describe('redefine_classes and attach stopOnEntry tests', () => {
       ['processId alone', { processId: 4242 }],
       ['adapterConfig.vmServiceUri alone', { adapterConfig: { vmServiceUri: 'ws://127.0.0.1:8181/tok=/ws' } }],
       ['adapterConfig.websocketAddress alone', { adapterConfig: { websocketAddress: 'ws://127.0.0.1:9229/uuid' } }],
-      ['adapterConfig.vmServiceInfoFile alone', { adapterConfig: { vmServiceInfoFile: '/tmp/vm.json' } }]
+      ['adapterConfig.vmServiceInfoFile alone', { adapterConfig: { vmServiceInfoFile: '/tmp/vm.json' } }],
+      ['adapterConfig.deviceId alone (a Flutter app on a device, issue #882)', { adapterConfig: { deviceId: 'emulator-5554' } }]
     ])('attaches in the same call on %s', async (_label, args) => {
       const result = await create(args);
 
