@@ -11,4 +11,6 @@ export interface FlutterE2eReportOptions {
   /** How those cases are named in messages. */
   label?: string;
 }
+/** The CLI's `--require <text>` as a case-insensitive literal matcher. */
+export function literalMatcher(text: string): RegExp;
 export function checkFlutterE2eReport(report: FlutterE2eReport, options?: FlutterE2eReportOptions): number;

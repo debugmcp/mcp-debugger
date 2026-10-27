@@ -1,12 +1,21 @@
 /**
  * Reject missing, skipped, or failed Flutter cases in the dedicated host CI lane (issue #790).
  * The lane runs the widget tests (required by default) and, in a second step, the browser case
- * (`--require <pattern>`: the cases that pattern names are the required ones instead). The
+ * (`--require <text>`: the cases whose title contains that text are the required ones instead). The
  * desktop cases need a display and a platform toolchain the lane has not, so they may be
  * skipped but never failed.
  */
 import { readFileSync } from 'node:fs';
 import { isMain } from './lib/is-main.mjs';
+
+/**
+ * The `--require <text>` of the CLI as a matcher: the text is a literal, matched case-insensitively
+ * — never a pattern, so a title's `build()` or `.` means itself and the argument cannot change the
+ * expression (CodeQL js/regex-injection).
+ */
+export function literalMatcher(text) {
+  return new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+}
 
 export function checkFlutterE2eReport(report, options = {}) {
   const requirePattern = options.require ?? /widget test:/i;
@@ -29,7 +38,7 @@ if (isMain(import.meta.url)) {
   try {
     const [filename, flag, pattern] = process.argv.slice(2);
     if (!filename) throw new Error('Usage: node scripts/check-flutter-e2e-report.mjs <vitest-report.json> [--require <pattern>]');
-    const options = flag === '--require' && pattern ? { require: new RegExp(pattern, 'i'), label: pattern } : {};
+    const options = flag === '--require' && pattern ? { require: literalMatcher(pattern), label: pattern } : {};
     const passed = checkFlutterE2eReport(JSON.parse(readFileSync(filename, 'utf8')), options);
     console.log(`Flutter host validation: ${passed} ${options.label ?? 'widget-test'} case(s) passed`);
   } catch (error) {

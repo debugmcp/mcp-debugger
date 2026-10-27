@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkFlutterE2eReport } from '../../../scripts/check-flutter-e2e-report.mjs';
+import { checkFlutterE2eReport, literalMatcher } from '../../../scripts/check-flutter-e2e-report.mjs';
 
 function report(widgetStatus = 'passed', desktopStatus = 'pending') {
   return {
@@ -43,5 +43,13 @@ describe('Flutter host validation report', () => {
   it('rejects a missing suite and an unsuccessful run', () => {
     expect(() => checkFlutterE2eReport({ success: true, testResults: [] })).toThrow('No Flutter widget-test cases');
     expect(() => checkFlutterE2eReport({ ...report(), success: false })).toThrow('unsuccessful run');
+  });
+
+  it('matches the --require text as a literal, case-insensitively: regex metacharacters mean themselves', () => {
+    const matcher = literalMatcher('in the Browser: breaks in build()');
+    expect(matcher.test('flutter run in the browser: breaks in build(), reads the widget state')).toBe(true);
+    expect(matcher.test('flutter run in the browser: breaks in build, reads the widget state')).toBe(false);
+    expect(literalMatcher('.').test('no dot here')).toBe(false);
+    expect(checkFlutterE2eReport(report(), { require: literalMatcher('WIDGET TEST:') })).toBe(2);
   });
 });
