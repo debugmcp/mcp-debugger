@@ -29,11 +29,17 @@ export interface FlutterVersion {
 
 interface Captured { code: number | null; stdout: string; stderr: string }
 
-function run(command: string, args: string[], options: SpawnOptions & { timeoutMs?: number }, spawnFn: ProbeSpawn): Promise<Captured | null> {
+function run(
+  command: string,
+  args: string[],
+  options: SpawnOptions & { timeoutMs?: number; platform?: NodeJS.Platform },
+  spawnFn: ProbeSpawn
+): Promise<Captured | null> {
+  const { timeoutMs, platform = process.platform, ...spawnOptions } = options;
   return new Promise((resolve) => {
     let child: ChildProcess;
     try {
-      child = spawnFn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, ...options });
+      child = spawnFn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, ...spawnOptions });
     } catch {
       resolve(null);
       return;
@@ -45,12 +51,12 @@ function run(command: string, args: string[], options: SpawnOptions & { timeoutM
     const timer = setTimeout(() => {
       // On Windows the launcher is cmd.exe + flutter.bat: `kill()` ends the shell and leaves
       // the dart tool (and the adb it started) running, so the whole tree goes.
-      if (process.platform === 'win32' && typeof child.pid === 'number') {
+      if (platform === 'win32' && typeof child.pid === 'number') {
         try { spawnFn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }); } catch { /* ignore */ }
       }
       try { child.kill(); } catch { /* ignore */ }
       finish(null);
-    }, options.timeoutMs ?? 20000);
+    }, timeoutMs ?? 20000);
     child.stdout?.on('data', (d: Buffer) => { stdout += d.toString('utf8'); });
     child.stderr?.on('data', (d: Buffer) => { stderr += d.toString('utf8'); });
     child.on('error', () => finish(null));
@@ -101,7 +107,7 @@ export async function probeFlutterVersion(flutterRoot: string, options: ProbeOpt
   const platform = options.platform ?? process.platform;
   const cmd = flutterLauncherCommand(flutterRoot, ['--version', '--machine'], platform);
   const env = { ...(options.env ?? process.env), FLUTTER_ROOT: flutterRoot };
-  const r = await run(cmd.command, cmd.args, { env, windowsVerbatimArguments: cmd.windowsVerbatimArguments, timeoutMs: options.timeoutMs ?? 120000 }, options.spawn ?? nodeSpawn);
+  const r = await run(cmd.command, cmd.args, { env, windowsVerbatimArguments: cmd.windowsVerbatimArguments, timeoutMs: options.timeoutMs ?? 120000, platform }, options.spawn ?? nodeSpawn);
   if (!r || r.code !== 0) return null;
   return parseFlutterVersionJson(r.stdout);
 }
@@ -159,7 +165,7 @@ export async function probeFlutterDevices(flutterRoot: string, options: ProbeOpt
   const platform = options.platform ?? process.platform;
   const cmd = flutterLauncherCommand(flutterRoot, ['devices', '--machine'], platform);
   const env = { ...(options.env ?? process.env), FLUTTER_ROOT: flutterRoot };
-  const r = await run(cmd.command, cmd.args, { env, windowsVerbatimArguments: cmd.windowsVerbatimArguments, timeoutMs: options.timeoutMs ?? 30000 }, options.spawn ?? nodeSpawn);
+  const r = await run(cmd.command, cmd.args, { env, windowsVerbatimArguments: cmd.windowsVerbatimArguments, timeoutMs: options.timeoutMs ?? 30000, platform }, options.spawn ?? nodeSpawn);
   if (!r || r.code !== 0) return null;
   return parseFlutterDevicesJson(r.stdout);
 }
@@ -168,7 +174,7 @@ export async function probeFlutterEmulators(flutterRoot: string, options: ProbeO
   const platform = options.platform ?? process.platform;
   const cmd = flutterLauncherCommand(flutterRoot, ['emulators'], platform);
   const env = { ...(options.env ?? process.env), FLUTTER_ROOT: flutterRoot };
-  const r = await run(cmd.command, cmd.args, { env, windowsVerbatimArguments: cmd.windowsVerbatimArguments, timeoutMs: options.timeoutMs ?? 30000 }, options.spawn ?? nodeSpawn);
+  const r = await run(cmd.command, cmd.args, { env, windowsVerbatimArguments: cmd.windowsVerbatimArguments, timeoutMs: options.timeoutMs ?? 30000, platform }, options.spawn ?? nodeSpawn);
   if (!r || r.code !== 0) return null;
   return parseFlutterEmulators(r.stdout);
 }

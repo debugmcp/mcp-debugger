@@ -62,5 +62,10 @@ describe('flutter devices / emulators probes (issue #877)', () => {
     expect(await probeFlutterDevices('C:\\src\\flutter', { platform: 'win32', spawn, timeoutMs: 20 })).toBeNull();
     expect(spawned[0].command).toMatch(/cmd\.exe$/i);
     expect(spawned[1]).toEqual({ command: 'taskkill', args: ['/PID', '4242', '/T', '/F'] });
+
+    // The platform is the probe's, not the host's: a Linux probe gets a plain kill, whatever runs the test.
+    spawned.length = 0;
+    expect(await probeFlutterEmulators('/opt/flutter', { platform: 'linux', spawn, timeoutMs: 20 })).toBeNull();
+    expect(spawned.map((s) => s.command)).toEqual(['/opt/flutter/bin/flutter']);
   });
 });
