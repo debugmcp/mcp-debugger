@@ -72,48 +72,67 @@ const codeOnly = (line: string): string => {
   return out;
 };
 
-/** A device as `flutter run` lists it when `deviceId` matched none (issue #877). */
+/** A device as `flutter run` lists it when `deviceId` matched none or none was supported (issue #877). */
 export interface FlutterListedDevice {
   id: string;
   name: string;
   /** `mobile`, `desktop`, `web` — the parenthesis after the name. */
   kind?: string;
   targetPlatform?: string;
+  /** `false` when flutter listed it under "found, but are not supported by this project". */
+  supportedByProject?: boolean;
+}
+
+/** One `•`-separated row of a Flutter text table, trimmed; fewer than two cells means not a row. */
+export function splitFlutterBulletRow(line: string): string[] | undefined {
+  const parts = line.split('\u2022').map((part) => part.trim());
+  return parts.length >= 2 ? parts : undefined;
 }
 
 /**
  * The device-miss text `flutter run` prints before it exits, measured on Flutter 3.47.7:
  * `No supported devices found with name or id matching '<id>'.`, a blank line, `The following
  * devices were found:` and one `•`-separated line per device (`<name> (<kind>) • <id> •
- * <targetPlatform> • <sdk>`); or `No supported devices connected.` when there is none.
+ * <targetPlatform> • <sdk>`); or `No supported devices connected.` followed — when devices exist
+ * that the project has no platform for — by `The following devices were found, but are not
+ * supported by this project:`, the same lines, and flutter's remedy (`If you would like your app
+ * to run on web or windows, consider running \`flutter create .\` …`), carried as `hint`.
  */
-export function parseFlutterDeviceMiss(outputTail: string): { requested?: string; devices: FlutterListedDevice[] } | undefined {
+export function parseFlutterDeviceMiss(outputTail: string): { requested?: string; devices: FlutterListedDevice[]; hint?: string } | undefined {
   const miss = /No supported devices found with name or id matching '([^']*)'/.exec(outputTail);
   const none = /No supported devices connected/.test(outputTail);
   if (!miss && !none) {
     return undefined;
   }
   const devices: FlutterListedDevice[] = [];
-  const listStart = outputTail.indexOf('The following devices were found:');
-  if (listStart >= 0) {
-    for (const line of outputTail.slice(listStart).split(/\r?\n/).slice(1)) {
-      const parts = line.split('\u2022').map((part) => part.trim());
-      if (parts.length < 2 || parts[1] === '') {
-        if (devices.length > 0) {
-          break;
-        }
+  const hints: string[] = [];
+  const header = /The following devices were found(, but are not supported by this project)?:/.exec(outputTail);
+  if (header) {
+    const unsupported = header[1] !== undefined;
+    for (const line of outputTail.slice(header.index + header[0].length).split(/\r?\n/)) {
+      const parts = splitFlutterBulletRow(line);
+      if (parts && parts[1] !== '') {
+        const kind = /\(([^()]+)\)\s*$/.exec(parts[0]);
+        devices.push({
+          id: parts[1],
+          name: kind ? parts[0].slice(0, kind.index).trim() : parts[0],
+          ...(kind ? { kind: kind[1] } : {}),
+          ...(parts[2] ? { targetPlatform: parts[2] } : {}),
+          ...(unsupported ? { supportedByProject: false } : {}),
+        });
         continue;
       }
-      const kind = /\(([^()]+)\)\s*$/.exec(parts[0]);
-      devices.push({
-        id: parts[1],
-        name: kind ? parts[0].slice(0, kind.index).trim() : parts[0],
-        ...(kind ? { kind: kind[1] } : {}),
-        ...(parts[2] ? { targetPlatform: parts[2] } : {}),
-      });
+      if (devices.length === 0) {
+        continue;
+      }
+      // Past the list: flutter's remedy lines until the first blank one.
+      if (line.trim() === '') {
+        break;
+      }
+      hints.push(line.trim());
     }
   }
-  return { ...(miss ? { requested: miss[1] } : {}), devices };
+  return { ...(miss ? { requested: miss[1] } : {}), devices, ...(hints.length > 0 ? { hint: hints.join(' ') } : {}) };
 }
 
 /** The Dart policy's reading of a program's end: the devices behind a `deviceId` miss (issue #877). */
@@ -122,11 +141,19 @@ export function explainFlutterProgramEnd(outputTail: string): { note: string; da
   if (!parsed) {
     return undefined;
   }
-  const ids = parsed.devices.map((d) => d.id);
-  const found = ids.length > 0 ? `flutter found: ${ids.join(', ')} (details in availableDevices)` : 'flutter found no device';
-  const note = parsed.requested !== undefined
-    ? `deviceId '${parsed.requested}' matched no device; ${found} — pass one of them as dapLaunchArgs.deviceId; an emulator that is not booted is not listed (flutter emulators --launch <id> boots it).`
-    : `no device is connected: boot an emulator (flutter emulators --launch <id>), plug a device in, or pass deviceId: "chrome" for the web.`;
+  const ids = parsed.devices.map((d) => d.id).join(', ');
+  const bootOne = 'boot an emulator (flutter emulators --launch <id>), plug a device in, or pass deviceId: "chrome" for the web.';
+  let note: string;
+  if (parsed.requested !== undefined) {
+    note = parsed.devices.length > 0
+      ? `deviceId '${parsed.requested}' matched no device; flutter found: ${ids} (details in availableDevices) — pass one of them as dapLaunchArgs.deviceId; an emulator that is not booted is not listed (flutter emulators --launch <id> boots it).`
+      : `deviceId '${parsed.requested}' matched no device; flutter found no device — ${bootOne}`;
+  } else if (parsed.devices.length > 0) {
+    // Devices exist but the project has no platform for them: flutter's own remedy first.
+    note = `no device this project supports is connected; flutter found ${ids}, which the project has no platform for (details in availableDevices) — ${parsed.hint ?? 'add the platform (flutter create . --platforms=<name>) or pick a device the project targets.'} Otherwise boot an emulator (flutter emulators --launch <id>) or plug a device in.`;
+  } else {
+    note = `no device is connected: ${bootOne}`;
+  }
   return {
     note,
     data: { ...(parsed.requested !== undefined ? { requestedDeviceId: parsed.requested } : {}), availableDevices: parsed.devices },

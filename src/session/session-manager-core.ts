@@ -7,7 +7,7 @@ import {
   SessionState, SessionLifecycleState, DebugLanguage, DebugSessionInfo, mapLegacyState,
   isTerminalSessionState, AdapterPolicy, SessionOutputEntry, redactSecretsInString
 } from '@debugmcp/shared';
-import type { Breakpoint, FunctionBreakpoint, SessionStopInfo, StackFrame } from '@debugmcp/shared';
+import type { Breakpoint, FunctionBreakpoint, ProgramEndExplanation, SessionStopInfo, StackFrame } from '@debugmcp/shared';
 import { USER_BREAK_REASONS } from '@debugmcp/shared';
 import { stopProvesDebuggerOn } from './debugger-off.js';
 import { isRedactionEnabled } from '../utils/redaction-mode.js';
@@ -213,15 +213,19 @@ export type PauseResultData = DebugResultData & StopAnswerFields & {
  * `DebugResultData`'s own fields: `exitCode` for a session that ended and
  * reported one, `pending` when the timeout passed first.
  */
+/** How much of the output's tail a policy reads the program's end from (issue #877). */
+const PROGRAM_END_OUTPUT_TAIL_CHARS = 8000;
+
 export type WaitForStopResultData = DebugResultData & StopAnswerFields & {
   message: string;
   lastStop?: SessionStopInfo;
   /**
    * What the adapter read into the program's end (issue #877; e.g. the Dart policy's
-   * `availableDevices`), for a session that ended. Nested so the tool handler can hoist
-   * it beside the message without knowing its keys; its note is already in `message`.
+   * `availableDevices`), for a session that ended — the same shape the session listing
+   * carries. Nested so the tool handler can hoist its data beside the message without
+   * knowing the keys; the note is already in `message`.
    */
-  programEnd?: Record<string, unknown>;
+  programEnd?: ProgramEndExplanation;
 };
 
 /**
@@ -1671,7 +1675,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       if (!explain) {
         return;
       }
-      const explanation = explain({ outputTail: outputBuffer.renderText().slice(-8000), exitCode: session.exitCode });
+      const explanation = explain({ outputTail: outputBuffer.renderTail(PROGRAM_END_OUTPUT_TAIL_CHARS), exitCode: session.exitCode });
       if (explanation && (explanation.note !== undefined || explanation.data !== undefined)) {
         session.programEndExplanation = explanation;
       }

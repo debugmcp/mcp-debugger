@@ -48,4 +48,19 @@ describe('flutter devices / emulators probes (issue #877)', () => {
     expect(emulators.calls[0]).toEqual({ command: '/opt/flutter/bin/flutter', args: ['emulators'] });
     expect(await probeFlutterDevices('/opt/flutter', { platform: 'linux', spawn: fakeSpawn('boom', 1).spawn })).toBeNull();
   });
+
+  it('kills the whole process tree of a probe that outlives its timeout on Windows (review of #1018)', async () => {
+    const spawned: Array<{ command: string; args: string[] }> = [];
+    const spawn: ProbeSpawn = (command, args) => {
+      spawned.push({ command, args });
+      const child = new EventEmitter() as ChildProcess;
+      Object.assign(child, { pid: 4242, stdout: new EventEmitter(), stderr: new EventEmitter(), kill: () => true });
+      if (command === 'taskkill') setImmediate(() => child.emit('close', 0, null));
+      return child; // the flutter command never closes
+    };
+
+    expect(await probeFlutterDevices('C:\\src\\flutter', { platform: 'win32', spawn, timeoutMs: 20 })).toBeNull();
+    expect(spawned[0].command).toMatch(/cmd\.exe$/i);
+    expect(spawned[1]).toEqual({ command: 'taskkill', args: ['/PID', '4242', '/T', '/F'] });
+  });
 });

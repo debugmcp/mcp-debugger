@@ -53,7 +53,7 @@ describe('SessionManager - program-end explanation (issue #877)', () => {
     expect(waited.state).toBe(SessionState.STOPPED);
     expect(waited.data?.message).toMatch(/deviceId 'bogus' matched no device/);
     // Nested, so the tool handler can hoist it beside the message without knowing its keys.
-    expect(waited.data?.programEnd).toEqual({ availableDevices: [{ id: 'windows' }] });
+    expect(waited.data?.programEnd).toEqual({ note: "deviceId 'bogus' matched no device.", data: { availableDevices: [{ id: 'windows' }] } });
 
     const listed = sessionManager.getAllSessions().find((s) => s.id === session.id);
     expect(listed?.programEnd?.note).toMatch(/matched no device/);

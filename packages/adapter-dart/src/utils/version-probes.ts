@@ -9,6 +9,7 @@
  * - Node mangles the quoting of a `.bat` spawned through cmd.exe unless the arguments are passed
  *   verbatim (measured: `'\"C:\src\…\flutter.bat\"' is not recognized`).
  */
+import { splitFlutterBulletRow } from '@debugmcp/shared';
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import path from 'node:path';
 
@@ -41,7 +42,15 @@ function run(command: string, args: string[], options: SpawnOptions & { timeoutM
     let stderr = '';
     let settled = false;
     const finish = (value: Captured | null): void => { if (!settled) { settled = true; clearTimeout(timer); resolve(value); } };
-    const timer = setTimeout(() => { try { child.kill(); } catch { /* ignore */ } finish(null); }, options.timeoutMs ?? 20000);
+    const timer = setTimeout(() => {
+      // On Windows the launcher is cmd.exe + flutter.bat: `kill()` ends the shell and leaves
+      // the dart tool (and the adb it started) running, so the whole tree goes.
+      if (process.platform === 'win32' && typeof child.pid === 'number') {
+        try { spawnFn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }); } catch { /* ignore */ }
+      }
+      try { child.kill(); } catch { /* ignore */ }
+      finish(null);
+    }, options.timeoutMs ?? 20000);
     child.stdout?.on('data', (d: Buffer) => { stdout += d.toString('utf8'); });
     child.stderr?.on('data', (d: Buffer) => { stderr += d.toString('utf8'); });
     child.on('error', () => finish(null));
@@ -138,8 +147,8 @@ export function parseFlutterEmulators(text: string): string[] {
   const ids: string[] = [];
   let inTable = false;
   for (const line of text.split(/\r?\n/)) {
-    const parts = line.split('\u2022').map((part) => part.trim());
-    if (parts.length < 2) continue;
+    const parts = splitFlutterBulletRow(line);
+    if (!parts) continue;
     if (parts[0] === 'Id') { inTable = true; continue; }
     if (inTable && parts[0] !== '') ids.push(parts[0]);
   }

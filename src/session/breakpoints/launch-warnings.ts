@@ -198,14 +198,15 @@ export function buildRunToCompletionSummary(
 ): RunToCompletionSummary {
   const base = summarizeProgramEnd(session);
   // What the adapter read into the end (issue #877: the devices a Flutter launch found when
-  // its deviceId matched none) joins the sentence and the data.
+  // its deviceId matched none) joins the sentence and the data — under the policy's own
+  // keys, the summary's own fields winning, as in wait_for_stop and the session listing.
   const explanation = session.programEndExplanation;
   if (!explanation) {
     return base;
   }
   return {
     summary: explanation.note ? `${base.summary} ${explanation.note}` : base.summary,
-    data: { ...base.data, ...(explanation.data ?? {}) } as RunToCompletionSummary['data'],
+    data: { ...(explanation.data ?? {}), ...base.data } as RunToCompletionSummary['data'],
   };
 }
 
