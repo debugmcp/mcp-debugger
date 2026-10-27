@@ -268,6 +268,14 @@ Interactive scripts not run by Vitest. For ad-hoc debugging of SSE connections, 
 
 Protocol-level correctness checks. `breakpoint-messages/` contains Python scripts that verify debugpy breakpoint message formats at the DAP wire level.
 
+### MCP Spec Contract and Conformance
+
+**Location:** `tests/integration/cli/http-spec-contract.test.ts`, `scripts/mcp-conformance.mjs` (issue #1023)
+
+Two tiers, split along the seam between this server's own code and the SDK transport. The clauses of the Streamable HTTP transport (spec 2025-11-25, the revision the pinned SDK speaks) that `createHttpApp` decides before it hands a request to `transport.handleRequest` — session routing, the Host/Origin allowlist, the stale-session reaper — are pinned one case per clause against the real server over raw HTTP: a missing `Mcp-Session-Id` is 400; an unknown, DELETEd or reaped one is 404 `Session not found`; an invalid `Origin` is 403; an unsupported `MCP-Protocol-Version` is 400. Raw HTTP because the SDK client folds every non-2xx answer into a thrown error, and a case about a status code has to read it. The 404 cases are the ones #1017 fixed; nothing in the suite could have caught the 400 they replaced.
+
+Everything after the hand-off is the SDK's conformance, and `scripts/mcp-conformance.mjs` (`pnpm test:conformance`) runs the protocol org's `@modelcontextprotocol/conformance` suite for the scenarios that apply to a server without its reference fixtures — initialize, ping, the three listings, multiple SSE streams, DNS-rebinding protection — against a local `http` server, as the `mcp-conformance` CI lane on Linux. The suite has no session-lifecycle scenario, which is why the first tier exists; its CLI is pinned, and on Windows its exit code is unusable (it aborts at exit with a libuv assertion even after a pass), so the script reads the printed summary instead. The 2026-07-28 revision removes protocol-level sessions altogether; the legacy era this file pins stays supported under the spec's feature lifecycle policy.
+
 ## Coverage Strategy
 
 **Provider:** Istanbul. **Reporters:** text, json, html, json-summary (output to `./coverage/`). `reportOnFailure: true` ensures partial coverage is captured even when tests fail. Coverage is configured at the **root** of `vitest.config.ts`, not per project — a per-project `coverage` block is silently ignored.
