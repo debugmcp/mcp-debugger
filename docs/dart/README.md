@@ -200,7 +200,8 @@ server yet: the SDK's test adapter answers the launch only after the build, inst
 VM-service connect, which is past the 30 s launch ceiling (#1019, see KNOWN_ISSUES; the test itself passes
 with `flutter test integration_test/app_test.dart -d <udid>`). `MCP_SKIP_FLUTTER_IOS=1` skips the
 simulator e2e cases; no CI lane runs them. A physical iPhone needs an Xcode that supports its iOS
-version (Xcode 26.3, the last for macOS 15, carries device support up to iOS 26.3) — unmeasured.
+version (Xcode 26.3, the last for macOS 15, carries device support up to iOS 26.3; an iPhone on
+iOS 26.6 needs Xcode 26.4+ and so a Mac on macOS 26) — unmeasured.
 
 ## Troubleshooting
 

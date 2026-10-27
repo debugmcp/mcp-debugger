@@ -580,6 +580,7 @@ warning (the Flutter issues that would turn it into an error for iOS/macOS targe
   31.1 s to the breakpoint because the launch response arrives earlier there. The test itself is
   fine (`flutter test integration_test/app_test.dart -d <udid>`: 34 s, `All tests passed!`). Worker
   finding, #1019; the simulator e2e block carries the launch and attach cases only.
-- Physical iPhone: not measured in this session (see the issue thread for the device/iOS version
-  constraint — Xcode 26.3 carries device support up to iOS 26.3.x, and this Mac cannot run a newer
-  Xcode).
+- Physical iPhone: not measurable from this box. The only iPhone to hand runs iOS 26.6.2; Xcode
+  26.3 carries device support up to iOS 26.3.x, and Xcode 26.4+ needs macOS 26, which a 2017 iMac
+  Pro cannot run. Launch and attach on a physical device stay unmeasured until a Mac on macOS 26
+  (or an iPhone on iOS ≤ 26.3) is available.
