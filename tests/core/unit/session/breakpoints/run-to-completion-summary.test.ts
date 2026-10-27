@@ -16,11 +16,12 @@ type BuilderSession = {
   exitCode?: number;
   lastStop?: { reason: string };
   adapterCapabilities?: { supportsLogPoints?: boolean };
+  programEndExplanation?: { note?: string; data?: Record<string, unknown> };
 };
 
 function build(session: BuilderSession) {
   return buildRunToCompletionSummary(
-    session as unknown as Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'exitCode' | 'lastStop' | 'adapterCapabilities'>
+    session as unknown as Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'exitCode' | 'lastStop' | 'adapterCapabilities' | 'programEndExplanation'>
   );
 }
 
@@ -92,5 +93,18 @@ describe('buildRunToCompletionSummary', () => {
       'The program ran to completion (exit code 0) after a stop the launch could not report (last stop: breakpoint).'
     );
     expect(result.data).toEqual({ exitCode: 0 });
+  });
+
+  it("joins the adapter's reading of the end to the sentence and the data, its own fields winning (issue #877)", () => {
+    const { summary, data } = build({
+      breakpoints: new Map(),
+      exitCode: 1,
+      programEndExplanation: { note: 'the device list.', data: { exitCode: 99, availableDevices: [{ id: 'windows' }] } },
+    });
+
+    expect(summary).toMatch(/exited with code 1/);
+    expect(summary.endsWith(' the device list.')).toBe(true);
+    expect(data.exitCode).toBe(1);
+    expect((data as Record<string, unknown>).availableDevices).toEqual([{ id: 'windows' }]);
   });
 });

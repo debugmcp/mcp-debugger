@@ -373,6 +373,15 @@ export interface ToolchainComponent {
 export interface ToolchainDescription {
   runtime?: ToolchainComponent;
   backend?: ToolchainComponent;
+  /** The targets the toolchain can run on, when it has a notion of them (Flutter devices, issue #877). */
+  targets?: ToolchainTargets;
+}
+
+/** A doctor row's targets: a label, the items as the tool lists them, and a note (emulators not booted, a probe that timed out). */
+export interface ToolchainTargets {
+  label: string;
+  items: string[];
+  note?: string;
 }
 
 /**

@@ -345,6 +345,19 @@ export interface LiveUpdatePolicy {
   mayStopDuringUpdate?: boolean;
 }
 
+/** What the policy reads a program's end from (issue #877). */
+export interface ProgramEndContext {
+  /** The tail of the output the program and its tool printed (the last few KB). */
+  outputTail: string;
+  exitCode?: number;
+}
+
+/** The policy's reading of a program's end: a sentence for the message, data for the answer. */
+export interface ProgramEndExplanation {
+  note?: string;
+  data?: Record<string, unknown>;
+}
+
 export interface AdapterPolicy {
   /**
    * Identifying name for diagnostics (e.g., 'default', 'js-debug')
@@ -744,6 +757,16 @@ export interface AdapterPolicy {
 
   /** The adapter's live code update behind `hot_reload` (issue #876); absent means the tool refuses this language by name. */
   liveUpdate?: LiveUpdatePolicy;
+
+  /**
+   * What the program's end means in this adapter's words (issue #877), for the answers that
+   * report the end — the launch that ran to completion within its hold, wait_for_stop, the
+   * session listing — read once at the end event from the output the program and its tool
+   * printed. Dart names the devices `flutter run` listed when `deviceId` matched none (the tool
+   * prints them and exits ~3 s after the launch answered, so the launch answer cannot). Absent
+   * or `undefined`: nothing to add.
+   */
+  explainProgramEnd?(context: ProgramEndContext): ProgramEndExplanation | undefined;
 
   /**
    * Normalize an adapter-specific DAP stop reason into a canonical reason

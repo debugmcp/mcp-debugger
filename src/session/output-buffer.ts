@@ -71,4 +71,21 @@ export class OutputRingBuffer {
   renderText(): string {
     return this.entries.map(e => e.output).join('');
   }
+
+  /**
+   * The last `maxChars` characters of the transcript, gathered from the newest entries back —
+   * what a policy reads the program's end from (issue #877) without joining a full buffer.
+   */
+  renderTail(maxChars: number): string {
+    if (maxChars <= 0) {
+      return '';
+    }
+    const parts: string[] = [];
+    let length = 0;
+    for (let i = this.entries.length - 1; i >= 0 && length < maxChars; i--) {
+      parts.push(this.entries[i].output);
+      length += this.entries[i].output.length;
+    }
+    return parts.reverse().join('').slice(-maxChars);
+  }
 }

@@ -7,7 +7,7 @@ import {
   SessionState, SessionLifecycleState, DebugLanguage, DebugSessionInfo, mapLegacyState,
   isTerminalSessionState, AdapterPolicy, SessionOutputEntry, redactSecretsInString
 } from '@debugmcp/shared';
-import type { Breakpoint, FunctionBreakpoint, SessionStopInfo, StackFrame } from '@debugmcp/shared';
+import type { Breakpoint, FunctionBreakpoint, ProgramEndExplanation, SessionStopInfo, StackFrame } from '@debugmcp/shared';
 import { USER_BREAK_REASONS } from '@debugmcp/shared';
 import { stopProvesDebuggerOn } from './debugger-off.js';
 import { isRedactionEnabled } from '../utils/redaction-mode.js';
@@ -213,9 +213,19 @@ export type PauseResultData = DebugResultData & StopAnswerFields & {
  * `DebugResultData`'s own fields: `exitCode` for a session that ended and
  * reported one, `pending` when the timeout passed first.
  */
+/** How much of the output's tail a policy reads the program's end from (issue #877). */
+const PROGRAM_END_OUTPUT_TAIL_CHARS = 8000;
+
 export type WaitForStopResultData = DebugResultData & StopAnswerFields & {
   message: string;
   lastStop?: SessionStopInfo;
+  /**
+   * What the adapter read into the program's end (issue #877; e.g. the Dart policy's
+   * `availableDevices`), for a session that ended — the same shape the session listing
+   * carries. Nested so the tool handler can hoist its data beside the message without
+   * knowing the keys; the note is already in `message`.
+   */
+  programEnd?: ProgramEndExplanation;
 };
 
 /**
@@ -642,6 +652,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     session.exitCode = undefined;
     session.adapterCapabilities = undefined;
     session.liveUpdateState = undefined;
+    session.programEndExplanation = undefined;
     session.failureDiagnostics = undefined;
     // Adapter degradation notes are per-launch (issue #441).
     session.adapterNotices = [];
@@ -1169,6 +1180,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       });
 
       this.noteUnboundFunctionBreakpoints(session, outputBuffer);
+      this.recordProgramEndExplanation(session, outputBuffer);
       this._updateSessionState(session, SessionState.STOPPED);
 
       // Clean up listeners since proxy is gone
@@ -1202,6 +1214,7 @@ export abstract class SessionManagerCore extends EventEmitter {
         session.exitCode = exitCode;
       }
       this.noteUnboundFunctionBreakpoints(session, outputBuffer);
+      this.recordProgramEndExplanation(session, outputBuffer);
       this._updateSessionState(session, SessionState.STOPPED);
 
       // Clean up listeners since proxy is gone
@@ -1651,6 +1664,26 @@ export abstract class SessionManagerCore extends EventEmitter {
    * adapters too: never-bound at exit is a real signal even where
    * unverified-at-launch is by design.
    */
+  /**
+   * The policy's reading of the program's end (issue #877), recorded once at the end event for
+   * every answer that reports it: the launch that ended within its hold, wait_for_stop, the
+   * session listing. Best effort: a policy that throws adds nothing.
+   */
+  private recordProgramEndExplanation(session: ManagedSession, outputBuffer: OutputRingBuffer): void {
+    try {
+      const explain = this.sessionStore.selectPolicy(session.language).explainProgramEnd;
+      if (!explain) {
+        return;
+      }
+      const explanation = explain({ outputTail: outputBuffer.renderTail(PROGRAM_END_OUTPUT_TAIL_CHARS), exitCode: session.exitCode });
+      if (explanation && (explanation.note !== undefined || explanation.data !== undefined)) {
+        session.programEndExplanation = explanation;
+      }
+    } catch (error) {
+      this.logger.debug(`[SessionManager ${session.id}] program-end explanation skipped: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   protected noteUnboundFunctionBreakpoints(session: ManagedSession, outputBuffer?: OutputRingBuffer): void {
     const neverBound: string[] = [];
     for (const bp of session.functionBreakpoints?.values() ?? []) {

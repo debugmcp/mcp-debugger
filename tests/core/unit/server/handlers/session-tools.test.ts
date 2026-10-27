@@ -77,6 +77,27 @@ describe('session tool handlers', () => {
       expect(byId.errored.lastStop).toMatchObject({ reason: 'exception' });
     });
 
+    it('reports what the adapter read into the program end: endNote and its data beside the row, the row own keys winning (issue #877)', async () => {
+      const now = new Date();
+      const availableDevices = [{ id: 'windows', name: 'Windows', kind: 'desktop' }];
+      ctx.sessionManager.getAllSessions.mockReturnValue([
+        {
+          id: 'stopped', name: 's', language: 'dart', state: 'stopped', createdAt: now,
+          // The policy's data lands under its own keys; one that collides with the row's own is ignored.
+          programEnd: { note: "deviceId 'bogus' matched no device.", data: { requestedDeviceId: 'bogus', availableDevices, id: 'not this one', state: 'not this one' } }
+        },
+        { id: 'plain', name: 'p', language: 'dart', state: 'stopped', createdAt: now }
+      ]);
+
+      const result = await handleListDebugSessions(ctx);
+      const payload = JSON.parse(result.content[0].text);
+      const byId = Object.fromEntries(payload.sessions.map((s: { id: string }) => [s.id, s]));
+
+      expect(byId.stopped).toMatchObject({ id: 'stopped', state: 'stopped', endNote: "deviceId 'bogus' matched no device.", requestedDeviceId: 'bogus', availableDevices });
+      expect(byId.plain).not.toHaveProperty('endNote');
+      expect(byId.plain).not.toHaveProperty('availableDevices');
+    });
+
     it('reports debuggerDisabled for a launch running with the debugger off (issue #749)', async () => {
       const now = new Date();
       // SessionStore.getAll() is the one gate on the field (running or paused

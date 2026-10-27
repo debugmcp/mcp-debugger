@@ -154,6 +154,15 @@ export const waitForStopTool: ToolHandler = async (ctx, args, _toolName, extra) 
     }
     // The landing (issues #904, #938), as for pause_execution and the step tools.
     await hoistStopLanding(ctx, response, data, args.sessionId, 'wait_for_stop result');
+    // What the adapter read into the program's end (issue #877: e.g. availableDevices)
+    // lands beside the message under the policy's own keys, after everything the answer
+    // says for itself: a key the answer already has — the landing's included — wins, the
+    // same rule as the launch summary and the session listing.
+    for (const [key, value] of Object.entries(data?.programEnd?.data ?? {})) {
+      if (!(key in response)) {
+        response[key] = value;
+      }
+    }
     return jsonResult(response);
   } catch (error) {
     // Same contract as the step tools: typed session errors and other
