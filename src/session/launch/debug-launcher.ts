@@ -943,10 +943,13 @@ export class DebugLauncher {
   private async restart(session: ManagedSession): Promise<DebugResult<LaunchResultData>> {
     const sessionId = session.id;
 
-    // The adapter's own restart, when it offers one and the debuggee is live:
-    // read from the session's capabilities, which the worker keeps current
-    // with the adapter's capabilities events (issue #876).
+    // The adapter's own restart, when the policy is pinned for it (measured:
+    // js-debug advertises `restart` too, and relaunches through a child
+    // session this proxy does not follow), the live capabilities — which the
+    // worker keeps current with the adapter's capabilities events — advertise
+    // it, and the debuggee is live (issue #876).
     const nativeRestart =
+      this.ctx.selectPolicy(session.language).restartViaDapRequest === true &&
       session.adapterCapabilities?.supportsRestartRequest === true &&
       session.proxyManager?.isRunning() === true;
 

@@ -106,6 +106,8 @@ interface PinnedCapabilities {
   honoursNoDebug: boolean | undefined;
   /** Whether shutdown sends DAP `terminate` ahead of the launch-mode `disconnect` (issue #885). */
   terminateBeforeDisconnect: boolean | undefined;
+  /** Whether restart_debugging sends DAP `restart` when the adapter advertises it, instead of relaunching (issue #876). */
+  restartViaDapRequest: boolean | undefined;
   /** The launch key the adapter reads for an entry stop when it is not `stopOnEntry` (issue #973). */
   entryStopLaunchKey: string | undefined;
   /**
@@ -142,7 +144,7 @@ interface PinnedCapabilities {
  * shim interpolates (#759); ruby/java/dotnet are the three that reject logpoints; js, java and cobol are the three
  * that bind function breakpoints late; js, python, go, cpp, cobol and dart are the six whose debugger a
  * `noDebug` launch turns off (#710); dart is the one whose close sends DAP `terminate` ahead of the
- * disconnect (#885); dotnet is the one whose adapter reads its entry stop as `stopAtEntry` (#973); dart is the one whose `next` stops per token position (#879); python is the one whose launch target may be `module` or `code` instead of `program`, and the one whose exception filters read the launch config — a pytest module launch arms `userUnhandled` (#985).
+ * disconnect (#885), and the one whose `restart_debugging` is the adapter's own hot restart (#876); dotnet is the one whose adapter reads its entry stop as `stopAtEntry` (#973); dart is the one whose `next` stops per token position (#879); python is the one whose launch target may be `module` or `code` instead of `program`, and the one whose exception filters read the launch config — a pytest module launch arms `userUnhandled` (#985).
  */
 const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
   [DebugLanguage.PYTHON]: {
@@ -153,6 +155,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     functionBreakpointsBindLate: undefined,
     honoursNoDebug: true,
     terminateBeforeDisconnect: undefined,
+    restartViaDapRequest: undefined,
     entryStopLaunchKey: undefined,
     launchTargetKeys: ['program', 'module', 'code'],
     exceptionFiltersForLaunch: true,
@@ -170,6 +173,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     functionBreakpointsBindLate: undefined,
     honoursNoDebug: undefined,
     terminateBeforeDisconnect: undefined,
+    restartViaDapRequest: undefined,
     entryStopLaunchKey: undefined,
     launchTargetKeys: undefined,
     exceptionFiltersForLaunch: false,
@@ -187,6 +191,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     functionBreakpointsBindLate: true,
     honoursNoDebug: true,
     terminateBeforeDisconnect: undefined,
+    restartViaDapRequest: undefined,
     entryStopLaunchKey: undefined,
     launchTargetKeys: undefined,
     exceptionFiltersForLaunch: false,
@@ -204,6 +209,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     functionBreakpointsBindLate: undefined,
     honoursNoDebug: undefined,
     terminateBeforeDisconnect: undefined,
+    restartViaDapRequest: undefined,
     entryStopLaunchKey: undefined,
     launchTargetKeys: undefined,
     exceptionFiltersForLaunch: false,
@@ -221,6 +227,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     functionBreakpointsBindLate: undefined,
     honoursNoDebug: true,
     terminateBeforeDisconnect: undefined,
+    restartViaDapRequest: undefined,
     entryStopLaunchKey: undefined,
     launchTargetKeys: undefined,
     exceptionFiltersForLaunch: false,
@@ -238,6 +245,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     functionBreakpointsBindLate: true,
     honoursNoDebug: undefined,
     terminateBeforeDisconnect: undefined,
+    restartViaDapRequest: undefined,
     entryStopLaunchKey: undefined,
     launchTargetKeys: undefined,
     exceptionFiltersForLaunch: false,
@@ -255,6 +263,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     functionBreakpointsBindLate: undefined,
     honoursNoDebug: undefined,
     terminateBeforeDisconnect: undefined,
+    restartViaDapRequest: undefined,
     entryStopLaunchKey: 'stopAtEntry',
     launchTargetKeys: undefined,
     exceptionFiltersForLaunch: false,
@@ -272,6 +281,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     functionBreakpointsBindLate: undefined,
     honoursNoDebug: true,
     terminateBeforeDisconnect: undefined,
+    restartViaDapRequest: undefined,
     entryStopLaunchKey: undefined,
     launchTargetKeys: undefined,
     exceptionFiltersForLaunch: false,
@@ -289,6 +299,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     functionBreakpointsBindLate: true,
     honoursNoDebug: true,
     terminateBeforeDisconnect: undefined,
+    restartViaDapRequest: undefined,
     entryStopLaunchKey: undefined,
     launchTargetKeys: undefined,
     exceptionFiltersForLaunch: false,
@@ -306,6 +317,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     functionBreakpointsBindLate: undefined,
     honoursNoDebug: true,
     terminateBeforeDisconnect: true,
+    restartViaDapRequest: true,
     entryStopLaunchKey: undefined,
     launchTargetKeys: undefined,
     exceptionFiltersForLaunch: false,
@@ -323,6 +335,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     functionBreakpointsBindLate: undefined,
     honoursNoDebug: undefined,
     terminateBeforeDisconnect: undefined,
+    restartViaDapRequest: undefined,
     entryStopLaunchKey: undefined,
     launchTargetKeys: undefined,
     exceptionFiltersForLaunch: false,
@@ -414,6 +427,7 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
 
   it('pins whether a noDebug launch turns the debugger off', () => {
     expect(policy.honoursNoDebug).toBe(pinned.honoursNoDebug);
+    expect(policy.restartViaDapRequest).toBe(pinned.restartViaDapRequest);
   });
 
   it('pins whether shutdown sends DAP terminate ahead of the launch-mode disconnect (issue #885)', () => {
