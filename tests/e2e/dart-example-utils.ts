@@ -226,22 +226,19 @@ let flutterProbePrepared = false;
 
 /**
  * Generate the probe's platform folders (not committed) and resolve its packages, once per test
- * process: `flutter create --platforms=windows,web .` then `flutter pub get`.
+ * process: `flutter create --platforms=<the host desktop, ios on macOS, web> .` then
+ * `flutter pub get`. Only the folders that are missing are generated, so a checkout made before
+ * a platform's case existed (no `web/`, no `ios/`) catches up without being regenerated.
  */
 export function prepareFlutterProbe(): void {
   if (flutterProbePrepared) return;
   const root = findFlutterRootSync();
   if (!root) throw new Error('No Flutter SDK found for the examples');
-  const platforms = process.platform === 'win32' ? 'windows,web' : process.platform === 'darwin' ? 'macos,web' : 'linux,web';
-  const platformDir = path.join(FLUTTER_PROBE_DIR, platforms.split(',')[0]);
-  if (!existsSync(platformDir)) {
-    const r = runFlutter(root, ['create', `--platforms=${platforms}`, '--project-name', 'flutter_probe', '.'], FLUTTER_PROBE_DIR);
-    if (r.status !== 0) throw new Error(`flutter create failed: ${r.out}`);
-  }
-  // A checkout generated before the web case existed has the desktop folder but no `web/`.
-  if (!existsSync(path.join(FLUTTER_PROBE_DIR, 'web'))) {
-    const r = runFlutter(root, ['create', '--platforms=web', '--project-name', 'flutter_probe', '.'], FLUTTER_PROBE_DIR);
-    if (r.status !== 0) throw new Error(`flutter create --platforms=web failed: ${r.out}`);
+  const platforms = process.platform === 'win32' ? ['windows', 'web'] : process.platform === 'darwin' ? ['macos', 'ios', 'web'] : ['linux', 'web'];
+  const missing = platforms.filter((p) => !existsSync(path.join(FLUTTER_PROBE_DIR, p)));
+  if (missing.length > 0) {
+    const r = runFlutter(root, ['create', `--platforms=${missing.join(',')}`, '--project-name', 'flutter_probe', '.'], FLUTTER_PROBE_DIR);
+    if (r.status !== 0) throw new Error(`flutter create --platforms=${missing.join(',')} failed: ${r.out}`);
   }
   if (!existsSync(path.join(FLUTTER_PROBE_DIR, '.dart_tool', 'package_config.json'))) {
     const r = runFlutter(root, ['pub', 'get'], FLUTTER_PROBE_DIR);
@@ -250,10 +247,17 @@ export function prepareFlutterProbe(): void {
   flutterProbePrepared = true;
 }
 
-let cachedDevices: string[] | undefined;
+/** One row of `flutter devices --machine`, the fields the helpers select on. */
+export interface FlutterDevice { id: string; name?: string; targetPlatform?: string; emulator?: boolean }
 
-/** Device ids `flutter devices --machine` reports on this box (cached); empty without Flutter. */
-export function flutterDeviceIds(): string[] {
+let cachedDevices: FlutterDevice[] | undefined;
+
+/**
+ * The devices `flutter devices --machine` reports on this box (cached); empty without Flutter.
+ * An iOS simulator is listed only while it is booted, under its UDID, with `targetPlatform: ios`
+ * and `emulator: true`, so the list is enough to pick one without a second `simctl` probe.
+ */
+export function flutterDevices(): FlutterDevice[] {
   if (cachedDevices) return cachedDevices;
   const root = findFlutterRootSync();
   if (!root) return (cachedDevices = []);
@@ -262,12 +266,24 @@ export function flutterDeviceIds(): string[] {
     // stdout only: the tool's warnings (`[!] adb …`, startup-lock notices) go to stderr and would
     // follow the array.
     const start = r.stdout.indexOf('[');
-    const list = JSON.parse(r.stdout.slice(start)) as Array<{ id?: string }>;
-    cachedDevices = list.map((d) => d.id).filter((id): id is string => typeof id === 'string');
+    const list = JSON.parse(r.stdout.slice(start)) as Array<Record<string, unknown>>;
+    cachedDevices = list
+      .filter((d): d is Record<string, unknown> & { id: string } => typeof d.id === 'string')
+      .map((d) => ({
+        id: d.id,
+        ...(typeof d.name === 'string' ? { name: d.name } : {}),
+        ...(typeof d.targetPlatform === 'string' ? { targetPlatform: d.targetPlatform } : {}),
+        ...(typeof d.emulator === 'boolean' ? { emulator: d.emulator } : {}),
+      }));
   } catch {
     cachedDevices = [];
   }
   return cachedDevices;
+}
+
+/** Device ids `flutter devices --machine` reports on this box (cached); empty without Flutter. */
+export function flutterDeviceIds(): string[] {
+  return flutterDevices().map((d) => d.id);
 }
 
 /**
@@ -405,6 +421,46 @@ export function prepareFlutterAndroid(deviceId: string): void {
     if (installed.status !== 0) throw new Error(`adb install failed: ${installed.out}`);
   }
   androidPrepared = true;
+}
+
+// ---- iOS ----------------------------------------------------------------------------------------
+
+let cachedIosSimulator: string | null | undefined;
+
+/**
+ * A booted iOS simulator, by the UDID `flutter devices` lists it under (`targetPlatform: ios`,
+ * `emulator: true`; the tool lists booted simulators only, from `xcrun simctl list devices
+ * booted`). An iPhone is preferred over an iPad. Null off macOS, with none booted, and with
+ * `MCP_SKIP_FLUTTER_IOS=1`. Booting one is the opt-in: `xcrun simctl boot "<name or udid>"` or
+ * `open -a Simulator`. Host-only: no CI lane runs it.
+ */
+export function iosSimulatorDeviceId(): string | null {
+  if (cachedIosSimulator !== undefined) return cachedIosSimulator;
+  if (process.platform !== 'darwin' || process.env.MCP_SKIP_FLUTTER_IOS === '1') return (cachedIosSimulator = null);
+  const sims = flutterDevices().filter((d) => d.targetPlatform === 'ios' && d.emulator === true);
+  cachedIosSimulator = (sims.find((d) => d.name?.includes('iPhone')) ?? sims[0])?.id ?? null;
+  return cachedIosSimulator;
+}
+
+let iosPrepared = false;
+
+/**
+ * Build the debug app for the simulator once ahead of the timed cases (`flutter build ios
+ * --simulator --debug`). `flutter run` builds, installs and launches on its own every time, so
+ * this only warms xcodebuild's derived data the way prepareFlutterAndroid warms Gradle; the cold
+ * build (minutes) is recorded in docs/dart/spike-notes.md, not paid inside a launch ceiling. A
+ * stale `ios/` is not regenerated: delete it.
+ */
+export function prepareFlutterIosSimulator(): void {
+  if (iosPrepared) return;
+  prepareFlutterProbe();
+  const root = findFlutterRootSync();
+  if (!root) throw new Error('No Flutter SDK found for the examples');
+  const built = runFlutter(root, ['build', 'ios', '--simulator', '--debug'], FLUTTER_PROBE_DIR, 900_000);
+  if (built.status !== 0) {
+    throw new Error(`flutter build ios --simulator --debug failed (a stale examples/dart/flutter_probe/ios can be deleted and regenerated): ${built.out}`);
+  }
+  iosPrepared = true;
 }
 
 export const FLUTTER_EXAMPLES = {

@@ -9,7 +9,9 @@
  * `MCP_SKIP_FLUTTER_DESKTOP=1` (CI's ubuntu lane sets it and runs the widget tests only). The
  * tool lists the host desktop whenever the platform feature flag is on, so a Windows box with
  * Flutter but no Visual Studio still reaches the runner build and fails there: install the
- * toolchain `flutter doctor` names, or set the variable.
+ * toolchain `flutter doctor` names, or set the variable. The iOS simulator cases are host-only
+ * (macOS, a booted simulator that `flutter devices` lists, `MCP_SKIP_FLUTTER_IOS` unset); no CI
+ * lane runs them.
  */
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';
@@ -19,9 +21,10 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
 import { skipIfSpawnBlocked } from '../test-utils/helpers/adapter-spawn.js';
-import { killProcesses, listPidsByImage, waitForProcessesToExit } from '../test-utils/helpers/process-table.js';
+import { killProcesses, listPidsByImage, listProcessesByImage, waitForProcessesToExit } from '../test-utils/helpers/process-table.js';
 import {
-  FLUTTER_EXAMPLES, FLUTTER_PROBE_DIR, bpLine, findFlutterRootSync, flutterDesktopDeviceId, flutterRunMachine, flutterWebDeviceId, hasFlutterToolchain, prepareFlutterProbe,
+  FLUTTER_EXAMPLES, FLUTTER_PROBE_DIR, bpLine, findFlutterRootSync, flutterDesktopDeviceId, flutterRunMachine, flutterWebDeviceId, hasFlutterToolchain, iosSimulatorDeviceId,
+  prepareFlutterIosSimulator, prepareFlutterProbe,
 } from './dart-example-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -31,6 +34,7 @@ const ROOT = path.resolve(__dirname, '../..');
 const SKIP_FLUTTER = !hasFlutterToolchain();
 const DESKTOP = SKIP_FLUTTER ? null : flutterDesktopDeviceId();
 const WEB = SKIP_FLUTTER ? null : flutterWebDeviceId();
+const IOS_SIM = SKIP_FLUTTER ? null : iosSimulatorDeviceId();
 
 interface Variable { name: string; value: string; type?: string; variablesReference?: number }
 interface Frame { id?: number; file?: string; name?: string; line?: number }
@@ -426,5 +430,82 @@ describe.skipIf(SKIP_FLUTTER)('MCP Server Flutter Debugging Smoke Test @requires
       expect(await pollState('stopped', 90000), 'the integration test should finish').toBeDefined();
       expect(await output()).toContain('✓ device increment');
     }, 400000);
+  });
+
+  describe.skipIf(!IOS_SIM)(`iOS simulator (${IOS_SIM ?? 'none booted'})`, () => {
+    beforeAll(() => { prepareFlutterIosSimulator(); }, 1_200_000);
+
+    /** The simulator runs the app as a host process: `…/CoreSimulator/Devices/<udid>/…/Runner.app/Runner`. */
+    async function simulatorAppPids(): Promise<number[]> {
+      return (await listProcessesByImage('Runner')).filter((p) => (p.args[0] ?? '').includes(IOS_SIM!)).map((p) => p.pid);
+    }
+
+    it('flutter run on the simulator: breaks in build(), reads the widget state, keeps running after continue, and terminates on close', async (ctx) => {
+      const line = bpLine(FLUTTER_EXAMPLES.main, 'BUILD');
+      const appsBefore = await simulatorAppPids();
+      await createSession('flutter-ios-simulator');
+      expect((await call('set_breakpoint', { file: FLUTTER_EXAMPLES.main, line })).success).toBe(true);
+      const launched = await startOrSkip(ctx, {
+        scriptPath: FLUTTER_EXAMPLES.main, dapLaunchArgs: { stopOnEntry: false, cwd: FLUTTER_PROBE_DIR, deviceId: IOS_SIM },
+      });
+      expect(await output()).toContain('runner: flutter');
+
+      const paused = await firstStop(launched, 300000);
+      expect(paused.lastStop?.reason).toBe('breakpoint');
+      const top = (await frames())[0];
+      expect(top.name).toBe('_ProbeAppState.build');
+      expect(top.line).toBe(line);
+      const vars = await locals();
+      expect(vars.has('this')).toBe(true);
+      expect(vars.has('context')).toBe(true);
+      expect(await evaluate('counter')).toBe('0');
+      expect(await evaluate('this.history.length')).toBe('0');
+
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      await wait(1500);
+      expect((await getSession())?.state).toBe('running');
+      const appPids = (await simulatorAppPids()).filter((pid) => !appsBefore.includes(pid));
+      expect(appPids, 'the simulator app is on the process table while the session runs').not.toEqual([]);
+
+      // Same contract as the desktop: close sends `terminate` (app.stop) ahead of `disconnect` (issue #885).
+      expect((await callToolSafely(mcpClient!, 'close_debug_session', { sessionId })).success).toBe(true);
+      sessionId = null;
+      const survivors = await waitForProcessesToExit(appPids, { timeoutMs: 5000, image: 'Runner' });
+      if (survivors.length > 0) await killProcesses(survivors);
+      expect(survivors, 'the simulator app survived close_debug_session').toEqual([]);
+    }, 600000);
+
+    it('attach: an app another flutter run started on the simulator, by its app.debugPort URI — the timer breakpoint hits, detach leaves it running (issue #882)', async (ctx) => {
+      const line = bpLine(FLUTTER_EXAMPLES.main, 'TICK');
+      const appsBefore = await simulatorAppPids();
+      const external = flutterRunMachine(IOS_SIM!);
+      try {
+        expect(await external.waitFor('app.debugPort', 300000), 'app.debugPort from flutter run --machine').not.toBeNull();
+        await external.waitFor('app.started', 60000);
+        await createSession('flutter-ios-simulator-attach');
+        expect((await call('set_breakpoint', { file: FLUTTER_EXAMPLES.main, line })).success).toBe(true);
+        const attached = await call('attach_to_process', {
+          stopOnEntry: false, adapterConfig: { runner: 'flutter', deviceId: IOS_SIM, cwd: FLUTTER_PROBE_DIR, vmServiceUri: external.wsUri },
+        });
+        if (!attached.success) skipIfSpawnBlocked(ctx as never, attached, 'Flutter');
+        expect(attached.success, JSON.stringify(attached)).toBe(true);
+
+        const paused = await waitForPause(60000, 'the timer breakpoint after attach');
+        expect(paused.lastStop?.reason).toBe('breakpoint');
+        const top = (await frames())[0];
+        expect(top.line).toBe(line);
+        expect(top.name).toBe('_ProbeAppState.initState.<anonymous closure>');
+        expect(await evaluate('ticks')).toMatch(/^\d+$/);
+
+        expect((await call('detach_from_process', {})).success).toBe(true);
+        sessionId = null;
+        await wait(1000);
+        expect(external.alive, 'the app keeps running after detach').toBe(true);
+      } finally {
+        await external.stop();
+        const leftovers = (await simulatorAppPids()).filter((pid) => !appsBefore.includes(pid));
+        if (leftovers.length > 0) await killProcesses(leftovers);
+      }
+    }, 600000);
   });
 });

@@ -497,3 +497,89 @@ note); `--host-vmservice-port` / `--device-vmservice-port` / `--no-dds` were not
 - `-d web-server`: `Launching lib\main.dart on Web Server in debug mode...`, then `Waiting for
   connection from Dart debug extension at http://localhost:<port>` — the tool needs the Dart Debug
   browser extension to debug, so no stop ever comes on its own; use `chrome` or `edge`.
+
+## macOS and iOS through the server (measured on an iMac Pro, 2026-10-27)
+
+Measured through `dist/index.js` with a stdio driver shaped like `tests/e2e/mcp-server-smoke-flutter.test.ts`
+(the same `wait_for_stop` slicing) and then with the suite itself, against `examples/dart/flutter_probe`.
+The box: a 2017 iMac Pro (Intel Xeon W, 8 cores, 64 GB) on macOS 15.8.1 — the last macOS that
+model can run, which caps Xcode at **26.3 (17C529)**: the App Store refuses to install Xcode there
+("macOS 26.6 or later is required") rather than offering the last compatible build, and
+developer.apple.com/download/all lists only the newest; the direct
+`download.developer.apple.com/Developer_Tools/Xcode_26.3/Xcode_26.3_Universal.xip` (2.9 GB, 155 s to
+expand) is the route. **Flutter 3.47.8** stable (Dart 3.13.7), iOS 26.3.1 simulator runtime. No
+CocoaPods (system Ruby 2.6; the probe has no plugins, SwiftPM is on by default in 3.47 and nothing
+asked for pods). `flutter doctor -v` lines of note, verbatim: `! Flutter is deprecating support for
+Intel-based Macs. A future version of Flutter will require an Apple Silicon Mac to build
+applications.`; `! CocoaPods not installed.`; before the simulator runtime was downloaded,
+`✗ Unable to get list of installed Simulator runtimes.` Everything below ran despite the Intel
+warning (the Flutter issues that would turn it into an error for iOS/macOS targets are open, not landed).
+
+| Case | First launch of the fresh example | Warm |
+|---|---|---|
+| widget test, breakpoint in the test body | 14.7 s whole case | 6.8 s (entry-stop case) |
+| `flutter run -d macos`, breakpoint in `build()` | **53.2 s** (runner build, `✓ Built build/macos/…/flutter_probe.app`) | **20.3 s**, 17.9 s on the next launch; 25.6 s whole e2e case |
+| attach to a `flutter run -d macos --machine` app by its `app.debugPort` URI, BP-TICK | — | `app.debugPort` 18.3 s after the external run started; attach answers **paused in 4.1 s**, already on the timer breakpoint; detach leaves the app alive |
+| attach with `deviceId: "macos"` and no URI | — | refused up front (0.0 s) with the `vmServiceUri` hint, as on Windows |
+| `restart_debugging` (hot restart) on `-d macos`, re-hit of `build()` | — | **0.8 s** cold, 0.7 s warm (`Restarted application in 432ms.`) |
+| `hot_reload` on `-d macos`, re-hit of `build()` | — | **0.1 s** (`Reloaded 0 libraries in 147ms … reassemble: 122 ms`) |
+| `integration_test` on `-d macos`, test breakpoint then the app's `increment()` on the tap | 31.1 s to the test breakpoint (first integration build) | 0.2 s from continue to the app breakpoint, 0.5 s to the end; 30.4 s whole e2e case |
+| `flutter run -d chrome` (Chrome 155, headless), breakpoint in `build()`, hot reload + hot restart | 43.4 s whole case | — |
+| `flutter build ios --simulator --debug` on the fresh example (the e2e helper's warm-up) | **211 s** (`Xcode build done. 177.7s`) | 17.8 s Xcode build on a later `flutter test` |
+| `flutter run -d <simulator udid>` (iPhone Air, iOS 26.3.1), breakpoint in `build()` | **48.5 s** with the build warm (first install on the simulator) | **22.1 s**; 37.3 s whole e2e case |
+| attach to a simulator app started by `flutter run -d <udid> --machine`, by its `app.debugPort` URI, BP-TICK | — | `app.debugPort` 22.3 s after the external run started; attach answers **success in 4.3 s**, BP-TICK hits **0.2 s** later; detach leaves the app alive; 28.4 s whole e2e case |
+| attach with `deviceId: "<udid>"` and no URI | — | never connects: `flutter attach` prints `Waiting for a connection from Flutter on iPhone Air...` for 90 s; through the server, `no threads reported within 50000ms` |
+| `restart_debugging` / `hot_reload` on the simulator, re-hit of `build()` | — | **0.8 s** / **0.1 s** |
+| `integration_test` on the simulator | — | **red**: the DAP `launch` is answered only after build + install + VM-service connect (~30 s warm), the proxy's 30 s launch ceiling fires first — see below; `flutter test integration_test/app_test.dart -d <udid>` by hand passes in 34 s |
+
+- At the `build()` breakpoint: frame `_ProbeAppState.build`, Locals `context` (`StatefulElement`)
+  and `this` (`_ProbeAppState`), `counter` → `0`, `this.history.length` → `0` — as on Windows.
+  At the attach breakpoint: frame `_ProbeAppState.initState.<anonymous closure>`, `ticks` numeric.
+- `get_output` lines of note on `-d macos`: `Launching lib/main.dart on macOS in debug mode...`, an
+  Xcode warning (`Run script build phase 'Run Script' will be run during every build …` in the
+  `Flutter Assemble` target — the SDK template's, harmless), `[IMPORTANT:…embedder_surface_metal_impeller.mm(53)]
+  Using the Impeller rendering backend (MetalSDF).`, **`Failed to foreground app; open returned 1`**
+  (the app runs and is on the process table; the tool's `open` of the bundle to bring it to the
+  front fails when the tool is not started from a GUI session — cosmetic), `Connecting to VM
+  Service at ws://127.0.0.1:<port>/<token>=/ws`, `Connected to the VM Service.`
+- `close_debug_session` on a running `-d macos` app: answered in 4.1 s, the `flutter_probe`
+  process gone from the process table (the #885 terminate-before-disconnect contract holds; the
+  e2e's 5 s assertion passes unchanged, `listPidsByImage('flutter_probe')` matches the bundle's
+  `Contents/MacOS/flutter_probe`).
+- The app quit from outside (SIGTERM): the session is `stopped` 0.4 s later with **no `exitCode`**
+  — `terminated` without `exited`, the same as the Flutter adapter on Windows.
+- The Dart suites (`mcp-server-smoke-dart`, `-attach`, the dart logpoint case) pass unchanged:
+  13/13, 65 s wall cold.
+
+- iOS toolchain on this box: `xcodebuild -downloadPlatform iOS` fetched the iOS 26.3.1 Universal
+  Simulator (23D8133, 10.47 GB) in 22 min; the first `simctl boot` of an iPhone Air took 98 s;
+  `open -a Simulator` fails by name (the app is inside Xcode:
+  `open -a /Applications/Xcode.app/Contents/Developer/Applications/Simulator.app`). `flutter devices
+  --machine` lists a booted simulator as `id: <UDID>`, `targetPlatform: ios`, `emulator: true`,
+  `sdk: com.apple.CoreSimulator.SimRuntime.iOS-26-3` — and only while it is booted (the tool's
+  source is `simctl list devices booted`), which is what `iosSimulatorDeviceId()` relies on.
+- On the simulator the app is a host process, `…/CoreSimulator/Devices/<udid>/data/Containers/
+  Bundle/Application/…/Runner.app/Runner` (image `Runner`, bundle `com.example.flutterProbe`);
+  `close_debug_session` takes it off the process table in 4.4 s, and `simctl terminate` from
+  outside ends the session `stopped` without an `exitCode` 0.5 s later — the macOS desktop
+  behaviour exactly.
+- **Attach on the simulator takes the URI, like desktop, not `deviceId` alone, like Android.** The
+  `app.debugPort` URI of another `flutter run --machine` is a plain loopback `ws://127.0.0.1:…`
+  (no adb forward in between), and a second tool connects through it: attach answers in 4.3 s and
+  the timer breakpoint hits 0.2 s later. Without a URI, `flutter attach -d <udid>` waits for a
+  connection that never comes — the simulator has no logcat-style discovery of an app another tool
+  started. The adapter currently lets a non-desktop id through to that wait with the note
+  "iOS is unmeasured" (`dart-debug-adapter.ts`); it should refuse with the URI hint as it does for
+  desktop ids (#1020).
+- **`integration_test` on the simulator through the server is red** (measured twice, plus once
+  with `DAP_TRACE=1`): the SDK's test adapter answers the DAP `launch` only once the VM service is
+  connected; on the simulator the hidden "loading" test (Xcode build 17.8 s warm, install, launch)
+  ends at 28.6 s and the connect follows, which is past `MinimalDapClient`'s default 30 s request
+  ceiling (`sendLaunchRequest` passes none), so the worker sends `terminate` and the launch comes
+  back as `Session terminated before debugger initialized`. On `-d macos` the same case lands at
+  31.1 s to the breakpoint because the launch response arrives earlier there. The test itself is
+  fine (`flutter test integration_test/app_test.dart -d <udid>`: 34 s, `All tests passed!`). Worker
+  finding, #1019; the simulator e2e block carries the launch and attach cases only.
+- Physical iPhone: not measured in this session (see the issue thread for the device/iOS version
+  constraint — Xcode 26.3 carries device support up to iOS 26.3.x, and this Mac cannot run a newer
+  Xcode).
