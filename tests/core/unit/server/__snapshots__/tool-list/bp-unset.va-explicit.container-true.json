@@ -3,7 +3,7 @@
     "tools": [
       {
         "name": "create_debug_session",
-        "description": "Create a new debugging session. Passing port, processId or an adapterConfig that names a debugger URI (vmServiceUri, websocketAddress, vmServiceInfoFile) attaches to a running process in the same call, with every attach argument attach_to_process takes (host alone does not); omit them for launch mode. Attaching pauses the target unless stopOnEntry is false",
+        "description": "Create a new debugging session. Passing port, processId or an adapterConfig that names a target (a debugger URI: vmServiceUri, websocketAddress, vmServiceInfoFile; or a Flutter deviceId, for an app running on an Android device) attaches to a running process in the same call, with every attach argument attach_to_process takes (host alone does not); omit them for launch mode. Attaching pauses the target unless stopOnEntry is false",
         "inputSchema": {
           "type": "object",
           "properties": {

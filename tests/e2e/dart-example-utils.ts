@@ -173,6 +173,11 @@ export function flutterRunMachine(deviceId: string, cwd = FLUTTER_PROBE_DIR, tar
   let wsUri: string | null = null;
   let appId: string | null = null;
   const waiters: Array<{ event: string; resolve: (params: Record<string, unknown> | null) => void }> = [];
+  const alive = () => child.exitCode === null && child.signalCode === null;
+  // A tool that dies (device offline, a signal) answers every pending wait at once, not after
+  // the wait's own timeout; its stdin may already be gone when stop() writes to it.
+  child.once('exit', () => { for (const w of waiters.splice(0)) w.resolve(null); });
+  child.stdin!.on('error', () => { /* the tool is gone; stop() checks alive() first */ });
   let rest = '';
   child.stdout!.on('data', (chunk: Buffer) => {
     rest += chunk.toString();
@@ -196,17 +201,18 @@ export function flutterRunMachine(deviceId: string, cwd = FLUTTER_PROBE_DIR, tar
   return {
     get wsUri() { return wsUri; },
     get appId() { return appId; },
-    get alive() { return child.exitCode === null && child.signalCode === null; },
+    get alive() { return alive(); },
     child,
     waitFor(event, timeoutMs) {
+      if (!alive()) return Promise.resolve(null);
       return new Promise((resolve) => {
-        const w = { event, resolve };
+        const timer = setTimeout(() => { const i = waiters.indexOf(w); if (i >= 0) { waiters.splice(i, 1); resolve(null); } }, timeoutMs);
+        const w = { event, resolve: (params: Record<string, unknown> | null) => { clearTimeout(timer); resolve(params); } };
         waiters.push(w);
-        setTimeout(() => { const i = waiters.indexOf(w); if (i >= 0) { waiters.splice(i, 1); resolve(null); } }, timeoutMs);
       });
     },
     async stop() {
-      if (child.exitCode !== null) return;
+      if (!alive()) return;
       if (appId) child.stdin!.write(`${JSON.stringify([{ id: 1, method: 'app.stop', params: { appId } }])}\n`);
       await new Promise<void>((resolve) => {
         const t = setTimeout(() => { child.kill(); resolve(); }, 5000);
