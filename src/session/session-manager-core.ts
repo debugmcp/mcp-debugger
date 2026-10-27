@@ -105,6 +105,8 @@ export interface DebugResultData extends ProxyFailureDiagnostics {
   /** Restart result fields. */
   breakpointsReapplied?: number;
   outputReset?: boolean;
+  /** The restart went through the adapter's own restart request — same process, output buffer kept (issue #876). */
+  hotRestart?: boolean;
   anchorResolution?: AnchorResolution;
   /**
    * Detach result field (issue #763): whether the paused target was resumed

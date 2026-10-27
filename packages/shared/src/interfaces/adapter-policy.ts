@@ -691,6 +691,18 @@ export interface AdapterPolicy {
   terminateBeforeDisconnect?: boolean;
 
   /**
+   * `restart_debugging` sends the DAP `restart` request instead of terminate +
+   * relaunch when the live `initialize` capabilities also advertise
+   * `supportsRestartRequest` (issue #876). Pinned per adapter because the
+   * advertisement alone is not enough: js-debug advertises it and relaunches
+   * through a child session this proxy does not follow (the session ends
+   * `stopped`), while the Flutter adapter's `restart` is a hot restart — the
+   * same process re-runs `main()`, breakpoints hold, measured to re-hit in
+   * ~0.4 s. Optional — absent means the relaunch.
+   */
+  restartViaDapRequest?: boolean;
+
+  /**
    * Normalize an adapter-specific DAP stop reason into a canonical reason
    * ('pause', 'breakpoint', 'step', 'exception', ...). Some adapters report
    * misleading raw reasons — e.g. CodeLLDB surfaces a user-initiated pause as

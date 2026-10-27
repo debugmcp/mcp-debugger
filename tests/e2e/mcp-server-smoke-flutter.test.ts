@@ -82,7 +82,7 @@ describe.skipIf(SKIP_FLUTTER)('MCP Server Flutter Debugging Smoke Test @requires
 
   async function getSession() {
     const res = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_debug_sessions', arguments: {} }));
-    const sessions = (res.sessions ?? []) as Array<{ id: string; state?: string; exitCode?: number; lastStop?: { reason?: string; text?: string } }>;
+    const sessions = (res.sessions ?? []) as Array<{ id: string; state?: string; exitCode?: number; lastStop?: { reason?: string; text?: string; threadId?: number } }>;
     return sessions.find(s => s.id === sessionId);
   }
 
@@ -263,6 +263,45 @@ describe.skipIf(SKIP_FLUTTER)('MCP Server Flutter Debugging Smoke Test @requires
         const leftovers = (await listPidsByImage('flutter_probe')).filter((pid) => !appsBefore.includes(pid));
         if (leftovers.length > 0) await killProcesses(leftovers);
       }
+    }, 300000);
+
+    it('restart_debugging is a hot restart: the DAP restart Flutter advertises re-runs main() in under a few seconds, breakpoints hold, the process stays (issue #876)', async (ctx) => {
+      const line = bpLine(FLUTTER_EXAMPLES.main, 'BUILD');
+      const appsBefore = await listPidsByImage('flutter_probe');
+      await createSession('flutter-desktop-hot-restart');
+      expect((await call('set_breakpoint', { file: FLUTTER_EXAMPLES.main, line })).success).toBe(true);
+      const launched = await startOrSkip(ctx, {
+        scriptPath: FLUTTER_EXAMPLES.main, dapLaunchArgs: { stopOnEntry: false, cwd: FLUTTER_PROBE_DIR, deviceId: DESKTOP },
+      });
+      const first = await firstStop(launched, 180000);
+      expect(first.lastStop?.reason).toBe('breakpoint');
+      const threadBefore = first.lastStop?.threadId;
+      const appPids = (await listPidsByImage('flutter_probe')).filter((pid) => !appsBefore.includes(pid));
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      await wait(500);
+
+      const started = Date.now();
+      const restarted = await call('restart_debugging', {});
+      expect(restarted.success, JSON.stringify(restarted)).toBe(true);
+      const data = restarted.data as { hotRestart?: boolean; outputReset?: boolean; pending?: boolean; reason?: string } | undefined;
+      expect(data?.hotRestart, 'the adapter advertised restart, so no relaunch').toBe(true);
+      expect(data?.outputReset, 'same process: the output buffer is kept').toBeUndefined();
+      // The re-run main() reaches build() again: measured ~0.4 s after the request on this box.
+      const again = restarted.state === 'paused' ? (await getSession())! : await waitForPause(30000, 'the build() breakpoint after the hot restart');
+      expect(Date.now() - started).toBeLessThan(20000);
+      expect(again.lastStop?.reason).toBe('breakpoint');
+      expect(again.lastStop?.threadId, 'a hot restart runs a new isolate').not.toBe(threadBefore);
+      expect((await frames())[0].line).toBe(line);
+      expect(await evaluate('counter')).toBe('0');
+      const bps = (await call('list_breakpoints', {})).breakpoints as Array<{ verified?: boolean }>;
+      expect(bps.every((b) => b.verified === true), 'breakpoints re-verified after the restart').toBe(true);
+      expect((await listPidsByImage('flutter_probe')).filter((pid) => !appsBefore.includes(pid)), 'the same app process').toEqual(appPids);
+
+      expect((await callToolSafely(mcpClient!, 'close_debug_session', { sessionId })).success).toBe(true);
+      sessionId = null;
+      const survivors = await waitForProcessesToExit(appPids, { timeoutMs: 5000, image: 'flutter_probe' });
+      if (survivors.length > 0) await killProcesses(survivors);
+      expect(survivors).toEqual([]);
     }, 300000);
 
     it('integration test on the desktop: the test\'s tap hits the app\'s breakpoint', async (ctx) => {

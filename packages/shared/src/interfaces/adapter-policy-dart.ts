@@ -78,6 +78,11 @@ export const DartAdapterPolicy = {
   supportsFunctionBreakpoints: false,
   honoursNoDebug: true,
   terminateBeforeDisconnect: true,
+  // The Flutter adapter advertises `supportsRestartRequest` once the app has started (a
+  // `capabilities` event) and its `restart` is a hot restart: main() re-runs in the same
+  // process and build() re-hits ~0.4 s later (issue #876). The Dart CLI adapter never
+  // advertises it, so a Dart program keeps the relaunch.
+  restartViaDapRequest: true,
   // `next` stops once per token position: app.dart:29 (`counter.value + 2`)
   // took three step_overs, columns 16, 26 and 32 (issue #879).
   stepsByTokenPosition: true,

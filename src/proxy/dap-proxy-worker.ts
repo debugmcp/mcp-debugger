@@ -260,11 +260,18 @@ export class DapProxyWorker {
   private lastStop: DebugProtocol.StoppedEvent['body'] | null = null;
   /**
    * Adapter id of the entry breakpoint a `stopOnEntry` launch armed on the policy's
-   * `entryBreakpointLine` (issue #790). Its first hit is relabelled `reason: 'entry'`, after
-   * which the id is forgotten; the breakpoint itself stays armed but never fires again (main
-   * runs once) and a later per-file re-send from the session's own list replaces it.
+   * `entryBreakpointLine` (issue #790), kept current across the re-sends it rides along with.
+   * The breakpoint stays armed for the session's life: `main` runs once per program start, and
+   * a hot restart (DAP `restart`, issue #876) is another start — its hit is relabelled `entry`
+   * whenever `entryHitPending` says the next hit is a program start.
    */
   private entryBreakpointAdapterId: number | undefined;
+  /**
+   * The next hit of the entry breakpoint is a program start and is reported as `entry`: set
+   * when the breakpoint is armed and again when a `restart` goes out; cleared by the relabel,
+   * so the breakpoint stops a program only at `main` (issue #876).
+   */
+  private entryHitPending = false;
   /** How long a suppressible entry stop waits for the adapter's own resume (measured: 1 ms). */
   private static readonly ENTRY_STOP_HOLD_MS = 200;
   /**
@@ -1098,6 +1105,7 @@ export class DapProxyWorker {
         this.noteDebuggeeExitCodeFromOutput(body);
         this.sendDapEvent('output', body);
       },
+      onCapabilities: (body) => this.mergeAdapterCapabilities(body),
       onStopped: async (body) => {
         this.logger!.info(`[Worker] DAP event: stopped reason=${body.reason} threadId=${body.threadId} allThreadsStopped=${body.allThreadsStopped}`);
         // A stop that arrives while an entry stop is held supersedes it: the program moved on.
@@ -1387,11 +1395,10 @@ export class DapProxyWorker {
    */
   private forwardStop(body: DebugProtocol.StoppedEvent['body']): void {
     const entryId = this.entryBreakpointAdapterId;
-    if (entryId !== undefined && body.reason === 'breakpoint') {
+    if (entryId !== undefined && this.entryHitPending && body.reason === 'breakpoint') {
       const ids = Array.isArray(body.hitBreakpointIds) ? body.hitBreakpointIds : undefined;
       if (ids === undefined || ids.includes(entryId)) {
-        this.entryBreakpointAdapterId = undefined;
-        this.entryBreakpoint = undefined;
+        this.entryHitPending = false;
         body = { ...body, reason: 'entry', ...(ids ? { hitBreakpointIds: ids.filter((id) => id !== entryId) } : {}) };
         this.logger!.info(`[Worker] Entry breakpoint ${entryId} hit${ids ? '' : ' (first breakpoint stop, no ids named)'}: reporting the stop as reason=entry`);
       }
@@ -1486,6 +1493,7 @@ export class DapProxyWorker {
       const entryEntries = new WeakSet<InitialBreakpointEntry>();
       this.entryBreakpointAdapterId = undefined;
       this.entryBreakpoint = undefined;
+      this.entryHitPending = false;
 
       if (initPayload.initialBreakpoints?.length) {
         this.logger!.info('[Worker] Initial breakpoints payload:', initPayload.initialBreakpoints);
@@ -1515,6 +1523,7 @@ export class DapProxyWorker {
         const entry: InitialBreakpointEntry = { file: initPayload.scriptPath, line: entryLine };
         entryEntries.add(entry);
         this.entryBreakpoint = { file: programPath, line: entryLine };
+        this.entryHitPending = true;
         if (!groupedBreakpoints.has(programPath)) {
           groupedBreakpoints.set(programPath, []);
         }
@@ -2556,6 +2565,10 @@ export class DapProxyWorker {
    * disconnect must still follow one the session sent with false.
    */
   private async beforeForwardingDapCommand(payload: DapCommandPayload): Promise<void> {
+    if (payload.dapCommand === 'restart') {
+      this.rearmEntryStopForRestart();
+      return;
+    }
     if (payload.dapCommand !== 'disconnect') {
       return;
     }
@@ -2571,8 +2584,39 @@ export class DapProxyWorker {
     }
   }
 
+  /**
+   * A capabilities update after initialize (issue #876): the Flutter adapter advertises
+   * `supportsRestartRequest` in a `capabilities` event once the app has started. Merged into
+   * what initialize reported and forwarded as the same status message, past the once-only
+   * guard that exists for the initialize response: the parent's capabilities must say what the
+   * adapter now offers.
+   */
+  private mergeAdapterCapabilities(body: DebugProtocol.CapabilitiesEvent['body'] | undefined): void {
+    const update = body?.capabilities;
+    if (!update || typeof update !== 'object') {
+      return;
+    }
+    this.adapterCapabilities = { ...(this.adapterCapabilities ?? {}), ...update };
+    this.logger?.info(`[Worker] DAP event: capabilities ${JSON.stringify(update)}; forwarding the merged capabilities`);
+    this.sendStatus('adapter_capabilities', { capabilities: this.adapterCapabilities });
+  }
+
+  /**
+   * A `restart` re-runs `main()` (the Flutter hot restart, issue #876): the entry breakpoint a
+   * `stopOnEntry` launch armed — still in the adapter, it rides along with every re-send — hits
+   * again, and that hit is the new program's entry stop, not a breakpoint the session can list.
+   */
+  private rearmEntryStopForRestart(): void {
+    if (!this.entryBreakpoint || this.entryBreakpointAdapterId === undefined) {
+      return;
+    }
+    this.entryHitPending = true;
+    this.logger?.info(`[Worker] restart: the entry breakpoint ${this.entryBreakpointAdapterId} at ${this.entryBreakpoint.file}:${this.entryBreakpoint.line} will report the re-run's entry stop`);
+  }
+
   private noteResumeCommand(command: string, args: unknown, response: unknown): void {
-    if (!['continue', 'next', 'stepIn', 'stepOut', 'goto'].includes(command)) {
+    // `restart` resumes too: the program re-runs from main (issue #876).
+    if (!['continue', 'next', 'stepIn', 'stepOut', 'goto', 'restart'].includes(command)) {
       return;
     }
     if (!this.lastStop) {
