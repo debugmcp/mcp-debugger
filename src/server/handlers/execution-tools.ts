@@ -152,6 +152,13 @@ export const waitForStopTool: ToolHandler = async (ctx, args, _toolName, extra) 
     if (typeof data?.exitCode === 'number') {
       response.exitCode = data.exitCode;
     }
+    // What the adapter read into the program's end (issue #877: e.g. availableDevices)
+    // lands beside the message, under the policy's own keys; the answer's own fields win.
+    for (const [key, value] of Object.entries(data?.programEnd ?? {})) {
+      if (!(key in response)) {
+        response[key] = value;
+      }
+    }
     // The landing (issues #904, #938), as for pause_execution and the step tools.
     await hoistStopLanding(ctx, response, data, args.sessionId, 'wait_for_stop result');
     return jsonResult(response);

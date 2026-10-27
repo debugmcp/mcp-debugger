@@ -96,3 +96,70 @@ export async function probeFlutterVersion(flutterRoot: string, options: ProbeOpt
   if (!r || r.code !== 0) return null;
   return parseFlutterVersionJson(r.stdout);
 }
+
+/** A device as `flutter devices --machine` lists it (issue #877). */
+export interface FlutterDevice {
+  id: string;
+  name: string;
+  targetPlatform?: string;
+  emulator?: boolean;
+  sdk?: string;
+}
+
+/** Parse the JSON array of `flutter devices --machine` (tool text may precede it on stdout). */
+export function parseFlutterDevicesJson(text: string): FlutterDevice[] | null {
+  const start = text.indexOf('[');
+  const end = text.lastIndexOf(']');
+  if (start < 0 || end < start) return null;
+  try {
+    const parsed = JSON.parse(text.slice(start, end + 1)) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    const devices: FlutterDevice[] = [];
+    for (const raw of parsed) {
+      if (typeof raw !== 'object' || raw === null) continue;
+      const d = raw as Record<string, unknown>;
+      if (typeof d.id !== 'string' || typeof d.name !== 'string') continue;
+      devices.push({
+        id: d.id,
+        name: d.name,
+        ...(typeof d.targetPlatform === 'string' ? { targetPlatform: d.targetPlatform } : {}),
+        ...(typeof d.emulator === 'boolean' ? { emulator: d.emulator } : {}),
+        ...(typeof d.sdk === 'string' ? { sdk: d.sdk } : {}),
+      });
+    }
+    return devices;
+  } catch {
+    return null;
+  }
+}
+
+/** The emulator ids out of `flutter emulators`' text table (`Id • Name • Manufacturer • Platform`). */
+export function parseFlutterEmulators(text: string): string[] {
+  const ids: string[] = [];
+  let inTable = false;
+  for (const line of text.split(/\r?\n/)) {
+    const parts = line.split('\u2022').map((part) => part.trim());
+    if (parts.length < 2) continue;
+    if (parts[0] === 'Id') { inTable = true; continue; }
+    if (inTable && parts[0] !== '') ids.push(parts[0]);
+  }
+  return ids;
+}
+
+export async function probeFlutterDevices(flutterRoot: string, options: ProbeOptions & { platform?: NodeJS.Platform } = {}): Promise<FlutterDevice[] | null> {
+  const platform = options.platform ?? process.platform;
+  const cmd = flutterLauncherCommand(flutterRoot, ['devices', '--machine'], platform);
+  const env = { ...(options.env ?? process.env), FLUTTER_ROOT: flutterRoot };
+  const r = await run(cmd.command, cmd.args, { env, windowsVerbatimArguments: cmd.windowsVerbatimArguments, timeoutMs: options.timeoutMs ?? 30000 }, options.spawn ?? nodeSpawn);
+  if (!r || r.code !== 0) return null;
+  return parseFlutterDevicesJson(r.stdout);
+}
+
+export async function probeFlutterEmulators(flutterRoot: string, options: ProbeOptions & { platform?: NodeJS.Platform } = {}): Promise<string[] | null> {
+  const platform = options.platform ?? process.platform;
+  const cmd = flutterLauncherCommand(flutterRoot, ['emulators'], platform);
+  const env = { ...(options.env ?? process.env), FLUTTER_ROOT: flutterRoot };
+  const r = await run(cmd.command, cmd.args, { env, windowsVerbatimArguments: cmd.windowsVerbatimArguments, timeoutMs: options.timeoutMs ?? 30000 }, options.spawn ?? nodeSpawn);
+  if (!r || r.code !== 0) return null;
+  return parseFlutterEmulators(r.stdout);
+}

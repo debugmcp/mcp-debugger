@@ -139,4 +139,16 @@ describe('formatJsonReport', () => {
 
     expect(JSON.parse(formatJsonReport(input))).toEqual(JSON.parse(JSON.stringify(input)));
   });
+
+  it('renders a Targets block for the languages that report one (issue #877)', () => {
+    const text = formatHumanReport(report({
+      languages: [
+        language({ language: 'dart', runtime: { label: 'Dart SDK', version: '3.13.4' }, targets: { label: 'Flutter devices', items: ['windows (Windows, windows-x64)', 'chrome (Chrome, web-javascript)'], note: 'emulators: mcp_api35' } }),
+        language({ language: 'python' })
+      ]
+    }));
+    expect(text).toContain('Targets');
+    expect(text).toContain('  dart Flutter devices: windows (Windows, windows-x64), chrome (Chrome, web-javascript) (emulators: mcp_api35)');
+    expect(text).not.toContain('python Flutter');
+  });
 });

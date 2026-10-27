@@ -83,7 +83,7 @@ describe.skipIf(SKIP_FLUTTER)('MCP Server Flutter Debugging Smoke Test @requires
 
   async function getSession() {
     const res = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_debug_sessions', arguments: {} }));
-    const sessions = (res.sessions ?? []) as Array<{ id: string; state?: string; exitCode?: number; lastStop?: { reason?: string; text?: string; threadId?: number } }>;
+    const sessions = (res.sessions ?? []) as Array<{ id: string; state?: string; exitCode?: number; endNote?: string; lastStop?: { reason?: string; text?: string; threadId?: number } }>;
     return sessions.find(s => s.id === sessionId);
   }
 
@@ -236,6 +236,20 @@ describe.skipIf(SKIP_FLUTTER)('MCP Server Flutter Debugging Smoke Test @requires
       sessionId = null;
     }, 400000);
   });
+
+  it('a launch whose deviceId matches no device ends with the devices flutter found, in wait_for_stop and the listing (issue #877)', async (ctx) => {
+    await createSession('flutter-bogus-device');
+    await startOrSkip(ctx, { scriptPath: FLUTTER_EXAMPLES.main, dapLaunchArgs: { stopOnEntry: false, cwd: FLUTTER_PROBE_DIR, deviceId: 'bogus' } });
+    // Measured: the tool prints its device list and exits ~3 s after the launch answered.
+    const ended = await call('wait_for_stop', { timeout: 30000 });
+    expect(ended.state).toBe('stopped');
+    expect(String(ended.message)).toMatch(/'bogus' matched no device/);
+    // The handler hoists the adapter's reading of the end beside the message (its own keys).
+    const devices = (ended.availableDevices ?? []) as Array<{ id: string }>;
+    expect(devices.map((d) => d.id)).toEqual(expect.arrayContaining([DESKTOP ?? 'chrome']));
+    const listed = await getSession();
+    expect(String(listed?.endNote)).toMatch(/matched no device/);
+  }, 120000);
 
   describe.skipIf(!DESKTOP)(`desktop (${DESKTOP ?? 'no desktop device'})`, () => {
     it('flutter run: breaks in build(), reads the widget state, keeps running after continue, and terminates on close', async (ctx) => {

@@ -176,6 +176,14 @@ export async function handleListDebugSessions(ctx: ToolContext): Promise<ToolRes
       if (session.exitCode !== undefined) {
           mappedSession.exitCode = session.exitCode;
       }
+      if (session.programEnd) {
+          // What the adapter read into the program's end (issue #877): the note as endNote, its
+          // data (e.g. availableDevices) beside it.
+          if (session.programEnd.note) {
+              mappedSession.endNote = session.programEnd.note;
+          }
+          Object.assign(mappedSession, session.programEnd.data ?? {});
+      }
       if (session.diagnostics) {
           mappedSession.diagnostics = session.diagnostics;
       }

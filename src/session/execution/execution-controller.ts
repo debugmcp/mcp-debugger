@@ -865,8 +865,10 @@ export class ExecutionController {
         success: true,
         state,
         data: {
-          message: `${describeProgramEnd(session.exitCode)}.`,
+          // The adapter's reading of the end joins the sentence and the data (issue #877).
+          message: `${describeProgramEnd(session.exitCode)}.${session.programEndExplanation?.note ? ` ${session.programEndExplanation.note}` : ''}`,
           ...(typeof session.exitCode === 'number' ? { exitCode: session.exitCode } : {}),
+          ...(session.programEndExplanation?.data ? { programEnd: session.programEndExplanation.data } : {}),
           ...stopDuringWait
         }
       };

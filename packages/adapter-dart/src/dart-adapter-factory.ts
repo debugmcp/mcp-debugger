@@ -12,11 +12,12 @@ import type {
   IAdapterFactory,
   IDebugAdapter,
   ToolchainDescription,
+  ToolchainTargets,
 } from '@debugmcp/shared';
 import { DART_ATTACH_FORMS_HINT } from './attach-hints.js';
 import { DartDebugAdapter } from './dart-debug-adapter.js';
 import { locateToolchain, realLocatorIo, type DartToolchain } from './utils/sdk-locator.js';
-import { probeDartVersion, probeFlutterVersion, type FlutterVersion } from './utils/version-probes.js';
+import { probeDartVersion, probeFlutterDevices, probeFlutterEmulators, probeFlutterVersion, type FlutterDevice, type FlutterVersion } from './utils/version-probes.js';
 
 /** Seams for tests. */
 export interface DartFactoryHooks {
@@ -25,6 +26,8 @@ export interface DartFactoryHooks {
   locate?: (projectRoot?: string) => DartToolchain;
   probeDartVersion?: (dartExe: string) => Promise<string | null>;
   probeFlutterVersion?: (flutterRoot: string) => Promise<FlutterVersion | null>;
+  probeFlutterDevices?: (flutterRoot: string) => Promise<FlutterDevice[] | null>;
+  probeFlutterEmulators?: (flutterRoot: string) => Promise<string[] | null>;
 }
 
 /** What validate() records and describeToolchain() reads back (one alias, compiler-checked). */
@@ -49,6 +52,8 @@ export class DartAdapterFactory implements IAdapterFactory {
       locate: hooks.locate ?? ((projectRoot) => locateToolchain(realLocatorIo({ platform, env: process.env, projectRoot }))),
       probeDartVersion: hooks.probeDartVersion ?? ((dartExe) => probeDartVersion(dartExe)),
       probeFlutterVersion: hooks.probeFlutterVersion ?? ((root) => probeFlutterVersion(root, { platform })),
+      probeFlutterDevices: hooks.probeFlutterDevices ?? ((root) => probeFlutterDevices(root, { platform })),
+      probeFlutterEmulators: hooks.probeFlutterEmulators ?? ((root) => probeFlutterEmulators(root, { platform })),
     };
   }
 
@@ -105,12 +110,33 @@ export class DartAdapterFactory implements IAdapterFactory {
       details.dartExe ? probeWithinBudget(options?.timeoutMs, () => this.hooks.probeDartVersion(details.dartExe!)) : Promise.resolve(null),
       details.flutterRoot ? probeWithinBudget(options?.timeoutMs, () => this.hooks.probeFlutterVersion(details.flutterRoot!)) : Promise.resolve(null),
     ]);
+    // The devices the SDK sees and the emulators not booted (issue #877), under the same budget.
+    const [devices, emulators] = details.flutterRoot
+      ? await Promise.all([
+          probeWithinBudget(options?.timeoutMs, () => this.hooks.probeFlutterDevices(details.flutterRoot!)),
+          probeWithinBudget(options?.timeoutMs, () => this.hooks.probeFlutterEmulators(details.flutterRoot!)),
+        ])
+      : [null, null];
+    const targets = details.flutterRoot ? describeFlutterTargets(devices ?? null, emulators ?? null) : undefined;
     const flutterNote = flutterVersion?.frameworkVersion
       ? `Flutter ${flutterVersion.frameworkVersion}${flutterVersion.channel ? ` (${flutterVersion.channel})` : ''} at ${details.flutterRoot}`
       : undefined;
     return {
       runtime: toolchainComponent({ label: 'Dart SDK', path: details.dartExe, version: dartVersion ?? undefined, source: flutterNote }),
       backend: toolchainComponent({ label: 'dart debug_adapter', path: details.dartExe ? `${details.dartExe} debug_adapter` : undefined, version: dartVersion ?? undefined }),
+      ...(targets ? { targets } : {}),
     };
   }
+}
+
+/** The doctor's targets row for Flutter: `<id> (<name>, <platform>[, emulator])`, plus the emulators `flutter emulators` lists. */
+function describeFlutterTargets(devices: FlutterDevice[] | null, emulators: string[] | null): ToolchainTargets {
+  if (devices === null) {
+    return { label: 'Flutter devices', items: [], note: 'not probed (flutter devices answered nothing within the doctor budget)' };
+  }
+  const items = devices.map((d) => `${d.id} (${[d.name, d.targetPlatform, d.emulator ? 'emulator' : undefined].filter(Boolean).join(', ')})`);
+  const note = emulators && emulators.length > 0
+    ? `emulators: ${emulators.join(', ')} (flutter emulators --launch <id> boots one; a booted emulator is listed as emulator-NNNN)`
+    : undefined;
+  return { label: 'Flutter devices', items, ...(note ? { note } : {}) };
 }

@@ -475,6 +475,8 @@ export interface DebugSessionInfo {
   lastStop?: SessionStopInfo;
   /** Debuggee exit code from the DAP 'exited' event, when the adapter reports one */
   exitCode?: number;
+  /** The adapter's reading of the program's end (issue #877): a note and data such as `availableDevices`. */
+  programEnd?: { note?: string; data?: Record<string, unknown> };
   /** Present when the session is in ERROR because its proxy failed. */
   diagnostics?: SessionFailureDiagnostics;
   /**

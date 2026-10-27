@@ -133,7 +133,11 @@ breakpoint in ~23 s on Chrome and ~24 s on Edge, headless too with
 `toolArgs: ["--web-browser-flag=--headless=new"]`, which is how CI runs it; `"web-server"` needs the
 Dart Debug browser extension and never stops on its own, so use a browser device), `"emulator-5554"`
 (Android, boot it first with `flutter emulators --launch <id>`). First launches pay the platform build (a Windows runner build,
-Gradle for Android); later launches reuse it. `integration_test/` files run through `flutter test`
+Gradle for Android); later launches reuse it. **Finding a target:** `mcp-debugger doctor dart` lists the
+devices the SDK sees and the emulators that are not booted; and a launch whose `deviceId` matches
+no device ends ~3 s after it answered with the devices `flutter run` found — `wait_for_stop`
+answers them as `availableDevices` (and `list_debug_sessions` as `endNote`), so an agent needs no
+shell to learn the ids (#877). `integration_test/` files run through `flutter test`
 on the chosen device, and a breakpoint in the app code hits when the test drives it.
 
 Measured through the server on Windows (Flutter 3.47.7, `examples/dart/flutter_probe`,

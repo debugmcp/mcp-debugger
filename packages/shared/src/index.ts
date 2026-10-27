@@ -78,6 +78,7 @@ export type {
   // Doctor presentation (issue #435)
   ToolchainComponent,
   ToolchainDescription,
+  ToolchainTargets,
   DescribeToolchainOptions,
 
   // Utility types
@@ -190,6 +191,8 @@ export type {
   HotReloadArgs,
   LiveUpdatePolicy,
   LiveUpdateRequest,
+  ProgramEndContext,
+  ProgramEndExplanation,
   ChildSessionStrategy,
   AdapterSpecificState,
   CommandHandling,

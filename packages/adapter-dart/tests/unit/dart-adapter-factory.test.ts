@@ -59,6 +59,26 @@ describe('DartAdapterFactory', () => {
     expect(d.runtime?.source).toBeUndefined();
   });
 
+  it('lists the Flutter devices and the emulators not booted as the doctor targets (issue #877)', async () => {
+    const f = new DartAdapterFactory(hooks({
+      probeFlutterDevices: async () => [{ id: 'windows', name: 'Windows', targetPlatform: 'windows-x64', emulator: false }, { id: 'emulator-5554', name: 'sdk gphone64 x86 64', targetPlatform: 'android-x64', emulator: true }],
+      probeFlutterEmulators: async () => ['mcp_api35'],
+    }));
+    const d = await f.describeToolchain(await f.validate());
+    expect(d.targets).toEqual({
+      label: 'Flutter devices',
+      items: ['windows (Windows, windows-x64)', 'emulator-5554 (sdk gphone64 x86 64, android-x64, emulator)'],
+      note: 'emulators: mcp_api35 (flutter emulators --launch <id> boots one; a booted emulator is listed as emulator-NNNN)',
+    });
+  });
+
+  it('says when the devices were not probed within the budget, and lists none without Flutter', async () => {
+    const slow = new DartAdapterFactory(hooks({ probeFlutterDevices: async () => null, probeFlutterEmulators: async () => null }));
+    expect((await slow.describeToolchain(await slow.validate())).targets).toEqual({ label: 'Flutter devices', items: [], note: 'not probed (flutter devices answered nothing within the doctor budget)' });
+    const dartOnly = new DartAdapterFactory(hooks({ locate: () => ({ dartExe: DART_EXE, dartSdkRoot: 'C:\\tools\\dart-sdk', dartSource: 'path', warnings: [] }) }));
+    expect((await dartOnly.describeToolchain(await dartOnly.validate())).targets).toBeUndefined();
+  });
+
   it('renders no runtime cell at all without an SDK', async () => {
     const f = new DartAdapterFactory(hooks({ locate: () => ({ warnings: [] }) }));
     const d = await f.describeToolchain(await f.validate());

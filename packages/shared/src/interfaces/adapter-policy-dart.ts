@@ -72,6 +72,67 @@ const codeOnly = (line: string): string => {
   return out;
 };
 
+/** A device as `flutter run` lists it when `deviceId` matched none (issue #877). */
+export interface FlutterListedDevice {
+  id: string;
+  name: string;
+  /** `mobile`, `desktop`, `web` — the parenthesis after the name. */
+  kind?: string;
+  targetPlatform?: string;
+}
+
+/**
+ * The device-miss text `flutter run` prints before it exits, measured on Flutter 3.47.7:
+ * `No supported devices found with name or id matching '<id>'.`, a blank line, `The following
+ * devices were found:` and one `•`-separated line per device (`<name> (<kind>) • <id> •
+ * <targetPlatform> • <sdk>`); or `No supported devices connected.` when there is none.
+ */
+export function parseFlutterDeviceMiss(outputTail: string): { requested?: string; devices: FlutterListedDevice[] } | undefined {
+  const miss = /No supported devices found with name or id matching '([^']*)'/.exec(outputTail);
+  const none = /No supported devices connected/.test(outputTail);
+  if (!miss && !none) {
+    return undefined;
+  }
+  const devices: FlutterListedDevice[] = [];
+  const listStart = outputTail.indexOf('The following devices were found:');
+  if (listStart >= 0) {
+    for (const line of outputTail.slice(listStart).split(/\r?\n/).slice(1)) {
+      const parts = line.split('\u2022').map((part) => part.trim());
+      if (parts.length < 2 || parts[1] === '') {
+        if (devices.length > 0) {
+          break;
+        }
+        continue;
+      }
+      const kind = /\(([^()]+)\)\s*$/.exec(parts[0]);
+      devices.push({
+        id: parts[1],
+        name: kind ? parts[0].slice(0, kind.index).trim() : parts[0],
+        ...(kind ? { kind: kind[1] } : {}),
+        ...(parts[2] ? { targetPlatform: parts[2] } : {}),
+      });
+    }
+  }
+  return { ...(miss ? { requested: miss[1] } : {}), devices };
+}
+
+/** The Dart policy's reading of a program's end: the devices behind a `deviceId` miss (issue #877). */
+export function explainFlutterProgramEnd(outputTail: string): { note: string; data: Record<string, unknown> } | undefined {
+  const parsed = parseFlutterDeviceMiss(outputTail);
+  if (!parsed) {
+    return undefined;
+  }
+  const ids = parsed.devices.map((d) => d.id);
+  const found = ids.length > 0 ? `flutter found: ${ids.join(', ')} (details in availableDevices)` : 'flutter found no device';
+  const note = parsed.requested !== undefined
+    ? `deviceId '${parsed.requested}' matched no device; ${found} — pass one of them as dapLaunchArgs.deviceId; an emulator that is not booted is not listed (flutter emulators --launch <id> boots it).`
+    : `no device is connected: boot an emulator (flutter emulators --launch <id>), plug a device in, or pass deviceId: "chrome" for the web.`;
+  return {
+    note,
+    data: { ...(parsed.requested !== undefined ? { requestedDeviceId: parsed.requested } : {}), availableDevices: parsed.devices },
+  };
+}
+
 /** What the Dart policy learns from the Flutter adapter's events for `hot_reload` (issue #876). */
 interface DartLiveUpdateState {
   flutterApp?: { started: boolean; launchMode?: string; supportsRestart?: boolean };
@@ -88,6 +149,9 @@ export const DartAdapterPolicy = {
   // process and build() re-hits ~0.4 s later (issue #876). The Dart CLI adapter never
   // advertises it, so a Dart program keeps the relaunch.
   restartViaDapRequest: true,
+  // A `flutter run` whose deviceId matched none prints its device list and exits ~3 s after the
+  // launch answered (measured): the end answers carry it as availableDevices (issue #877).
+  explainProgramEnd: (context) => explainFlutterProgramEnd(context.outputTail),
   // Flutter hot reload (issue #876): the SDK adapter's `hotReload` request, once the app has
   // started — learned from the adapter's `flutter.appStart` / `flutter.appStarted` events,
   // which the worker forwards for this. The reassemble runs build(), so a breakpoint there

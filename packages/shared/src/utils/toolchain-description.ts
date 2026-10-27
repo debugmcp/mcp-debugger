@@ -88,6 +88,17 @@ export function normalizeToolchainDescription(value: unknown): ToolchainDescript
     return {};
   }
   const description: ToolchainDescription = {};
+  const targets = (value as Record<string, unknown>).targets;
+  if (typeof targets === 'object' && targets !== null && !Array.isArray(targets)) {
+    const t = targets as Record<string, unknown>;
+    if (typeof t.label === 'string' && Array.isArray(t.items)) {
+      description.targets = {
+        label: t.label,
+        items: t.items.filter((item): item is string => typeof item === 'string'),
+        ...(typeof t.note === 'string' && t.note !== '' ? { note: t.note } : {}),
+      };
+    }
+  }
   for (const cell of ['runtime', 'backend'] as const) {
     const raw = (value as Record<string, unknown>)[cell];
     if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
