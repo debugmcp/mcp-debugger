@@ -122,7 +122,7 @@ empty stack until it next runs code.
 | Output | stdout/stderr as output events; `dart test` / `flutter test` also print `✓ name` lines and emit structured test events |
 | Exit code | reported for Dart programs; `flutter test` and `flutter run` sessions end with `terminated` only |
 | Close | `close_debug_session` (and `restart_debugging`) send DAP `terminate` before `disconnect`, so a `flutter run` app is stopped (`app.stop`); the SDK adapter's `disconnect` alone kills only its tool processes and leaves the app running (#885) |
-| `restart_debugging` | relaunches; hot reload / hot restart are not exposed yet |
+| `restart_debugging` | Flutter: a **hot restart** through the adapter's `restart` request (same process, `main()` re-runs, the first breakpoint hits again ~0.4 s later, `data.hotRestart: true`, output buffer kept; works on attach sessions too); Dart CLI: a relaunch. Hot reload: `hot_reload` (#876) |
 | Attach | by URI or service-info file, or by `deviceId` alone for a Flutter app on an Android device; not by PID |
 
 ## Flutter targets

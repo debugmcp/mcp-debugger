@@ -546,7 +546,7 @@ See the [JavaScript configuration guide](javascript/README.md#custom-configurati
 
 ### restart_debugging
 
-Restarts the debuggee in one call: terminates the current program (if still running) and relaunches it with the same configuration as the last `start_debugging`. All current breakpoints are re-applied automatically — the core edit-rerun loop (`fix a line → restart → confirm at the same breakpoints`) becomes a single tool call instead of close/create/re-set/start.
+Restarts the debuggee in one call. When the adapter offers a native restart (DAP `supportsRestartRequest` — the Flutter adapter advertises it once the app has started), the DAP `restart` request is sent and the session goes on in place: for Flutter that is a **hot restart**, `main()` re-runs in the same process and the first breakpoint is reached again about half a second later (measured on Windows desktop and Chrome). Otherwise the current program is terminated (if still running) and relaunched with the same configuration as the last `start_debugging`. Either way the current breakpoints stay in force — the core edit-rerun loop (`fix a line → restart → confirm at the same breakpoints`) is a single tool call instead of close/create/re-set/start.
 
 **Parameters:**
 - `sessionId` (string, required): The ID of the debug session.
@@ -567,11 +567,12 @@ Restarts the debuggee in one call: terminates the current program (if still runn
 
 **Notes:**
 - Works while the program is running, paused, **or after it has exited** (the primary use case — a finished session can be restarted without recreating it).
-- Restart is implemented uniformly as terminate + relaunch (the DAP-spec-blessed emulation; no adapter advertises native restart), so every launch-mode language works identically. Native DAP `restart` is a possible future optimization.
+- **Which path ran is in the answer**: `data.hotRestart: true` means the adapter's own restart was used (same process, output buffer kept, no `outputReset`); otherwise the restart was terminate + relaunch (the DAP-spec-blessed emulation every launch-mode language gets) and `outputReset: true` is set. The choice is the adapter's advertised capability, read live: today only the Flutter adapter advertises `restart`, and the Dart CLI adapter, like every other, is relaunched (issue #876).
+- A hot restart of a `stopOnEntry: true` Flutter launch stops at entry again: the re-run `main()` hits the entry breakpoint the launch armed, reported as `reason: "entry"` like the first time.
 - The launch configuration is replayed verbatim (script, args, `dapLaunchArgs`, `adapterLaunchConfig` — the `testRunner` preset rides in it — `breakOnExceptions`); there are no per-restart overrides — call `start_debugging` for a different configuration.
-- **The output buffer starts fresh**: `outputReset: true` signals that `get_output` cursors from the previous launch are stale — read from `since: 0`.
+- **The output buffer starts fresh on a relaunch**: `outputReset: true` signals that `get_output` cursors from the previous launch are stale — read from `since: 0`. A hot restart keeps the buffer (same process): cursors stay valid.
 - The hold and its `pending: true` answer are the same as `start_debugging`'s ("When the launch answers" above): a relaunch that has not stopped when the hold elapses answers `running`, and `wait_for_stop` collects its stop. A relaunch that stopped carries the same [stop snapshot](#the-stop-snapshot) (issue #982).
-- Not available for **attach sessions** (no launch configuration to replay — detach and re-attach instead) or for sessions that were never launched, including dry-run-only sessions — call `start_debugging` on the same session instead.
+- Not available for **attach sessions** unless the adapter offers a native restart (a Flutter attach session hot-restarts like a launched one; any other attach session has no launch configuration to replay — detach and re-attach instead), nor for sessions that were never launched, including dry-run-only sessions — call `start_debugging` on the same session instead.
 
 ---
 

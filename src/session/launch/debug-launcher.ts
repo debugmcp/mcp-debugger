@@ -25,7 +25,7 @@ import {
   type AdapterPolicy,
   type ExceptionBreakMode
 } from '@debugmcp/shared';
-import { resolveExceptionFilters } from '@debugmcp/shared';
+import { isTerminalSessionState, resolveExceptionFilters } from '@debugmcp/shared';
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import { checkLaunchToolchain } from '../../utils/language-availability.js';
@@ -36,7 +36,7 @@ import type { LaunchContext } from '../operations-context.js';
 import { describeStopLocation, landingFields, type StopLanding } from '../inspection/stop-location.js';
 import { composeStopSnapshot } from '../inspection/stop-snapshot.js';
 import type { BreakpointController, ResyncOutcome } from '../breakpoints/breakpoint-controller.js';
-import { reresolveAnchors } from '../breakpoints/anchor-resolution.js';
+import { reresolveAnchors, type AnchorResolution } from '../breakpoints/anchor-resolution.js';
 import {
   buildLogpointDowngradeLaunchWarning,
   buildNoDebugFailureNote,
@@ -911,13 +911,19 @@ export class DebugLauncher {
   }
 
   /**
-   * Restart the debuggee: terminate the current program (if any) and replay
-   * the last real launch with the same configuration. Breakpoints re-apply
-   * automatically via the initialBreakpoints snapshot; the output buffer
-   * starts fresh (read from since=0). Terminate+relaunch is used uniformly —
-   * no adapter advertises native DAP restart, and the spec blesses the
-   * emulation — so every launch-mode language works with no per-adapter
-   * wiring (issue #238).
+   * Restart the debuggee. When the adapter advertises `supportsRestartRequest`
+   * — the Flutter adapter does, in a `capabilities` event once the app has
+   * started, and its `restart` is a hot restart: the same process re-runs
+   * `main()` and reaches its first breakpoint again in well under a second
+   * (issue #876) — the DAP `restart` request is sent and the session goes on
+   * in place: breakpoints stay armed and the output buffer is kept. Otherwise
+   * the current program is terminated (if any) and the last real launch is
+   * replayed with the same configuration — the spec-blessed emulation every
+   * launch-mode language gets with no per-adapter wiring (issue #238);
+   * breakpoints re-apply through the initialBreakpoints snapshot and the
+   * output buffer starts fresh (read from since=0). Either way the statement
+   * anchors are re-resolved first, so breakpoints survive the edit that was
+   * the point of the session (issue #271).
    */
   async restartDebugging(sessionId: string): Promise<DebugResult<LaunchResultData>> {
     // Claimed first (issue #711): a launch or attach still being awaited, or
@@ -925,7 +931,7 @@ export class DebugLauncher {
     // session. Held for the whole restart, so the replayed launch runs under
     // this claim. The refusal text distinguishes "wait for it" from the one
     // pairing that is terminal rather than transient — an in-flight attach,
-    // whose session will never accept a restart (the `session.attachMode`
+    // whose session will never accept a relaunch (the `session.attachMode`
     // check below, answered up front because attachMode is only written
     // after the attach's first awaits).
     return this.inFlight.run(sessionId, 'restart', 'restart_debugging', this.ctx, () =>
@@ -937,14 +943,21 @@ export class DebugLauncher {
   private async restart(session: ManagedSession): Promise<DebugResult<LaunchResultData>> {
     const sessionId = session.id;
 
-    if (session.attachMode) {
+    // The adapter's own restart, when it offers one and the debuggee is live:
+    // read from the session's capabilities, which the worker keeps current
+    // with the adapter's capabilities events (issue #876).
+    const nativeRestart =
+      session.adapterCapabilities?.supportsRestartRequest === true &&
+      session.proxyManager?.isRunning() === true;
+
+    if (session.attachMode && !nativeRestart) {
       return {
         success: false,
         state: session.state,
-        error: 'Cannot restart an attach session: there is no launch configuration to replay. Detach and re-attach instead.'
+        error: 'Cannot restart an attach session: there is no launch configuration to replay, and the adapter offers no restart request. Detach and re-attach instead.'
       };
     }
-    if (!session.lastLaunch) {
+    if (!session.lastLaunch && !nativeRestart) {
       return {
         success: false,
         state: session.state,
@@ -957,7 +970,18 @@ export class DebugLauncher {
     // point of the session (issue #271).
     const anchorResolution = await reresolveAnchors(session, this.ctx);
 
+    if (nativeRestart) {
+      return this.hotRestart(session, anchorResolution);
+    }
+
     const spec = session.lastLaunch;
+    if (!spec) {
+      return {
+        success: false,
+        state: session.state,
+        error: 'Nothing to restart: this session has not been launched (start_debugging has not run, or only a dry run was performed).'
+      };
+    }
     this.ctx.logger.info(
       `[SessionManager] Restarting session ${sessionId}: replaying launch of ${spec.scriptPath}`
     );
@@ -972,34 +996,14 @@ export class DebugLauncher {
       spec.breakOnExceptions
     );
     if (result.success) {
-      const staleCount = anchorResolution?.stale.length ?? 0;
       // Stamp stale-anchor notes AFTER the relaunch: the per-launch
       // breakpoint state reset (#238) clears message on every new launch,
       // and a real adapter verdict should still win over ours — a refusal of
       // the relaunch's re-send is not one (issue #754), so the note displaces it.
-      if (anchorResolution) {
-        const bps = this.ctx.getSession(sessionId).breakpoints;
-        for (const staleEntry of anchorResolution.stale) {
-          const bp = bps.get(staleEntry.breakpointId);
-          if (bp && (bp.message === undefined || bp.messageOrigin === 'refusal')) {
-            setCuratedMessage(
-              bp,
-              `Anchor "${staleEntry.statement}" not found at restart; breakpoint kept at last known line ${staleEntry.line}`
-            );
-          }
-        }
-      }
+      this.stampStaleAnchorNotes(this.ctx.getSession(sessionId), anchorResolution);
       // Join rather than clobber: startDebugging may already have set a
       // warning (unbound function breakpoints, issue #308).
-      const priorWarning = result.data?.warning;
-      const staleWarning = staleCount > 0
-        ? `${staleCount} statement anchor(s) no longer match the current file; those breakpoints kept their previous lines — re-set them if the target moved.`
-        : undefined;
-      const ambiguousCount = anchorResolution?.moved.filter((m) => m.candidates !== undefined).length ?? 0;
-      const ambiguousWarning = ambiguousCount > 0
-        ? `${ambiguousCount} statement anchor(s) matched multiple lines and re-anchored to the nearest match — check anchorResolution.moved (candidates listed) and re-set any that landed wrong.`
-        : undefined;
-      const warnings = [priorWarning, staleWarning, ambiguousWarning].filter(Boolean);
+      const warnings = [result.data?.warning, anchorWarnings(anchorResolution)].filter(Boolean);
       result.data = {
         ...(result.data ?? {}),
         breakpointsReapplied: this.ctx.getSession(sessionId).breakpoints.size,
@@ -1012,4 +1016,138 @@ export class DebugLauncher {
     }
     return result;
   }
+
+  /**
+   * The adapter's own restart (issue #876): `restart` goes out and the
+   * session goes on in place — the same process, so the output buffer is
+   * kept and the breakpoints stay armed in the adapter. The answer is built
+   * the way a launch's is: a short hold for the first stop (issues #823,
+   * #826), then the landing and the snapshot (issues #951, #982), or
+   * `pending` with what is armed.
+   */
+  private async hotRestart(
+    session: ManagedSession,
+    anchorResolution: AnchorResolution | undefined
+  ): Promise<DebugResult<LaunchResultData>> {
+    const sessionId = session.id;
+    const proxyManager = session.proxyManager!;
+    const target = session.lastLaunch?.scriptPath ?? 'the attached program';
+    this.ctx.logger.info(
+      `[SessionManager] Restarting session ${sessionId} in place: the adapter offers a restart request (hot restart)`
+    );
+
+    // A breakpoint whose anchor moved with the edit must reach the adapter
+    // before the program re-runs; the rest is still armed there.
+    if (anchorResolution && anchorResolution.moved.length > 0) {
+      await this.breakpoints.resyncAll(session, { forceFreshEcho: true });
+    }
+
+    // RUNNING before the request, the way continue does: the core keeps a
+    // paused session paused on a `continued` event (its guard against stale
+    // resumes), so the adapter's own resume of the paused thread would not
+    // move it, and the hold below would read the stop the restart replaces.
+    const wasPaused = session.state === SessionState.PAUSED;
+    if (wasPaused) {
+      this.ctx.updateState(session, SessionState.RUNNING);
+    }
+    try {
+      await proxyManager.sendDapRequest('restart', {});
+    } catch (error) {
+      if (wasPaused && !isTerminalSessionState(session.state)) {
+        this.ctx.updateState(session, SessionState.PAUSED);
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        success: false,
+        state: session.state,
+        error: `The adapter refused the restart request: ${message}`
+      };
+    }
+
+    const readiness = await waitForLaunchReadiness(this.ctx, {
+      sessionId,
+      launchedCeilingMs: this.ctx.tunables.launchReadyCeilingMs,
+      holdMs: this.ctx.tunables.launchHoldMs,
+    });
+    const finalSession = this.ctx.getSession(sessionId);
+    const finalState = finalSession.state;
+    const landing: StopLanding = finalState === SessionState.PAUSED
+      ? await describeStopLocation(this.ctx, sessionId, 'launch')
+      : {};
+    const snapshot = await composeStopSnapshot(this.ctx, sessionId, landing.stackResult, 'launch');
+    const runToCompletion = finalState === SessionState.STOPPED
+      ? buildRunToCompletionSummary(finalSession)
+      : undefined;
+    let stillRunning: string | undefined;
+    if (readiness === 'running' && finalState === SessionState.RUNNING) {
+      const requestedEntry = finalSession.lastLaunch?.dapLaunchArgs?.stopOnEntry;
+      const arming = describeLaunchArming(finalSession, typeof requestedEntry === 'boolean' ? requestedEntry : undefined);
+      stillRunning = ErrorMessages.launchStillRunning(
+        arming.armed ? arming.summary : undefined,
+        debuggerOffWhy(finalSession),
+        arming.loggingSummary
+      );
+    }
+    this.stampStaleAnchorNotes(finalSession, anchorResolution);
+    const warning = anchorWarnings(anchorResolution);
+
+    this.ctx.logger.info(`[SessionManager] Hot restart of session ${sessionId} answered. State: ${finalState}`);
+    return {
+      success: true,
+      state: finalState,
+      data: {
+        message:
+          `Restarted ${target} in place (the adapter's hot restart). Current state: ${finalState}` +
+          (runToCompletion ? `. ${runToCompletion.summary}` : '') +
+          (stillRunning ? `. ${stillRunning}` : ''),
+        hotRestart: true,
+        breakpointsReapplied: finalSession.breakpoints.size,
+        ...(anchorResolution ? { anchorResolution } : {}),
+        ...(warning ? { warning } : {}),
+        ...(stillRunning ? { pending: true } : {}),
+        ...(runToCompletion?.data ?? {}),
+        reason: finalState === SessionState.PAUSED ? finalSession.lastStop?.reason ?? 'unknown' : undefined,
+        ...landingFields(landing),
+        ...(snapshot ? { snapshot } : {}),
+      },
+    };
+  }
+
+  /**
+   * Stale-anchor notes on the breakpoints that kept their previous lines: a
+   * real adapter verdict still wins over ours; a refusal of a re-send is not
+   * one (issue #754), so the note displaces it.
+   */
+  private stampStaleAnchorNotes(session: ManagedSession, anchorResolution: AnchorResolution | undefined): void {
+    if (!anchorResolution) {
+      return;
+    }
+    for (const staleEntry of anchorResolution.stale) {
+      const bp = session.breakpoints.get(staleEntry.breakpointId);
+      if (bp && (bp.message === undefined || bp.messageOrigin === 'refusal')) {
+        setCuratedMessage(
+          bp,
+          `Anchor "${staleEntry.statement}" not found at restart; breakpoint kept at last known line ${staleEntry.line}`
+        );
+      }
+    }
+  }
+}
+
+/** The restart answer's warning for anchors that went stale or re-anchored ambiguously (issue #271). */
+function anchorWarnings(anchorResolution: AnchorResolution | undefined): string | undefined {
+  if (!anchorResolution) {
+    return undefined;
+  }
+  const staleCount = anchorResolution.stale.length;
+  const ambiguousCount = anchorResolution.moved.filter((m) => m.candidates !== undefined).length;
+  const parts = [
+    staleCount > 0
+      ? `${staleCount} statement anchor(s) no longer match the current file; those breakpoints kept their previous lines — re-set them if the target moved.`
+      : undefined,
+    ambiguousCount > 0
+      ? `${ambiguousCount} statement anchor(s) matched multiple lines and re-anchored to the nearest match — check anchorResolution.moved (candidates listed) and re-set any that landed wrong.`
+      : undefined,
+  ].filter((part): part is string => part !== undefined);
+  return parts.length > 0 ? parts.join('; ') : undefined;
 }

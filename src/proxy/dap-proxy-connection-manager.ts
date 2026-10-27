@@ -268,6 +268,8 @@ export class DapConnectionManager {
       onExited?: (body: DebugProtocol.ExitedEvent['body']) => void;
       onTerminated?: (body: DebugProtocol.TerminatedEvent['body']) => void;
       onBreakpoint?: (body: DebugProtocol.BreakpointEvent['body']) => void;
+      /** A capabilities update after initialize (the Flutter adapter advertises restart this way, issue #876). */
+      onCapabilities?: (body: DebugProtocol.CapabilitiesEvent['body']) => void;
       onError?: (err: Error) => void;
       onClose?: () => void;
     }
@@ -302,6 +304,10 @@ export class DapConnectionManager {
 
     if (handlers.onBreakpoint) {
       client.on('breakpoint', handlers.onBreakpoint);
+    }
+
+    if (handlers.onCapabilities) {
+      client.on('capabilities', handlers.onCapabilities);
     }
 
     if (handlers.onError) {
