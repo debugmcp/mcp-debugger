@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 void main() {
@@ -15,7 +17,26 @@ class ProbeApp extends StatefulWidget {
 
 class _ProbeAppState extends State<ProbeApp> {
   int counter = 0;
+  int ticks = 0;
   final List<int> history = [];
+  Timer? _ticker;
+
+  // A line that executes on its own every 500 ms, without rebuilding the widget tree: a
+  // breakpoint here fires in an attached app with no user action, and `pumpAndSettle` still
+  // settles because no frame is scheduled.
+  @override
+  void initState() {
+    super.initState();
+    _ticker = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      ticks += 1; // BP-TICK
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
 
   void increment() {
     setState(() {

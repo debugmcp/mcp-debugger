@@ -109,7 +109,7 @@ attach_to_process {sessionId, host, port, sourcePaths, adapterConfig}
 - Java: JVM flag -agentlib:jdwp=transport=dt_socket,server=y,address=*:PORT (breakpoints defer until class load); FQCN as "file" needs no source at all
 - C/C++ (and other native): attach by PID — attach_to_process {sessionId, processId, adapterConfig: {program: "<binary path>"}}
 - COBOL: attach by PID like C/C++; add adapterConfig: {manifestDirs: ["<.debug-mcp/cobol/<name>/<buildKey> dir of the running build>"]} so the shim finds the symbol manifest, or variables show only the engine's C view (regeneration from sources on attach is a later milestone)
-- Dart/Flutter: attach to a running VM service — pass adapterConfig.vmServiceUri or vmServiceInfoFile, not a PID (the SDK adapter is spawned locally and connects to the VM service)
+- Dart/Flutter: attach to a running VM service — pass adapterConfig.vmServiceUri or vmServiceInfoFile, not a PID (the SDK adapter is spawned locally and connects to the VM service); a Flutter app on an Android device or emulator takes adapterConfig.deviceId alone with no URI (flutter attach discovers it; the app.debugPort URI of another flutter run is that tool's own DDS and never connects)
 Breakpoint paths are sent verbatim and resolved on the TARGET's filesystem (host-side existence checks are skipped). Without a mapping, use debuggee-side paths — get_stack_trace shows them — or address by symbol ({function: "name"}), which needs no paths. adapterConfig keys the adapter cannot forward are named in the response's warning.
 detach_from_process leaves the target running.
 Kubernetes pods (port-forward vs ephemeral sidecar, copy-paste per-language presets): docs/kubernetes.md and examples/kubernetes/attach-presets.md in the mcp-debugger repo.

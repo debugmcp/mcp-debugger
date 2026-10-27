@@ -69,11 +69,12 @@ export class DartAdapterFactory implements IAdapterFactory {
         launch: true,
         attach: 'spawn',
         // A VM-service URI (or info file) under adapterConfig, or host:port for a
-        // VM started with --disable-service-auth-codes; no PID step (issue #903)
+        // VM started with --disable-service-auth-codes, or a Flutter deviceId alone
+        // for an app on an Android device (issue #882); no PID step (issue #903)
         attachBy: ['port', 'adapterConfig'],
         attachHints: {
           processId:
-            'Dart attaches by VM-service URI: pass adapterConfig.vmServiceUri (from dart --enable-vm-service run, the app.debugPort event of flutter run --machine, or the dart.debuggerUris answer of this server) or adapterConfig.vmServiceInfoFile (the file written by --write-service-info)'
+            'Dart attaches by VM-service URI: pass adapterConfig.vmServiceUri (from dart --enable-vm-service run, the app.debugPort event of flutter run --machine, or the dart.debuggerUris answer of this server) or adapterConfig.vmServiceInfoFile (the file written by --write-service-info); a Flutter app on an Android device or emulator takes adapterConfig.deviceId alone (flutter attach discovers it)'
         }
       },
     };

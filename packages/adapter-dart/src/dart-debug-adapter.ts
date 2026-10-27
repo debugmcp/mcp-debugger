@@ -67,6 +67,9 @@ const FORWARDED_LAUNCH_KEYS = [
 const FLUTTER_ONLY_KEYS = ['deviceId', 'flutterMode'] as const;
 const FLUTTER_MODES = new Set(['debug', 'profile', 'release']);
 
+/** `flutter devices` ids of the host desktops, where `flutter attach` cannot discover an app (issue #882). */
+const DESKTOP_DEVICE_IDS = new Set(['windows', 'macos', 'linux']);
+
 export class DartDebugAdapter extends EventEmitter implements IDebugAdapter {
   readonly language = DebugLanguage.DART;
   readonly name = 'Dart/Flutter Debug Adapter (SDK DAP)';
@@ -305,20 +308,37 @@ export class DartDebugAdapter extends EventEmitter implements IDebugAdapter {
       out.vmServiceUri = `ws://${String(vmHost)}:${String(port)}/ws`;
       this.note('port', `attaching to ws://${String(vmHost)}:${String(port)}/ws — a host:port only works for a VM started with --disable-service-auth-codes; otherwise pass the full vmServiceUri with its token`);
     }
-    if (isFlutter(detection.runner) && typeof deviceId === 'string' && deviceId) {
+    const device = isFlutter(detection.runner) && typeof deviceId === 'string' && deviceId ? deviceId : undefined;
+    if (device) {
       const existing = Array.isArray(out.toolArgs) ? (out.toolArgs as unknown[]).map(String) : [];
-      out.toolArgs = ['-d', deviceId, ...existing];
+      out.toolArgs = ['-d', device, ...existing];
     } else if (deviceId !== undefined) {
       this.note('deviceId', `ignored: only Flutter runners use deviceId (this attach uses ${detection.runner})`);
     }
-    // Nothing to attach to is refused here, by name (issue #903): sent on, the
-    // SDK adapter would fail with its own words about a missing URI.
     if (out.vmServiceUri === undefined && out.vmServiceInfoFile === undefined) {
-      throw new AdapterError(
-        'Dart attach needs adapterConfig.vmServiceUri or adapterConfig.vmServiceInfoFile (or host and port, for a VM started with '
-        + '--disable-service-auth-codes); the request named none of them.',
-        AdapterErrorCode.ENVIRONMENT_INVALID,
-      );
+      if (device && !DESKTOP_DEVICE_IDS.has(device)) {
+        // A Flutter app on a device needs no URI: `flutter attach -d <id>` finds the app's VM
+        // service on the device (Android: the logcat line) and forwards it itself. The host-side
+        // URI `flutter run --machine` reports is its own DDS and never connects this way (issue #882).
+        this.note('deviceId', `no vmServiceUri: flutter attach -d ${device} discovers the running app's VM service on the device and forwards it itself (measured on Android; issue #882)`);
+      } else if (device) {
+        // Measured: on a desktop target the tool waits for a connection that never comes and the
+        // attach fails at the thread-verification deadline; the URI recipe works there.
+        throw new AdapterError(
+          `flutter attach cannot discover an app on the ${device} desktop: pass adapterConfig.vmServiceUri `
+          + '(the app.debugPort event of `flutter run --machine`, or the dart.debuggerUris answer of this server).',
+          AdapterErrorCode.ENVIRONMENT_INVALID,
+        );
+      } else {
+        // Nothing to attach to is refused here, by name (issue #903): sent on, the
+        // SDK adapter would fail with its own words about a missing URI.
+        throw new AdapterError(
+          'Dart attach needs adapterConfig.vmServiceUri or adapterConfig.vmServiceInfoFile (or host and port, for a VM started with '
+          + '--disable-service-auth-codes; or, for a Flutter app running on an Android device or emulator, adapterConfig.deviceId '
+          + 'alone); the request named none of them.',
+          AdapterErrorCode.ENVIRONMENT_INVALID,
+        );
+      }
     }
     return out;
   }

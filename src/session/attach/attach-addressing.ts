@@ -44,10 +44,12 @@ const URI_KEYS = ['vmServiceUri', 'websocketAddress'] as const;
 
 /**
  * `adapterConfig` keys that name an attach target on their own (issue #905):
- * the URI keys and Dart's service-info file. Beside `processId` and `port`,
- * these are what make `create_debug_session` attach in the same call.
+ * the URI keys, Dart's service-info file, and a Flutter device id — `flutter
+ * attach -d <id>` discovers the app on the device itself (issue #882). Beside
+ * `processId` and `port`, these are what make `create_debug_session` attach
+ * in the same call.
  */
-export const ADAPTER_CONFIG_TARGET_KEYS = [...URI_KEYS, 'vmServiceInfoFile'] as const;
+export const ADAPTER_CONFIG_TARGET_KEYS = [...URI_KEYS, 'vmServiceInfoFile', 'deviceId'] as const;
 
 /** Whether a request names an attach target at all; `host` alone never does. */
 export function namesAttachTarget(request: AttachAddressingRequest): boolean {

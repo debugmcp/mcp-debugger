@@ -21,7 +21,7 @@ import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
 import { skipIfSpawnBlocked } from '../test-utils/helpers/adapter-spawn.js';
 import { killProcesses, listPidsByImage, waitForProcessesToExit } from '../test-utils/helpers/process-table.js';
 import {
-  FLUTTER_EXAMPLES, FLUTTER_PROBE_DIR, bpLine, findFlutterRootSync, flutterDesktopDeviceId, hasFlutterToolchain, prepareFlutterProbe,
+  FLUTTER_EXAMPLES, FLUTTER_PROBE_DIR, bpLine, findFlutterRootSync, flutterDesktopDeviceId, flutterRunMachine, hasFlutterToolchain, prepareFlutterProbe,
 } from './dart-example-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -229,6 +229,40 @@ describe.skipIf(SKIP_FLUTTER)('MCP Server Flutter Debugging Smoke Test @requires
       const survivors = await waitForProcessesToExit(appPids, { timeoutMs: 5000, image: 'flutter_probe' });
       if (survivors.length > 0) await killProcesses(survivors);
       expect(survivors, 'flutter_probe survived close_debug_session (issue #885)').toEqual([]);
+    }, 300000);
+
+    it('attach: an app another flutter run started, by its app.debugPort URI — the timer breakpoint hits, detach leaves it running (issue #882)', async (ctx) => {
+      const line = bpLine(FLUTTER_EXAMPLES.main, 'TICK');
+      const appsBefore = await listPidsByImage('flutter_probe');
+      const external = flutterRunMachine(DESKTOP!);
+      try {
+        expect(await external.waitFor('app.debugPort', 180000), 'app.debugPort from flutter run --machine').not.toBeNull();
+        await external.waitFor('app.started', 60000);
+        await createSession('flutter-desktop-attach');
+        expect((await call('set_breakpoint', { file: FLUTTER_EXAMPLES.main, line })).success).toBe(true);
+        const attached = await call('attach_to_process', {
+          stopOnEntry: false, adapterConfig: { runner: 'flutter', deviceId: DESKTOP, cwd: FLUTTER_PROBE_DIR, vmServiceUri: external.wsUri },
+        });
+        if (!attached.success) skipIfSpawnBlocked(ctx as never, attached, 'Flutter');
+        expect(attached.success, JSON.stringify(attached)).toBe(true);
+
+        // The probe's periodic timer reaches the breakpoint on its own: no tap, no hot reload.
+        const paused = await waitForPause(60000, 'the timer breakpoint after attach');
+        expect(paused.lastStop?.reason).toBe('breakpoint');
+        const top = (await frames())[0];
+        expect(top.line).toBe(line);
+        expect(top.name).toBe('_ProbeAppState.initState.<anonymous closure>');
+        expect(await evaluate('ticks')).toMatch(/^\d+$/);
+
+        expect((await call('detach_from_process', {})).success).toBe(true);
+        sessionId = null;
+        await wait(1000);
+        expect(external.alive, 'the app keeps running after detach').toBe(true);
+      } finally {
+        await external.stop();
+        const leftovers = (await listPidsByImage('flutter_probe')).filter((pid) => !appsBefore.includes(pid));
+        if (leftovers.length > 0) await killProcesses(leftovers);
+      }
     }, 300000);
 
     it('integration test on the desktop: the test\'s tap hits the app\'s breakpoint', async (ctx) => {

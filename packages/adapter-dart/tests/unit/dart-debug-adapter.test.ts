@@ -209,6 +209,33 @@ describe('DartDebugAdapter attach', () => {
     const cmd = a.buildAdapterCommand({ sessionId: 's', executablePath: DART_EXE, adapterHost: '127.0.0.1', adapterPort: 2, logDir: 'C:\\logs', scriptPath: 'attach://remote', launchConfig: out as GenericLaunchConfig, attachMode: true });
     expect(cmd.args).toContain('debug-adapter');
   });
+  it('attaches to an app on a device by deviceId alone: flutter attach discovers it (issue #882)', async () => {
+    const dir = project('flutter', FLUTTER_PUBSPEC, ['lib/main.dart']);
+    const a = new DartDebugAdapter(deps(), hooks());
+    const out = await a.transformAttachConfig(attach({ cwd: dir, deviceId: 'emulator-5554' }));
+    expect(out.vmServiceUri).toBeUndefined();
+    expect(out.toolArgs).toEqual(['-d', 'emulator-5554']);
+    expect(a.consumeLaunchConfigDiagnostics().find((d) => d.key === 'deviceId')?.message).toMatch(/discover/);
+  });
+
+  it('refuses a desktop deviceId with no URI: flutter attach cannot discover a desktop app (issue #882)', async () => {
+    const dir = project('flutter', FLUTTER_PUBSPEC, ['lib/main.dart']);
+    const a = new DartDebugAdapter(deps(), hooks());
+    await expect(a.transformAttachConfig(attach({ cwd: dir, deviceId: 'windows' }))).rejects.toThrow(/desktop.*vmServiceUri/);
+  });
+
+  it("puts -d before the caller's toolArgs on attach, as launch does", async () => {
+    const dir = project('flutter', FLUTTER_PUBSPEC, ['lib/main.dart']);
+    const a = new DartDebugAdapter(deps(), hooks());
+    const out = await a.transformAttachConfig(attach({ vmServiceUri: 'ws://x/ws', cwd: dir, deviceId: 'emulator-5554', toolArgs: ['--no-dds'] }));
+    expect(out.toolArgs).toEqual(['-d', 'emulator-5554', '--no-dds']);
+  });
+
+  it('still refuses deviceId alone on the dart runner: discovery is a flutter attach feature', async () => {
+    const dir = project('dart', DART_PUBSPEC, ['bin/pause.dart']);
+    const a = new DartDebugAdapter(deps(), hooks());
+    await expect(a.transformAttachConfig(attach({ cwd: dir, deviceId: 'emulator-5554' }))).rejects.toThrow(/needs adapterConfig\.vmServiceUri/);
+  });
 });
 
 describe('DartDebugAdapter environment and capabilities', () => {
