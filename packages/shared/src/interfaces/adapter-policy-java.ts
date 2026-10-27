@@ -60,6 +60,18 @@ export const JavaAdapterPolicy = {
   // Classes not yet loaded bind via ClassPrepareRequest deferral —
   // unverified-at-launch is not a failure here (issue #308).
   functionBreakpointsBindLate: true,
+  // JVM HotSwap behind `hot_reload` (the former `redefine_classes` tool, issue #876): the JDI
+  // bridge scans classesDir for .class files newer than sinceTimestamp and redefines the loaded
+  // ones. Nothing stops the program; code changed only when something was redefined.
+  liveUpdate: {
+    request: (args): { command: string; args: Record<string, unknown> } | { refused: string } => {
+      if (typeof args.classesDir !== 'string' || args.classesDir === '') {
+        return { refused: 'hot_reload on Java needs classesDir: the directory of the recompiled .class files (e.g. build/classes/java/main)' };
+      }
+      return { command: 'redefineClasses', args: { classesDir: args.classesDir, sinceTimestamp: args.sinceTimestamp ?? 0 } };
+    },
+    changed: (response) => (((response?.body as { redefinedCount?: number } | undefined)?.redefinedCount) ?? 0) > 0,
+  },
   supportsReverseStartDebugging: false,
   childSessionStrategy: 'none',
   buildChildStartArgs: () => {

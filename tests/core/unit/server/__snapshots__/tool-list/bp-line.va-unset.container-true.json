@@ -3,7 +3,7 @@
     "tools": [
       {
         "name": "create_debug_session",
-        "description": "Create a new debugging session. Passing port, processId or an adapterConfig that names a debugger URI (vmServiceUri, websocketAddress, vmServiceInfoFile) attaches to a running process in the same call, with every attach argument attach_to_process takes (host alone does not); omit them for launch mode. Attaching pauses the target unless stopOnEntry is false",
+        "description": "Create a new debugging session. Passing port, processId or an adapterConfig that names a target (a debugger URI: vmServiceUri, websocketAddress, vmServiceInfoFile; or a Flutter deviceId, for an app running on an Android device) attaches to a running process in the same call, with every attach argument attach_to_process takes (host alone does not); omit them for launch mode. Attaching pauses the target unless stopOnEntry is false",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -715,8 +715,8 @@
         }
       },
       {
-        "name": "redefine_classes",
-        "description": "Hot-swap changed Java classes into a running JVM. Scans a classes directory for .class files modified after sinceTimestamp, matches them against loaded classes in the target JVM, and redefines them using JDI. Returns which classes were redefined and the newest file timestamp (pass as sinceTimestamp on next call for incremental updates). Statement-anchored breakpoints are re-resolved against the new source after the swap (anchorResolution reports moved/stale). Only works with Java debug sessions.",
+        "name": "hot_reload",
+        "description": "Apply changed code to the running program and keep its state — the adapter's own live update. Flutter: the SDK adapter's hot reload (the app must have started; the reassemble runs build(), so a breakpoint there is reported by this call as the stop, with its location and snapshot; widget state, counters and timers survive; a reload sent to a paused program lands when it resumes). Java: class redefinition (JDI HotSwap) — scans classesDir for .class files modified after sinceTimestamp, redefines the ones the JVM has loaded, re-plants breakpoints, and returns which classes were redefined and the newest file timestamp (pass it as sinceTimestamp next time for an incremental update). Statement-anchored breakpoints are re-resolved against the new source after the update (anchorResolution reports moved/stale). Refused by name on the other languages. redefine_classes is a deprecated alias of this tool.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -725,20 +725,19 @@
             },
             "classesDir": {
               "type": "string",
-              "description": "Absolute path to compiled classes directory (e.g. build/classes/java/main/)"
+              "description": "Java only: absolute path to the compiled classes directory (e.g. build/classes/java/main/)"
             },
             "sinceTimestamp": {
               "type": "number",
-              "description": "Unix timestamp (ms). Only redefine .class files modified after this time. 0 or omitted = all files."
+              "description": "Java only: Unix timestamp (ms). Only redefine .class files modified after this time. 0 or omitted = all files."
             },
             "timeout": {
               "type": "number",
-              "description": "Max time (ms) to wait for the redefinition to complete (default: 30000, max: 600000). Increase when hot-swapping many classes at once"
+              "description": "Max time (ms) to wait for the update to complete (default: 30000, max: 600000). Increase when hot-swapping many classes at once"
             }
           },
           "required": [
-            "sessionId",
-            "classesDir"
+            "sessionId"
           ]
         }
       }

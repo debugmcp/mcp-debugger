@@ -78,6 +78,16 @@ export function formatHumanReport(report: DoctorReport): string {
   lines.push(...padColumns(tableRows));
   lines.push('');
 
+  // The targets a toolchain can run on (Flutter devices, issue #877): one line per language that reports them.
+  const targetLines = report.languages
+    .filter((diagnosis) => diagnosis.targets)
+    .map((diagnosis) => `  ${diagnosis.language} ${diagnosis.targets!.label}: ${diagnosis.targets!.items.join(', ') || 'none'}${diagnosis.targets!.note ? ` (${diagnosis.targets!.note})` : ''}`);
+  if (targetLines.length > 0) {
+    lines.push('Targets');
+    lines.push(...targetLines);
+    lines.push('');
+  }
+
   lines.push('Platform checks');
   for (const check of report.platformChecks) {
     lines.push(`  ${STATUS_MARKS[check.status]} ${check.label}: ${check.detail}`);

@@ -1,5 +1,5 @@
 /**
- * Java Hot-Reload (redefine_classes) Smoke Test via MCP Interface
+ * Java Hot-Reload (hot_reload, the former redefine_classes) Smoke Test via MCP Interface
  *
  * Tests the redefine_classes tool by:
  * 1. Compiling RedefineTarget.java (getValue() returns 42)
@@ -231,10 +231,10 @@ describe('Java Hot-Reload (redefine_classes) Smoke Test @requires-java', () => {
         fs.writeFileSync(mainFile, originalContent);
       }
 
-      // 8. Call redefine_classes — still paused at line 19
-      console.log('[Redefine] Calling redefine_classes...');
+      // 8. Call hot_reload (the Java HotSwap) — still paused at line 19
+      console.log('[Redefine] Calling hot_reload...');
       const redefineResult = parseSdkToolResult(await mcpClient!.callTool({
-        name: 'redefine_classes',
+        name: 'hot_reload',
         arguments: {
           sessionId,
           classesDir: testJavaDir,
@@ -395,13 +395,14 @@ describe('Java Hot-Reload (redefine_classes) Smoke Test @requires-java', () => {
         fs.writeFileSync(mainFile, originalContent);
       }
 
-      // 6. Hot-swap while paused at line 19
+      // 6. Hot-swap while paused at line 19 — through the deprecated alias, which still works (issue #876)
       const redefineResult = parseSdkToolResult(await mcpClient!.callTool({
         name: 'redefine_classes',
         arguments: { sessionId, classesDir: testJavaDir, sinceTimestamp: 0 }
       }));
       console.log('[Redefine #370] Result:', JSON.stringify(redefineResult));
       expect(redefineResult.success).toBe(true);
+      expect(String(redefineResult.warning)).toMatch(/deprecated alias of hot_reload/);
       expect(redefineResult.redefinedCount).toBeGreaterThanOrEqual(1);
       // Issue #370: the response reports how many breakpoints were re-planted
       // after JDI cancelled them during redefinition.

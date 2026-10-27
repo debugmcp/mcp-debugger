@@ -12,7 +12,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
 import { skipIfSpawnBlocked } from '../test-utils/helpers/adapter-spawn.js';
 import { isProcessAlive, waitForProcessesToExit } from '../test-utils/helpers/process-table.js';
-import { DART_EXAMPLES, DART_PROBE_DIR, bpLine, hasDartToolchain, prepareDartProbe } from './dart-example-utils.js';
+import { DART_EXAMPLES, DART_PROBE_DIR, bpLine, hasDartToolchain, hasFlutterToolchain, prepareDartProbe } from './dart-example-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -283,14 +283,30 @@ describe.skipIf(SKIP_DART)('MCP Server Dart Debugging Smoke Test @requires-dart'
     expect(await output()).toContain('hello mcp-debugger');
   }, 60000);
 
+  it('refuses hot_reload by name: a Dart CLI program has no Flutter app to reload (issue #876)', async (ctx) => {
+    const line = bpLine(DART_EXAMPLES.hello, 'HELLO');
+    await createSession('dart-hot-reload-refusal');
+    expect((await call('set_breakpoint', { file: DART_EXAMPLES.hello, line })).success).toBe(true);
+    await startOrSkip(ctx, { scriptPath: DART_EXAMPLES.hello, dapLaunchArgs: { stopOnEntry: false } });
+    expect(await pollState('paused', 30000), 'session should pause at the breakpoint').toBeDefined();
+    const refused = await call('hot_reload', {});
+    expect(refused.success).toBe(false);
+    expect(String(refused.error)).toMatch(/runs `dart`/);
+  }, 120000);
+
   it('reports the dart row in doctor', async () => {
     const { spawnSync } = await import('child_process');
     const r = spawnSync(process.execPath, [path.join(ROOT, 'dist', 'index.js'), 'doctor', 'dart', '--json'], { encoding: 'utf8', cwd: DART_PROBE_DIR, env: { ...process.env, NODE_ENV: 'test' } });
     expect(r.status).toBe(0);
-    const report = JSON.parse(r.stdout) as { languages: Array<{ language: string; verdict?: string; runtime?: { label?: string; version?: string } }> };
+    const report = JSON.parse(r.stdout) as { languages: Array<{ language: string; verdict?: string; runtime?: { label?: string; version?: string }; targets?: { label?: string; items?: string[] } }> };
     const row = report.languages.find(l => l.language === 'dart');
     expect(row?.verdict).toBe('ok');
     expect(row?.runtime?.label).toBe('Dart SDK');
     expect(row?.runtime?.version).toMatch(/^\d+\.\d+\.\d+/);
+    // With Flutter installed the row lists the devices the SDK sees (issue #877).
+    if (hasFlutterToolchain()) {
+      expect(row?.targets?.label).toBe('Flutter devices');
+      expect(Array.isArray(row?.targets?.items)).toBe(true);
+    }
   }, 60000);
 });

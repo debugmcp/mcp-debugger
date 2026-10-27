@@ -171,7 +171,7 @@ export function createMockSessionManager(mockAdapterRegistry: IAdapterRegistry) 
     waitForStop: vi.fn(),
     detachFromProcess: vi.fn(),
     attachToProcess: vi.fn(),
-    redefineClasses: vi.fn(),
+    hotReload: vi.fn(),
     exposeSession: vi.fn(),
     unexposeSession: vi.fn(),
     adapterRegistry: mockAdapterRegistry,

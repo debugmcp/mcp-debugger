@@ -110,12 +110,13 @@ Dart 3.13 and Flutter 3.47 — and none of them is a session error.
   adapter sends `terminated` but no `exited` event, so `exitCode` is unknown in
   `list_debug_sessions`; the test results (`✓ name`) are in `get_output`. The Dart CLI
   adapter does report `exited` (255 for an uncaught exception).
-- **Attaching to an app already running on an Android emulator does not connect.** The
-  VM-service URI another `flutter run --machine` reports is host-forwarded through that tool's
-  own adb forward; `attach_to_process` with it reaches `flutter.appStart` and then waits on
-  "Connecting to the VM Service is taking longer than expected" (measured, 60 s). The same
-  recipe works for desktop apps and Dart programs. Launch the app through mcp-debugger instead;
-  #882 tracks the `--device-vmservice-port` / `--host-vmservice-port` / `--no-dds` measurements.
+- **Attaching to an app on an Android device takes `deviceId` alone, not the other tool's URI.**
+  The URI another `flutter run --machine` reports in `app.debugPort` is that tool's own DDS
+  proxy; a second tool attaching through it waits on "Connecting to the VM Service is taking
+  longer than expected" forever (measured, #882). With `adapterConfig: { runner: "flutter",
+  deviceId: "emulator-5554" }` and no URI, `flutter attach` discovers the app through the
+  device's log and connects in ~5 s. Desktop apps keep the URI recipe (the tool cannot discover
+  them; a desktop `deviceId` without a URI is refused with that hint).
 - **On an Android emulator, the first launch after a fresh install may end without a stop.**
   Seen once: the first `flutter run` right after the debug APK was first installed ended with
   "The program ended without reporting an exit code" instead of pausing; the next launch was
@@ -125,6 +126,10 @@ Dart 3.13 and Flutter 3.47 — and none of them is a session error.
   build, not to the debugger: the launch answers `pending: true` and `wait_for_stop` collects
   the stop (in slices under your client's request cap — see the Flutter targets section of
   the Dart guide).
+- **`flutter run -d web-server` never stops.** That device serves the app for a browser with the Dart
+  Debug extension to attach to; without it no isolate ever connects, so breakpoints never bind and the
+  launch stays `running`. Use `deviceId: "chrome"` or `"edge"` (headless with
+  `toolArgs: ["--web-browser-flag=--headless=new"]`), measured to stop in `build()` in ~23 s.
 - **`dart test` fails under `%LOCALAPPDATA%\Temp` with the winget SDK (Windows).**
   package:test spawns its frontend server through a cwd-relative SDK path that does not
   resolve from there (`The system cannot find the file specified … dartaotruntime.exe`).

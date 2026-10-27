@@ -1,16 +1,29 @@
 /**
- * Reject missing, skipped, or failed Flutter widget-test cases in the dedicated host CI lane
- * (issue #790, M2). The desktop cases need a display and a platform toolchain the lane has not,
- * so only the `widget test:` cases are required there; the rest may be skipped but never failed.
+ * Reject missing, skipped, or failed Flutter cases in the dedicated host CI lane (issue #790).
+ * The lane runs the widget tests (required by default) and, in a second step, the browser case
+ * (`--require <text>`: the cases whose title contains that text are the required ones instead). The
+ * desktop cases need a display and a platform toolchain the lane has not, so they may be
+ * skipped but never failed.
  */
 import { readFileSync } from 'node:fs';
 import { isMain } from './lib/is-main.mjs';
 
-export function checkFlutterE2eReport(report) {
+/**
+ * The `--require <text>` of the CLI as a matcher: the text is a literal, matched case-insensitively
+ * — never a pattern, so a title's `build()` or `.` means itself and the argument cannot change the
+ * expression (CodeQL js/regex-injection).
+ */
+export function literalMatcher(text) {
+  return new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+}
+
+export function checkFlutterE2eReport(report, options = {}) {
+  const requirePattern = options.require ?? /widget test:/i;
+  const label = options.label ?? 'widget-test';
   const suite = report.testResults?.find(result => result.name?.replace(/\\/g, '/').endsWith('/mcp-server-smoke-flutter.test.ts'));
   const all = suite?.assertionResults ?? [];
-  const required = all.filter(test => /widget test:/i.test(test.fullName ?? test.title ?? ''));
-  if (required.length === 0) throw new Error('No Flutter widget-test cases recorded for mcp-server-smoke-flutter.test.ts');
+  const required = all.filter(test => requirePattern.test(test.fullName ?? test.title ?? ''));
+  if (required.length === 0) throw new Error(`No Flutter ${label} cases recorded for mcp-server-smoke-flutter.test.ts`);
   const incomplete = required.filter(test => test.status !== 'passed');
   if (incomplete.length) {
     throw new Error(`Flutter validation incomplete: ${incomplete.map(test => `${test.title}: ${test.status}`).join(', ')}`);
@@ -23,10 +36,11 @@ export function checkFlutterE2eReport(report) {
 
 if (isMain(import.meta.url)) {
   try {
-    const filename = process.argv[2];
-    if (!filename) throw new Error('Usage: node scripts/check-flutter-e2e-report.mjs <vitest-report.json>');
-    const passed = checkFlutterE2eReport(JSON.parse(readFileSync(filename, 'utf8')));
-    console.log(`Flutter host validation: ${passed} widget-test case(s) passed`);
+    const [filename, flag, pattern] = process.argv.slice(2);
+    if (!filename) throw new Error('Usage: node scripts/check-flutter-e2e-report.mjs <vitest-report.json> [--require <pattern>]');
+    const options = flag === '--require' && pattern ? { require: literalMatcher(pattern), label: pattern } : {};
+    const passed = checkFlutterE2eReport(JSON.parse(readFileSync(filename, 'utf8')), options);
+    console.log(`Flutter host validation: ${passed} ${options.label ?? 'widget-test'} case(s) passed`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

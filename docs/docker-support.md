@@ -85,7 +85,7 @@ Here's the recommended configuration for your MCP settings file:
         "evaluate_expression",
         "get_source_context",
         "get_output",
-        "redefine_classes"
+        "hot_reload"
       ],
       "disabled": false,
       "timeout": 60

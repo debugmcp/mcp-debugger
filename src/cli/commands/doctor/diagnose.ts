@@ -10,7 +10,7 @@
  * checks, and an honest verdict where the server fails open (recorded via
  * probe.failed / probe.timedOut so the divergence is visible).
  */
-import type { AdapterManifestEntry, IAdapterRegistry, IEnvironment, IFileSystem, ILogger, IProcessManager, ToolchainComponent, ToolchainDescription } from '@debugmcp/shared';
+import type { AdapterManifestEntry, IAdapterRegistry, IEnvironment, IFileSystem, ILogger, IProcessManager, ToolchainComponent, ToolchainTargets, ToolchainDescription } from '@debugmcp/shared';
 import { normalizeToolchainDescription } from '@debugmcp/shared';
 import { probeLanguageEntry, type LanguageModes } from '../../../utils/language-availability.js';
 import { getDisabledLanguages } from '../../../utils/language-config.js';
@@ -44,6 +44,8 @@ export interface LanguageDiagnosis {
   warnings: string[];
   runtime?: ToolchainComponent;
   backend?: ToolchainComponent;
+  /** The targets the toolchain reports (Flutter devices, issue #877). */
+  targets?: ToolchainTargets;
   /** Verbatim computeModeAvailability output — matches list_supported_languages */
   modes?: LanguageModes;
   /** Raw validate() details, verbatim */
@@ -390,6 +392,7 @@ async function diagnoseLanguage(
     warnings,
     runtime: view.runtime,
     backend: view.backend,
+    ...(view.targets ? { targets: view.targets } : {}),
     modes,
     details,
     probe: { durationMs, timedOut, failed }

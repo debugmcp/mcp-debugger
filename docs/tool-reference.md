@@ -42,7 +42,7 @@ This document provides a complete reference for all tools available in mcp-debug
    - [expose_session](#expose_session)
    - [unexpose_session](#unexpose_session)
 7. [Language-Specific Tools](#language-specific-tools)
-   - [redefine_classes](#redefine_classes)
+   - [hot_reload](#hot_reload)
 
 ---
 
@@ -57,7 +57,7 @@ Creates a new debugging session.
 - `name` (string, optional): A descriptive name for the debug session. Defaults to `"<language>-debug-<timestamp>"` (e.g., `"python-debug-1711500000000"`), built from the session language and `Date.now()`.
 - `executablePath` (string, optional): Path to the language interpreter/executable (e.g., Python interpreter path).
 - `host` (string, optional): Attach mode only — host to attach to; the adapter defaults it (`127.0.0.1` for every adapter but Java, which uses `localhost`). Does not trigger attach mode by itself.
-- `port` (number, optional): Debug port to attach to. **Passing `port`, `processId` or an `adapterConfig` that names a debugger URI (`vmServiceUri`, `websocketAddress`, `vmServiceInfoFile`) switches the call into attach mode** — the session is created and immediately attached with the same request `attach_to_process` would send (see [attach_to_process](#attach_to_process) for the full attach contract; issue #905). `host` alone does not trigger it.
+- `port` (number, optional): Debug port to attach to. **Passing `port`, `processId` or an `adapterConfig` that names a target — a debugger URI (`vmServiceUri`, `websocketAddress`, `vmServiceInfoFile`), or a Flutter `deviceId` for an app running on an Android device — switches the call into attach mode** — the session is created and immediately attached with the same request `attach_to_process` would send (see [attach_to_process](#attach_to_process) for the full attach contract; issue #905). `host` alone does not trigger it.
 - `processId` (number or string, optional): Attach mode only — same as [attach_to_process](#attach_to_process)'s `processId`; triggers attach mode.
 - `sourcePaths` (string[], optional): Attach mode only — same as `attach_to_process`.
 - `justMyCode` (boolean, optional): Attach mode only — same as `attach_to_process`.
@@ -546,7 +546,7 @@ See the [JavaScript configuration guide](javascript/README.md#custom-configurati
 
 ### restart_debugging
 
-Restarts the debuggee in one call: terminates the current program (if still running) and relaunches it with the same configuration as the last `start_debugging`. All current breakpoints are re-applied automatically — the core edit-rerun loop (`fix a line → restart → confirm at the same breakpoints`) becomes a single tool call instead of close/create/re-set/start.
+Restarts the debuggee in one call. When the adapter offers a native restart (DAP `supportsRestartRequest` — the Flutter adapter advertises it once the app has started), the DAP `restart` request is sent and the session goes on in place: for Flutter that is a **hot restart**, `main()` re-runs in the same process and the first breakpoint is reached again about half a second later (measured on Windows desktop and Chrome). Otherwise the current program is terminated (if still running) and relaunched with the same configuration as the last `start_debugging`. Either way the current breakpoints stay in force — the core edit-rerun loop (`fix a line → restart → confirm at the same breakpoints`) is a single tool call instead of close/create/re-set/start.
 
 **Parameters:**
 - `sessionId` (string, required): The ID of the debug session.
@@ -567,11 +567,12 @@ Restarts the debuggee in one call: terminates the current program (if still runn
 
 **Notes:**
 - Works while the program is running, paused, **or after it has exited** (the primary use case — a finished session can be restarted without recreating it).
-- Restart is implemented uniformly as terminate + relaunch (the DAP-spec-blessed emulation; no adapter advertises native restart), so every launch-mode language works identically. Native DAP `restart` is a possible future optimization.
+- **Which path ran is in the answer**: `data.hotRestart: true` means the adapter's own restart was used (same process, output buffer kept, no `outputReset`); otherwise the restart was terminate + relaunch (the DAP-spec-blessed emulation every launch-mode language gets) and `outputReset: true` is set. The native path is taken only for adapters measured for it (the policy's `restartViaDapRequest` pin) that also advertise `supportsRestartRequest` live — today Flutter. js-debug advertises `restart` too but relaunches through a child session this proxy does not follow, so JavaScript, the Dart CLI adapter and every other language keep the emulation (issue #876).
+- A hot restart of a `stopOnEntry: true` Flutter launch stops at entry again: the re-run `main()` hits the entry breakpoint the launch armed, reported as `reason: "entry"` like the first time.
 - The launch configuration is replayed verbatim (script, args, `dapLaunchArgs`, `adapterLaunchConfig` — the `testRunner` preset rides in it — `breakOnExceptions`); there are no per-restart overrides — call `start_debugging` for a different configuration.
-- **The output buffer starts fresh**: `outputReset: true` signals that `get_output` cursors from the previous launch are stale — read from `since: 0`.
+- **The output buffer starts fresh on a relaunch**: `outputReset: true` signals that `get_output` cursors from the previous launch are stale — read from `since: 0`. A hot restart keeps the buffer (same process): cursors stay valid.
 - The hold and its `pending: true` answer are the same as `start_debugging`'s ("When the launch answers" above): a relaunch that has not stopped when the hold elapses answers `running`, and `wait_for_stop` collects its stop. A relaunch that stopped carries the same [stop snapshot](#the-stop-snapshot) (issue #982).
-- Not available for **attach sessions** (no launch configuration to replay — detach and re-attach instead) or for sessions that were never launched, including dry-run-only sessions — call `start_debugging` on the same session instead.
+- Not available for **attach sessions** unless the adapter offers a native restart (a Flutter attach session hot-restarts like a launched one; any other attach session has no launch configuration to replay — detach and re-attach instead), nor for sessions that were never launched, including dry-run-only sessions — call `start_debugging` on the same session instead.
 
 ---
 
@@ -775,7 +776,7 @@ Blocks until the session next pauses or ends, then says why and where. This is t
 - The wait is on the session's state, not on the adapter's raw `stopped` event, so a stop the server resumes by itself — the entry stop of a `stopOnEntry: false` launch — is never reported. The answer is the first stop `list_debug_sessions` would also show.
 - A session that is already paused answers at once with its current stop, and asking twice without resuming returns the same stop twice. After `continue_execution` (or a step that answered `pending: true`) the session is `running`, so the next call waits for the next stop.
 - `lastStop` is the record `list_debug_sessions` reports: `reason`, `rawReason` when the adapter's own reason was normalized, `threadId`, and `description`/`text` for an exception — emitted as a secret-redacted copy, like variable values (issue #982). `lastStop.exceptionInfo` is filled in a moment after an exception stop — re-query `list_debug_sessions` if it is absent. `location` and `context` are best-effort: they appear when the stack could be read, and `location` is the first visible frame, as for the step tools; `threadId` and `note` appear as for `pause_execution` (a pause collected by the wait is anchored the same way). The [stop snapshot](#the-stop-snapshot) rides on every paused answer; here it carries no `exception` key — `lastStop.description`/`text` already are the exception.
-- `exitCode` is present only when the debuggee reported one. A session that ended in an error answers `state: "error"` with the reason in `message`. A finished session keeps answering the same way until it is closed. When a stop landed during the wait and the program ended before it could be inspected — an uncaught exception and the exit arriving together — the ended answer carries that stop as `lastStop`; a stop from before the wait is not repeated.
+- `exitCode` is present only when the debuggee reported one. What the adapter read into the program's end joins the answer, its note in `message` and its data beside it under the adapter's own keys — a Flutter `flutter run` whose `deviceId` matched no device answers `requestedDeviceId` and `availableDevices` (`id`, `name`, `kind`, `targetPlatform`, and `supportedByProject: false` when the project has no platform for the device) with a note that says to pass one of them, or flutter's own remedy (issue #877); a key the answer already has is never overwritten by the adapter's data; `list_debug_sessions` carries the same note as `endNote` with the data beside it. A session that ended in an error answers `state: "error"` with the reason in `message`. A finished session keeps answering the same way until it is closed. When a stop landed during the wait and the program ended before it could be inspected — an uncaught exception and the exit arriving together — the ended answer carries that stop as `lastStop`; a stop from before the wait is not repeated.
 - `pending: true` sits at the top level, as for the step tools. The message says what the wait is still for: with breakpoints (or `breakOnExceptions: "all"`) armed it names them and says they stay armed; with nothing armed it promises no pause — the program will stop only for an uncaught exception the debugger catches, or report its exit — so a caller is not sent round a loop that cannot end in a stop. When the launch runs with the debugger off (`dapLaunchArgs.noDebug`, honoured), the message says so and that the wait is for the program's exit; when the launch or attach itself has not completed, it says the session is still starting.
 - A session that was never started answers `success: false` (`Nothing to wait for: this session has not been started…`). So does a session closed while the call was waiting, and a `timeout` that is not a positive number.
 - Several calls may wait on one session at once. A call whose request is cancelled, or whose client disconnects, releases its wait.
@@ -1424,7 +1425,7 @@ Which forms a language accepts is declared by its adapter (the attach-addressing
 | C/C++, COBOL, .NET | `processId` only | used | refused: CodeLLDB and netcoredbg attach to a local PID (a gdbserver-style remote target goes through C/C++ `adapterConfig.processCreateCommands`) |
 | JavaScript | `processId`, `port`, or `adapterConfig.websocketAddress` (the inspector URL from `/json/list`; js-debug dials it directly, no `port` needed — issue #896) | the running Node.js process's inspector is activated and attached on `port` (issue #871) | used |
 | Python, Ruby, Java | `port` only | refused, with the recipe for opening a port (`python -m debugpy --listen …`, `rdbg --open --port …`, `-agentlib:jdwp=…`) | used |
-| Dart | `port`, or `adapterConfig.vmServiceUri` / `vmServiceInfoFile` | refused, with the VM-service recipe | used — `host`/`port` becomes `ws://host:port/ws`, which needs `--disable-service-auth-codes` (the response `warning` says so) |
+| Dart | `port`, `adapterConfig.vmServiceUri` / `vmServiceInfoFile`, or `adapterConfig.deviceId` alone for a Flutter app on an Android device or emulator (`flutter attach` discovers it, issue #882) | refused, with the VM-service recipe | used — `host`/`port` becomes `ws://host:port/ws`, which needs `--disable-service-auth-codes` (the response `warning` says so) |
 | Go, Rust, Mock | no attach | refused (`Attach mode is not implemented`) | refused |
 
 The same pass records where the target lives (`processId` → this host; `port` → loopback or remote by its `host`; a URI → by its hostname), which is what lets `set_breakpoint` content-address a local attach (see [set_breakpoint](#set_breakpoint)).
@@ -1615,20 +1616,38 @@ Closes the mirror endpoint and disconnects any attached IDE clients (they receiv
 
 ## Language-Specific Tools
 
-### redefine_classes
+### hot_reload
 
-Hot-swap changed Java classes into a running JVM using JDI `VirtualMachine.redefineClasses()`. **Java only.**
+Apply changed code to the running program and keep its state — the adapter's own live update. Two adapters have one today; the tool is refused by name on the others.
+
+- **Flutter** (a `flutter run` / `flutter attach` session): the SDK adapter's **hot reload**. The reassemble runs `build()`, so a breakpoint there is reported by this call as the stop, with its `location` and `snapshot` (measured: ~150 ms after the request on desktop; on web the adapter holds its response until the paused isolate resumes, which is why the call answers the stop rather than waiting for the response). Widget state, counters and timers survive. A reload sent to a *paused* program answers at once and lands when the program resumes (`note` says so). Before the app has reported `appStarted`, and on a plain Dart program, the call is refused by name.
+- **Java**: class redefinition (JDI `VirtualMachine.redefineClasses()`, HotSwap) — the former `redefine_classes` tool, whose answer is unchanged.
+
+`redefine_classes` is a **deprecated alias** of this tool: still accepted, answered with a `warning`, not advertised by `tools/list`, removed at 1.0.
 
 **Parameters:**
-- `sessionId` (string, required): The debug session ID (must be an active Java session)
-- `classesDir` (string, required): Absolute path to compiled classes directory (e.g., `build/classes/java/main/`)
-- `sinceTimestamp` (number, optional): Unix timestamp in milliseconds. Only redefine `.class` files modified after this time. `0` or omitted = scan all files.
-- `timeout` (number, optional): Maximum time in milliseconds to wait for the redefinition to complete (default: 30000, max: 600000). Increase when hot-swapping many classes at once.
+- `sessionId` (string, required): The debug session ID.
+- `classesDir` (string, Java only): Absolute path to the compiled classes directory (e.g., `build/classes/java/main/`). Required on Java; refused on Flutter.
+- `sinceTimestamp` (number, Java only, optional): Unix timestamp in milliseconds. Only redefine `.class` files modified after this time. `0` or omitted = scan all files.
+- `timeout` (number, optional): Maximum time in milliseconds to wait for the update to complete (default: 30000, max: 600000). Increase when hot-swapping many classes at once.
 
-**Response:**
+**Response (Flutter, the reassemble reached a breakpoint):**
 ```json
 {
   "success": true,
+  "state": "paused",
+  "reason": "breakpoint",
+  "location": { "file": "/app/lib/main.dart", "line": 30, "function": "_ProbeAppState.build" },
+  "snapshot": { "frames": ["…"], "locals": ["…"] }
+}
+```
+A reload whose program is still running when the hold elapses answers `state: "running"` with `pending: true` — call `wait_for_stop` for a stop it may land on.
+
+**Response (Java):**
+```json
+{
+  "success": true,
+  "state": "paused",
   "redefined": ["com.example.Foo", "com.example.Bar"],
   "redefinedCount": 2,
   "skippedNotLoaded": 3,
@@ -1641,7 +1660,12 @@ Hot-swap changed Java classes into a running JVM using JDI `VirtualMachine.redef
 }
 ```
 
-**Example — full scan:**
+**Example — Flutter:**
+```json
+{ "sessionId": "abc-123" }
+```
+
+**Example — Java, full scan:**
 ```json
 {
   "sessionId": "abc-123",
@@ -1649,7 +1673,7 @@ Hot-swap changed Java classes into a running JVM using JDI `VirtualMachine.redef
 }
 ```
 
-**Example — incremental scan (pass `newestTimestamp` from previous call):**
+**Example — Java, incremental scan (pass `newestTimestamp` from the previous call):**
 ```json
 {
   "sessionId": "abc-123",
@@ -1659,11 +1683,10 @@ Hot-swap changed Java classes into a running JVM using JDI `VirtualMachine.redef
 ```
 
 **Notes:**
-- Only works with Java debug sessions (requires JDI support)
-- Classes must already be loaded in the target JVM — unloaded classes are skipped (`skippedNotLoaded`)
-- Schema changes (adding/removing methods or fields) will fail for individual classes without blocking others
-- The `newestTimestamp` in the response enables incremental workflows: recompile, then pass it as `sinceTimestamp` on the next call to only redefine newly modified files
-- The session can be paused or running when calling this tool
+- Statement-anchored breakpoints are re-resolved against the new source after the update (`anchorResolution` reports moved/stale, as `restart_debugging` does); moved ones are re-sent so they bind against the new line table.
+- Java: classes must already be loaded in the target JVM — unloaded classes are skipped (`skippedNotLoaded`); schema changes (adding/removing methods or fields) fail for individual classes without blocking others; the `newestTimestamp` in the response enables incremental workflows.
+- Java: the session can be paused or running when calling this tool. Flutter: the app must have started.
+- Hot *restart* (re-run `main()` in the same process) is `restart_debugging` on a Flutter session.
 
 ---
 

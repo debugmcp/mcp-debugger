@@ -149,6 +149,37 @@ describe('execution tool handlers', () => {
       });
     });
 
+    it('hoists what the adapter read into the program\'s end beside the message (issue #877)', async () => {
+      ctx.sessionManager.getSession.mockReturnValue(liveSession);
+      const availableDevices = [{ id: 'windows', name: 'Windows', kind: 'desktop' }];
+      ctx.sessionManager.waitForStop.mockResolvedValue({
+        success: true,
+        state: 'stopped',
+        data: {
+          message: "The program ended without reporting an exit code. deviceId 'bogus' matched no device.",
+          note: 'the landing note',
+          // The policy's whole explanation, nested by the session layer so the handler can hoist
+          // its data without knowing the keys; a key the answer already has — the landing's
+          // included — stays as it is, and the note is already in the message.
+          programEnd: {
+            note: "deviceId 'bogus' matched no device.",
+            data: { requestedDeviceId: 'bogus', availableDevices, message: 'not this one', state: 'not this one', note: 'not this one' }
+          }
+        }
+      });
+
+      const result = await waitForStopTool(ctx, { sessionId: 'test-session' }, 'wait_for_stop');
+
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        success: true,
+        state: 'stopped',
+        message: "The program ended without reporting an exit code. deviceId 'bogus' matched no device.",
+        note: 'the landing note',
+        requestedDeviceId: 'bogus',
+        availableDevices
+      });
+    });
+
     it('keeps exit code 0: a clean finish is still an answer', async () => {
       ctx.sessionManager.getSession.mockReturnValue(liveSession);
       ctx.sessionManager.waitForStop.mockResolvedValue({

@@ -20,6 +20,7 @@ describe('DebugResultData type contract (issue #590)', () => {
       | 'unhitBreakpoints'
       | 'breakpointsReapplied'
       | 'outputReset'
+      | 'hotRestart'
       | 'anchorResolution'
       | 'resumedBeforeDetach'
     >();

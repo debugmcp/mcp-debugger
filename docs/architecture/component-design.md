@@ -128,7 +128,7 @@ class SessionManager {
   async attachToProcess(sessionId: string, attachConfig: { port?: number; host?: string; processId?: number | string; timeout?: number; sourcePaths?: string[]; stopOnEntry?: boolean; justMyCode?: boolean; verifyTimeout?: number; breakOnExceptions?: ExceptionBreakMode; adapterConfig?: Record<string, unknown>; }): Promise<DebugResult<AttachResultData>>
   async detachFromProcess(sessionId: string, terminateProcess?: boolean): Promise<DebugResult>
   async listThreads(sessionId: string): Promise<Array<{ id: number; name: string }>>
-  async redefineClasses(sessionId: string, classesDir: string, sinceTimestamp?: number, timeoutMs?: number): Promise<RedefineClassesResult>
+  async hotReload(sessionId: string, args?: HotReloadArgs, timeoutMs?: number): Promise<HotReloadResult>
   async exposeSession(sessionId: string): Promise<ExposeSessionResult>
   async unexposeSession(sessionId: string): Promise<UnexposeSessionResult>
 
@@ -254,7 +254,7 @@ ProxyManager spawns and communicates with a debug proxy worker process over IPC 
 
 ProxyManager tracks pending DAP requests with timeout handling. The timeout is
 derived, not hardcoded: a per-request `timeoutMs` override (from the `timeout`
-tool argument on `evaluate_expression`/`redefine_classes`, issue #142) or the
+tool argument on `evaluate_expression`/`hot_reload`, issue #142) or the
 30s default, plus a 5s margin so the worker/socket timeout — which produces the
 actionable error — always fires before this parent backstop:
 

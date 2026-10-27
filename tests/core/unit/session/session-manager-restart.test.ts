@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
-import { DebugLanguage, SessionState } from '@debugmcp/shared';
+import { DebugLanguage, MockAdapterPolicy, SessionState, type AdapterPolicy } from '@debugmcp/shared';
 import { createMockDependencies } from './session-manager-test-utils.js';
 import { internals } from '../../../test-utils/helpers/operations-internals.js';
 
@@ -313,4 +313,111 @@ describe('SessionManager - restart and relaunch', () => {
       expect(listed).not.toHaveProperty('lastStop');
     });
   });
+
+  describe('hot restart through DAP restart (issue #876)', () => {
+    /** The facade's policy lookup, which the launcher reads: the mock policy pinned for the native restart. */
+    function pinNativeRestart() {
+      vi.spyOn(sessionManager as unknown as { selectPolicy: (l: string) => AdapterPolicy }, 'selectPolicy')
+        .mockReturnValue({ ...MockAdapterPolicy, restartViaDapRequest: true } as AdapterPolicy);
+    }
+
+    async function pausedLaunchedSession(options: { pinned?: boolean } = {}) {
+      if (options.pinned !== false) pinNativeRestart();
+      const session = await createLaunchedSession();
+      dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+      await vi.runAllTimersAsync();
+      dependencies.mockProxyManager.dapRequestCalls = [];
+      return session;
+    }
+
+    function restartRequests() {
+      return dependencies.mockProxyManager.dapRequestCalls.filter((c) => c.command === 'restart');
+    }
+
+    it('sends DAP restart instead of relaunching when the adapter advertises supportsRestartRequest, and answers the stop that follows', async () => {
+      const session = await pausedLaunchedSession();
+      dependencies.mockProxyManager.emit('adapter-capabilities', { supportsRestartRequest: true });
+
+      const restartPromise = sessionManager.restartDebugging(session.id);
+      await vi.advanceTimersByTimeAsync(20);
+      expect(restartRequests()).toHaveLength(1);
+      // The re-run program reaches its breakpoint on a new thread, as a hot restart does.
+      dependencies.mockProxyManager.simulateStopped(2, 'breakpoint');
+      await vi.runAllTimersAsync();
+      const result = await restartPromise;
+
+      expect(result.success).toBe(true);
+      expect(dependencies.mockProxyManager.startCalls, 'no relaunch').toHaveLength(1);
+      expect(result.state).toBe(SessionState.PAUSED);
+      const data = result.data as { hotRestart?: boolean; outputReset?: boolean; reason?: string; breakpointsReapplied?: number };
+      expect(data.hotRestart).toBe(true);
+      expect(data.outputReset, 'the output buffer is kept: same process').toBeUndefined();
+      expect(data.reason).toBe('breakpoint');
+    });
+
+    it('answers pending when the re-run program has not stopped within the hold', async () => {
+      const session = await pausedLaunchedSession();
+      dependencies.mockProxyManager.emit('adapter-capabilities', { supportsRestartRequest: true });
+
+      const restartPromise = sessionManager.restartDebugging(session.id);
+      await vi.runAllTimersAsync();
+      const result = await restartPromise;
+
+      expect(result.success).toBe(true);
+      expect(restartRequests()).toHaveLength(1);
+      expect(result.state).toBe(SessionState.RUNNING);
+      const data = result.data as { hotRestart?: boolean; pending?: boolean };
+      expect(data.hotRestart).toBe(true);
+      expect(data.pending).toBe(true);
+    });
+
+    it('keeps terminate-and-relaunch for an adapter that advertises restart but is not pinned for it (js-debug relaunches through a child session this proxy does not follow)', async () => {
+      const session = await pausedLaunchedSession({ pinned: false });
+      dependencies.mockProxyManager.emit('adapter-capabilities', { supportsRestartRequest: true });
+
+      const restartPromise = sessionManager.restartDebugging(session.id);
+      await vi.runAllTimersAsync();
+      const result = await restartPromise;
+
+      expect(result.success).toBe(true);
+      expect(restartRequests()).toHaveLength(0);
+      expect(dependencies.mockProxyManager.startCalls).toHaveLength(2);
+      expect((result.data as { hotRestart?: boolean; outputReset?: boolean }).hotRestart).toBeUndefined();
+      expect((result.data as { outputReset?: boolean }).outputReset).toBe(true);
+    });
+
+    it('keeps terminate-and-relaunch for a pinned adapter that does not advertise restart', async () => {
+      const session = await pausedLaunchedSession();
+
+      const restartPromise = sessionManager.restartDebugging(session.id);
+      await vi.runAllTimersAsync();
+      const result = await restartPromise;
+
+      expect(result.success).toBe(true);
+      expect(restartRequests()).toHaveLength(0);
+      expect(dependencies.mockProxyManager.startCalls).toHaveLength(2);
+      expect((result.data as { hotRestart?: boolean }).hotRestart).toBeUndefined();
+    });
+
+    it('restarts an attach session when the adapter advertises restart, and says why when it does not', async () => {
+      const session = await pausedLaunchedSession();
+      sessionManager.getSession(session.id)!.attachMode = true;
+
+      const refused = await sessionManager.restartDebugging(session.id);
+      expect(refused.success).toBe(false);
+      expect(refused.error).toMatch(/restart request/);
+
+      dependencies.mockProxyManager.emit('adapter-capabilities', { supportsRestartRequest: true });
+      const restartPromise = sessionManager.restartDebugging(session.id);
+      await vi.advanceTimersByTimeAsync(20);
+      dependencies.mockProxyManager.simulateStopped(2, 'breakpoint');
+      await vi.runAllTimersAsync();
+      const result = await restartPromise;
+
+      expect(result.success).toBe(true);
+      expect(restartRequests()).toHaveLength(1);
+      expect((result.data as { hotRestart?: boolean }).hotRestart).toBe(true);
+    });
+  });
+
 });

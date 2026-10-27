@@ -305,6 +305,59 @@ export function generatedFileCandidatesFrom(
   return candidates;
 }
 
+/** Arguments of a `hot_reload` call, as the policy turns them into its adapter's request (issue #876). */
+export interface HotReloadArgs {
+  /** Java: the directory of the recompiled `.class` files the JDI bridge scans. */
+  classesDir?: string;
+  /** Java: only `.class` files modified after this Unix-ms timestamp (0 or absent: all). */
+  sinceTimestamp?: number;
+}
+
+/** The DAP request a `hot_reload` call sends, or the reason the policy refuses it right now. */
+export type LiveUpdateRequest =
+  | { command: string; args?: Record<string, unknown> }
+  | { refused: string };
+
+/**
+ * The adapter's live code update behind `hot_reload` (issue #876): apply changed code to the
+ * running program and keep its state. One object, so a reader sees one feature and a new
+ * adapter implements one member: Java's is the JDI bridge's `redefineClasses` (HotSwap);
+ * Flutter's is the SDK adapter's `hotReload`, gated on the app having started, which the
+ * policy learns from the adapter's own events.
+ */
+export interface LiveUpdatePolicy {
+  /** Custom DAP events the worker forwards to the session for this feature's bookkeeping. */
+  events?: readonly string[];
+  /** DAP commands of this feature that resume the program (the worker clears its last stop). */
+  resumeCommands?: readonly string[];
+  /** Folds a forwarded event into the session's per-policy state (opaque to the core). */
+  onEvent?(state: unknown, event: string, body: unknown): unknown;
+  /** The request a `hot_reload` call sends, or why it is refused now — decided before anything reaches the adapter. */
+  request(args: HotReloadArgs, state: unknown): LiveUpdateRequest;
+  /** Whether the update changed code, so statement anchors re-resolve and moved breakpoints are re-sent (issue #464). */
+  changed(response: DebugProtocol.Response | undefined): boolean;
+  /**
+   * The update may stop the program before it answers (Flutter: the reassemble runs `build()`
+   * and a breakpoint there fires ~150 ms after the request; the response is held until the
+   * isolate resumes on some platforms — measured). The controller then races the stop against
+   * the response under the launch hold instead of awaiting the response.
+   */
+  mayStopDuringUpdate?: boolean;
+}
+
+/** What the policy reads a program's end from (issue #877). */
+export interface ProgramEndContext {
+  /** The tail of the output the program and its tool printed (the last few KB). */
+  outputTail: string;
+  exitCode?: number;
+}
+
+/** The policy's reading of a program's end: a sentence for the message, data for the answer. */
+export interface ProgramEndExplanation {
+  note?: string;
+  data?: Record<string, unknown>;
+}
+
 export interface AdapterPolicy {
   /**
    * Identifying name for diagnostics (e.g., 'default', 'js-debug')
@@ -689,6 +742,31 @@ export interface AdapterPolicy {
    * out alone.
    */
   terminateBeforeDisconnect?: boolean;
+
+  /**
+   * `restart_debugging` sends the DAP `restart` request instead of terminate +
+   * relaunch when the live `initialize` capabilities also advertise
+   * `supportsRestartRequest` (issue #876). Pinned per adapter because the
+   * advertisement alone is not enough: js-debug advertises it and relaunches
+   * through a child session this proxy does not follow (the session ends
+   * `stopped`), while the Flutter adapter's `restart` is a hot restart — the
+   * same process re-runs `main()`, breakpoints hold, measured to re-hit in
+   * ~0.4 s. Optional — absent means the relaunch.
+   */
+  restartViaDapRequest?: boolean;
+
+  /** The adapter's live code update behind `hot_reload` (issue #876); absent means the tool refuses this language by name. */
+  liveUpdate?: LiveUpdatePolicy;
+
+  /**
+   * What the program's end means in this adapter's words (issue #877), for the answers that
+   * report the end — the launch that ran to completion within its hold, wait_for_stop, the
+   * session listing — read once at the end event from the output the program and its tool
+   * printed. Dart names the devices `flutter run` listed when `deviceId` matched none (the tool
+   * prints them and exits ~3 s after the launch answered, so the launch answer cannot). Absent
+   * or `undefined`: nothing to add.
+   */
+  explainProgramEnd?(context: ProgramEndContext): ProgramEndExplanation | undefined;
 
   /**
    * Normalize an adapter-specific DAP stop reason into a canonical reason

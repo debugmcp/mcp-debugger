@@ -3,7 +3,7 @@
  * Flutter's bundled copy, the winget install dir), resolve the example project's packages once,
  * and locate `// BP-NAME` marker lines so moving a line never breaks an assertion.
  */
-import { spawnSync } from 'child_process';
+import { spawn, spawnSync, type ChildProcess } from 'child_process';
 import { existsSync, readFileSync, readdirSync, realpathSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -145,6 +145,83 @@ function runFlutter(root: string, args: string[], cwd: string, timeoutMs = 300_0
   return { status: r.status, stdout, out: `${stdout}${r.stderr ?? ''}` };
 }
 
+/** A `flutter run --machine` started outside the debugger (issue #882): the app a session attaches to. */
+export interface FlutterRunMachine {
+  /** The tool's `app.debugPort` URI (`params.wsUri`) once reported; null before. */
+  readonly wsUri: string | null;
+  readonly appId: string | null;
+  /** The tool process is still running — and with it, the app it started. */
+  readonly alive: boolean;
+  readonly child: ChildProcess;
+  /** The params of the next `<event>` on the machine stream, or null after `timeoutMs`. */
+  waitFor(event: string, timeoutMs: number): Promise<Record<string, unknown> | null>;
+  /** `app.stop` through the tool, then end the tool process. */
+  stop(): Promise<void>;
+}
+
+/**
+ * Start the probe app the way a developer terminal or an IDE does — `flutter run -d <device>
+ * --machine` — so a test can attach to an app the debugger did not launch. The JSON-RPC stream
+ * on stdout carries `app.start`, `app.debugPort` (the tool's own DDS URI) and `app.started`; the
+ * tool's plain text goes to the same stream and is skipped.
+ */
+export function flutterRunMachine(deviceId: string, cwd = FLUTTER_PROBE_DIR, target = FLUTTER_EXAMPLES.main): FlutterRunMachine {
+  const root = findFlutterRootSync();
+  if (!root) throw new Error('No Flutter SDK found for the examples');
+  const argv = flutterToolArgv(root, ['run', '-d', deviceId, '--machine', '-t', target]);
+  const child = spawn(argv.command, argv.args, { cwd, env: argv.env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  let wsUri: string | null = null;
+  let appId: string | null = null;
+  const waiters: Array<{ event: string; resolve: (params: Record<string, unknown> | null) => void }> = [];
+  const alive = () => child.exitCode === null && child.signalCode === null;
+  // A tool that dies (device offline, a signal) answers every pending wait at once, not after
+  // the wait's own timeout; its stdin may already be gone when stop() writes to it.
+  child.once('exit', () => { for (const w of waiters.splice(0)) w.resolve(null); });
+  child.stdin!.on('error', () => { /* the tool is gone; stop() checks alive() first */ });
+  let rest = '';
+  child.stdout!.on('data', (chunk: Buffer) => {
+    rest += chunk.toString();
+    let nl: number;
+    while ((nl = rest.indexOf('\n')) >= 0) {
+      const line = rest.slice(0, nl).replace(/\r$/, '');
+      rest = rest.slice(nl + 1);
+      if (!line.startsWith('[{')) continue;
+      let message: { event?: string; params?: Record<string, unknown> } | undefined;
+      try { [message] = JSON.parse(line) as Array<typeof message>; } catch { continue; }
+      if (!message?.event) continue;
+      const params = message.params ?? {};
+      if (message.event === 'app.start' || message.event === 'app.debugPort') appId = typeof params.appId === 'string' ? params.appId : appId;
+      if (message.event === 'app.debugPort' && typeof params.wsUri === 'string') wsUri = params.wsUri;
+      for (const w of [...waiters]) {
+        if (w.event === message.event) { waiters.splice(waiters.indexOf(w), 1); w.resolve(params); }
+      }
+    }
+  });
+  child.stderr!.on('data', () => { /* the tool's warnings; the test reads the app's state through the server */ });
+  return {
+    get wsUri() { return wsUri; },
+    get appId() { return appId; },
+    get alive() { return alive(); },
+    child,
+    waitFor(event, timeoutMs) {
+      if (!alive()) return Promise.resolve(null);
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => { const i = waiters.indexOf(w); if (i >= 0) { waiters.splice(i, 1); resolve(null); } }, timeoutMs);
+        const w = { event, resolve: (params: Record<string, unknown> | null) => { clearTimeout(timer); resolve(params); } };
+        waiters.push(w);
+      });
+    },
+    async stop() {
+      if (!alive()) return;
+      if (appId) child.stdin!.write(`${JSON.stringify([{ id: 1, method: 'app.stop', params: { appId } }])}\n`);
+      await new Promise<void>((resolve) => {
+        const t = setTimeout(() => { child.kill(); resolve(); }, 5000);
+        child.once('exit', () => { clearTimeout(t); resolve(); });
+      });
+    },
+  };
+}
+
 let flutterProbePrepared = false;
 
 /**
@@ -160,6 +237,11 @@ export function prepareFlutterProbe(): void {
   if (!existsSync(platformDir)) {
     const r = runFlutter(root, ['create', `--platforms=${platforms}`, '--project-name', 'flutter_probe', '.'], FLUTTER_PROBE_DIR);
     if (r.status !== 0) throw new Error(`flutter create failed: ${r.out}`);
+  }
+  // A checkout generated before the web case existed has the desktop folder but no `web/`.
+  if (!existsSync(path.join(FLUTTER_PROBE_DIR, 'web'))) {
+    const r = runFlutter(root, ['create', '--platforms=web', '--project-name', 'flutter_probe', '.'], FLUTTER_PROBE_DIR);
+    if (r.status !== 0) throw new Error(`flutter create --platforms=web failed: ${r.out}`);
   }
   if (!existsSync(path.join(FLUTTER_PROBE_DIR, '.dart_tool', 'package_config.json'))) {
     const r = runFlutter(root, ['pub', 'get'], FLUTTER_PROBE_DIR);
@@ -199,6 +281,17 @@ export function flutterDesktopDeviceId(): string | null {
   if (process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) return null;
   const want = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux';
   return flutterDeviceIds().includes(want) ? want : null;
+}
+
+/**
+ * The browser device for a Flutter web run: `chrome` when `flutter devices` lists it (the SDK
+ * finds Chrome on PATH or through CHROME_EXECUTABLE), null with `MCP_SKIP_FLUTTER_WEB=1`. The
+ * cases run it headless (`--web-browser-flag=--headless=new`), so no display is needed:
+ * measured at the same first-stop time as a windowed Chrome (~22 s, issue #790).
+ */
+export function flutterWebDeviceId(): string | null {
+  if (process.env.MCP_SKIP_FLUTTER_WEB === '1') return null;
+  return flutterDeviceIds().includes('chrome') ? 'chrome' : null;
 }
 
 // ---- Android ------------------------------------------------------------------------------------

@@ -21,7 +21,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
 import { skipIfSpawnBlocked } from '../test-utils/helpers/adapter-spawn.js';
 import {
-  FLUTTER_EXAMPLES, FLUTTER_PROBE_DIR, bpLine, findFlutterRootSync, flutterEmulatorDeviceId, hasFlutterToolchain,
+  FLUTTER_EXAMPLES, FLUTTER_PROBE_DIR, bpLine, findFlutterRootSync, flutterEmulatorDeviceId, flutterRunMachine, hasFlutterToolchain,
   prepareFlutterAndroid, resetAndroidApp,
 } from './dart-example-utils.js';
 
@@ -162,6 +162,39 @@ describe.skipIf(!EMULATOR)(`MCP Server Flutter Android Smoke Test @requires-flut
     expect((await getSession())?.state).toBe('running');
     expect((await callToolSafely(mcpClient!, 'close_debug_session', { sessionId })).success).toBe(true);
     sessionId = null;
+  }, 600000);
+
+  it('attach: an app another flutter run started on the emulator, by deviceId alone — flutter attach discovers it, the timer breakpoint hits, detach leaves it running (issue #882)', async (ctx) => {
+    const line = bpLine(FLUTTER_EXAMPLES.main, 'TICK');
+    resetAndroidApp(EMULATOR!);
+    const external = flutterRunMachine(EMULATOR!);
+    try {
+      expect(await external.waitFor('app.debugPort', 300000), 'app.debugPort from flutter run --machine').not.toBeNull();
+      await external.waitFor('app.started', 60000);
+      await createSession('flutter-android-attach');
+      expect((await call('set_breakpoint', { file: FLUTTER_EXAMPLES.main, line })).success).toBe(true);
+      // No URI: the one `flutter run --machine` reports is that tool's own DDS and never connects
+      // from a second tool; `flutter attach -d <device>` finds the app through the device's log.
+      const attached = await call('attach_to_process', {
+        stopOnEntry: false, verifyTimeout: 90000, adapterConfig: { runner: 'flutter', deviceId: EMULATOR, cwd: FLUTTER_PROBE_DIR },
+      });
+      if (!attached.success) skipIfSpawnBlocked(ctx as never, attached, 'Flutter');
+      expect(attached.success, JSON.stringify(attached)).toBe(true);
+      expect(JSON.stringify(attached)).toMatch(/discovers/);
+
+      const paused = await waitForPause(60000, 'the timer breakpoint after attach');
+      expect(paused.lastStop?.reason).toBe('breakpoint');
+      expect((await frames())[0].line).toBe(line);
+      expect(await output()).toContain('Connected to the VM Service.');
+
+      expect((await call('detach_from_process', {})).success).toBe(true);
+      sessionId = null;
+      await wait(1000);
+      expect(external.alive, 'the app keeps running after detach').toBe(true);
+    } finally {
+      await external.stop();
+      resetAndroidApp(EMULATOR!);
+    }
   }, 600000);
 
   it('integration test on the emulator: the test\'s tap hits the app\'s breakpoint, and the run finishes', async (ctx) => {

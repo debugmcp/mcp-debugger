@@ -87,6 +87,18 @@ describe('OutputRingBuffer', () => {
     expect(buffer.renderText()).toBe('out 1\nerr 1\npartial line\n');
   });
 
+  it('renders only the tail, by characters, from the newest entries back (issue #877)', () => {
+    const buffer = new OutputRingBuffer();
+    buffer.push('stdout', 'abc');
+    buffer.push('stderr', 'defg');
+    buffer.push('stdout', 'hij');
+
+    expect(buffer.renderTail(5)).toBe('fghij');
+    expect(buffer.renderTail(4)).toBe('ghij');
+    expect(buffer.renderTail(100)).toBe('abcdefghij');
+    expect(buffer.renderTail(0)).toBe('');
+  });
+
   it('uses the default cap of 1000', () => {
     const buffer = new OutputRingBuffer();
     for (let i = 0; i < OUTPUT_BUFFER_CAP + 10; i++) {

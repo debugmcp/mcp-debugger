@@ -78,6 +78,7 @@ export type {
   // Doctor presentation (issue #435)
   ToolchainComponent,
   ToolchainDescription,
+  ToolchainTargets,
   DescribeToolchainOptions,
 
   // Utility types
@@ -187,6 +188,11 @@ export { AdapterFactory } from './factories/adapter-factory.js';
 // Adapter Policy interfaces and implementations
 export type {
   AdapterPolicy,
+  HotReloadArgs,
+  LiveUpdatePolicy,
+  LiveUpdateRequest,
+  ProgramEndContext,
+  ProgramEndExplanation,
   ChildSessionStrategy,
   AdapterSpecificState,
   CommandHandling,
@@ -228,7 +234,7 @@ export { RustAdapterPolicy } from './interfaces/adapter-policy-rust.js';
 export { CppAdapterPolicy } from './interfaces/adapter-policy-cpp.js';
 export { getLldbAttachBehavior } from './interfaces/lldb-policy-shared.js';
 export { CobolAdapterPolicy, COBOL_SCOPE_NAMES, COBOL_RUNTIME_ERROR_FILTER } from './interfaces/adapter-policy-cobol.js';
-export { DartAdapterPolicy, DART_LOCAL_SCOPE_NAMES, DART_BRIDGE_BASENAME } from './interfaces/adapter-policy-dart.js';
+export { DartAdapterPolicy, DART_LOCAL_SCOPE_NAMES, DART_BRIDGE_BASENAME, explainFlutterProgramEnd, parseFlutterDeviceMiss, splitFlutterBulletRow } from './interfaces/adapter-policy-dart.js';
 export { DapFrameDecoder, encodeDapMessage } from './dap/dap-framing.js';
 export type { DapFrameDecoderErrorContext, DapFrameDecoderOptions } from './dap/dap-framing.js';
 export { GoAdapterPolicy } from './interfaces/adapter-policy-go.js';

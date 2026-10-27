@@ -256,16 +256,16 @@ The adapter never compiles your code: JDI binds a breakpoint through the `.class
 - Check for firewall rules blocking the port
 - Ensure `server=y` is set in the JDWP agent string
 
-## Hot Reload (redefine_classes)
+## Hot Reload (hot_reload)
 
-The `redefine_classes` MCP tool hot-swaps changed Java classes into a running JVM using JDI's `VirtualMachine.redefineClasses()`. This enables edit-compile-reload workflows without restarting the debug session.
+The `hot_reload` MCP tool (`redefine_classes` until #876; the old name is a deprecated alias that still answers, with a warning) hot-swaps changed Java classes into a running JVM using JDI's `VirtualMachine.redefineClasses()`. This enables edit-compile-reload workflows without restarting the debug session.
 
 ### Workflow
 
 1. **Attach** to a running JVM (or launch a debug session)
 2. **Edit** your Java source files
 3. **Recompile** with `javac -g` to produce updated `.class` files
-4. **Call `redefine_classes`** with the classes directory:
+4. **Call `hot_reload`** with the classes directory:
    ```json
    {
      "sessionId": "your-session-id",

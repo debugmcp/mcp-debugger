@@ -18,7 +18,7 @@ import {
   getPolicyForLanguage,
   isSettledSessionState
 } from '@debugmcp/shared';
-import type { AttachLocality, ExceptionBreakMode, SessionStopInfo } from '@debugmcp/shared';
+import type { AttachLocality, ExceptionBreakMode, ProgramEndExplanation, SessionStopInfo } from '@debugmcp/shared';
 import { SessionNotFoundError } from '../errors/debug-errors.js';
 
 /**
@@ -168,6 +168,10 @@ export interface ManagedSession extends DebugSessionInfo {
   // Reset on each launch; gates best-effort requests like exceptionInfo and
   // lets tooling validate static policy tables against the real adapter.
   adapterCapabilities?: DebugProtocol.Capabilities;
+  /** The policy's live-update bookkeeping (issue #876), opaque to the core; reset per launch. */
+  liveUpdateState?: unknown;
+  /** The policy's reading of the program's end (issue #877), recorded at the end event; reset per launch. */
+  programEndExplanation?: ProgramEndExplanation;
   // The breakOnExceptions mode actually in effect for the current launch or
   // attach — the user's value, or the policy's launch default when unset
   // (issue #244). Previously write-only pass-through; recorded for read-back.
@@ -351,6 +355,8 @@ export class SessionStore {
         ? { lastStop: s.lastStop }
         : {}),
       exitCode: s.exitCode,
+      // What the adapter read into the program's end (issue #877), once it has ended.
+      ...(s.programEndExplanation && s.state === SessionState.STOPPED ? { programEnd: s.programEndExplanation } : {}),
       ...(s.state === SessionState.ERROR && s.failureDiagnostics
         ? { diagnostics: s.failureDiagnostics }
         : {}),
