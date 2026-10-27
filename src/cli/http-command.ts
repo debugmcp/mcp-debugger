@@ -387,8 +387,12 @@ export function createHttpApp(
 
         await newDebugServer.server.connect(newTransport);
         transport = newTransport;
+      } else if (sessionId) {
+        logger.warn('Rejecting MCP request: unknown session ID', { method: req.method });
+        res.status(404).json(jsonRpcErrorBody(-32001, 'Session not found'));
+        return;
       } else {
-        logger.warn('Rejecting MCP request: missing or unknown session ID', {
+        logger.warn('Rejecting MCP request: missing session ID', {
           method: req.method,
           hasSessionId: !!sessionId,
           isInit: req.method === 'POST' && isInitializeRequest(req.body),
@@ -396,7 +400,7 @@ export function createHttpApp(
         res.status(400).json(
           jsonRpcErrorBody(
             ErrorCode.InvalidRequest,
-            'Bad Request: missing or unknown Mcp-Session-Id, and this is not an initialize request'
+            'Bad Request: missing Mcp-Session-Id, and this is not an initialize request'
           )
         );
         return;
