@@ -128,16 +128,20 @@ empty stack until it next runs code.
 ## Flutter targets
 
 `flutter test` runs headless on every platform. `flutter run` needs a device: `deviceId: "windows"`
-(desktop, Visual Studio required), `"chrome"` / `"edge"` (web, through dwds; listed by `flutter
-devices` but not yet exercised by the test suite), `"emulator-5554"` (Android, boot it first with
-`flutter emulators --launch <id>`). First launches pay the platform build (a Windows runner build,
+(desktop, Visual Studio required), `"chrome"` / `"edge"` (web, through dwds — measured: a `build()`
+breakpoint in ~23 s on Chrome and ~24 s on Edge, headless too with
+`toolArgs: ["--web-browser-flag=--headless=new"]`, which is how CI runs it; `"web-server"` needs the
+Dart Debug browser extension and never stops on its own, so use a browser device), `"emulator-5554"`
+(Android, boot it first with `flutter emulators --launch <id>`). First launches pay the platform build (a Windows runner build,
 Gradle for Android); later launches reuse it. `integration_test/` files run through `flutter test`
 on the chosen device, and a breakpoint in the app code hits when the test drives it.
 
 Measured through the server on Windows (Flutter 3.47.7, `examples/dart/flutter_probe`,
 `tests/e2e/mcp-server-smoke-flutter.test.ts`): a widget-test breakpoint in ~6 s warm, a `build()`
 breakpoint under `flutter run -d windows` in ~20 s warm, an `integration_test` breakpoint on the
-desktop in ~21 s warm; the first launch of a fresh project takes ~30 s for either. The launch
+desktop in ~21 s warm, a `build()` breakpoint under `flutter run -d chrome` in ~23 s (the web build;
+`hot_reload` re-hits it in-call and `restart_debugging` hot-restarts the page in ~0.6 s); the first
+launch of a fresh project takes ~30 s for either. The launch
 answers `pending: true` after its one-second hold, so follow it with `wait_for_stop` in slices
 under your MCP client's request cap (60 s is a common default; 45 s is safe), called again while
 the answer is `pending: true` — one long `timeout` fails on the client side first (measured at

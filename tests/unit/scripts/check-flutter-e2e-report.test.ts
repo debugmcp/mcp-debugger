@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkFlutterE2eReport } from '../../../scripts/check-flutter-e2e-report.mjs';
+import { checkFlutterE2eReport, literalMatcher } from '../../../scripts/check-flutter-e2e-report.mjs';
 
 function report(widgetStatus = 'passed', desktopStatus = 'pending') {
   return {
@@ -26,8 +26,30 @@ describe('Flutter host validation report', () => {
   it('rejects a failed desktop case even though it is not required', () => {
     expect(() => checkFlutterE2eReport(report('passed', 'failed'))).toThrow('cases failed');
   });
+  it('requires the cases a `require` pattern names instead of the widget tests (the web lane, issue #790)', () => {
+    const web = {
+      success: true,
+      testResults: [{ name: 'C:/x/tests/e2e/mcp-server-smoke-flutter.test.ts', assertionResults: [
+        { title: 'widget test: breaks', fullName: 'widget test: breaks', status: 'skipped' },
+        { title: 'flutter run in the browser: breaks in build()', fullName: 'web (chrome) flutter run in the browser: breaks in build()', status: 'passed' },
+      ] }],
+    };
+    expect(checkFlutterE2eReport(web, { require: /in the browser/, label: 'web' })).toBe(1);
+    expect(() => checkFlutterE2eReport({ ...web, testResults: [{ ...web.testResults[0], assertionResults: [web.testResults[0].assertionResults[0]] }] }, { require: /in the browser/, label: 'web' })).toThrow('No Flutter web cases');
+    const skipped = { ...web, testResults: [{ ...web.testResults[0], assertionResults: web.testResults[0].assertionResults.map((t) => ({ ...t, status: 'skipped' })) }] };
+    expect(() => checkFlutterE2eReport(skipped, { require: /in the browser/, label: 'web' })).toThrow('validation incomplete');
+  });
+
   it('rejects a missing suite and an unsuccessful run', () => {
     expect(() => checkFlutterE2eReport({ success: true, testResults: [] })).toThrow('No Flutter widget-test cases');
     expect(() => checkFlutterE2eReport({ ...report(), success: false })).toThrow('unsuccessful run');
+  });
+
+  it('matches the --require text as a literal, case-insensitively: regex metacharacters mean themselves', () => {
+    const matcher = literalMatcher('in the Browser: breaks in build()');
+    expect(matcher.test('flutter run in the browser: breaks in build(), reads the widget state')).toBe(true);
+    expect(matcher.test('flutter run in the browser: breaks in build, reads the widget state')).toBe(false);
+    expect(literalMatcher('.').test('no dot here')).toBe(false);
+    expect(checkFlutterE2eReport(report(), { require: literalMatcher('WIDGET TEST:') })).toBe(2);
   });
 });

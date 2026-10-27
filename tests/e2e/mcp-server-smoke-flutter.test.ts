@@ -21,7 +21,7 @@ import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
 import { skipIfSpawnBlocked } from '../test-utils/helpers/adapter-spawn.js';
 import { killProcesses, listPidsByImage, waitForProcessesToExit } from '../test-utils/helpers/process-table.js';
 import {
-  FLUTTER_EXAMPLES, FLUTTER_PROBE_DIR, bpLine, findFlutterRootSync, flutterDesktopDeviceId, flutterRunMachine, hasFlutterToolchain, prepareFlutterProbe,
+  FLUTTER_EXAMPLES, FLUTTER_PROBE_DIR, bpLine, findFlutterRootSync, flutterDesktopDeviceId, flutterRunMachine, flutterWebDeviceId, hasFlutterToolchain, prepareFlutterProbe,
 } from './dart-example-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -30,6 +30,7 @@ const ROOT = path.resolve(__dirname, '../..');
 
 const SKIP_FLUTTER = !hasFlutterToolchain();
 const DESKTOP = SKIP_FLUTTER ? null : flutterDesktopDeviceId();
+const WEB = SKIP_FLUTTER ? null : flutterWebDeviceId();
 
 interface Variable { name: string; value: string; type?: string; variablesReference?: number }
 interface Frame { id?: number; file?: string; name?: string; line?: number }
@@ -191,6 +192,50 @@ describe.skipIf(SKIP_FLUTTER)('MCP Server Flutter Debugging Smoke Test @requires
     await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
     expect(await pollState('stopped', 60000), 'the test run should finish').toBeDefined();
   }, 240000);
+
+  describe.skipIf(!WEB)(`web (${WEB ?? 'no browser device'})`, () => {
+    it('flutter run in the browser: breaks in build(), reads the widget state, hot-reloads and hot-restarts in place, and ends on close', async (ctx) => {
+      const line = bpLine(FLUTTER_EXAMPLES.main, 'BUILD');
+      await createSession('flutter-web');
+      expect((await call('set_breakpoint', { file: FLUTTER_EXAMPLES.main, line })).success).toBe(true);
+      const launched = await startOrSkip(ctx, {
+        scriptPath: FLUTTER_EXAMPLES.main,
+        // Headless: what CI's runner takes; measured on Windows at the same first-stop time as a windowed Chrome.
+        dapLaunchArgs: { stopOnEntry: false, cwd: FLUTTER_PROBE_DIR, deviceId: WEB, toolArgs: ['--web-browser-flag=--headless=new'] },
+      });
+      expect(await output()).toContain('runner: flutter');
+
+      // The web build (dwds) takes ~20 s warm; the launch answers pending and wait_for_stop collects the stop.
+      const paused = await firstStop(launched, 240000);
+      expect(paused.lastStop?.reason).toBe('breakpoint');
+      const top = (await frames())[0];
+      expect(top.name).toMatch(/build$/);
+      expect(top.line).toBe(line);
+      expect(await evaluate('counter')).toBe('0');
+      expect(await output()).toContain('Connected to the VM Service.');
+
+      // Hot reload: the reassemble lands on build() again, in-call (issue #876).
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      await wait(1000);
+      const reloaded = await call('hot_reload', {});
+      expect(reloaded.success, JSON.stringify(reloaded)).toBe(true);
+      const afterReload = reloaded.state === 'paused' ? (await getSession())! : await waitForPause(30000, 'the build() breakpoint after the hot reload');
+      expect(afterReload.lastStop?.reason).toBe('breakpoint');
+
+      // Hot restart through restart_debugging: main() re-runs in the same browser session (issue #876).
+      await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+      await wait(500);
+      const restarted = await call('restart_debugging', {});
+      expect(restarted.success, JSON.stringify(restarted)).toBe(true);
+      expect((restarted.data as { hotRestart?: boolean } | undefined)?.hotRestart).toBe(true);
+      const afterRestart = restarted.state === 'paused' ? (await getSession())! : await waitForPause(30000, 'the build() breakpoint after the hot restart');
+      expect(afterRestart.lastStop?.reason).toBe('breakpoint');
+      expect(await evaluate('counter')).toBe('0');
+
+      expect((await callToolSafely(mcpClient!, 'close_debug_session', { sessionId })).success).toBe(true);
+      sessionId = null;
+    }, 400000);
+  });
 
   describe.skipIf(!DESKTOP)(`desktop (${DESKTOP ?? 'no desktop device'})`, () => {
     it('flutter run: breaks in build(), reads the widget state, keeps running after continue, and terminates on close', async (ctx) => {
