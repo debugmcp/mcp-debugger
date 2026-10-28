@@ -287,7 +287,7 @@ describe('getErrorMessage', () => {
 // the filter the caller opted out of; a crash runs to the program's exit.
 describe("the unarmed launch wording under breakOnExceptions 'none' (issue #1009)", () => {
   it('launchStillRunning names the mode and promises only the exit', () => {
-    const text = ErrorMessages.launchStillRunning(undefined, undefined, undefined, false);
+    const text = ErrorMessages.launchStillRunning(undefined, undefined, undefined, 'opted-out');
     expect(text).toMatch(/breakOnExceptions: 'none'/);
     expect(text).toMatch(/report its exit|only report its exit/);
     expect(text).not.toMatch(/catches by default/);
@@ -296,9 +296,46 @@ describe("the unarmed launch wording under breakOnExceptions 'none' (issue #1009
   });
 
   it('waitForStopPending names the mode and promises only the exit', () => {
-    const text = ErrorMessages.waitForStopPending(5, 'running', { uncaughtStops: false });
+    const text = ErrorMessages.waitForStopPending(5, 'running', { noUncaughtStop: 'opted-out' });
     expect(text).toMatch(/breakOnExceptions: 'none'/);
     expect(text).not.toMatch(/catches by default/);
     expect(ErrorMessages.waitForStopPending(5, 'running')).toMatch(/catches by default/);
+  });
+});
+
+// Issue #1032: two more reasons no uncaught exception will stop the program — the
+// adapter has no uncaught-only filter (rdbg; CodeLLDB on Windows, where abort()
+// ends the process with exit code 3), or none was requested (an attach with no
+// mode on an adapter that has one). Neither names a mode the caller never chose.
+describe('the unarmed launch wording when the adapter cannot, or was not asked to, stop at an uncaught exception (issue #1032)', () => {
+  it("launchStillRunning: 'unavailable' blames the adapter, 'not-requested' the missing request, and neither promises the default stop", () => {
+    const unavailable = ErrorMessages.launchStillRunning(undefined, undefined, undefined, 'unavailable');
+    expect(unavailable).toMatch(/no uncaught-exception filter/);
+    expect(unavailable).toMatch(/only report its exit/);
+    expect(unavailable).not.toMatch(/catches by default/);
+    expect(unavailable).not.toMatch(/'none'/);
+
+    const notRequested = ErrorMessages.launchStillRunning(undefined, undefined, undefined, 'not-requested');
+    expect(notRequested).toMatch(/none was requested/);
+    expect(notRequested).toMatch(/only report its exit/);
+    expect(notRequested).not.toMatch(/catches by default/);
+    expect(notRequested).not.toMatch(/'none'/);
+  });
+
+  it('waitForStopPending: the same two wordings', () => {
+    const unavailable = ErrorMessages.waitForStopPending(5, 'running', { noUncaughtStop: 'unavailable' });
+    expect(unavailable).toMatch(/no uncaught-exception filter/);
+    expect(unavailable).not.toMatch(/catches by default/);
+    expect(unavailable).not.toMatch(/'none'/);
+
+    const notRequested = ErrorMessages.waitForStopPending(5, 'running', { noUncaughtStop: 'not-requested' });
+    expect(notRequested).toMatch(/none was requested/);
+    expect(notRequested).not.toMatch(/catches by default/);
+  });
+
+  it('keeps the logging clause beside both wordings (issue #865)', () => {
+    const text = ErrorMessages.launchStillRunning(undefined, undefined, '1 logpoint(s) that log without stopping', 'unavailable');
+    expect(text).toMatch(/1 logpoint\(s\) that log without stopping/);
+    expect(text).toMatch(/no pausing breakpoints/);
   });
 });

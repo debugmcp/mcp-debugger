@@ -29,6 +29,7 @@ import type { AttachContext } from '../operations-context.js';
 import type { BreakpointController } from '../breakpoints/breakpoint-controller.js';
 import { failProxySetup, sessionRemovedDuringTeardown } from '../launch/proxy-failure-diagnostics.js';
 import type { ProxyLauncher } from '../launch/proxy-launcher.js';
+import { recordExceptionArming } from '../launch/launch-arming.js';
 import { verifyAttachThreads } from './attach-verification.js';
 import { ATTACH_ANCHOR_BOUNDS, selectStopAnchor } from '../inspection/stop-anchor.js';
 import { describeStopLocation, landingFields } from '../inspection/stop-location.js';
@@ -228,6 +229,7 @@ export class AttachController {
       // Attach never receives a policy default (issue #244) — record the
       // user's value (possibly undefined) for read-back symmetry.
       session.effectiveBreakOnExceptions = breakOnExceptions;
+      const policy = this.ctx.selectPolicy(session.language);
 
       const attachConfigData = await this.proxyLauncher.start(session, {
         scriptPath: placeholderPath,
@@ -236,6 +238,11 @@ export class AttachController {
         adapterLaunchConfig: adapterConfig,
         breakOnExceptions,
       });
+      // What the mode arms on this policy, and whether an uncaught exception
+      // will stop the target at all (issue #1032) — the same record a launch
+      // keeps, so a wait_for_stop on an attached target reads one truth: with
+      // no mode the filter the adapter has was simply not requested.
+      recordExceptionArming(session, policy, breakOnExceptions, attachConfigData);
 
       // Perform language-specific handshake if required, mirroring
       // startDebugging. For js-debug the whole DAP sequence — initialize,
@@ -243,7 +250,6 @@ export class AttachController {
       // here because the proxy worker skips its built-in attach flow for
       // command-queueing policies. Policies without performHandshake are
       // untouched: their attach is performed by the proxy worker.
-      const policy = this.ctx.selectPolicy(session.language);
       if (policy.performHandshake) {
         try {
           await policy.performHandshake({

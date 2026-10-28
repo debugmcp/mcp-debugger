@@ -25,7 +25,7 @@ import {
   type AdapterPolicy,
   type ExceptionBreakMode
 } from '@debugmcp/shared';
-import { isTerminalSessionState, resolveExceptionFilters } from '@debugmcp/shared';
+import { isTerminalSessionState } from '@debugmcp/shared';
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import { checkLaunchToolchain } from '../../utils/language-availability.js';
@@ -49,7 +49,7 @@ import {
   sessionRemovedDuringTeardown
 } from './proxy-failure-diagnostics.js';
 import { waitForLaunchReadiness } from './launch-readiness.js';
-import { describeLaunchArming } from './launch-arming.js';
+import { describeLaunchArming, recordExceptionArming, supportedExceptionModes } from './launch-arming.js';
 import type { AdapterPreparationOutcome, ProxyLauncher } from './proxy-launcher.js';
 import { describeLaunchTarget, describeSpawnCommand } from './spawn-command.js';
 import { classifyTestRunner, TEST_RUNNER_KEY } from './test-runner-gate.js';
@@ -585,15 +585,24 @@ export class DebugLauncher {
 
       // One resolver, two readers (issue #985): the same launch-aware answer
       // the worker sends as setExceptionBreakpoints, recorded here with the
-      // ids beyond the mode's table, so the arming text cannot drift from the
-      // wire — a pytest module launch adds userUnhandled to the uncaught default.
-      const armedFilters = resolveExceptionFilters(policy, effectiveBreakOnExceptions, launchConfigData);
-      // The mode's table alone: the resolver without a launch config.
-      const tableFilters = resolveExceptionFilters(policy, effectiveBreakOnExceptions);
-      session.launchExceptionFilters = {
-        ids: armedFilters,
-        beyondMode: armedFilters.filter(id => !tableFilters.includes(id))
-      };
+      // ids beyond the mode's table and the verdict on whether an uncaught
+      // exception will stop the program at all (issue #1032), so the arming
+      // text cannot drift from the wire — a pytest module launch adds
+      // userUnhandled to the uncaught default; a Ruby launch arms nothing.
+      const exceptionArming = recordExceptionArming(session, policy, effectiveBreakOnExceptions, launchConfigData);
+      // A mode the caller asked for by name that arms nothing and stops
+      // nothing is a silent no-op otherwise (issue #1032): the worker skips
+      // setExceptionBreakpoints with a log line only. Said on this answer's
+      // warning surface; the policy default never earns it — the pending
+      // answer already says what a crash will do.
+      if (
+        breakOnExceptions !== undefined && breakOnExceptions !== 'none' &&
+        exceptionArming.ids.length === 0 && exceptionArming.noUncaughtStop === 'unavailable'
+      ) {
+        (session.launchConfigNotices ??= []).push(
+          ErrorMessages.exceptionModeArmsNothing(breakOnExceptions, session.language, supportedExceptionModes(policy))
+        );
+      }
 
       // Perform language-specific handshake if required
       if (policy.performHandshake) {
@@ -836,7 +845,7 @@ export class DebugLauncher {
           arming.armed ? arming.summary : undefined,
           debuggerOnAnyway ? undefined : debuggerOffWhy(finalSession),
           arming.loggingSummary,
-          arming.uncaughtStops
+          arming.noUncaughtStop
         );
       }
 
@@ -1128,7 +1137,7 @@ export class DebugLauncher {
         arming.armed ? arming.summary : undefined,
         debuggerOffWhy(finalSession),
         arming.loggingSummary,
-        arming.uncaughtStops
+        arming.noUncaughtStop
       );
     }
     this.stampStaleAnchorNotes(finalSession, anchorResolution);

@@ -492,6 +492,14 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
       // block above proved are arrays).
       expect(behavior.defaultExceptionBreakMode).toBe('uncaught');
       expect(Array.isArray(filters?.uncaught)).toBe(true);
+
+      // Issue #1032: an 'uncaught' default over an empty table arms nothing, so the policy
+      // has to say outright whether its engine stops at an uncaught exception anyway (cpp:
+      // SIGABRT on POSIX, exit code 3 on Windows) — the launch answer promises a stop or
+      // an exit from that word, and a policy that stays silent would promise the default.
+      if (filters?.uncaught.length === 0) {
+        expect(typeof behavior.stopsOnUncaughtWithoutFilter, 'an empty uncaught table under an uncaught default must pin stopsOnUncaughtWithoutFilter').toBe('boolean');
+      }
     }
   });
 
