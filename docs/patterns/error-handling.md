@@ -199,7 +199,7 @@ most actionable error message fires first:
 
 1. **Socket** (`minimal-dap.ts`) — 30s default, per-request `timeoutMs` override
 2. **Worker request tracker** (`dap-proxy-request-tracker.ts`) — 30s default, same override; its
-   `Request '<cmd>' timed out after Ns` failure is what callers normally see
+   `Request '<cmd>' timed out after Ns` failure (`Nms` under a second, issue #1037) is what callers normally see
 3. **Parent** (`proxy-manager.ts`) — override (or 30s default) **plus a 5s margin**, a backstop
    that only fires if the worker never responds at all
 

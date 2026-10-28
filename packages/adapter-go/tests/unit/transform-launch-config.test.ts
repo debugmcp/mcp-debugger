@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { GoDebugAdapter } from '../../src/index.js';
 import type { AdapterDependencies, GenericLaunchConfig } from '@debugmcp/shared';
 
@@ -50,6 +53,25 @@ describe('GoDebugAdapter.transformLaunchConfig — mode inference', () => {
     } as unknown as GenericLaunchConfig);
 
     expect(cfg.mode).toBe('debug');
+  });
+
+  // Issue #1036: a package directory is a `dlv debug` target — `exec` can never
+  // run a directory, and the "not an executable file" it answered said nothing
+  // about why. Only a directory that exists is inferred; a bare path that cannot
+  // be read stays a binary.
+  describe('a package directory as the program', () => {
+    const packageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'go-pkg-'));
+    afterAll(() => fs.rmSync(packageDir, { recursive: true, force: true }));
+
+    it('infers mode "debug" for a directory that exists', async () => {
+      const cfg = await adapter.transformLaunchConfig({ program: packageDir } as unknown as GenericLaunchConfig);
+      expect(cfg.mode).toBe('debug');
+    });
+
+    it('still lets an explicit mode win over the directory inference', async () => {
+      const cfg = await adapter.transformLaunchConfig({ program: packageDir, mode: 'test' } as unknown as GenericLaunchConfig);
+      expect(cfg.mode).toBe('test');
+    });
   });
 
   it('preserves explicit mode "test" against a _test.go program', async () => {
