@@ -141,8 +141,3 @@ Dart 3.13 and Flutter 3.47 — and none of them is a session error.
   iPhone Air simulator, #1019). Widget tests, `flutter run` on the simulator and `integration_test`
   on `-d macos` are unaffected. Until the ceiling is raised for device test runs, run the test
   with `flutter test integration_test/<file> -d <udid>` and debug the app side with `flutter run`.
-- **Attaching to an app on an iOS simulator needs the URI; `deviceId` alone never connects.** The
-  simulator has no logcat-style discovery, so `flutter attach -d <udid>` waits for a connection
-  forever (the server gives up at `verifyTimeout`). Pass the `app.debugPort` URI of the
-  `flutter run --machine` that started the app — it is a plain loopback socket there and works
-  (measured, #1020), unlike the Android emulator's forwarded one (#882).

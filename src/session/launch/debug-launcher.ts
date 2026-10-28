@@ -803,7 +803,8 @@ export class DebugLauncher {
         stillRunning = ErrorMessages.launchStillRunning(
           arming.armed ? arming.summary : undefined,
           debuggerOnAnyway ? undefined : debuggerOffWhy(finalSession),
-          arming.loggingSummary
+          arming.loggingSummary,
+          arming.uncaughtStops
         );
       }
 
@@ -1088,7 +1089,8 @@ export class DebugLauncher {
       stillRunning = ErrorMessages.launchStillRunning(
         arming.armed ? arming.summary : undefined,
         debuggerOffWhy(finalSession),
-        arming.loggingSummary
+        arming.loggingSummary,
+        arming.uncaughtStops
       );
     }
     this.stampStaleAnchorNotes(finalSession, anchorResolution);

@@ -72,6 +72,11 @@ const FLUTTER_MODES = new Set(['debug', 'profile', 'release']);
 const DESKTOP_DEVICE_IDS = new Set(['windows', 'macos', 'linux']);
 /** The web devices: dwds attaches by URI, there is no device log to discover an app from. */
 const WEB_DEVICE_IDS = new Set(['chrome', 'edge', 'web-server']);
+/**
+ * An iOS simulator as `flutter devices` lists it: its CoreSimulator UDID (an 8-4-4-4-12 UUID).
+ * Android emulators are `emulator-NNNN` and device serials carry no such shape (issue #1020).
+ */
+const IOS_SIMULATOR_UDID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class DartDebugAdapter extends EventEmitter implements IDebugAdapter {
   readonly language = DebugLanguage.DART;
@@ -328,16 +333,21 @@ export class DartDebugAdapter extends EventEmitter implements IDebugAdapter {
       }
     }
     if (out.vmServiceUri === undefined && out.vmServiceInfoFile === undefined) {
-      if (device && !DESKTOP_DEVICE_IDS.has(device) && !WEB_DEVICE_IDS.has(device)) {
+      const noDiscovery = device
+        ? DESKTOP_DEVICE_IDS.has(device) ? 'desktop' : WEB_DEVICE_IDS.has(device) ? 'web' : IOS_SIMULATOR_UDID.test(device) ? 'iOS simulator' : undefined
+        : undefined;
+      if (device && noDiscovery === undefined) {
         // A Flutter app on a device needs no URI: `flutter attach -d <id>` finds the app's VM
         // service on the device (Android: the logcat line) and forwards it itself. The host-side
         // URI `flutter run --machine` reports is its own DDS and never connects this way (issue #882).
-        this.note('deviceId', `no vmServiceUri: flutter attach -d ${device} discovers the running app's VM service on the device and forwards it itself (measured on Android; iOS is unmeasured; issue #882)`);
+        this.note('deviceId', `no vmServiceUri: flutter attach -d ${device} discovers the running app's VM service on the device and forwards it itself (measured on Android; a physical iOS device is unmeasured — if the attach waits for a connection that never comes, pass the app.debugPort URI; issues #882, #1020)`);
       } else if (device) {
-        // Measured on the desktop: the tool waits for a connection that never comes and the attach
-        // fails at the thread-verification deadline; the web devices attach by URI only (dwds).
+        // Measured on the desktop and on an iOS simulator: the tool waits for a connection that
+        // never comes and the attach fails at the thread-verification deadline (the simulator has
+        // no logcat-style discovery; its app.debugPort URI is a plain loopback socket and works,
+        // issue #1020); the web devices attach by URI only (dwds).
         throw new AdapterError(
-          `flutter attach cannot discover an app on the ${device} ${WEB_DEVICE_IDS.has(device) ? 'web' : 'desktop'} target: pass adapterConfig.vmServiceUri `
+          `flutter attach cannot discover an app on the ${device} ${noDiscovery} target: pass adapterConfig.vmServiceUri `
           + '(the app.debugPort event of `flutter run --machine`, or the dart.debuggerUris answer of this server).',
           AdapterErrorCode.ENVIRONMENT_INVALID,
         );

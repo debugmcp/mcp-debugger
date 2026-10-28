@@ -890,7 +890,8 @@ export class ExecutionController {
           {
             ...(arming.armed ? { armedSummary: arming.summary } : {}),
             ...(arming.loggingSummary ? { loggingSummary: arming.loggingSummary } : {}),
-            ...(debuggerOffWhy(session) ? { debuggerOffWhy: debuggerOffWhy(session) } : {})
+            ...(debuggerOffWhy(session) ? { debuggerOffWhy: debuggerOffWhy(session) } : {}),
+            uncaughtStops: arming.uncaughtStops
           }
         ),
         pending: true
