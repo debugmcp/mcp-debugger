@@ -84,7 +84,10 @@ This directory contains end-to-end smoke tests that verify the MCP debugger serv
   Linux also without a `DISPLAY`, and anywhere with `MCP_SKIP_FLUTTER_DESKTOP=1` (CI's
   `flutter-host` lane sets it and runs the widget-test cases only; `scripts/check-flutter-e2e-report.mjs`
   requires them). The helper generates the probe's platform folders with `flutter create` on
-  first use
+  first use. On macOS a gated `iOS simulator` block runs `flutter run` and the attach-by-URI case
+  on a booted simulator (`xcrun simctl boot "<name>"` is the opt-in; it self-skips off macOS, with
+  none booted, and with `MCP_SKIP_FLUTTER_IOS=1`); its helper generates `ios/` and runs one
+  `flutter build ios --simulator --debug` ahead of the timed cases. Never runs on CI
 - `mcp-server-smoke-flutter-android.test.ts` runs `flutter run` and the `integration_test` on a
   booted Android emulator (`flutter emulators --launch <id>` is the opt-in; it self-skips without
   Flutter, adb or an online emulator, and with `MCP_SKIP_FLUTTER_ANDROID=1`). The helper generates
