@@ -332,7 +332,12 @@ export class ProxyLauncher {
       ];
       const namesTarget = namesLaunchTarget({ ...genericLaunchConfig, ...adapterExtras }, nonProgramTargetKeys);
       if (!namesTarget && (typeof genericLaunchConfig.cwd !== 'string' || genericLaunchConfig.cwd.length === 0)) {
-        genericLaunchConfig.cwd = path.dirname(scriptPath);
+        // The script's directory — which, for a directory target (a Go package
+        // directory, issue #1036), is the target itself: its parent would run
+        // `go build` under the parent's own go.mod. A path that cannot be read
+        // (an attach placeholder, a missing file) keeps the parent default.
+        const isDirectory = await this.ctx.fileSystem.stat(scriptPath).then(stat => stat.isDirectory()).catch(() => false);
+        genericLaunchConfig.cwd = isDirectory ? scriptPath : path.dirname(scriptPath);
       }
     }
 
