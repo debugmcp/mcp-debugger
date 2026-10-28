@@ -35,6 +35,18 @@ describe('describeLaunchArming', () => {
     expect(describeLaunchArming(session({ effectiveBreakOnExceptions: 'none' }), false).armed).toBe(false);
   });
 
+  // Issue #1009: the unarmed answer used to promise a stop "for an uncaught
+  // exception the debugger catches by default" under every mode — under
+  // 'none' that filter is exactly what the caller opted out of, and a crash
+  // runs to the exit. The arming says whether an uncaught exception still
+  // stops the program, so the answer can say what will actually happen.
+  it("says whether an uncaught exception still stops the program: yes by default and for 'uncaught' and 'all', no for 'none'", () => {
+    expect(describeLaunchArming(session(), false).uncaughtStops).toBe(true);
+    expect(describeLaunchArming(session({ effectiveBreakOnExceptions: 'uncaught' }), false).uncaughtStops).toBe(true);
+    expect(describeLaunchArming(session({ effectiveBreakOnExceptions: 'all' }), false).uncaughtStops).toBe(true);
+    expect(describeLaunchArming(session({ effectiveBreakOnExceptions: 'none' }), false).uncaughtStops).toBe(false);
+  });
+
   // Issue #985: a pytest module launch arms userUnhandled beside the uncaught
   // default; the launcher records the ids the launch added beyond the mode's
   // table, and those count as armed — they stop on an exception the program

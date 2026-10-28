@@ -48,6 +48,14 @@ export interface LaunchArming {
   logpoints: number;
   /** "1 logpoint(s) that log without stopping"; undefined when there are none. */
   loggingSummary?: string;
+  /**
+   * Whether an uncaught exception still stops the program (issue #1009): true
+   * under the 'uncaught' default and under 'all', false under 'none', where
+   * that filter is exactly what the caller opted out of and a crash runs to
+   * the exit. Not armed (see the header), but it decides what the unarmed
+   * answer may promise.
+   */
+  uncaughtStops: boolean;
 }
 
 export function describeLaunchArming(session: ArmingSession, stopOnEntry: boolean | undefined): LaunchArming {
@@ -102,7 +110,8 @@ export function describeLaunchArming(session: ArmingSession, stopOnEntry: boolea
     extraExceptionFilters,
     summary: joinClauses(clauses),
     logpoints,
-    ...(logpoints > 0 ? { loggingSummary: `${logpoints} logpoint(s) that log without stopping` } : {})
+    ...(logpoints > 0 ? { loggingSummary: `${logpoints} logpoint(s) that log without stopping` } : {}),
+    uncaughtStops: session.effectiveBreakOnExceptions !== 'none'
   };
 }
 
