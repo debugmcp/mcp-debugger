@@ -70,7 +70,7 @@ import { composeStopSnapshot } from '../inspection/stop-snapshot.js';
 import type { PauseCoordinator } from './pause-coordinator.js';
 import { waitForSessionState } from './session-state-wait.js';
 import { resolveDapTimeoutOverride } from '../dap-request-helpers.js';
-import { describeProgramEnd } from '../breakpoints/launch-warnings.js';
+import { buildRunToCompletionSummary, describeProgramEnd } from '../breakpoints/launch-warnings.js';
 import { describeLaunchArming } from '../launch/launch-arming.js';
 
 /** What distinguishes the three step flavours: everything else is shared. */
@@ -861,13 +861,22 @@ export class ExecutionController {
       };
     }
     if (state === SessionState.STOPPED) {
+      // No stop was recorded in this launch: the program ran past every
+      // breakpoint, and the answer says which — the same run-to-completion
+      // summary the launch gives when the program ends inside its hold
+      // (issues #701, #1033); it already joins the adapter's reading of the
+      // end (issue #877). A program resumed past a stop keeps the plain
+      // message: its breakpoints were not all missed.
+      const ranPast = session.lastStop ? undefined : buildRunToCompletionSummary(session);
       return {
         success: true,
         state,
         data: {
-          // The adapter's reading of the end joins the sentence and the data (issue #877).
-          message: `${describeProgramEnd(session.exitCode)}.${session.programEndExplanation?.note ? ` ${session.programEndExplanation.note}` : ''}`,
+          message: ranPast
+            ? ranPast.summary
+            : `${describeProgramEnd(session.exitCode)}.${session.programEndExplanation?.note ? ` ${session.programEndExplanation.note}` : ''}`,
           ...(typeof session.exitCode === 'number' ? { exitCode: session.exitCode } : {}),
+          ...(ranPast?.data ?? {}),
           ...(session.programEndExplanation ? { programEnd: session.programEndExplanation } : {}),
           ...stopDuringWait
         }
@@ -891,7 +900,7 @@ export class ExecutionController {
             ...(arming.armed ? { armedSummary: arming.summary } : {}),
             ...(arming.loggingSummary ? { loggingSummary: arming.loggingSummary } : {}),
             ...(debuggerOffWhy(session) ? { debuggerOffWhy: debuggerOffWhy(session) } : {}),
-            uncaughtStops: arming.uncaughtStops
+            noUncaughtStop: arming.noUncaughtStop
           }
         ),
         pending: true

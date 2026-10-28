@@ -114,6 +114,10 @@ start_debugging {
 }
 ```
 
+### Exceptions
+
+rdbg offers one exception filter, `any`, which pauses at **every** raise, caught or not. There is no uncaught-only filter, so Ruby is the one language whose launches apply no `breakOnExceptions` default: with no mode, a crash runs to the program's exit and the launch's "still running" answer says so (no stop is promised, issue #1032). `breakOnExceptions: "all"` arms `any`; an explicit `"uncaught"` arms nothing — the response's `warning` says so and names `"all"` — and `"none"` is the default spelled out.
+
 ## Attach mode
 
 Ruby attach is **port-only**: nothing makes a running Ruby process open a debug socket after the fact, so an `attach_to_process { processId }` is refused by name before anything starts, with the `rdbg --open --port <port>` recipe (issue #903).

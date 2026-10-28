@@ -152,6 +152,11 @@ export const waitForStopTool: ToolHandler = async (ctx, args, _toolName, extra) 
     if (typeof data?.exitCode === 'number') {
       response.exitCode = data.exitCode;
     }
+    // The breakpoints a finished program ran past (issues #701, #1033), as the
+    // launch answer lists them; an empty list says nothing a flat answer needs.
+    if (Array.isArray(data?.unhitBreakpoints) && data.unhitBreakpoints.length > 0) {
+      response.unhitBreakpoints = data.unhitBreakpoints;
+    }
     // The landing (issues #904, #938), as for pause_execution and the step tools.
     await hoistStopLanding(ctx, response, data, args.sessionId, 'wait_for_stop result');
     // What the adapter read into the program's end (issue #877: e.g. availableDevices)
