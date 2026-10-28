@@ -453,9 +453,27 @@ const LLDB_DWARF_NOISE_PATTERNS: RegExp[] = [
 ];
 
 /**
- * Suppress a DAP output event when it is purely LLDB DWARF-parser noise.
- * Multi-line events are dropped only when EVERY non-empty line matches a
- * noise pattern — mixed content always passes through untouched (never
+ * CodeLLDB's own console housekeeping (issue #1038): the console-mode banner,
+ * the markers around its command scripts, and the launch lines. They arrive
+ * as `console` output events ahead of any program output, so they consumed
+ * the get_output cursor and read as the program's own. Measured on a COBOL
+ * and a C++ launch, Windows and Linux, line for line. Anchored on the full
+ * line shape so a program's own "Launching rockets" survives; the engine's
+ * "Process exited with code N." stays — the worker reads the exit code from
+ * it. Console only: the same text on stdout or stderr is the program's.
+ */
+const LLDB_CONSOLE_HOUSEKEEPING_PATTERNS: RegExp[] = [
+  /^Console is in '\w+' mode, prefix \w+ with '.+'\.$/,
+  /^Executing script: \w+$/,
+  /^Launching: .+$/,
+  /^Launched process \d+ from '.+'$/
+];
+
+/**
+ * Suppress a DAP output event when it is purely LLDB DWARF-parser noise
+ * (stderr or console), or purely CodeLLDB console housekeeping (console
+ * only). Multi-line events are dropped only when EVERY non-empty line matches
+ * a noise pattern — mixed content always passes through untouched (never
  * partially rewritten).
  */
 export function lldbShouldSuppressOutputEvent(category: string, text: string): boolean {
@@ -466,7 +484,10 @@ export function lldbShouldSuppressOutputEvent(category: string, text: string): b
   if (lines.length === 0) {
     return false;
   }
-  return lines.every((line) => LLDB_DWARF_NOISE_PATTERNS.some((pattern) => pattern.test(line)));
+  const patterns = category === 'console'
+    ? [...LLDB_DWARF_NOISE_PATTERNS, ...LLDB_CONSOLE_HOUSEKEEPING_PATTERNS]
+    : LLDB_DWARF_NOISE_PATTERNS;
+  return lines.every((line) => patterns.some((pattern) => pattern.test(line)));
 }
 
 /**
