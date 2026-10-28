@@ -584,3 +584,22 @@ warning (the Flutter issues that would turn it into an error for iOS/macOS targe
   26.3 carries device support up to iOS 26.3.x, and Xcode 26.4+ needs macOS 26, which a 2017 iMac
   Pro cannot run. Launch and attach on a physical device stay unmeasured until a Mac on macOS 26
   (or an iPhone on iOS ≤ 26.3) is available.
+
+## The Flutter tool's update banner and the first launch of the day (measured on Windows, 2026-10-27)
+
+- `flutter debug-adapter` runs the tool's once-a-day version freshness check like every other
+  command (`flutter_tools/lib/src/version.dart`, `maxTimeSinceLastWarning = 1 day`, stamped in
+  `bin/cache/flutter_version_check.stamp` as `lastTimeWarningWasPrinted`). When a newer stable
+  exists it prints the "A new version of Flutter is available!" box with `logger.printBox` — on
+  **stdout**, ahead of the DAP server's first frame, with bare `\n` line ends.
+- The proxy's frame decoder cut its header block at the first `\r\n\r\n`, which only the real
+  header supplied, so the banner and the `Content-Length` line shared one block; the #470 resync
+  looked only past the block and the initialize response went down with the banner:
+  `Debug proxy initialization did not complete within 30s … the "initialize" request never
+  received a response`, then `disconnect` answered normally (the channel was fine after the
+  banner). Seen organically at 13:03 local, the stamp rewritten the same second; reproduced on
+  demand by setting `lastTimeWarningWasPrinted` back two days and running one widget-test case.
+- Fixed in #1026: the adapter passes `--no-version-check --suppress-analytics` ahead of
+  `debug-adapter` (the tool's global switches, parsed by its runner before the command), and
+  the shared decoder resyncs on a `Content-Length` found inside a malformed block. The
+  `dart debug_adapter` path never printed a banner.
