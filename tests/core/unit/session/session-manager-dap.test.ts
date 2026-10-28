@@ -3899,6 +3899,60 @@ describe('SessionManager - DAP Operations', () => {
       expect(sessionManager.getSession(session.id)?.effectiveBreakOnExceptions).toBeUndefined();
     });
 
+    // Issue #1032: the verdict on whether an uncaught exception will stop the
+    // program is recorded beside the filter ids the mode armed, read from the
+    // policy's own table — the mode name alone said "yes" for a Ruby launch
+    // that arms nothing (rdbg has no uncaught-only filter).
+    it('records the exception arming: a ruby launch with no mode arms nothing, and the filter is unavailable', async () => {
+      const session = await sessionManager.createSession({ language: DebugLanguage.RUBY, executablePath: 'ruby' });
+
+      await sessionManager.startDebugging(session.id, 'test.rb');
+      await vi.runAllTimersAsync();
+
+      expect(sessionManager.getSession(session.id)?.launchExceptionFilters).toEqual({
+        ids: [], beyondMode: [], noUncaughtStop: 'unavailable'
+      });
+    });
+
+    it("warns on an explicit 'uncaught' the adapter cannot arm, naming the mode it can (ruby, issue #1032)", async () => {
+      const session = await sessionManager.createSession({ language: DebugLanguage.RUBY, executablePath: 'ruby' });
+
+      const result = await sessionManager.startDebugging(session.id, 'test.rb', undefined, undefined, undefined, undefined, 'uncaught');
+      await vi.runAllTimersAsync();
+
+      expect(sessionManager.getSession(session.id)?.launchExceptionFilters).toEqual({
+        ids: [], beyondMode: [], noUncaughtStop: 'unavailable'
+      });
+      expect(result.data?.warning).toMatch(/breakOnExceptions 'uncaught' arms no exception filter on the ruby adapter/);
+      expect(result.data?.warning).toMatch(/'all'/);
+    });
+
+    it("records the 'uncaught' default as armed on an adapter that has the filter, with no warning (mock)", async () => {
+      const session = await sessionManager.createSession({ language: DebugLanguage.MOCK, executablePath: 'python' });
+
+      const result = await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+
+      expect(sessionManager.getSession(session.id)?.launchExceptionFilters).toEqual({
+        ids: ['uncaught'], beyondMode: [], noUncaughtStop: undefined
+      });
+      expect(result.data?.warning ?? '').not.toMatch(/arms no exception filter/);
+    });
+
+    it("records 'none' as opted out, and an attach-shaped launch with no mode as not requested (issue #1032)", async () => {
+      const optedOut = await sessionManager.createSession({ language: DebugLanguage.MOCK, executablePath: 'python' });
+      await sessionManager.startDebugging(optedOut.id, 'test.py', undefined, undefined, undefined, undefined, 'none');
+      await vi.runAllTimersAsync();
+      expect(sessionManager.getSession(optedOut.id)?.launchExceptionFilters?.noUncaughtStop).toBe('opted-out');
+
+      const attachShaped = await sessionManager.createSession({ language: DebugLanguage.MOCK, executablePath: 'python' });
+      await sessionManager.startDebugging(
+        attachShaped.id, 'attach://remote', undefined, { request: 'attach', __attachMode: true } as never
+      );
+      await vi.runAllTimersAsync();
+      expect(sessionManager.getSession(attachShaped.id)?.launchExceptionFilters?.noUncaughtStop).toBe('not-requested');
+    });
+
     it('records description and text from the stopped event body on lastStop', async () => {
       const session = await createPausedSession(sessionManager, dependencies);
 

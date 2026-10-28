@@ -1039,6 +1039,14 @@ export interface AdapterPolicy {
      *  adapters without a usable uncaught filter (e.g. Ruby) so crashing
      *  scripts keep running to termination. Mirrors defaultStopOnEntry. */
     defaultExceptionBreakMode?: ExceptionBreakMode;
+    /** Whether the engine pauses at an uncaught exception with NO exception filter
+     *  armed (issue #1032) — CodeLLDB on POSIX, where an uncaught C++ exception reaches
+     *  std::terminate → SIGABRT, a signal stop. Read by the session layer's exception
+     *  arming when a mode resolves to an empty filter list: true keeps the launch
+     *  answer's promise of a crash stop, absent or false makes it promise the exit
+     *  instead. A policy with an empty `uncaught` table under an 'uncaught' default has
+     *  to say which (the cross-policy contract test checks). */
+    stopsOnUncaughtWithoutFilter?: boolean;
   };
 
   /**

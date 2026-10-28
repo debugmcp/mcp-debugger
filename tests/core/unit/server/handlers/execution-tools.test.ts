@@ -149,6 +149,31 @@ describe('execution tool handlers', () => {
       });
     });
 
+    it('copies the breakpoints the program ran past when the session layer lists them, and omits an empty list (issue #1033)', async () => {
+      ctx.sessionManager.getSession.mockReturnValue(liveSession);
+      const unhitBreakpoints = [{ file: '/work/src/app.py', line: 3, verified: true }];
+      ctx.sessionManager.waitForStop.mockResolvedValue({
+        success: true,
+        state: 'stopped',
+        data: {
+          message: 'The program ran to completion (exit code 0) without hitting any breakpoint. Verified but never hit: app.py:3.',
+          exitCode: 0,
+          unhitBreakpoints
+        }
+      });
+
+      const listed = JSON.parse((await waitForStopTool(ctx, { sessionId: 'test-session' }, 'wait_for_stop')).content[0].text);
+      expect(listed.unhitBreakpoints).toEqual(unhitBreakpoints);
+
+      ctx.sessionManager.waitForStop.mockResolvedValue({
+        success: true,
+        state: 'stopped',
+        data: { message: 'The program ran to completion (exit code 0).', exitCode: 0, unhitBreakpoints: [] }
+      });
+      const bare = JSON.parse((await waitForStopTool(ctx, { sessionId: 'test-session' }, 'wait_for_stop')).content[0].text);
+      expect(bare).not.toHaveProperty('unhitBreakpoints');
+    });
+
     it('hoists what the adapter read into the program\'s end beside the message (issue #877)', async () => {
       ctx.sessionManager.getSession.mockReturnValue(liveSession);
       const availableDevices = [{ id: 'windows', name: 'Windows', kind: 'desktop' }];

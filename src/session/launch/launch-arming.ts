@@ -8,13 +8,93 @@
  * uncaught-exception filter (the launch default on most adapters) is left
  * out: it stops the program only at a crash, which is not a stop a caller
  * is waiting for, and counting it would make every launch armed.
+ *
+ * The exception arming itself — the filter ids the mode resolves to on this
+ * policy, and whether an uncaught exception will stop the program at all —
+ * is settled once per launch or attach by `recordExceptionArming` (issues
+ * #985, #1032) and read back here, so the launch answer, the wait_for_stop
+ * answer and the wire cannot drift apart.
  */
+import { resolveExceptionFilters, type AdapterPolicy, type ExceptionBreakMode } from '@debugmcp/shared';
 import type { ManagedSession } from '../session-store.js';
+import type { NoUncaughtStop } from '../../utils/error-messages.js';
 
 export type ArmingSession = Pick<
   ManagedSession,
   'breakpoints' | 'functionBreakpoints' | 'adapterCapabilities' | 'effectiveBreakOnExceptions' | 'launchExceptionFilters'
 >;
+
+/**
+ * The exception arming of one launch or attach: the DAP filter ids the
+ * resolved mode arms on this policy (the same resolver the worker sends), the
+ * ids beyond the mode's table (issue #985: a pytest module launch adds
+ * `userUnhandled` to the `uncaught` default), and — when no uncaught
+ * exception will stop the program — why (issue #1032).
+ */
+export interface ExceptionArming {
+  readonly ids: readonly string[];
+  readonly beyondMode: readonly string[];
+  /**
+   * Why no uncaught exception will stop the program, or undefined when one
+   * will: the caller opted out (`'none'`); the adapter has no uncaught-only
+   * filter and its engine does not stop on its own (rdbg; CodeLLDB on
+   * Windows, where abort() ends the process with exit code 3); or the adapter
+   * has one and nobody asked for it (an attach with no mode).
+   */
+  readonly noUncaughtStop: NoUncaughtStop | undefined;
+}
+
+export function describeExceptionArming(
+  policy: AdapterPolicy,
+  mode: ExceptionBreakMode | undefined,
+  launchConfig?: Record<string, unknown>
+): ExceptionArming {
+  // The launch-aware answer, and the mode's table alone (the resolver without
+  // a launch config), so the ids the launch added beyond the table are known.
+  const ids = resolveExceptionFilters(policy, mode, launchConfig);
+  const tableIds = resolveExceptionFilters(policy, mode);
+  return {
+    ids,
+    beyondMode: ids.filter(id => !tableIds.includes(id)),
+    noUncaughtStop: noUncaughtStopOf(policy, mode, ids)
+  };
+}
+
+/** `describeExceptionArming`, recorded on the session for the answers that read it. */
+export function recordExceptionArming(
+  session: Pick<ManagedSession, 'launchExceptionFilters'>,
+  policy: AdapterPolicy,
+  mode: ExceptionBreakMode | undefined,
+  launchConfig?: Record<string, unknown>
+): ExceptionArming {
+  const arming = describeExceptionArming(policy, mode, launchConfig);
+  session.launchExceptionFilters = arming;
+  return arming;
+}
+
+/** The abstract modes this policy resolves to at least one filter id — what a caller could ask for instead. */
+export function supportedExceptionModes(policy: AdapterPolicy): readonly ExceptionBreakMode[] {
+  return (['uncaught', 'all'] as const).filter(mode => resolveExceptionFilters(policy, mode).length > 0);
+}
+
+function noUncaughtStopOf(
+  policy: AdapterPolicy,
+  mode: ExceptionBreakMode | undefined,
+  ids: readonly string[]
+): NoUncaughtStop | undefined {
+  if (mode === 'none') {
+    return 'opted-out';
+  }
+  // A filter is armed, or the engine stops at an uncaught exception with none
+  // (CodeLLDB on POSIX: std::terminate → SIGABRT is a signal stop).
+  if (ids.length > 0 || policy.getInitializationBehavior().stopsOnUncaughtWithoutFilter === true) {
+    return undefined;
+  }
+  if (mode === undefined && resolveExceptionFilters(policy, 'uncaught').length > 0) {
+    return 'not-requested';
+  }
+  return 'unavailable';
+}
 
 export interface LaunchArming {
   /** True when anything below can stop the program before it ends. */
@@ -49,13 +129,14 @@ export interface LaunchArming {
   /** "1 logpoint(s) that log without stopping"; undefined when there are none. */
   loggingSummary?: string;
   /**
-   * Whether an uncaught exception still stops the program (issue #1009): true
-   * under the 'uncaught' default and under 'all', false under 'none', where
-   * that filter is exactly what the caller opted out of and a crash runs to
-   * the exit. Not armed (see the header), but it decides what the unarmed
-   * answer may promise.
+   * Why no uncaught exception will stop the program (issues #1009, #1032),
+   * or undefined when one will — the `'uncaught'` default on an adapter that
+   * has the filter, or an engine that stops at a crash on its own. Not armed
+   * (see the header), but it decides what the unarmed answer may promise:
+   * read from the recorded exception arming; a session with none recorded
+   * falls back to the mode (`'none'` opted out, anything else stops).
    */
-  uncaughtStops: boolean;
+  noUncaughtStop?: NoUncaughtStop;
 }
 
 export function describeLaunchArming(session: ArmingSession, stopOnEntry: boolean | undefined): LaunchArming {
@@ -79,6 +160,9 @@ export function describeLaunchArming(session: ArmingSession, stopOnEntry: boolea
   const pausesOnCaughtExceptions = session.effectiveBreakOnExceptions === 'all';
   const extraExceptionFilters = session.launchExceptionFilters?.beyondMode ?? [];
   const entry = stopOnEntry === true;
+  const noUncaughtStop = session.launchExceptionFilters
+    ? session.launchExceptionFilters.noUncaughtStop
+    : session.effectiveBreakOnExceptions === 'none' ? 'opted-out' : undefined;
 
   const clauses: string[] = [];
   if (lineBreakpoints > 0) {
@@ -111,7 +195,7 @@ export function describeLaunchArming(session: ArmingSession, stopOnEntry: boolea
     summary: joinClauses(clauses),
     logpoints,
     ...(logpoints > 0 ? { loggingSummary: `${logpoints} logpoint(s) that log without stopping` } : {}),
-    uncaughtStops: session.effectiveBreakOnExceptions !== 'none'
+    ...(noUncaughtStop ? { noUncaughtStop } : {})
   };
 }
 
