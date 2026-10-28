@@ -60,14 +60,16 @@ describe('lldbShouldSuppressOutputEvent', () => {
 // Issue #1038: CodeLLDB's own console housekeeping — the mode banner, its
 // script markers, the launch lines — arrived in get_output ahead of any
 // program output, consuming the cursor and reading as the program's own.
-// Measured on a COBOL and a C++ launch (Windows and Linux), line for line.
+// Measured on a COBOL and a C++ launch (Windows and Linux) and a C++ attach by
+// PID, line for line.
 const CONSOLE_HOUSEKEEPING = [
   "Console is in 'commands' mode, prefix expressions with '?'.\n",
   'Executing script: initCommands\n',
   'Executing script: preRunCommands\n',
   'Launching: C:\\proj\\.debug-mcp\\hello.exe\n',
   "Launched process 43828 from 'C:\\proj\\.debug-mcp\\hello.exe'\n",
-  'Executing script: postRunCommands\n'
+  'Executing script: postRunCommands\n',
+  'Attached to process 22624\n'
 ];
 
 describe('lldbShouldSuppressOutputEvent — CodeLLDB console housekeeping (issue #1038)', () => {
@@ -86,6 +88,8 @@ describe('lldbShouldSuppressOutputEvent — CodeLLDB console housekeeping (issue
 
   it("keeps the engine's exit line and a program's own console text, and never partially rewrites", () => {
     expect(lldbShouldSuppressOutputEvent('console', 'Process exited with code 3.\n')).toBe(false);
+    // The engine's break-in report on attach is on stderr and says something.
+    expect(lldbShouldSuppressOutputEvent('stderr', 'Stop reason: Exception 0x80000003 encountered at address 0x7fff12f83f40\n')).toBe(false);
     expect(lldbShouldSuppressOutputEvent('console', 'Launching rockets\n')).toBe(false);
     expect(lldbShouldSuppressOutputEvent('console', 'Executing script: initCommands\nreal output\n')).toBe(false);
   });

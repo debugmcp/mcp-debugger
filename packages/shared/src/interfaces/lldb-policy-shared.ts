@@ -454,19 +454,22 @@ const LLDB_DWARF_NOISE_PATTERNS: RegExp[] = [
 
 /**
  * CodeLLDB's own console housekeeping (issue #1038): the console-mode banner,
- * the markers around its command scripts, and the launch lines. They arrive
- * as `console` output events ahead of any program output, so they consumed
- * the get_output cursor and read as the program's own. Measured on a COBOL
- * and a C++ launch, Windows and Linux, line for line. Anchored on the full
- * line shape so a program's own "Launching rockets" survives; the engine's
- * "Process exited with code N." stays — the worker reads the exit code from
- * it. Console only: the same text on stdout or stderr is the program's.
+ * the markers around its command scripts, the launch lines and the attach
+ * line. They arrive as `console` output events ahead of any program output,
+ * so they consumed the get_output cursor and read as the program's own.
+ * Measured on a COBOL and a C++ launch (Windows and Linux) and a C++ attach
+ * by PID, line for line. Anchored on the full line shape so a program's own
+ * "Launching rockets" survives; the engine's "Process exited with code N."
+ * stays — the worker reads the exit code from it — and so does its
+ * "Stop reason: …" break-in report, which is on stderr and says something.
+ * Console only: the same text on stdout or stderr is the program's.
  */
 const LLDB_CONSOLE_HOUSEKEEPING_PATTERNS: RegExp[] = [
   /^Console is in '\w+' mode, prefix \w+ with '.+'\.$/,
   /^Executing script: \w+$/,
   /^Launching: .+$/,
-  /^Launched process \d+ from '.+'$/
+  /^Launched process \d+ from '.+'$/,
+  /^Attached to process \d+$/
 ];
 
 /**
