@@ -8,9 +8,14 @@
  * paragraph at the PERFORM statement, named `HELLO: 0000-MAIN (PERFORM
  * 1000-INIT)` — the way a COBOL programmer reads a call stack. The performed
  * range comes from the entry's `perform_through` (the label id cobc gave the
- * THRU-end paragraph, recorded in the manifest), the PERFORM statement from
- * the entry's return address through the engine's line table and the
- * manifest's `#line` map, which works on 3.1.2 and 3.2 alike.
+ * THRU-end paragraph, recorded in the manifest), and the PERFORM statement
+ * from the manifest's PERFORM call sites — the one that runs that range
+ * (issue #1034) — with the entry's return address through the engine's line
+ * table only to tell apart several PERFORMs of one range, or as the fallback
+ * for a manifest without call sites. The line table alone is not a source:
+ * it attributes the return to the row after the call on MinGW 3.2, to a row
+ * inside the performed paragraph on 3.1.2 (the caller then vanished from the
+ * stack) and to the generated header on Linux 3.2 (no frame at all).
  *
  * Synthesised frames carry ids from their own band and resolve, for scopes and
  * evaluation, to the real frame: the storage is the program's, whichever
@@ -22,6 +27,7 @@ import type { CobolProcRange } from '../manifest/schema.js';
 import type { EngineRequester } from './engine-client.js';
 import type { ShimLogger } from './logger.js';
 import type { ProgramEntry } from './manifest-registry.js';
+import { generatedLineAt } from './perform-escape.js';
 import { readPerformDepth, readPerformThrough, readReturnAddress, resolveAddressLocation } from './perform-frames.js';
 import { SHIM_FRAME_ID_BASE, type CachedFrame, type SessionState } from './session-state.js';
 
@@ -46,6 +52,82 @@ function rangeByLabelId(entry: ProgramEntry, labelId: number): CobolProcRange | 
   return paragraphs.find((r) => r.labelId === labelId) ?? sections.find((r) => r.labelId === labelId);
 }
 
+/** A COBOL source location by the manifest's file id. */
+export interface PerformStatement {
+  fileId: number;
+  line: number;
+}
+
+/**
+ * The PERFORM statement an active stack entry returns to — the performing
+ * paragraph's line (issue #1034). The manifest's PERFORM call sites first:
+ * the one whose THRU-end label is the entry's `perform_through`, or, when
+ * several PERFORMs run the same range (GCC may share their return blocks),
+ * the one whose generated-C bounds hold the engine's own row for the return
+ * address — the rule the GO TO step watch already applies. The engine's line
+ * table alone is the fallback, for a manifest without call sites. Shared by
+ * the stack frames and by step_out, so the two cannot drift.
+ */
+export async function performStatementOf(
+  engine: EngineRequester,
+  state: SessionState,
+  entry: ProgramEntry,
+  frameId: number,
+  address: bigint,
+  labelId: number | undefined
+): Promise<PerformStatement | undefined> {
+  const site = await performCallSite(engine, entry, frameId, address, labelId);
+  if (site) {
+    return site;
+  }
+  const location = await resolveAddressLocation(engine, frameId, address);
+  if (!location) {
+    return undefined;
+  }
+  const direct = state.registry.sourceIdByPath(entry, location.path);
+  if (direct !== undefined) {
+    return { fileId: direct, line: location.line };
+  }
+  if (state.registry.isGeneratedSource(entry, location.path)) {
+    const mapped = state.registry.mapGeneratedLine(entry, location.line);
+    if (mapped) {
+      return { fileId: mapped.source.id, line: mapped.line };
+    }
+  }
+  return undefined;
+}
+
+async function performCallSite(
+  engine: EngineRequester,
+  entry: ProgramEntry,
+  frameId: number,
+  address: bigint,
+  labelId: number | undefined
+): Promise<PerformStatement | undefined> {
+  const flow = entry.program.controlFlow;
+  if (!flow || labelId === undefined) {
+    return undefined;
+  }
+  const candidates = flow.performs.filter((call) => call.endLabel === labelId);
+  if (candidates.length === 0) {
+    return undefined;
+  }
+  let call = candidates[0];
+  if (candidates.length > 1) {
+    const returning = await generatedLineAt(engine, entry, frameId, address);
+    const exact = returning === undefined
+      ? []
+      : candidates.filter((candidate) => returning >= candidate.callCLine && returning <= candidate.endCLine);
+    if (exact.length !== 1) {
+      return undefined;
+    }
+    call = exact[0];
+  }
+  // callCLine is the compiler's statement comment; its #line row follows it.
+  const row = entry.program.lineMap.find((r) => r.cLine >= call.callCLine && r.cLine < call.returnCLine);
+  return row ? { fileId: row.sourceFileId, line: row.line } : undefined;
+}
+
 /** One entry of the PERFORM stack, read through the engine in the program's real frame. */
 async function readPerformEntry(
   engine: EngineRequester,
@@ -61,20 +143,7 @@ async function readPerformEntry(
   if (address === undefined) {
     return undefined;
   }
-  const location = await resolveAddressLocation(engine, engineFrameId, address);
-  if (!location) {
-    return undefined;
-  }
-  let cobol: { fileId: number; line: number } | undefined;
-  const direct = state.registry.sourceIdByPath(entry, location.path);
-  if (direct !== undefined) {
-    cobol = { fileId: direct, line: location.line };
-  } else if (state.registry.isGeneratedSource(entry, location.path)) {
-    const mapped = state.registry.mapGeneratedLine(entry, location.line);
-    if (mapped) {
-      cobol = { fileId: mapped.source.id, line: mapped.line };
-    }
-  }
+  const cobol = await performStatementOf(engine, state, entry, engineFrameId, address, labelId);
   if (!cobol) {
     return undefined;
   }

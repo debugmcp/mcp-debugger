@@ -28,8 +28,8 @@ import type { ShimLogger } from './logger.js';
 import type { FunctionBreakpointRecord } from './breakpoint-table.js';
 import { normalisePath } from './manifest-registry.js';
 import { hexAddress, MemoryReader } from './memory-reader.js';
-import { readPerformDepth, readReturnAddress, resolveAddressLocation } from './perform-frames.js';
-import { insertPerformFrames } from './perform-stack.js';
+import { readPerformDepth, readPerformThrough, readReturnAddress } from './perform-frames.js';
+import { insertPerformFrames, performStatementOf } from './perform-stack.js';
 import { PerformEscapeWatch } from './perform-escape.js';
 import { resolveProcedureName } from './procedure-names.js';
 import { readRuntimeMessage } from './runtime-message.js';
@@ -1010,15 +1010,17 @@ export class Router {
         await escapeWatch.inspect(origin.id, depth, origin.remappedFromC?.line);
         const mapped = callLine === undefined ? undefined : this.state.registry.mapGeneratedLine(origin.program, callLine);
         const address = mapped ? undefined : await readReturnAddress(this.engine, origin.id, depth);
+        const through = address === undefined ? undefined : await readPerformThrough(this.engine, origin.id, depth);
         const performLine = mapped ? { path: mapped.source.path, line: mapped.line }
-          : address === undefined ? undefined : await this.performLineOf(origin, address);
+          : address === undefined ? undefined : await this.performLineOf(origin, address, through);
         return { kind: 'out', depth, origin, returning: false, finished: false, cycles: 0, performLine, escapeWatch };
       }
       const armed = await this.armReturnStop(origin.id, depth);
       if (armed === undefined) {
         return undefined;
       }
-      const performLine = await this.performLineOf(origin, armed.address);
+      const through = await readPerformThrough(this.engine, origin.id, depth);
+      const performLine = await this.performLineOf(origin, armed.address, through);
       this.logger.info(`stepOut at ${origin.label} (PERFORM depth ${depth}): running to the range's return${performLine ? ` (PERFORM at line ${performLine.line})` : ''}`);
       return { kind: 'out', depth, origin, returning: false, finished: false, cycles: 0, performLine };
     }
@@ -1026,25 +1028,22 @@ export class Router {
     return { kind: 'over', depth, origin, returning: false, finished: false, cycles: 0, performLine, escapeWatch };
   }
 
-  /** The COBOL statement a performed range returns to: the PERFORM that runs it, via the return address and the line map. */
-  private async performLineOf(origin: CachedFrame, returnAddress: bigint): Promise<{ path: string; line: number } | undefined> {
+  /**
+   * The COBOL statement a performed range returns to: the PERFORM that runs it —
+   * the manifest's call site for the entry's THRU label, the return address
+   * through the line map only as the fallback (issue #1034; the same reading
+   * the stack frames give).
+   */
+  private async performLineOf(origin: CachedFrame, returnAddress: bigint, labelId?: number): Promise<{ path: string; line: number } | undefined> {
     if (this.inactive) return undefined;
     const entry = origin.program;
     if (!entry) {
       return undefined;
     }
     try {
-      const location = await resolveAddressLocation(this.engine, origin.id, returnAddress);
-      if (!location) {
-        return undefined;
-      }
-      if (this.state.registry.sourceIdByPath(entry, location.path) !== undefined) {
-        return location;
-      }
-      if (this.state.registry.isGeneratedSource(entry, location.path)) {
-        const mapped = this.state.registry.mapGeneratedLine(entry, location.line);
-        return mapped ? { path: mapped.source.path, line: mapped.line } : undefined;
-      }
+      const statement = await performStatementOf(this.engine, this.state, entry, origin.id, returnAddress, labelId);
+      const source = statement ? this.state.registry.sourceById(entry, statement.fileId) : undefined;
+      return statement && source ? { path: source.path, line: statement.line } : undefined;
     } catch (error) {
       this.logger.warn('PERFORM statement of the range unavailable', error);
     }
