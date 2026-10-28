@@ -469,6 +469,133 @@ describe('compile-utils', () => {
       });
     });
 
+    // Issue #1035: a host-built binary under .debug-mcp was reused by the Docker
+    // server over the same bind mount (same path, same name on Linux/macOS), and
+    // every breakpoint stayed unbound — the DWARF names the host's paths. Reuse
+    // was decided by file times alone; a build record beside the output now says
+    // which environment produced it.
+    describe('the build record (issue #1035)', () => {
+      const compileWith = (identity: { compiler?: string; compilerVersion?: string }) =>
+        vi.fn(async ({ outputPath: stagedPath }: { outputPath: string }) => {
+          await fs.writeFile(stagedPath, 'binary');
+          return { success: true, binaryPath: stagedPath, ...identity, args: ['-gdwarf-4', '-O0'] };
+        });
+      const recordPath = () => `${outputPath}.build.json`;
+
+      it('writes the record after a compile and reuses the binary while the environment matches', async () => {
+        const compile = compileWith({ compiler: 'g++', compilerVersion: 'g++ (GCC) 13.2.0' });
+        const first = await prepareSourceBinary({
+          sourcePath, outputPath, platform: 'win32', container: false, compile
+        });
+        expect(first).toMatchObject({ success: true, compiled: true });
+        const record = JSON.parse(await fs.readFile(recordPath(), 'utf8'));
+        expect(record).toMatchObject({
+          version: 1, compiler: 'g++', compilerVersion: 'g++ (GCC) 13.2.0', args: ['-gdwarf-4', '-O0'],
+          platform: 'win32', container: false, sourcePath
+        });
+        expect(typeof record.arch).toBe('string');
+
+        const describeCompiler = vi.fn(async () => ({ command: 'g++', version: 'g++ (GCC) 13.2.0' }));
+        const reused = await prepareSourceBinary({
+          sourcePath, outputPath, platform: 'win32', container: false, compile, describeCompiler
+        });
+        expect(reused).toMatchObject({ success: true, compiled: false, binaryPath: outputPath });
+        expect(compile).toHaveBeenCalledTimes(1);
+        expect(describeCompiler).toHaveBeenCalledTimes(1);
+      });
+
+      it('recompiles when the record names another environment: the container flag, the compiler, the source path', async () => {
+        const compile = compileWith({ compiler: 'g++', compilerVersion: 'g++ (GCC) 13.2.0' });
+        await prepareSourceBinary({ sourcePath, outputPath, platform: 'win32', container: false, compile });
+
+        // The same folder seen from the container (issue #1035's case).
+        const inContainer = await prepareSourceBinary({
+          sourcePath, outputPath, platform: 'win32', container: true, compile,
+          describeCompiler: async () => ({ command: 'g++', version: 'g++ (GCC) 13.2.0' })
+        });
+        expect(inContainer).toMatchObject({ success: true, compiled: true });
+        expect(JSON.parse(await fs.readFile(recordPath(), 'utf8')).container).toBe(true);
+
+        // Another compiler on the same host.
+        const otherCompiler = await prepareSourceBinary({
+          sourcePath, outputPath, platform: 'win32', container: true, compile,
+          describeCompiler: async () => ({ command: 'clang++', version: 'clang version 18.1.0' })
+        });
+        expect(otherCompiler).toMatchObject({ success: true, compiled: true });
+
+        // The record names the source as compiled; a different path is another build.
+        const record = JSON.parse(await fs.readFile(recordPath(), 'utf8'));
+        await fs.writeFile(recordPath(), JSON.stringify({ ...record, sourcePath: '/home/ubuntu/proj/hello.cpp' }));
+        const otherSource = await prepareSourceBinary({
+          sourcePath, outputPath, platform: 'win32', container: true, compile,
+          describeCompiler: async () => ({ command: 'clang++', version: 'clang version 18.1.0' })
+        });
+        expect(otherSource).toMatchObject({ success: true, compiled: true });
+        expect(compile).toHaveBeenCalledTimes(4);
+      });
+
+      it('recompiles a binary that carries no record (built before records existed), once', async () => {
+        await fs.writeFile(outputPath, 'old binary');
+        const compile = compileWith({ compiler: 'g++', compilerVersion: 'g++ (GCC) 13.2.0' });
+        const describeCompiler = vi.fn(async () => ({ command: 'g++', version: 'g++ (GCC) 13.2.0' }));
+
+        const rebuilt = await prepareSourceBinary({ sourcePath, outputPath, platform: 'win32', container: false, compile, describeCompiler });
+        expect(rebuilt).toMatchObject({ success: true, compiled: true });
+        const reused = await prepareSourceBinary({ sourcePath, outputPath, platform: 'win32', container: false, compile, describeCompiler });
+        expect(reused).toMatchObject({ success: true, compiled: false });
+        expect(compile).toHaveBeenCalledTimes(1);
+      });
+
+      it('compares the compiler only when the record names one, and never probes otherwise', async () => {
+        const compile = compileWith({});
+        await prepareSourceBinary({ sourcePath, outputPath, platform: 'win32', container: false, compile });
+        const describeCompiler = vi.fn(async () => ({ command: 'g++', version: 'g++ (GCC) 13.2.0' }));
+
+        const reused = await prepareSourceBinary({ sourcePath, outputPath, platform: 'win32', container: false, compile, describeCompiler });
+        expect(reused).toMatchObject({ success: true, compiled: false });
+        expect(describeCompiler).not.toHaveBeenCalled();
+      });
+
+      // Issue #1041: on Linux/macOS the main binary has no extension, so the
+      // managed-sibling check accepted any `<name>.debug-mcp-*` file — a
+      // compiler's half-written `.tmp` staging file, or a Windows host's `.exe`
+      // copy over a bind mount — and the newest of those won the reuse.
+      it('never picks a .tmp or .exe sibling as the POSIX output (issue #1041)', async () => {
+        const posixOutput = getDefaultOutputPath(sourcePath, 'linux');
+        const environment = { version: 1, platform: 'linux', arch: process.arch, container: false, sourcePath };
+        await fs.writeFile(posixOutput, 'binary');
+        await fs.writeFile(`${posixOutput}.build.json`, JSON.stringify(environment));
+        const future = new Date(Date.now() + 10_000);
+        for (const sibling of [`${getManagedOutputPath(posixOutput, 'crashed')}.tmp`, `${getManagedOutputPath(posixOutput, 'host')}.exe`]) {
+          await fs.writeFile(sibling, 'not a build');
+          await fs.utimes(sibling, future, future);
+        }
+        const old = new Date(Date.now() - 10_000);
+        await fs.utimes(sourcePath, old, old);
+
+        const compile = vi.fn();
+        const result = await prepareSourceBinary({ sourcePath, outputPath: posixOutput, platform: 'linux', container: false, compile });
+
+        expect(compile).not.toHaveBeenCalled();
+        expect(result).toMatchObject({ success: true, compiled: false, binaryPath: posixOutput });
+      });
+
+      it('still rebuilds on a newer source, and forceRebuild still rebuilds a matching record', async () => {
+        const compile = compileWith({ compiler: 'g++', compilerVersion: 'g++ (GCC) 13.2.0' });
+        const describeCompiler = async () => ({ command: 'g++', version: 'g++ (GCC) 13.2.0' });
+        await prepareSourceBinary({ sourcePath, outputPath, platform: 'win32', container: false, compile, describeCompiler });
+
+        const future = new Date(Date.now() + 60_000);
+        await fs.utimes(sourcePath, future, future);
+        const newer = await prepareSourceBinary({ sourcePath, outputPath, platform: 'win32', container: false, compile, describeCompiler });
+        expect(newer).toMatchObject({ success: true, compiled: true });
+
+        const forced = await prepareSourceBinary({ sourcePath, outputPath, platform: 'win32', container: false, compile, describeCompiler, forceRebuild: true });
+        expect(forced).toMatchObject({ success: true, compiled: true });
+        expect(compile).toHaveBeenCalledTimes(3);
+      });
+    });
+
     it('reports a failed output-directory creation instead of throwing', async () => {
       const compile = vi.fn();
       const readOnlyFileSystem = {
@@ -668,6 +795,12 @@ describe('compile-utils', () => {
       await fs.writeFile(outputPath, 'fresh binary');
       const future = new Date(Date.now() + 10_000);
       await fs.utimes(outputPath, future, future);
+      // A record from this environment (issue #1035), naming no compiler, so
+      // the defaults are what decide the reuse and nothing is probed.
+      await fs.writeFile(`${outputPath}.build.json`, JSON.stringify({
+        version: 1, platform: process.platform, arch: process.arch,
+        container: process.env.MCP_CONTAINER === 'true', sourcePath
+      }));
 
       const result = await prepareSourceBinary({ sourcePath, outputPath });
 

@@ -38,7 +38,7 @@ attach_to_process {"sessionId": "<id>", "processId": 4242}
 ## Quirks
 
 - **Same CodeLLDB engine as Rust** — the Rust reference's engine quirks apply: possible launch-time system stop before the first breakpoint (one `continue_execution` fixes it), multi-location lines (macros/templates) draining one location per continue (#255), Windows pause via break-in thread with empty locals on the synthetic thread (#275), stop-reason labels occasionally off on Windows — judge progress by stack lines.
-- **Exceptions:** launch default `"uncaught"` sets no filter — an uncaught `throw` reaches `std::terminate` → SIGABRT and the session pauses at the crash anyway. `breakOnExceptions: "all"` arms `cpp_throw` (pauses at every throw, caught included). `exceptionInfo` is populated for C++ exception stops.
+- **Exceptions:** launch default `"uncaught"` sets no filter — on Linux/macOS an uncaught `throw` reaches `std::terminate` → SIGABRT and the session pauses at the crash anyway; on Windows `abort()` ends the process with exit code 3 and nothing pauses (the launch's "still running" answer says so; pass `"all"` to stop at the throw). `breakOnExceptions: "all"` arms `cpp_throw` (pauses at every throw, caught included). `exceptionInfo` is populated for C++ exception stops.
 - **Output** is captured like Rust's (#223 tier): POSIX via CodeLLDB DAP output events, Windows via adapter-stdio forwarding — `get_output` works either way.
 - **Expression evaluation** is real LLDB: `ptr->field`, `obj.method()`, casts, and full Python via CodeLLDB's `/py` prefix when `expressions` allows.
 - Logpoints work: `set_breakpoint` with `logMessage: "x={x}"`.
