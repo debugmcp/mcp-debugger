@@ -24,10 +24,25 @@ describe('dapCommandFor', () => {
     expect(c.args).toEqual([
       '--packages=C:\\src\\flutter\\packages\\flutter_tools\\.dart_tool\\package_config.json',
       'C:\\src\\flutter\\bin\\cache\\flutter_tools.snapshot',
+      '--no-version-check',
+      '--suppress-analytics',
       'debug-adapter',
     ]);
     expect(c.env).toEqual({ FLUTTER_ROOT: 'C:\\src\\flutter' });
     expect(dapCommandFor('flutter-test', WIN).args.at(-1)).toBe('--test');
+  });
+
+  it('keeps the Flutter tool quiet on stdout: its global switches go ahead of the subcommand on both platforms (issue #1026)', () => {
+    // The tool's once-a-day "A new version of Flutter is available" box is printed on stdout
+    // before the DAP server's first frame, and analytics prompts can be too; either costs the
+    // initialize response. The global flags are parsed by the tool's runner, so they sit
+    // between the snapshot (Windows) or the launcher (POSIX) and `debug-adapter`.
+    for (const tc of [WIN, NIX]) {
+      const args = dapCommandFor('flutter', tc).args;
+      const sub = args.indexOf('debug-adapter');
+      expect(args.slice(sub - 2, sub), tc.platform).toEqual(['--no-version-check', '--suppress-analytics']);
+    }
+    expect(dapCommandFor('dart', NIX).args).not.toContain('--no-version-check');
   });
 
   it('passes FLUTTER_TOOL_ARGS through on Windows the way flutter.bat does', () => {
@@ -41,7 +56,7 @@ describe('dapCommandFor', () => {
 
   it('spawns bin/flutter directly on POSIX', () => {
     const c = dapCommandFor('flutter-test', NIX);
-    expect(c).toEqual({ command: '/opt/flutter/bin/flutter', args: ['debug-adapter', '--test'], env: { FLUTTER_ROOT: '/opt/flutter' } });
+    expect(c).toEqual({ command: '/opt/flutter/bin/flutter', args: ['--no-version-check', '--suppress-analytics', 'debug-adapter', '--test'], env: { FLUTTER_ROOT: '/opt/flutter' } });
   });
 
   it('refuses a Flutter runner without a Flutter root, naming FLUTTER_ROOT', () => {

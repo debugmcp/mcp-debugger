@@ -55,7 +55,13 @@ export function dapCommandFor(runner: DartRunner, tc: InvocationToolchain): DapC
     return { command: tc.dartExe, args: ['debug_adapter', ...(test ? ['--test'] : [])], env: {} };
   }
   if (!tc.flutterRoot) throw new Error('No Flutter SDK found for a Flutter project: put `flutter` on PATH or set FLUTTER_ROOT');
-  const dapArgs = ['debug-adapter', ...(test ? ['--test'] : [])];
+  // The tool's global switches sit ahead of the subcommand (its runner parses them before any
+  // command runs). Without them the once-a-day "A new version of Flutter is available" box —
+  // and an analytics prompt — are printed on stdout ahead of the DAP server's first frame, and
+  // the initialize response goes down with them: a 30 s launch failure once a day for every box
+  // one Flutter stable behind (issue #1026, measured and reproduced by setting the tool's
+  // version-check stamp back).
+  const dapArgs = ['--no-version-check', '--suppress-analytics', 'debug-adapter', ...(test ? ['--test'] : [])];
   const env = { FLUTTER_ROOT: tc.flutterRoot };
   if (tc.platform !== 'win32') {
     return { command: p.join(tc.flutterRoot, 'bin', 'flutter'), args: dapArgs, env };
