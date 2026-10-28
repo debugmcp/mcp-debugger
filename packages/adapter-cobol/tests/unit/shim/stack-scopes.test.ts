@@ -5,7 +5,7 @@
 import { describe, expect, it, afterEach } from 'vitest';
 import path from 'node:path';
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import { engineError, installMemory } from './fake-engine.js';
+import { engineError, installMemory, type FakeEngine } from './fake-engine.js';
 import { callsManifest, callsMemory, helloManifest, helloMemory } from './fixtures.js';
 import { bringUp, frame, startShim, stopWithFrames, tick, type Harness } from './harness.js';
 import { DEPTH_EXPRESSION } from '../../../src/shim/perform-frames.js';
@@ -79,6 +79,89 @@ describe('cobol shim stackTrace and scopes', () => {
     expect(evaluated.filter((e) => e.expression.includes('b_19')).every((e) => e.frameId === 1)).toBe(true);
     const evaluate = await h.client.request('evaluate', { expression: 'WS-ID OF WS-GROUP', frameId: PERFORM_FRAME_ID_BASE });
     expect((evaluate.body as DebugProtocol.EvaluateResponse['body']).result).toBe('42');
+  });
+
+  // Issue #1034: the PERFORM statement's line came from the entry's return
+  // address through the engine's line table, which three compilers attribute
+  // three ways — the row after the call (MinGW 3.2: right), a row inside the
+  // performed paragraph (3.1.2: "1000-INIT (PERFORM 1000-INIT)" at 38, the
+  // caller gone from the stack), the generated header (Linux 3.2: no frame at
+  // all). The manifest's PERFORM call sites name the caller without the line
+  // table; the line table only tells apart several PERFORMs of one range.
+  describe('the performer from the manifest call site (issue #1034)', () => {
+    /** The hello manifest with its PERFORM call sites, as the compiler-output parser records them. */
+    function manifestWithCallSites() {
+      const manifest = helloManifest(ROOT);
+      manifest.programs[0].procedure.paragraphs[0].labelId = 4;
+      manifest.programs[0].procedure.paragraphs[1].labelId = 5;
+      // A row inside 1000-INIT, so a misattributed return lands there.
+      manifest.programs[0].lineMap.push({ cLine: 216, sourceFileId: 1, line: 38 });
+      manifest.programs[0].controlFlow = {
+        hasGoto: false,
+        ranges: [{ labelId: 4, startCLine: 117, endCLine: 198 }, { labelId: 5, startCLine: 199, endCLine: 249 }],
+        performs: [{ callCLine: 123, returnCLine: 139, endCLine: 145, startLabel: 5, endLabel: 5 }]
+      };
+      return manifest;
+    }
+
+    /** One active PERFORM (depth 1, perform_through 5) whose return address the engine's line table resolves to `resolved`. */
+    function installPerformStack(engine: FakeEngine, resolved: string): void {
+      installMemory(engine, helloMemory());
+      const memory = engine.handler('evaluate')!;
+      engine.on('evaluate', (args: { expression: string; frameId?: number }, request) => {
+        if (args.expression === DEPTH_EXPRESSION) {
+          return { result: '1', variablesReference: 0 };
+        }
+        if (args.expression.includes('frame_stack[1].return_address_ptr')) {
+          return { result: '140698323261470', variablesReference: 0 };
+        }
+        if (args.expression.includes('frame_stack[1].perform_through')) {
+          return { result: '5', variablesReference: 0 };
+        }
+        if (args.expression.startsWith('/py ') && args.expression.includes('ResolveLoadAddress')) {
+          return { result: resolved, variablesReference: 0 };
+        }
+        return memory(args, request);
+      });
+    }
+
+    const pyRepr = (location: string) => `'${location.replace(/\\/g, '\\\\')}'`;
+
+    it('names the performer at its PERFORM line when the line table attributes the return to the performed paragraph', async () => {
+      h = await startShim({
+        manifests: [manifestWithCallSites()],
+        engineSetup: (engine) => installPerformStack(engine, pyRepr(`${HELLO_C}|247`))
+      });
+      await bringUp(h);
+      const frames = await stopWithFrames(h, [frame(1, 'HELLO_', HELLO_COB, 37), frame(2, 'HELLO', HELLO_C, 220), frame(3, 'main', HELLO_C, 250)]);
+      expect(frames.map((f) => f.name)).toEqual(['HELLO: 1000-INIT', 'HELLO: 0000-MAIN (PERFORM 1000-INIT)', 'HELLO', 'main']);
+      expect(frames[1].line).toBe(32);
+      expect(frames[1].source?.path).toBe(HELLO_COB);
+    });
+
+    it('keeps the frame when the line table attributes the return to the generated header', async () => {
+      h = await startShim({
+        manifests: [manifestWithCallSites()],
+        engineSetup: (engine) => installPerformStack(engine, pyRepr(`${HELLO_C}.h|76`))
+      });
+      await bringUp(h);
+      const frames = await stopWithFrames(h, [frame(1, 'HELLO_', HELLO_COB, 37), frame(2, 'HELLO', HELLO_C, 220), frame(3, 'main', HELLO_C, 250)]);
+      expect(frames.map((f) => f.name)).toEqual(['HELLO: 1000-INIT', 'HELLO: 0000-MAIN (PERFORM 1000-INIT)', 'HELLO', 'main']);
+      expect(frames[1].line).toBe(32);
+    });
+
+    it('falls back to the line table when the manifest records no call site for the range', async () => {
+      const manifest = manifestWithCallSites();
+      manifest.programs[0].controlFlow = { hasGoto: false, ranges: [], performs: [] };
+      h = await startShim({
+        manifests: [manifest],
+        engineSetup: (engine) => installPerformStack(engine, pyRepr(`${HELLO_C}|130`))
+      });
+      await bringUp(h);
+      const frames = await stopWithFrames(h, [frame(1, 'HELLO_', HELLO_COB, 37), frame(2, 'HELLO', HELLO_C, 220), frame(3, 'main', HELLO_C, 250)]);
+      expect(frames[1].name).toBe('HELLO: 0000-MAIN (PERFORM 1000-INIT)');
+      expect(frames[1].line).toBe(32);
+    });
   });
 
   it('labels COBOL frames "<PROGRAM-ID>: <paragraph>" and leaves entry wrapper, main and CRT frames alone', async () => {

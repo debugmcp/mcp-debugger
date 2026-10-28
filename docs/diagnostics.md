@@ -57,7 +57,7 @@ Usage notes:
 | dotnet | .NET 6+ SDK | netcoredbg | download from [Samsung releases](https://github.com/Samsung/netcoredbg/releases); Portable PDB symbols required | `NETCOREDBG_PATH`, `NETCOREDBG_X86_PATH` (x86 attach targets) |
 | rust | Rust toolchain (rustup) | CodeLLDB (vendored / platform packages) | nothing extra on a normal install; on Windows use the **GNU** toolchain (DWARF) | `CODELLDB_PATH` (used when no vendored copy resolves) |
 | cpp | compiler only for source-file launch (`g++`/`clang++`) | CodeLLDB (shared with rust) | nothing for prebuilt binaries; compile with `-gdwarf-4 -O0` | `CODELLDB_PATH`, `CPP_MSVC_BEHAVIOR` (`warn`\|`error`\|`continue`) |
-| cobol | GnuCOBOL 3.1.2+ (`cobc`) — for source launch and COBOL-shaped variables | CodeLLDB (shared with rust/cpp) behind the COBOL DAP shim | `apt install gnucobol3` / `brew install gnucobol` / MSYS2 `pacman -S mingw-w64-ucrt-x86_64-gnucobol`; a prebuilt executable must be built with `cobc -g` (`-A -gdwarf-4` on MinGW) | `COBC_PATH`, `COB_CONFIG_DIR` (set automatically for MSYS2/Homebrew layouts), `MCP_COBOL_ALLOW_PREBUILT` |
+| cobol | GnuCOBOL 3.1.2+ (`cobc`) — for source launch and COBOL-shaped variables | CodeLLDB (shared with rust/cpp) behind the COBOL DAP shim | `apt install gnucobol3` / `brew install gnucobol` / MSYS2 `pacman -S mingw-w64-ucrt-x86_64-gnucobol`; a prebuilt executable must be built with `cobc -g` (`-A -gdwarf-4` on MinGW) | `COBC_PATH`, `COB_CONFIG_DIR` (set automatically for MSYS2/Homebrew layouts) |
 | dart | Dart SDK 3.x (`dart`), or Flutter (bundles its own Dart) | `dart debug_adapter` / `flutter debug-adapter` — the SDK's own DAP servers, behind a TCP-to-stdio bridge; nothing vendored | [dart.dev/get-dart](https://dart.dev/get-dart) (Windows `winget install Google.DartSDK`, macOS `brew install dart`, Linux the `dart` apt package) or Flutter; run `flutter --version` once so the Flutter tool cache is built | `DART_SDK` (alias `DART_PATH`), `FLUTTER_ROOT` (alias `FLUTTER_PATH`); a project's fvm pin (`.fvmrc`) is honoured |
 | mock | — | — | nothing (testing adapter) | — |
 
@@ -148,7 +148,7 @@ The most common symptom → cause → fix mappings per language. (The agent-faci
 | Breakpoint `verified: false`, "Resolved locations: 0", program runs through | Executable built without `-g`, or with DWARF-5 on MinGW | Let the adapter compile it, or rebuild with `cobc -g -A "-O0 -gdwarf-4"` |
 | `libcob-4.dll not found` (Windows) | GnuCOBOL's `bin` directory not on the debuggee's PATH | Automatic when cobc is found; otherwise add `<prefix>/bin` to PATH or pass it in `env` |
 | Variables are `b_N` byte arrays, `get_local_variables` empty, log warns "no COBOL symbol manifest" | Prebuilt executable without `sources`/`manifestDirs`, or cobc missing | Pass `sources` (with cobc installed) or `manifestDirs` |
-| "GnuCOBOL (cobc) not found" | Not installed or off PATH | Install GnuCOBOL or set `COBC_PATH`; for prebuilt binaries only, `MCP_COBOL_ALLOW_PREBUILT=true` |
+| "GnuCOBOL (cobc) not found" | Not installed or off PATH | Install GnuCOBOL or set `COBC_PATH`; a prebuilt binary still launches without it (engine view only) |
 | Runtime error (bad subscript, non-numeric data) never pauses | `runtimeChecks` unset, so no check is compiled in | `runtimeChecks: true` in `dapLaunchArgs` |
 
 ### dart
@@ -234,7 +234,7 @@ The runtime-affecting variables the server and its adapters read (the [developme
 | `CPP_MSVC_BEHAVIOR` / `RUST_MSVC_BEHAVIOR` | `warn` (default) \| `error` \| `continue` when a cpp/rust target has MSVC PDB symbols |
 | `RUST_AUTO_SUGGEST_GNU` | `0`/`false`/`no` suppresses the "switch to the GNU toolchain" suggestion (on by default) |
 | `CARGO_BUILD_TARGET` / `RUST_TARGET` / `RUSTFLAGS` | Read only as signals that a `*-pc-windows-gnu` target is in play — gates the Windows `dlltool` warning |
-| `MCP_RUST_ALLOW_PREBUILT` / `MCP_CPP_ALLOW_PREBUILT` / `MCP_COBOL_ALLOW_PREBUILT` | `true` lets the rust/cpp/cobol adapter debug a prebuilt binary with no toolchain installed (implied by `MCP_CONTAINER=true`) |
+| `MCP_RUST_ALLOW_PREBUILT` / `MCP_CPP_ALLOW_PREBUILT` | `true` lets the rust/cpp adapter debug a prebuilt binary with no toolchain installed (implied by `MCP_CONTAINER=true`); the cobol adapter needs no flag — a prebuilt COBOL executable launches without cobc, with the engine's C view only |
 | `COBC_PATH` | Pin the GnuCOBOL compiler (`cobc`) — checked before PATH and the known install directories |
 | `COB_CONFIG_DIR` / `COB_COPY_DIR` | GnuCOBOL's own dialect-configuration and copybook directories; the adapter sets them to `<prefix>/share/gnucobol/{config,copy}` when cobc's install has them and you have not (MSYS2's cobc cannot find its config outside an MSYS2 shell) |
 | `DART_SDK` / `DART_PATH` | Dart SDK root (or its `bin/dart`) — checked before `dart` on PATH, a Flutter checkout's bundled SDK and the known install directories |
