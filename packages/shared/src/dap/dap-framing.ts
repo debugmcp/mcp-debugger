@@ -148,6 +148,24 @@ export class DapFrameDecoder {
         }
       }
 
+      if (parsedLength === null) {
+        // No line *starts* with the header, but the block may still carry it: a peer that
+        // prints a banner with bare `\n` line ends ahead of its first frame (the Flutter
+        // tool's once-a-day update box, issue #1026) leaves the banner and the real
+        // `Content-Length` line in one block, because only the real header supplies the
+        // separator. Resyncing past the block (below) would throw that header away with
+        // the banner; resync inside the block instead and parse the header on its own.
+        const inBlock = header.toLowerCase().indexOf('content-length');
+        if (inBlock > 0) {
+          this.onError?.(
+            new Error('Invalid Content-Length header encountered; discarded the bytes ahead of the header inside the block and resynced'),
+            'header'
+          );
+          this.headerData = this.headerData.subarray(Buffer.byteLength(header.slice(0, inBlock), 'utf8'));
+          continue;
+        }
+      }
+
       // Remove header from buffer; the remainder starts the body (or next header)
       const remainder = this.headerData.subarray(idx + TWO_CRLF.length);
       this.headerData = Buffer.alloc(0);
