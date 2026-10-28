@@ -7,6 +7,7 @@
  * @since 0.1.0
  */
 import { EventEmitter } from 'events';
+import * as fs from 'node:fs/promises';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { 
   IDebugAdapter,
@@ -303,21 +304,19 @@ export class GoDebugAdapter extends EventEmitter implements IDebugAdapter {
   }
   
   // ===== Debug Configuration =====
-  
+
   async transformLaunchConfig(config: GenericLaunchConfig): Promise<GoLaunchConfig> {
-    // Inference rule: a .go source file means dlv should compile-and-run
-    // (mode 'debug'); anything else (a pre-built binary) means dlv should
-    // run it directly (mode 'exec'). dlv exits with no useful error when
-    // given a binary in 'debug' mode, so this auto-detection is required
-    // for usable UX. An explicit user-supplied mode always wins (e.g.
-    // 'test', 'replay', 'core').
+    // Inference rule: a .go source file, or a package directory (issue
+    // #1036), means dlv should compile-and-run (mode 'debug'); anything else
+    // (a pre-built binary) means dlv should run it directly (mode 'exec').
+    // dlv exits with no useful error when given a binary in 'debug' mode,
+    // and 'exec' can never run a directory ("not an executable file"), so
+    // this auto-detection is required for usable UX. An explicit
+    // user-supplied mode always wins (e.g. 'test', 'replay', 'core').
     const rawConfig = config as Record<string, unknown>;
     const userMode = rawConfig.mode as GoLaunchConfig['mode'] | undefined;
     const program = rawConfig.program;
-    const isGoSource = typeof program === 'string'
-      && program.toLowerCase().endsWith('.go');
-    const inferredMode: GoLaunchConfig['mode'] = isGoSource ? 'debug' : 'exec';
-    const mode = userMode ?? inferredMode;
+    const mode = userMode ?? await inferLaunchMode(program);
 
     const goConfig: GoLaunchConfig = {
       ...config,
@@ -610,4 +609,21 @@ You can also specify the Go path explicitly in your debug configuration.`;
     
     return version;
   }
+}
+
+/**
+ * The dlv mode a program path implies when the caller names none (issue
+ * #1036): a `.go` source or a package directory that exists is a
+ * compile-and-run target (`debug`); anything else — a prebuilt binary, or a
+ * path that cannot be read — runs as it is (`exec`).
+ */
+async function inferLaunchMode(program: unknown): Promise<GoLaunchConfig['mode']> {
+  if (typeof program !== 'string') {
+    return 'exec';
+  }
+  if (program.toLowerCase().endsWith('.go')) {
+    return 'debug';
+  }
+  const isDirectory = await fs.stat(program).then(stat => stat.isDirectory()).catch(() => false);
+  return isDirectory ? 'debug' : 'exec';
 }

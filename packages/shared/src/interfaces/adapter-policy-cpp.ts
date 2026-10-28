@@ -135,7 +135,12 @@ export const CppAdapterPolicy = {
         uncaught: [],
         all: ['cpp_throw']
       },
-      defaultExceptionBreakMode: 'uncaught'
+      defaultExceptionBreakMode: 'uncaught',
+      // The abort-signal stop is a POSIX fact. Measured on Windows (MinGW
+      // g++, issue #1032): abort() ends the process with exit code 3 and
+      // CodeLLDB reports no stop, so there the launch answer must promise
+      // the exit, not a crash stop.
+      stopsOnUncaughtWithoutFilter: process.platform !== 'win32'
     };
   },
 

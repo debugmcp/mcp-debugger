@@ -19,6 +19,28 @@ export interface ProxyInitProgress {
 }
 
 /**
+ * Why no uncaught exception will stop a running program (issues #1009, #1032),
+ * settled once per launch or attach by the session layer's exception arming:
+ * the caller opted out with breakOnExceptions 'none'; the adapter has no
+ * uncaught-only filter and its engine does not stop on its own (rdbg;
+ * CodeLLDB on Windows); or the adapter has one and none was requested (an
+ * attach with no mode). Undefined means the crash stop is still coming.
+ */
+export type NoUncaughtStop = 'opted-out' | 'unavailable' | 'not-requested';
+
+/** The parenthetical the unarmed answers give for each reason. */
+function noUncaughtStopClause(why: NoUncaughtStop): string {
+  switch (why) {
+    case 'opted-out':
+      return "breakOnExceptions: 'none' runs a crash to the program's exit";
+    case 'unavailable':
+      return "this adapter has no uncaught-exception filter, so a crash runs to the program's exit";
+    case 'not-requested':
+      return "none was requested, so a crash runs to the program's exit";
+  }
+}
+
+/**
  * The refusal lead-in for each operation that takes a session's in-flight
  * claim (issue #711). Declared here, next to the message builder that reads
  * it, so `InFlightGuard` can import the operation union instead of restating
@@ -238,6 +260,24 @@ export const ErrorMessages = {
     `get_stack_trace with includeInternals: true lists the frames.`,
 
   /**
+   * An explicit breakOnExceptions mode the adapter cannot honour (issue #1032):
+   * the policy's table resolves it to no filter and the engine does not stop
+   * at an uncaught exception on its own, so the request is a no-op the caller
+   * must hear about — the worker skips setExceptionBreakpoints with a log
+   * line only. Lands on the launch answer's warning surface. The policy
+   * default never earns it: the pending answer already says what a crash does.
+   * Used in: src/session/launch/debug-launcher.ts
+   * @param mode - The mode the caller asked for
+   * @param language - The session language
+   * @param supportedModes - The modes the policy resolves to at least one filter
+   */
+  exceptionModeArmsNothing: (mode: string, language: string, supportedModes: readonly string[]) =>
+    `breakOnExceptions '${mode}' arms no exception filter on the ${language} adapter ` +
+    `(it has no ${mode === 'uncaught' ? 'uncaught-only' : 'matching'} filter), so an exception runs to the program's exit` +
+    (supportedModes.length > 0 ? `; the mode(s) it supports: ${supportedModes.map(m => `'${m}'`).join(', ')}` : '') +
+    '.',
+
+  /**
    * wait_for_stop reached its timeout with the session still live (issue
    * #849). Not an error, and nothing was cancelled — said outright, because
    * "did the timeout disarm my breakpoint?" is the first thing a pending
@@ -257,7 +297,7 @@ export const ErrorMessages = {
   waitForStopPending: (
     seconds: number,
     state: 'running' | 'initializing',
-    why: { armedSummary?: string; debuggerOffWhy?: string; loggingSummary?: string; uncaughtStops?: boolean } = {}
+    why: { armedSummary?: string; debuggerOffWhy?: string; loggingSummary?: string; noUncaughtStop?: NoUncaughtStop } = {}
   ) => {
     if (state === 'initializing') {
       return `The session is still starting after ${seconds}s (its launch or attach has not completed). ` +
@@ -276,13 +316,14 @@ export const ErrorMessages = {
         `Nothing was cancelled: what is armed stays armed, and the session becomes 'paused' when the program ` +
         `gets there. Call wait_for_stop again to keep waiting, or pause_execution to interrupt it.`;
     }
-    // Under breakOnExceptions 'none' the uncaught filter is what the caller
-    // opted out of: a crash runs to the exit, and promising a stop for it
-    // described the default, not the mode chosen (issue #1009).
-    if (why.uncaughtStops === false) {
+    // No uncaught exception will stop the program (issues #1009, #1032): the
+    // caller opted out, the adapter cannot, or nobody asked — a crash runs to
+    // the exit, and promising a stop for it would describe a default this
+    // launch does not have.
+    if (why.noUncaughtStop) {
       return `The program is still running after ${seconds}s${logging}, and nothing is armed to stop it ` +
-        `(no ${why.loggingSummary ? 'pausing ' : ''}breakpoint, and no exception filter — breakOnExceptions: 'none' runs a crash ` +
-        `to the program's exit): unless a step or a pause is still in flight, it will only report its exit. ` +
+        `(no ${why.loggingSummary ? 'pausing ' : ''}breakpoint, and no exception filter — ${noUncaughtStopClause(why.noUncaughtStop)}): ` +
+        `unless a step or a pause is still in flight, it will only report its exit. ` +
         `Call wait_for_stop again to wait for it, or pause_execution to interrupt it.`;
     }
     return `The program is still running after ${seconds}s${logging}, and no ${why.loggingSummary ? 'pausing ' : ''}breakpoint ` +
@@ -328,10 +369,11 @@ export const ErrorMessages = {
    * @param debuggerOffWhy - The debugger-off sentence, when it applies
    * @param loggingSummary - Logpoints the adapter runs on ("1 logpoint(s) that log without stopping"), named apart
    *   because they never stop the program (issue #865); undefined when there are none
-   * @param uncaughtStops - Whether an uncaught exception still stops the program; false under
-   *   breakOnExceptions 'none', where the unarmed answer may promise only the exit (issue #1009)
+   * @param noUncaughtStop - Why no uncaught exception will stop the program (issues #1009, #1032):
+   *   the caller opted out, the adapter has no such filter, or none was requested — the unarmed
+   *   answer then promises only the exit; undefined when the crash stop is still coming
    */
-  launchStillRunning: (armedSummary: string | undefined, debuggerOffWhy?: string, loggingSummary?: string, uncaughtStops: boolean = true) => {
+  launchStillRunning: (armedSummary: string | undefined, debuggerOffWhy?: string, loggingSummary?: string, noUncaughtStop?: NoUncaughtStop) => {
     if (debuggerOffWhy) {
       return `The program is running — ${debuggerOffWhy}. ` +
         `Call wait_for_stop to wait for it to end, or read get_output.`;
@@ -344,10 +386,10 @@ export const ErrorMessages = {
     }
     // "no breakpoints" to a caller who set a logpoint reads as "it was not
     // registered" — the first thing checked when a logpoint seems silent.
-    if (!uncaughtStops) {
+    if (noUncaughtStop) {
       return `The program is running${logging}${loggingSummary ? ',' : ''} and nothing is armed to stop it ` +
-        `(no ${loggingSummary ? 'pausing ' : ''}breakpoints, no entry stop, and no exception filter — breakOnExceptions: 'none' ` +
-        `runs a crash to the program's exit): it will only report its exit. Call wait_for_stop to wait for it, ` +
+        `(no ${loggingSummary ? 'pausing ' : ''}breakpoints, no entry stop, and no exception filter — ` +
+        `${noUncaughtStopClause(noUncaughtStop)}): it will only report its exit. Call wait_for_stop to wait for it, ` +
         `read get_output, or set breakpoints — they take effect on the running program.`;
     }
     return `The program is running${logging}${loggingSummary ? ',' : ''} and nothing is armed to stop it ` +

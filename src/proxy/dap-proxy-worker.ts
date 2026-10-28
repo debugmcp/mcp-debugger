@@ -2208,11 +2208,14 @@ export class DapProxyWorker {
    */
   private handleRequestTimeout(requestId: string, command: string, timeoutMs: number): void {
     this.logger!.error(`[Worker] DAP request '${command}' (id: ${requestId}) timed out after ${timeoutMs}ms`);
+    // Milliseconds under a second (issue #1037): the attach thread poll uses
+    // sub-second timeouts, and a rounded "0s" reads as a misconfigured timeout.
+    const duration = timeoutMs < 1000 ? `${timeoutMs}ms` : `${Math.round(timeoutMs / 1000)}s`;
     this.sendDapResponse(
       requestId,
       false,
       undefined,
-      `Request '${command}' timed out after ${Math.round(timeoutMs / 1000)}s`
+      `Request '${command}' timed out after ${duration}`
     );
   }
 

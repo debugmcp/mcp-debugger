@@ -97,7 +97,7 @@ Data breakpoints (hardware watchpoints), disassembly view, instruction stepping,
 ## Exceptions
 
 - `breakOnExceptions: "all"` maps to CodeLLDB's `cpp_throw` filter — pauses at **every** throw (first chance), caught or not.
-- The launch default `"uncaught"` sets **no filter**: LLDB has no uncaught-only C++ filter, and an uncaught exception reaches `std::terminate` → SIGABRT, which the debugger stops on natively — you still land at the crash with stack and locals.
+- The launch default `"uncaught"` sets **no filter**: LLDB has no uncaught-only C++ filter. On Linux and macOS an uncaught exception reaches `std::terminate` → SIGABRT, which the debugger stops on natively — you still land at the crash with stack and locals. **On Windows there is no such stop** (measured with MinGW g++, issue #1032): `abort()` ends the process with exit code 3, so a crash runs to the program's exit and the launch's "still running" answer says so; pass `"all"` to stop at the throw instead.
 - `cpp_catch` (break on catch) is available via explicit filter configuration.
 
 ## Debugging host-built binaries in Docker

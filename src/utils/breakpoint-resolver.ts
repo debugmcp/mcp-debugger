@@ -13,12 +13,19 @@ const MAX_LISTED_MATCHES = 20;
  * How an expectedContent assertion matched (issue #379): 'exact' is trimmed
  * whole-line equality, and 'comment-stripped-exact' is its exact-equivalent
  * — the expectation is the entire code of the line, the line merely carries
- * a trailing comment (issue #440); neither warrants a warning. The remaining
+ * a trailing comment (issue #440) — as is 'terminator-stripped-exact': the
+ * expectation is the whole statement without the line's trailing `;` or `.`
+ * (issue #1038); none of the three warrants a warning. The remaining
  * qualities are relaxed matches the caller should surface as a warning — the
  * #367 tolerance deliberately accepts lines the expectation only partially
  * pins down.
  */
-export type ContentMatchQuality = 'exact' | 'comment-stripped-exact' | 'substring' | 'comment-stripped';
+export type ContentMatchQuality =
+  | 'exact'
+  | 'comment-stripped-exact'
+  | 'terminator-stripped-exact'
+  | 'substring'
+  | 'comment-stripped';
 
 export type LineContentAssertion =
   | { ok: true; matchQuality: ContentMatchQuality; actual: string }
@@ -66,6 +73,11 @@ export function stripTrailingComment(line: string): string {
     cut = hash;
   }
   return cut === -1 ? line : line.slice(0, cut);
+}
+
+/** A trimmed line without one trailing statement terminator (`;` or `.`), trailing space included. */
+function stripStatementTerminator(trimmedLine: string): string {
+  return trimmedLine.replace(/\s*[;.]$/, '');
 }
 
 /**
@@ -130,6 +142,17 @@ export function assertLineContent(
     stripTrailingComment(lines[line - 1]).trim() === expected
   ) {
     return { ok: true, matchQuality: 'comment-stripped-exact', actual };
+  }
+  // The whole statement without the line's terminator (issue #1038): a COBOL
+  // period, a C or JS semicolon — the one character an agent quoting a
+  // statement drops. Exact-equivalent, on the line as it is or past its
+  // trailing comment (the same expectation-side guard as above).
+  if (
+    stripStatementTerminator(actual) === expected ||
+    (stripTrailingComment(expectedContent).trim() === expected &&
+      stripStatementTerminator(stripTrailingComment(lines[line - 1]).trim()) === expected)
+  ) {
+    return { ok: true, matchQuality: 'terminator-stripped-exact', actual };
   }
   if (actual.includes(expected)) {
     return { ok: true, matchQuality: 'substring', actual };

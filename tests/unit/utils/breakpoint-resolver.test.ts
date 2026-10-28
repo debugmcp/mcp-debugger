@@ -115,6 +115,27 @@ describe('assertLineContent', () => {
     });
   });
 
+  // Issue #1038: an expectation that drops the line's statement terminator — a
+  // COBOL period, a C or JS semicolon — is the whole statement, not a substring
+  // worth a warning; agents quoting a statement drop the terminator routinely,
+  // and a warning they learn to ignore protects nothing.
+  it('classifies an expectation that lacks only the trailing terminator as exact-equivalent (issue #1038)', () => {
+    expect(assertLineContent(['           ADD WS-SCALED TO WS-TOTAL.'], 1, 'ADD WS-SCALED TO WS-TOTAL', FILE)).toEqual({
+      ok: true, matchQuality: 'terminator-stripped-exact', actual: 'ADD WS-SCALED TO WS-TOTAL.'
+    });
+    expect(assertLineContent(['  foo(x);'], 1, 'foo(x)', FILE)).toEqual({
+      ok: true, matchQuality: 'terminator-stripped-exact', actual: 'foo(x);'
+    });
+    // ...and on a line that also carries a trailing comment.
+    expect(assertLineContent(['  foo(x);  // call it'], 1, 'foo(x)', FILE)).toEqual({
+      ok: true, matchQuality: 'terminator-stripped-exact', actual: 'foo(x);  // call it'
+    });
+    // A partial statement is still a substring match, with its warning.
+    expect(assertLineContent(['  total = sum(prices);'], 1, 'sum(prices)', FILE)).toMatchObject({ matchQuality: 'substring' });
+    // An expectation that carries its own terminator is exact, as before.
+    expect(assertLineContent(['  foo(x);'], 1, 'foo(x);', FILE)).toMatchObject({ matchQuality: 'exact' });
+  });
+
   it('still labels a partial-code match on a commented line as substring (issue #440)', () => {
     const result = assertLineContent(
       ['    total = sum(prices)  # recompute'], 1, 'sum(prices)', FILE
