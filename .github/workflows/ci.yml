@@ -616,9 +616,38 @@ jobs:
         pnpm exec vitest run --project integration tests/adapters/go/integration --reporter=default --reporter=json --outputFile=/tmp/go-current.json
         node -e "const r=require('/tmp/go-current.json'); console.log('passed', r.numPassedTests, 'skipped', r.numPendingTests + r.numTodoTests); if (r.numPassedTests === 0 || r.numPendingTests + r.numTodoTests > 0) process.exit(1)"
 
+  mcp-conformance:
+    # The protocol org's own conformance suite (`@modelcontextprotocol/conformance`, pinned in
+    # the script) against a local `http` server: the scenarios that apply to a server without
+    # the suite's reference fixtures (issue #1023). Linux only — on Windows the CLI aborts at
+    # exit with a libuv assertion even after every check passed. What the suite does not cover,
+    # the session-lifecycle clauses this server answers itself, is pinned by
+    # tests/integration/cli/http-spec-contract.test.ts in build-and-test.
+    name: MCP Conformance (official suite)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Setup pnpm
+      uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+    - name: Setup Node.js
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: '22.x'
+        cache: 'pnpm'
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+      env:
+        SKIP_ADAPTER_VENDOR: 'true'
+    - name: Build project
+      run: pnpm run build:ci
+    - name: Run the applicable conformance scenarios
+      run: node scripts/mcp-conformance.mjs --verbose
+
   test-summary:
     name: Test Summary
-    needs: [build-and-test, windows-python-integration, lint, container-tests, cobol-host, dart-host, flutter-host, go-current]
+    needs: [build-and-test, windows-python-integration, lint, container-tests, cobol-host, dart-host, flutter-host, go-current, mcp-conformance]
     runs-on: ubuntu-latest
     if: always()
 
@@ -633,6 +662,7 @@ jobs:
         echo "dart-host: ${{ needs.dart-host.result }}"
         echo "flutter-host: ${{ needs.flutter-host.result }}"
         echo "go-current: ${{ needs.go-current.result }}"
+        echo "mcp-conformance: ${{ needs.mcp-conformance.result }}"
         if [ "${{ needs.build-and-test.result }}" != "success" ] \
           || [ "${{ needs.windows-python-integration.result }}" != "success" ] \
           || [ "${{ needs.lint.result }}" != "success" ] \
@@ -640,7 +670,8 @@ jobs:
           || [ "${{ needs.cobol-host.result }}" != "success" ] \
           || [ "${{ needs.dart-host.result }}" != "success" ] \
           || [ "${{ needs.flutter-host.result }}" != "success" ] \
-          || [ "${{ needs.go-current.result }}" != "success" ]; then
+          || [ "${{ needs.go-current.result }}" != "success" ] \
+          || [ "${{ needs.mcp-conformance.result }}" != "success" ]; then
           echo "❌ One or more required jobs did not succeed"
           exit 1
         fi

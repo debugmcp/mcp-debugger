@@ -372,7 +372,7 @@ describe('HTTP Command Handler', () => {
       );
     });
 
-    it('rejects a request with an unknown Mcp-Session-Id with 400', async () => {
+    it('answers a request with an unknown Mcp-Session-Id with 404 so the client re-initializes', async () => {
       const { handler } = getHandler();
       const req = makeReq({
         headers: { 'mcp-session-id': 'unknown-session' },
@@ -382,10 +382,20 @@ describe('HTTP Command Handler', () => {
 
       await handler(req, res);
 
-      expect(res.status).toHaveBeenCalledWith(400);
+      expect(MockedStreamableHTTPServerTransport).not.toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(404);
       expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({ error: expect.objectContaining({ code: -32600 }) })
+        expect.objectContaining({ error: expect.objectContaining({ code: -32001, message: 'Session not found' }) })
       );
+    });
+
+    it('answers a GET or DELETE for a session that no longer exists with 404', async () => {
+      const { handler } = getHandler();
+      for (const method of ['GET', 'DELETE']) {
+        const res = makeRes();
+        await handler(makeReq({ method, headers: { 'mcp-session-id': 'gone' } }), res);
+        expect(res.status, method).toHaveBeenCalledWith(404);
+      }
     });
 
     it('removes the session from the map and stops its server when the transport closes', async () => {
