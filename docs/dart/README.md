@@ -133,7 +133,8 @@ empty stack until it next runs code.
 
 `flutter test` runs headless on every platform. `flutter run` needs a device: `deviceId: "windows"`
 (desktop, Visual Studio required), `"macos"` (desktop, Xcode required), `"<udid>"` (an iOS simulator
-— `flutter devices` lists a simulator under its UDID only while it is booted — or an iPhone),
+— `flutter devices` lists a simulator under its UDID only while it is booted; a physical iPhone is
+unmeasured, see below),
 `"chrome"` / `"edge"` (web, through dwds — measured: a `build()`
 breakpoint in ~23 s on Chrome and ~24 s on Edge, headless too with
 `toolArgs: ["--web-browser-flag=--headless=new"]`, which is how CI runs it; `"web-server"` needs the
