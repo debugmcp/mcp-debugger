@@ -171,8 +171,12 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Attach Smoke Test @requires-cobol'
       const tick1 = await readTick();
       expect(tick1).toBeGreaterThanOrEqual(1);
       expect((await localsByName()).get('WS-ONE')?.value).toBe('1');
-      // evaluate walks up too and says so: `3 (evaluated in PAUSE: 0000-MAIN …, 6 frames up)`.
-      expect(String((await call('evaluate_expression', { expression: 'WS-TICK' })).result)).toMatch(new RegExp('^' + tick1 + ' [(]evaluated in PAUSE: 0000-MAIN.*, [0-9]+ frames? up[)]$'));
+      // An evaluate that names no frame lands in the visible COBOL frame — the stop anchor's
+      // first program frame (#904/#912) — so the value comes back plain (issue #1010); only a
+      // caller who names the raw libcob frame is told the shim walked up for it.
+      expect(String((await call('evaluate_expression', { expression: 'WS-TICK' })).result)).toBe(String(tick1));
+      expect(String((await call('evaluate_expression', { expression: 'WS-TICK', frameId: raw[0].id })).result))
+        .toMatch(new RegExp('^' + tick1 + ' [(]evaluated in PAUSE: 0000-MAIN.*, [0-9]+ frames? up[)]$'));
 
       // Let the job run, pause it again: WS-TICK moved on and is read from the new stop.
       expect((await call('continue_execution', {})).success).toBe(true);
