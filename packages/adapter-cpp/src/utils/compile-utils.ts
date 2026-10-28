@@ -31,6 +31,10 @@ export interface CompileResult {
   success: boolean;
   binaryPath?: string;
   error?: string;
+  /** The compiler that produced `binaryPath`, its version banner and its arguments — recorded beside the output (issue #1035). */
+  compiler?: string;
+  compilerVersion?: string;
+  args?: string[];
 }
 
 export interface PreparedSourceBinaryResult extends CompileResult {
@@ -65,20 +69,36 @@ export function dialectForSource(filePath: string): SourceDialect {
   return path.extname(filePath).toLowerCase() === '.c' ? 'c' : 'cpp';
 }
 
-/** Whether `<command> --version` runs and exits 0 (the shared probe, issue #969: bounded, read on close). */
-async function probeCommand(command: string): Promise<boolean> {
-  return (await runVersionProbe(command, ['--version'])).code === 0;
+/**
+ * Whether `<command> --version` runs and exits 0 (the shared probe, issue #969:
+ * bounded, read on close), with the banner's first line when it does — kept
+ * from the discovery probe so the build record (issue #1035) costs no second
+ * spawn.
+ */
+async function probeCompiler(command: string): Promise<{ ok: boolean; version: string | null }> {
+  const result = await runVersionProbe(command, ['--version']);
+  const firstLine = (result.stdout + result.stderr)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+  return { ok: result.code === 0, version: result.code === 0 && firstLine ? firstLine : null };
+}
+
+/** Find the first working compiler for the given dialect, with its version banner, or null. */
+export async function findCompilerWithVersion(dialect: SourceDialect): Promise<CompilerInfo | null> {
+  const candidates = dialect === 'c' ? C_COMPILER_CANDIDATES : CPP_COMPILER_CANDIDATES;
+  for (const candidate of candidates) {
+    const probe = await probeCompiler(candidate);
+    if (probe.ok) {
+      return { command: candidate, version: probe.version };
+    }
+  }
+  return null;
 }
 
 /** Find the first working compiler for the given dialect, or null. */
 export async function findCompiler(dialect: SourceDialect): Promise<string | null> {
-  const candidates = dialect === 'c' ? C_COMPILER_CANDIDATES : CPP_COMPILER_CANDIDATES;
-  for (const candidate of candidates) {
-    if (await probeCommand(candidate)) {
-      return candidate;
-    }
-  }
-  return null;
+  return (await findCompilerWithVersion(dialect))?.command ?? null;
 }
 
 /** Find any C/C++ compiler, preferring C++ ones (they handle both dialects). */
@@ -107,12 +127,7 @@ export async function getCompilerInfo(command?: string): Promise<CompilerInfo | 
 }
 
 async function captureVersionLine(command: string): Promise<string | null> {
-  const result = await runVersionProbe(command, ['--version']);
-  const firstLine = (result.stdout + result.stderr)
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find((line) => line.length > 0);
-  return result.code === 0 && firstLine ? firstLine : null;
+  return (await probeCompiler(command)).version;
 }
 
 /**
@@ -143,7 +158,12 @@ function isManagedOutputName(fileName: string, outputPath: string): boolean {
   if (!fileName.startsWith(prefix) || !fileName.endsWith(parsed.ext)) {
     return false;
   }
-  return fileName.slice(prefix.length, fileName.length - parsed.ext.length).length > 0;
+  const token = fileName.slice(prefix.length, fileName.length - parsed.ext.length);
+  // The token is `<time>-<pid>-<n>`, never dotted. An extension-free output
+  // (POSIX) would otherwise accept a compiler's half-written `.tmp` staging
+  // file or a Windows host's `.exe` copy over a bind mount as its newest
+  // build (issue #1041).
+  return token.length > 0 && !token.includes('.');
 }
 
 async function findNewestCompiledOutput(
@@ -252,14 +272,109 @@ async function promoteStagedOutput(
   }
 }
 
+/**
+ * What a `.debug-mcp` build was produced with, written beside the output
+ * (issue #1035). The host and a Docker container share the folder over a
+ * bind mount; a host-built binary launched in-container has the host's
+ * paths in its DWARF and binds no breakpoint, and file times alone could
+ * not tell the two apart.
+ */
+export interface BuildRecord {
+  version: 1;
+  compiler?: string;
+  compilerVersion?: string;
+  args?: string[];
+  platform: string;
+  arch: string;
+  /** Built inside the container (MCP_CONTAINER=true). */
+  container: boolean;
+  /** The source path as compiled. */
+  sourcePath: string;
+}
+
+export const BUILD_RECORD_SUFFIX = '.build.json';
+
+/** `<output>.build.json`, beside the deterministic output. */
+export function buildRecordPath(outputPath: string): string {
+  return `${outputPath}${BUILD_RECORD_SUFFIX}`;
+}
+
+export async function readBuildRecord(outputPath: string): Promise<BuildRecord | undefined> {
+  try {
+    const parsed = JSON.parse(await fs.readFile(buildRecordPath(outputPath), 'utf8')) as Partial<BuildRecord> | null;
+    return parsed && parsed.version === 1 && typeof parsed.sourcePath === 'string' ? (parsed as BuildRecord) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether the recorded build was produced in this environment (issue #1035):
+ * the same platform, architecture and container side, from the same source
+ * path, and — when the record names a compiler — by the compiler this
+ * environment offers now (probed only then, so a reuse costs no spawn when
+ * the record has nothing to compare). A missing record is a build from before
+ * records existed, or by another tool: rebuilt once. The reason is logged.
+ */
+async function buildRecordMatches(
+  outputPath: string,
+  expected: Pick<BuildRecord, 'platform' | 'arch' | 'container' | 'sourcePath'>,
+  describeCompiler: () => Promise<CompilerInfo | null>,
+  logger?: CompileLogger
+): Promise<boolean> {
+  const record = await readBuildRecord(outputPath);
+  const mismatch = (what: string): false => {
+    logger?.info?.(`[compile-utils] Rebuilding ${outputPath}: ${what}`);
+    return false;
+  };
+  if (!record) {
+    return mismatch('no build record beside it (built before records existed, or by another tool)');
+  }
+  for (const key of ['platform', 'arch', 'container', 'sourcePath'] as const) {
+    if (record[key] !== expected[key]) {
+      return mismatch(`its build record names ${key} ${JSON.stringify(record[key])}, this environment is ${JSON.stringify(expected[key])}`);
+    }
+  }
+  if (record.compiler !== undefined) {
+    const current = await describeCompiler();
+    const sameCompiler =
+      current !== null &&
+      current.command === record.compiler &&
+      (record.compilerVersion === undefined || current.version === record.compilerVersion);
+    if (!sameCompiler) {
+      return mismatch(
+        `its build record names compiler ${record.compiler} ${record.compilerVersion ?? ''}, ` +
+        `this environment offers ${current ? `${current.command} ${current.version ?? ''}` : 'none'}`
+      );
+    }
+  }
+  return true;
+}
+
+async function writeBuildRecord(outputPath: string, record: BuildRecord, logger?: CompileLogger): Promise<void> {
+  try {
+    await fs.writeFile(buildRecordPath(outputPath), JSON.stringify(record, null, 2));
+  } catch (error) {
+    // A record that cannot be written costs one rebuild next time, nothing more.
+    logger?.warn?.(
+      `[compile-utils] Could not write the build record for ${outputPath}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
 export interface PrepareSourceBinaryOptions {
   sourcePath: string;
   outputPath: string;
   forceRebuild?: boolean;
   platform?: NodeJS.Platform;
+  /** The build environment recorded beside the output (issue #1035); this process's by default. */
+  arch?: string;
+  container?: boolean;
   logger?: CompileLogger;
   /** Internal test seam. */
   compile?: (options: CompileOptions) => Promise<CompileResult>;
+  /** Internal test seam: the compiler this environment offers now, for the record comparison. */
+  describeCompiler?: () => Promise<CompilerInfo | null>;
   /** Internal test seam. */
   fileSystem?: ArtifactFileSystem;
 }
@@ -279,10 +394,14 @@ export async function prepareSourceBinary(
     outputPath,
     forceRebuild = false,
     platform = process.platform,
+    arch = process.arch,
+    container = process.env.MCP_CONTAINER === 'true',
     logger,
     compile = compileSourceFile,
+    describeCompiler = () => findCompilerWithVersion(dialectForSource(sourcePath)),
     fileSystem = artifactFileSystem
   } = options;
+  const environment = { platform, arch, container, sourcePath };
 
   const outputDir = path.dirname(outputPath);
   try {
@@ -301,7 +420,8 @@ export async function prepareSourceBinary(
   if (
     !forceRebuild &&
     currentOutput &&
-    !(await needsRecompile(sourcePath, currentOutput))
+    !(await needsRecompile(sourcePath, currentOutput)) &&
+    (await buildRecordMatches(outputPath, environment, describeCompiler, logger))
   ) {
     await removeOlderManagedOutputs(outputPath, currentOutput, fileSystem, logger);
     return { success: true, binaryPath: currentOutput, compiled: false };
@@ -340,6 +460,15 @@ export async function prepareSourceBinary(
     return { success: false, error: promoted.error ?? 'Could not finalize compiled artifact' };
   }
   const launchPath = promoted.binaryPath;
+  // Keyed on the deterministic output: a managed sibling (a locked Windows
+  // exe) is the same environment's build.
+  await writeBuildRecord(outputPath, {
+    version: 1,
+    ...(result.compiler !== undefined ? { compiler: result.compiler } : {}),
+    ...(result.compilerVersion !== undefined ? { compilerVersion: result.compilerVersion } : {}),
+    ...(result.args !== undefined ? { args: result.args } : {}),
+    ...environment
+  }, logger);
   await removeOlderManagedOutputs(outputPath, launchPath, fileSystem, logger);
   return { success: true, binaryPath: launchPath, compiled: true };
 }
@@ -381,7 +510,8 @@ export async function compileSourceFile(options: CompileOptions): Promise<Compil
   const { sourcePath, outputPath, logger } = options;
   const dialect = options.dialect ?? dialectForSource(sourcePath);
 
-  const compiler = await findCompiler(dialect);
+  const found = await findCompilerWithVersion(dialect);
+  const compiler = found?.command;
   if (!compiler) {
     const label = dialect === 'c' ? 'C' : 'C++';
     return {
@@ -394,6 +524,8 @@ export async function compileSourceFile(options: CompileOptions): Promise<Compil
 
   const args = ['-gdwarf-4', '-O0', '-o', outputPath, sourcePath];
   logger?.info?.(`[compile-utils] ${compiler} ${args.join(' ')}`);
+  // For the build record (issue #1035): the banner the reuse check compares.
+  const compilerVersion = found?.version ?? undefined;
 
   return new Promise((resolve) => {
     const child = spawn(compiler, args, {
@@ -412,7 +544,7 @@ export async function compileSourceFile(options: CompileOptions): Promise<Compil
 
     child.on('exit', (code) => {
       if (code === 0) {
-        resolve({ success: true, binaryPath: outputPath });
+        resolve({ success: true, binaryPath: outputPath, compiler, compilerVersion, args: args.slice(0, 2) });
       } else {
         resolve({
           success: false,

@@ -37,7 +37,7 @@ Compile with **`-gdwarf-4 -O0`**: full debug info, no optimization (optimized co
    g++ -gdwarf-4 -O0 -o myapp myapp.cpp
    start_debugging scriptPath=/path/to/myapp
    ```
-2. **A lone `.c`/`.cpp`/`.cc`/`.cxx` source file** (convenience path): the adapter compiles it (`-gdwarf-4 -O0`) into `.debug-mcp/` next to the source, staleness-checked by mtime.
+2. **A lone `.c`/`.cpp`/`.cc`/`.cxx` source file** (convenience path): the adapter compiles it (`-gdwarf-4 -O0`) into `.debug-mcp/` next to the source, staleness-checked by mtime and by a build record beside the binary (`<binary>.build.json`: compiler and version, flags, platform, architecture, container or host, the source path as compiled). A binary built in another environment — on the host and seen from the Docker container over a bind mount, say — is rebuilt instead of reused (issue #1035); a binary from before the record existed is rebuilt once.
    - Headers are **not** staleness-tracked — pass `forceRebuild: true` in the launch config after header-only edits.
    - Rebuilds compile to a staging executable before replacing the stable output. On Windows, if a running debugger still locks the stable `.exe`, mcp-debugger launches the successful versioned artifact instead and reuses the newest managed artifact on the next launch. Older unlocked versions are cleaned up automatically.
    - Multi-file projects: build them yourself (make/cmake), then launch the executable.
