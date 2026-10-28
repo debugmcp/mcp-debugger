@@ -106,3 +106,24 @@ line mapping and pending breakpoints, and nothing COBOL-shaped.
 - R13 modules: a `.cob` breakpoint in a `-m` module set before launch stays `verified:false`, gets a
   `breakpoint changed … verified:true` event when the module loads, and hits inside `MOD1_`. Re-sending
   `setBreakpoints` before the load also returns `verified:false` without harm.
+
+## The PERFORM frame's line across compilers (issue #1034, measured 2026-10-28)
+
+The return address of an active PERFORM entry (`frame_stack[n].return_address_ptr`) resolved
+through the engine's line table (`ResolveLoadAddress(...).GetLineEntry()`), at a stop on
+`hello.cob:37` inside `1000-INIT`:
+
+| Build | Line entry for the return address | PERFORM frame the old chain produced |
+|---|---|---|
+| MinGW cobc 3.2.0, Windows | `hello.c:140` — the row after `goto l_5` | `0000-MAIN (PERFORM 1000-INIT)` at 32 (right) |
+| gnucobol3 3.2.0, Ubuntu 26.04 (Docker image) | `hello.c.h:76` — the generated header | none: the path maps to no `#line` row, the frame was dropped |
+| cobc 3.1.2 (the issue's host) | `hello.cob:38` — the inline PERFORM VARYING inside 1000-INIT | `1000-INIT (PERFORM 1000-INIT)` at 38, the caller gone |
+
+Three builds, three attributions: the line table is not a source for the PERFORM statement. The
+manifest's control flow records every out-of-line PERFORM call site (`performs[]`:
+`callCLine`, `returnCLine`, `endCLine`, `startLabel`, `endLabel`), and on all three compilers'
+output the call site whose `endLabel` is the entry's `perform_through` maps through the `#line`
+rows to the PERFORM statement in the performing paragraph (`parse-control-flow.test.ts` proves
+it on the vendored fixtures). The shim reads that first; the line table only tells apart several
+PERFORMs of one range (GCC may share their return blocks — the rule the GO TO step watch already
+applies) or stands in for a manifest without call sites.

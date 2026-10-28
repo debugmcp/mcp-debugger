@@ -61,7 +61,7 @@ attach_to_process {"sessionId": "<id>", "processId": 4242, "adapterConfig": {"ma
 | Breakpoint `verified: false`, "Resolved locations: 0", program runs through | Binary built without `-g` / without `-gdwarf-4` on MinGW | Let the adapter compile, or `cobc -g -A "-O0 -gdwarf-4"` |
 | `libcob-4.dll not found`, program dies at start (Windows) | GnuCOBOL `bin` not on PATH | Automatic when cobc is found; else add `<prefix>/bin` to PATH or `env` |
 | Variables are `b_8`-style byte arrays, `get_local_variables` empty | No symbol manifest (prebuilt without `sources`/`manifestDirs`, or cobc missing) | Pass `sources` (cobc installed) or `manifestDirs` |
-| "GnuCOBOL (cobc) not found" | Not installed / off PATH | Install, or `COBC_PATH`; prebuilt-only hosts: `MCP_COBOL_ALLOW_PREBUILT=true` |
+| "GnuCOBOL (cobc) not found" | Not installed / off PATH | Install, or `COBC_PATH`; a prebuilt binary still launches without it (engine view only) |
 | Runtime error never pauses | `runtimeChecks` unset | `"runtimeChecks": true` |
 | Module breakpoint never verifies | Module not loaded / not found | Wait for the CALL; check `modules` / `COB_LIBRARY_PATH` |
 | `cobol-shim.js not found` | Adapter package not built | `pnpm --filter @debugmcp/adapter-cobol run build` |

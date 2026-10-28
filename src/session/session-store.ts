@@ -20,6 +20,7 @@ import {
 } from '@debugmcp/shared';
 import type { AttachLocality, ExceptionBreakMode, ProgramEndExplanation, SessionStopInfo } from '@debugmcp/shared';
 import { SessionNotFoundError } from '../errors/debug-errors.js';
+import type { NoUncaughtStop } from '../utils/error-messages.js';
 
 /**
  * Parameters for creating a new debug session
@@ -211,13 +212,19 @@ export interface ManagedSession extends DebugSessionInfo {
   transformedLaunch?: TransformedLaunch;
 
   /**
-   * The DAP exception-filter ids the last launch armed (issue #985), and the
-   * ones beyond the mode's table — a pytest module launch adds `userUnhandled`
-   * to the `uncaught` default. Those stop on an exception the program
-   * survives, so the launch counts as armed (`describeLaunchArming`). Reset
-   * per launch attempt; absent for attach.
+   * The exception arming of the last launch or attach (`recordExceptionArming`):
+   * the DAP exception-filter ids it armed (issue #985), the ones beyond the
+   * mode's table — a pytest module launch adds `userUnhandled` to the
+   * `uncaught` default; those stop on an exception the program survives, so
+   * the launch counts as armed (`describeLaunchArming`) — and why no uncaught
+   * exception will stop the program when none will (issue #1032). Reset per
+   * launch attempt.
    */
-  launchExceptionFilters?: { readonly ids: readonly string[]; readonly beyondMode: readonly string[] };
+  launchExceptionFilters?: {
+    readonly ids: readonly string[];
+    readonly beyondMode: readonly string[];
+    readonly noUncaughtStop: NoUncaughtStop | undefined;
+  };
   // Live DAP mirror endpoint, when exposed via expose_session (issue #217).
   exposure?: SessionExposure;
 }

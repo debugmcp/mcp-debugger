@@ -5,8 +5,14 @@
  * of a launch or a wait_for_stop (issues #823, #826).
  */
 import { describe, it, expect } from 'vitest';
-import type { Breakpoint, FunctionBreakpoint } from '@debugmcp/shared';
-import { describeLaunchArming, type ArmingSession } from '../../../../../src/session/launch/launch-arming.js';
+import { PythonAdapterPolicy, RubyAdapterPolicy, type AdapterPolicy, type Breakpoint, type FunctionBreakpoint } from '@debugmcp/shared';
+import {
+  describeExceptionArming,
+  describeLaunchArming,
+  recordExceptionArming,
+  type ArmingSession
+} from '../../../../../src/session/launch/launch-arming.js';
+import type { NoUncaughtStop } from '../../../../../src/utils/error-messages.js';
 
 function session(overrides: Partial<ArmingSession> = {}): ArmingSession {
   return {
@@ -38,13 +44,27 @@ describe('describeLaunchArming', () => {
   // Issue #1009: the unarmed answer used to promise a stop "for an uncaught
   // exception the debugger catches by default" under every mode — under
   // 'none' that filter is exactly what the caller opted out of, and a crash
-  // runs to the exit. The arming says whether an uncaught exception still
-  // stops the program, so the answer can say what will actually happen.
-  it("says whether an uncaught exception still stops the program: yes by default and for 'uncaught' and 'all', no for 'none'", () => {
-    expect(describeLaunchArming(session(), false).uncaughtStops).toBe(true);
-    expect(describeLaunchArming(session({ effectiveBreakOnExceptions: 'uncaught' }), false).uncaughtStops).toBe(true);
-    expect(describeLaunchArming(session({ effectiveBreakOnExceptions: 'all' }), false).uncaughtStops).toBe(true);
-    expect(describeLaunchArming(session({ effectiveBreakOnExceptions: 'none' }), false).uncaughtStops).toBe(false);
+  // runs to the exit. Issue #1032: the mode name is not enough either — a
+  // Ruby launch has no mode and arms nothing (rdbg offers no uncaught-only
+  // filter), and a Python attach with no mode arms nothing because none was
+  // asked for. The arming reads the verdict the launch recorded beside the
+  // filter ids, so the answer can say which of the three it is.
+  it('reads why no uncaught exception will stop the program from the recorded exception arming', () => {
+    const record = (noUncaughtStop: NoUncaughtStop) => ({ ids: [], beyondMode: [], noUncaughtStop });
+    expect(describeLaunchArming(session({ effectiveBreakOnExceptions: 'none', launchExceptionFilters: record('opted-out') }), false).noUncaughtStop).toBe('opted-out');
+    expect(describeLaunchArming(session({ effectiveBreakOnExceptions: undefined, launchExceptionFilters: record('unavailable') }), false).noUncaughtStop).toBe('unavailable');
+    expect(describeLaunchArming(session({ effectiveBreakOnExceptions: 'uncaught', launchExceptionFilters: record('unavailable') }), false).noUncaughtStop).toBe('unavailable');
+    expect(describeLaunchArming(session({ effectiveBreakOnExceptions: undefined, launchExceptionFilters: record('not-requested') }), false).noUncaughtStop).toBe('not-requested');
+    expect(describeLaunchArming(
+      session({ effectiveBreakOnExceptions: 'uncaught', launchExceptionFilters: { ids: ['uncaught'], beyondMode: [], noUncaughtStop: undefined } }), false
+    ).noUncaughtStop).toBeUndefined();
+  });
+
+  it("falls back to the mode when no arming was recorded: 'none' opted out, anything else still stops", () => {
+    expect(describeLaunchArming(session(), false).noUncaughtStop).toBeUndefined();
+    expect(describeLaunchArming(session({ effectiveBreakOnExceptions: 'uncaught' }), false).noUncaughtStop).toBeUndefined();
+    expect(describeLaunchArming(session({ effectiveBreakOnExceptions: 'all' }), false).noUncaughtStop).toBeUndefined();
+    expect(describeLaunchArming(session({ effectiveBreakOnExceptions: 'none' }), false).noUncaughtStop).toBe('opted-out');
   });
 
   // Issue #985: a pytest module launch arms userUnhandled beside the uncaught
@@ -53,7 +73,7 @@ describe('describeLaunchArming', () => {
   // survives (a failing test), which the 'uncaught' default never does.
   it('counts an exception filter the launch armed beyond its mode as armed, and names it', () => {
     const arming = describeLaunchArming(
-      session({ effectiveBreakOnExceptions: 'uncaught', launchExceptionFilters: { ids: ['uncaught', 'userUnhandled'], beyondMode: ['userUnhandled'] } }),
+      session({ effectiveBreakOnExceptions: 'uncaught', launchExceptionFilters: { ids: ['uncaught', 'userUnhandled'], beyondMode: ['userUnhandled'], noUncaughtStop: undefined } }),
       false
     );
     expect(arming.armed).toBe(true);
@@ -62,7 +82,7 @@ describe('describeLaunchArming', () => {
     expect(arming.summary).not.toMatch(/test/);
 
     const plain = describeLaunchArming(
-      session({ effectiveBreakOnExceptions: 'uncaught', launchExceptionFilters: { ids: ['uncaught'], beyondMode: [] } }),
+      session({ effectiveBreakOnExceptions: 'uncaught', launchExceptionFilters: { ids: ['uncaught'], beyondMode: [], noUncaughtStop: undefined } }),
       false
     );
     expect(plain.armed).toBe(false);
@@ -149,5 +169,51 @@ describe('describeLaunchArming', () => {
     expect(describeLaunchArming(s, true).summary).toBe(
       "1 breakpoint(s), 1 function breakpoint(s), an entry stop and breakOnExceptions: 'all'"
     );
+  });
+});
+
+// Issue #1032: the one verdict on whether an uncaught exception stops the
+// program, taken from what the mode resolves to on this policy — the same
+// resolver the worker sends — and the policy's own word on its engine
+// (CodeLLDB stops at std::terminate's SIGABRT on POSIX with no filter armed;
+// on Windows abort() ends the process with exit code 3). Recorded beside the
+// filter ids, so the launch and wait answers read one truth.
+describe('describeExceptionArming / recordExceptionArming', () => {
+  /** A policy with just the exception table and, when given, the engine's word. */
+  const policyWith = (uncaught: string[], all: string[], stopsOnUncaughtWithoutFilter?: boolean): AdapterPolicy =>
+    ({ getInitializationBehavior: () => ({ exceptionFilters: { uncaught, all }, stopsOnUncaughtWithoutFilter }) }) as unknown as AdapterPolicy;
+
+  it("ruby: no mode and an explicit 'uncaught' both arm nothing, which the verdict calls unavailable; 'all' arms rdbg's any", () => {
+    expect(describeExceptionArming(RubyAdapterPolicy, undefined)).toEqual({ ids: [], beyondMode: [], noUncaughtStop: 'unavailable' });
+    expect(describeExceptionArming(RubyAdapterPolicy, 'uncaught')).toEqual({ ids: [], beyondMode: [], noUncaughtStop: 'unavailable' });
+    expect(describeExceptionArming(RubyAdapterPolicy, 'all')).toEqual({ ids: ['any'], beyondMode: [], noUncaughtStop: undefined });
+  });
+
+  it("an empty 'uncaught' table is only unavailable when the engine does not stop on its own (the cpp pin)", () => {
+    expect(describeExceptionArming(policyWith([], ['cpp_throw'], true), 'uncaught').noUncaughtStop).toBeUndefined();
+    expect(describeExceptionArming(policyWith([], ['cpp_throw'], false), 'uncaught').noUncaughtStop).toBe('unavailable');
+    expect(describeExceptionArming(policyWith([], ['cpp_throw']), 'uncaught').noUncaughtStop).toBe('unavailable');
+    // The pin also covers an attach with no mode: the engine stops regardless.
+    expect(describeExceptionArming(policyWith([], ['cpp_throw'], true), undefined).noUncaughtStop).toBeUndefined();
+  });
+
+  it("python: 'uncaught' arms the filter; no mode on an adapter that has one is not-requested (an attach); 'none' is opted out", () => {
+    expect(describeExceptionArming(PythonAdapterPolicy, 'uncaught')).toEqual({ ids: ['uncaught'], beyondMode: [], noUncaughtStop: undefined });
+    expect(describeExceptionArming(PythonAdapterPolicy, undefined)).toEqual({ ids: [], beyondMode: [], noUncaughtStop: 'not-requested' });
+    expect(describeExceptionArming(PythonAdapterPolicy, 'none')).toEqual({ ids: [], beyondMode: [], noUncaughtStop: 'opted-out' });
+  });
+
+  it('keeps the ids a launch arms beyond its mode (issue #985)', () => {
+    expect(describeExceptionArming(PythonAdapterPolicy, 'uncaught', { module: 'pytest' })).toEqual({
+      ids: ['uncaught', 'userUnhandled'], beyondMode: ['userUnhandled'], noUncaughtStop: undefined
+    });
+  });
+
+  it('records the verdict on the session and returns it', () => {
+    const s = session({ effectiveBreakOnExceptions: undefined });
+    const record = recordExceptionArming(s, RubyAdapterPolicy, undefined);
+    expect(record.noUncaughtStop).toBe('unavailable');
+    expect(s.launchExceptionFilters).toBe(record);
+    expect(describeLaunchArming(s, false).noUncaughtStop).toBe('unavailable');
   });
 });

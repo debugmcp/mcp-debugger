@@ -90,6 +90,16 @@ start_debugging { "sessionId": "your-session-id", "scriptPath": "/path/to/your/t
                                      "program": "/path/to/your/test/directory" } }
 ```
 
+#### Package directory (debug a package that is its own module)
+```text
+start_debugging { "sessionId": "your-session-id", "scriptPath": "/path/to/your/package/dir" }
+```
+A directory as `scriptPath` is a `debug` target (no `mode` needed) and is its own working
+directory, so `go build` runs under the package's own `go.mod` even when a parent directory
+holds another module (issue #1036). When the build fails, the launch answer quotes the
+compiler's last lines (the same text `get_output` holds) after Delve's own
+"Build error: Check the debug console for details."
+
 ### 5. Control Execution
 
 When execution pauses at a breakpoint, you can:

@@ -4412,6 +4412,30 @@ describe('DapProxyWorker', () => {
 
       vi.useRealTimers();
     });
+
+    // Issue #1037: the attach thread poll uses sub-second timeouts, and
+    // `Math.round(400 / 1000)` printed "timed out after 0s" — which reads as a
+    // misconfigured timeout to the agent the attach error quotes it to.
+    it('prints a sub-second timeout in milliseconds', async () => {
+      vi.useFakeTimers();
+      (worker as any).logger = mockLogger;
+      (worker as any).currentSessionId = 'timeout-session';
+      mockMessageSender.send.mockClear();
+
+      (worker as any).requestTracker.track('short-req', 'threads', 400);
+      await vi.advanceTimersByTimeAsync(401);
+      await Promise.resolve();
+
+      expect(mockMessageSender.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestId: 'short-req',
+          success: false,
+          error: "Request 'threads' timed out after 400ms"
+        })
+      );
+
+      vi.useRealTimers();
+    });
   });
 
   describe('Error Handling', () => {

@@ -9,6 +9,7 @@ import {
 } from '../../src/interfaces/lldb-policy-shared.js';
 import { CppAdapterPolicy } from '../../src/interfaces/adapter-policy-cpp.js';
 import { RustAdapterPolicy } from '../../src/interfaces/adapter-policy-rust.js';
+import { CobolAdapterPolicy } from '../../src/interfaces/adapter-policy-cobol.js';
 
 const DIE_ERROR_MULTILINE =
   "error: hello_world.exe [0x0000000000002293]: DIE has DW_AT_ranges(DW_FORM_sec_offset 0x000000000000000c) attribute,\n" +
@@ -53,6 +54,50 @@ describe('lldbShouldSuppressOutputEvent', () => {
     expect(RustAdapterPolicy.shouldSuppressOutputEvent?.('stderr', MEMBER_ERROR)).toBe(true);
     expect(CppAdapterPolicy.shouldSuppressOutputEvent?.('stderr', MEMBER_ERROR)).toBe(true);
     expect(RustAdapterPolicy.shouldSuppressOutputEvent?.('stdout', 'hello\n')).toBe(false);
+  });
+});
+
+// Issue #1038: CodeLLDB's own console housekeeping — the mode banner, its
+// script markers, the launch lines — arrived in get_output ahead of any
+// program output, consuming the cursor and reading as the program's own.
+// Measured on a COBOL and a C++ launch (Windows and Linux) and a C++ attach by
+// PID, line for line.
+const CONSOLE_HOUSEKEEPING = [
+  "Console is in 'commands' mode, prefix expressions with '?'.\n",
+  'Executing script: initCommands\n',
+  'Executing script: preRunCommands\n',
+  'Launching: C:\\proj\\.debug-mcp\\hello.exe\n',
+  "Launched process 43828 from 'C:\\proj\\.debug-mcp\\hello.exe'\n",
+  'Executing script: postRunCommands\n',
+  'Attached to process 22624\n'
+];
+
+describe('lldbShouldSuppressOutputEvent — CodeLLDB console housekeeping (issue #1038)', () => {
+  it('drops each housekeeping line on the console category', () => {
+    for (const line of CONSOLE_HOUSEKEEPING) {
+      expect(lldbShouldSuppressOutputEvent('console', line), line).toBe(true);
+    }
+  });
+
+  it('keeps the same text on stdout and stderr: only the console category carries housekeeping', () => {
+    for (const line of CONSOLE_HOUSEKEEPING) {
+      expect(lldbShouldSuppressOutputEvent('stdout', line), line).toBe(false);
+      expect(lldbShouldSuppressOutputEvent('stderr', line), line).toBe(false);
+    }
+  });
+
+  it("keeps the engine's exit line and a program's own console text, and never partially rewrites", () => {
+    expect(lldbShouldSuppressOutputEvent('console', 'Process exited with code 3.\n')).toBe(false);
+    // The engine's break-in report on attach is on stderr and says something.
+    expect(lldbShouldSuppressOutputEvent('stderr', 'Stop reason: Exception 0x80000003 encountered at address 0x7fff12f83f40\n')).toBe(false);
+    expect(lldbShouldSuppressOutputEvent('console', 'Launching rockets\n')).toBe(false);
+    expect(lldbShouldSuppressOutputEvent('console', 'Executing script: initCommands\nreal output\n')).toBe(false);
+  });
+
+  it('is wired into the cobol policy as well as rust and cpp', () => {
+    expect(CobolAdapterPolicy.shouldSuppressOutputEvent?.('console', CONSOLE_HOUSEKEEPING[0])).toBe(true);
+    expect(RustAdapterPolicy.shouldSuppressOutputEvent?.('console', CONSOLE_HOUSEKEEPING[1])).toBe(true);
+    expect(CppAdapterPolicy.shouldSuppressOutputEvent?.('console', CONSOLE_HOUSEKEEPING[4])).toBe(true);
   });
 });
 

@@ -193,6 +193,33 @@ describe('SessionManager - waitForStop (issue #849)', () => {
     expect(wait.result()).toMatchObject({ success: true, state: SessionState.STOPPED });
     // The breakpoint was left behind by the continue: it is not this wait's stop.
     expect(wait.result()?.data?.lastStop).toBeUndefined();
+    // Resumed past a stop: the breakpoints were not all missed, so no list (issue #1033).
+    expect(wait.result()?.data?.message).toBe('The program ran to completion (exit code 0).');
+    expect(wait.result()?.data?.unhitBreakpoints).toBeUndefined();
+  });
+
+  // Issue #1033: the #701 "verified but never hit" summary was only on the launch
+  // answer. A program that outlives the launch hold gets a pending launch answer,
+  // so the wait that reports its exit must carry the same summary — the
+  // breakpoints it ran past are the case #701 exists for.
+  it('reports the verified breakpoints a program ran past when it ends during the wait (issue #1033)', async () => {
+    const session = await sessionManager.createSession({ language: DebugLanguage.MOCK, executablePath: 'python' });
+    const { breakpoint } = await sessionManager.setBreakpoint(session.id, { file: '/work/src/app.py', line: 3 });
+    const started = sessionManager.startDebugging(session.id, 'test.py', [], { stopOnEntry: false });
+    await vi.runAllTimersAsync();
+    expect((await started).state).toBe(SessionState.RUNNING);
+    dependencies.mockProxyManager.emit('breakpoints-synced', [{ id: breakpoint.id, file: '/work/src/app.py', line: 3, verified: true }]);
+    const wait = track(sessionManager.waitForStop(session.id, 10_000));
+
+    dependencies.mockProxyManager.simulateExited(0);
+    await afterStop();
+
+    expect(wait.result()).toMatchObject({ success: true, state: SessionState.STOPPED });
+    expect(wait.result()?.data?.exitCode).toBe(0);
+    expect(wait.result()?.data?.message).toBe(
+      'The program ran to completion (exit code 0) without hitting any breakpoint. Verified but never hit: app.py:3.'
+    );
+    expect(wait.result()?.data?.unhitBreakpoints).toEqual([{ file: '/work/src/app.py', line: 3, verified: true }]);
   });
 
   it('answers a finished session at once', async () => {

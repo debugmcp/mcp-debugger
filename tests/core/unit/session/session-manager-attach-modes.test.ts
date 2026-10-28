@@ -437,6 +437,12 @@ describe('SessionManagerOperations attach modes', () => {
       const result = await operations.attachToProcess('test-session', { host: '127.0.0.1', port: 12345, stopOnEntry });
 
       expect(result.success).toBe(true);
+      // The exception arming is recorded for an attach too (issue #1032): no mode was
+      // requested, and cpp's empty uncaught table is covered by the engine's own
+      // abort-signal stop on POSIX only.
+      expect(mockSession.launchExceptionFilters).toEqual({
+        ids: [], beyondMode: [], noUncaughtStop: process.platform === 'win32' ? 'unavailable' : undefined
+      });
       expect(setCurrentThreadId).toHaveBeenCalledWith(37436);
       // The stop thread was checked first and won; no other thread was unwound.
       expect(anchorUnwinds()).toHaveLength(1);

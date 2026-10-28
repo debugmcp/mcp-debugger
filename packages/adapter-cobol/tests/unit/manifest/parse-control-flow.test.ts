@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { parseControlFlow } from '../../../src/manifest/parse-control-flow.js';
+import { parseGeneratedCText } from '../../../src/manifest/parse-generated-c.js';
 import { splitProgramSegments } from '../../../src/manifest/parse-procedure-map.js';
 import { splitLines } from '../../../src/manifest/c-text.js';
 
@@ -21,6 +22,31 @@ describe('compiler PERFORM control-flow identities', () => {
       expect(range.endCLine).toBeGreaterThan(range.startCLine);
       expect(text.split('\n')[call.returnCLine - 1]).toMatch(/^\s*l_\d+:/);
     }
+  });
+
+  // Issue #1034: the PERFORM frame's line and performer come from the call site the
+  // manifest records, not from the engine's line table — which three compilers
+  // attribute three ways (the row after the call, a row inside the performed
+  // paragraph, the generated header). On every compiler's output the call site of
+  // 1000-INIT maps through the #line rows to the PERFORM statement in 0000-MAIN.
+  it.each(['3.1.2-linux', '3.2-linux', '3.2-win32'])('maps the 1000-INIT call site to its PERFORM line in 0000-MAIN on %s output', version => {
+    const dir = new URL(`../../fixtures/cobc/${version}/hello-dw4/`, import.meta.url);
+    const read = (name: string) => readFileSync(new URL(name, dir), 'latin1');
+    const manifest = parseGeneratedCText(
+      { c: read('hello.c'), h: read('hello.c.h'), lh: read('hello.c.l.h'), cPath: '/build/hello.c' },
+      { cobcVersion: version, argv: [] }
+    );
+    const program = manifest.programs[0];
+    const init = program.procedure.paragraphs.find(p => p.name === '1000-INIT')!;
+    const main = program.procedure.paragraphs.find(p => p.name === '0000-MAIN')!;
+    const calls = program.controlFlow!.performs.filter(call => call.endLabel === init.labelId);
+    expect(calls).toHaveLength(1);
+    // callCLine is the compiler's statement comment; its #line row follows it.
+    const row = program.lineMap.find(r => r.cLine >= calls[0].callCLine && r.cLine < calls[0].returnCLine)!;
+    expect(row).toBeDefined();
+    expect(row.line).toBe(32);
+    expect(row.line).toBeGreaterThanOrEqual(main.startLine);
+    expect(row.line).toBeLessThanOrEqual(main.endLine);
   });
 
   it('uses generated order for THRU, sections and repeated COPY line numbers', () => {

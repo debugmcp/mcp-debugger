@@ -25,7 +25,7 @@ import {
   type AdapterPolicy,
   type ExceptionBreakMode
 } from '@debugmcp/shared';
-import { isTerminalSessionState, resolveExceptionFilters } from '@debugmcp/shared';
+import { isTerminalSessionState } from '@debugmcp/shared';
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import { checkLaunchToolchain } from '../../utils/language-availability.js';
@@ -49,7 +49,7 @@ import {
   sessionRemovedDuringTeardown
 } from './proxy-failure-diagnostics.js';
 import { waitForLaunchReadiness } from './launch-readiness.js';
-import { describeLaunchArming } from './launch-arming.js';
+import { describeLaunchArming, recordExceptionArming, supportedExceptionModes } from './launch-arming.js';
 import type { AdapterPreparationOutcome, ProxyLauncher } from './proxy-launcher.js';
 import { describeLaunchTarget, describeSpawnCommand } from './spawn-command.js';
 import { classifyTestRunner, TEST_RUNNER_KEY } from './test-runner-gate.js';
@@ -93,6 +93,35 @@ function failureData<T extends object>(
 /** Preparation and adapter notes share the existing warning surface, once each. */
 function launchWarnings(session: ManagedSession, ...notes: (string | undefined)[]): string | undefined {
   return joinWarnings(...notes, ...(session.launchConfigNotices ?? []), ...(session.adapterNotices ?? []));
+}
+
+const OUTPUT_BEFORE_FAILURE_LINES = 8;
+const OUTPUT_BEFORE_FAILURE_LINE_CHARS = 300;
+
+/**
+ * The output the adapter produced before a launch failed (issue #1036):
+ * Delve's "Build error: Check the debug console for details." names exactly
+ * this — the build's own lines, already captured as DAP output events, which
+ * the agent otherwise needs a second call to read. The last few lines,
+ * bounded; the buffer keeps the rest for get_output. Undefined when nothing
+ * was captured. The caller hands over this attempt's buffer only: a failure
+ * before the proxy started leaves the previous launch's on the session.
+ */
+function outputBeforeFailure(buffer: ManagedSession['outputBuffer'] | undefined): string | undefined {
+  // Per entry, then per line: an entry without a trailing newline (Delve's
+  // "Building <dir>") must not run into the next one the way the raw
+  // transcript would.
+  const lines = (buffer?.read(0, 1000).entries ?? [])
+    .flatMap(entry => entry.output.split('\n'))
+    .map(line => line.trim())
+    .filter(line => line.length > 0)
+    .slice(-OUTPUT_BEFORE_FAILURE_LINES)
+    .map(line => (line.length > OUTPUT_BEFORE_FAILURE_LINE_CHARS ? `${line.slice(0, OUTPUT_BEFORE_FAILURE_LINE_CHARS)}…` : line));
+  if (lines.length === 0) {
+    return undefined;
+  }
+  return `The adapter's output before the failure (last ${lines.length} line${lines.length === 1 ? '' : 's'}; ` +
+    `get_output has all of it):\n${lines.join('\n')}`;
 }
 
 /** The warning surface's join: each note once, `'; '`-separated, absent when there is none. */
@@ -523,6 +552,9 @@ export class DebugLauncher {
       session.launchDebuggerOff = true;
     }
     let effectiveLaunchArgs = launchArgs;
+    // This attempt's output buffer is the one the proxy start creates: a
+    // failure before that point leaves the previous launch's here (issue #1036).
+    const outputBufferBefore = session.outputBuffer;
 
     try {
       const effectiveBreakOnExceptions =
@@ -553,15 +585,24 @@ export class DebugLauncher {
 
       // One resolver, two readers (issue #985): the same launch-aware answer
       // the worker sends as setExceptionBreakpoints, recorded here with the
-      // ids beyond the mode's table, so the arming text cannot drift from the
-      // wire — a pytest module launch adds userUnhandled to the uncaught default.
-      const armedFilters = resolveExceptionFilters(policy, effectiveBreakOnExceptions, launchConfigData);
-      // The mode's table alone: the resolver without a launch config.
-      const tableFilters = resolveExceptionFilters(policy, effectiveBreakOnExceptions);
-      session.launchExceptionFilters = {
-        ids: armedFilters,
-        beyondMode: armedFilters.filter(id => !tableFilters.includes(id))
-      };
+      // ids beyond the mode's table and the verdict on whether an uncaught
+      // exception will stop the program at all (issue #1032), so the arming
+      // text cannot drift from the wire — a pytest module launch adds
+      // userUnhandled to the uncaught default; a Ruby launch arms nothing.
+      const exceptionArming = recordExceptionArming(session, policy, effectiveBreakOnExceptions, launchConfigData);
+      // A mode the caller asked for by name that arms nothing and stops
+      // nothing is a silent no-op otherwise (issue #1032): the worker skips
+      // setExceptionBreakpoints with a log line only. Said on this answer's
+      // warning surface; the policy default never earns it — the pending
+      // answer already says what a crash will do.
+      if (
+        breakOnExceptions !== undefined && breakOnExceptions !== 'none' &&
+        exceptionArming.ids.length === 0 && exceptionArming.noUncaughtStop === 'unavailable'
+      ) {
+        (session.launchConfigNotices ??= []).push(
+          ErrorMessages.exceptionModeArmsNothing(breakOnExceptions, session.language, supportedExceptionModes(policy))
+        );
+      }
 
       // Perform language-specific handshake if required
       if (policy.performHandshake) {
@@ -804,7 +845,7 @@ export class DebugLauncher {
           arming.armed ? arming.summary : undefined,
           debuggerOnAnyway ? undefined : debuggerOffWhy(finalSession),
           arming.loggingSummary,
-          arming.uncaughtStops
+          arming.noUncaughtStop
         );
       }
 
@@ -841,7 +882,13 @@ export class DebugLauncher {
         ? diagnosticData
         : undefined;
 
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      // What the adapter said before it failed, when the proxy got as far as
+      // capturing anything (issue #1036) — after the adapter's own words.
+      const failureOutput = session.outputBuffer !== outputBufferBefore
+        ? outputBeforeFailure(session.outputBuffer)
+        : undefined;
+      const errorMessage =
+        `${error instanceof Error ? error.message : String(error)}${failureOutput ? ` ${failureOutput}` : ''}`;
 
       // Normalize error identity for callers/tests
       let errorType: string | undefined;
@@ -1090,7 +1137,7 @@ export class DebugLauncher {
         arming.armed ? arming.summary : undefined,
         debuggerOffWhy(finalSession),
         arming.loggingSummary,
-        arming.uncaughtStops
+        arming.noUncaughtStop
       );
     }
     this.stampStaleAnchorNotes(finalSession, anchorResolution);

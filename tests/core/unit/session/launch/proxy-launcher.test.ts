@@ -188,6 +188,33 @@ describe('ProxyLauncher.prepareLaunchInputs', () => {
     });
   });
 
+  // Issue #1036: a Go package directory as scriptPath. The default cwd was the
+  // script's parent — right for a file, the parent directory for a directory,
+  // where `go build` then runs under the parent's own go.mod and fails.
+  it('defaults cwd to the script path itself when it is a directory (issue #1036)', async () => {
+    vi.mocked(h.ctx.fileSystem.stat).mockResolvedValue(
+      { isDirectory: () => true, isFile: () => false } as unknown as Awaited<ReturnType<typeof h.ctx.fileSystem.stat>>
+    );
+    const session = makeSession();
+
+    const inputs = await h.launcher.prepareLaunchInputs(session, { scriptPath: SCRIPT });
+
+    expect(h.ctx.fileSystem.stat).toHaveBeenCalledWith(SCRIPT);
+    expect(inputs.genericLaunchConfig.cwd).toBe(SCRIPT);
+    // A caller cwd still wins.
+    const explicit = await h.launcher.prepareLaunchInputs(session, {
+      scriptPath: SCRIPT,
+      dapLaunchArgs: launchArgs({ cwd: '/elsewhere' })
+    });
+    expect(explicit.genericLaunchConfig.cwd).toBe('/elsewhere');
+  });
+
+  it('keeps the parent directory as cwd when the script path cannot be read (an attach placeholder, a missing file)', async () => {
+    vi.mocked(h.ctx.fileSystem.stat).mockRejectedValue(new Error('ENOENT'));
+    const inputs = await h.launcher.prepareLaunchInputs(makeSession(), { scriptPath: SCRIPT });
+    expect(inputs.genericLaunchConfig.cwd).toBe(path.dirname(SCRIPT));
+  });
+
   it('lets a caller-supplied program and cwd win over the script path (compiled languages)', async () => {
     const request: ProxyLaunchRequest = {
       scriptPath: SCRIPT,
