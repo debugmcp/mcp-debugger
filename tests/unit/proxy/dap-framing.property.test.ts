@@ -157,6 +157,49 @@ describe('DapFrameDecoder malformed-input recovery', () => {
     expect(decoder.push(frame(event))).toEqual([event]);
   });
 
+  it('recovers the frame behind a banner printed with bare \\n line ends ahead of the first header (issue #1026)', () => {
+    // The Flutter tool prints its once-a-day update box on stdout before the DAP server's
+    // first frame. The box ends its lines with `\n`, never `\r\n\r\n`, so the banner and the
+    // real `Content-Length` line land in ONE header block and the #470 resync, which looks
+    // only past the block, never sees the header: the initialize response was lost and the
+    // launch timed out. The header is inside the block; find it there.
+    const errors: Array<{ message: string; context: string }> = [];
+    const decoder = new DapFrameDecoder({
+      onError: (err, context) => errors.push({ message: err.message, context })
+    });
+
+    const banner = Buffer.from(
+      '╔══════════════════════════════════════════════════════════════╗\n'
+      + '║ A new version of Flutter is available!                       ║\n'
+      + '║ To update to the latest version, run "flutter upgrade".       ║\n'
+      + '╚══════════════════════════════════════════════════════════════╝\n',
+      'utf8'
+    );
+    const response = { seq: 1, type: 'response', command: 'initialize', request_seq: 1, success: true, body: { supportsRestartRequest: false } };
+    const initialized = { seq: 2, type: 'event', event: 'initialized' };
+    const received = decoder.push(Buffer.concat([banner, frame(response), frame(initialized)]));
+
+    expect(received).toEqual([JSON.parse(JSON.stringify(response)), initialized]);
+    expect(errors).toEqual([expect.objectContaining({ context: 'header' })]);
+  });
+
+  it('a preamble without the header separator never costs the frame it is glued to', () => {
+    fc.assert(
+      fc.property(
+        messagesArb,
+        fc.array(fc.string({ unit: fc.constantFrom(...ALNUM.split('')), minLength: 1, maxLength: 40 }), { minLength: 1, maxLength: 4 }),
+        (messages, lines) => {
+          const decoder = new DapFrameDecoder({ onError: () => { /* expected */ } });
+          const stream = Buffer.concat([
+            Buffer.from(`${lines.join('\n')}\n`, 'utf8'),
+            ...messages.map(m => encodeDapMessage(m as unknown as DebugProtocol.ProtocolMessage))
+          ]);
+          expect(decoder.push(stream)).toEqual(messages.map(m => JSON.parse(JSON.stringify(m))));
+        }
+      )
+    );
+  });
+
   it('resyncs when the frame after the junk block is itself split across pushes', () => {
     const errors: string[] = [];
     const decoder = new DapFrameDecoder({

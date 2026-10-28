@@ -119,6 +119,8 @@ describe('DartDebugAdapter.buildAdapterCommand', () => {
       `${FLUTTER_ROOT}\\bin\\cache\\dart-sdk\\bin\\dart.exe`,
       `--packages=${FLUTTER_ROOT}\\packages\\flutter_tools\\.dart_tool\\package_config.json`,
       `${FLUTTER_ROOT}\\bin\\cache\\flutter_tools.snapshot`,
+      '--no-version-check',
+      '--suppress-analytics',
       'debug-adapter',
     ]);
     expect(cmd.env?.FLUTTER_ROOT).toBe(FLUTTER_ROOT);
