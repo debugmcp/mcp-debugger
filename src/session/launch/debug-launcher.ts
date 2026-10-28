@@ -95,6 +95,28 @@ function launchWarnings(session: ManagedSession, ...notes: (string | undefined)[
   return joinWarnings(...notes, ...(session.launchConfigNotices ?? []), ...(session.adapterNotices ?? []));
 }
 
+const OUTPUT_BEFORE_FAILURE_LINES = 8;
+const OUTPUT_BEFORE_FAILURE_CHARS = 1200;
+
+/**
+ * The output the adapter produced before a launch failed (issue #1036):
+ * Delve's "Build error: Check the debug console for details." names exactly
+ * this — the build's own lines, already captured as DAP output events, which
+ * the agent otherwise needs a second call to read. The last few lines,
+ * bounded; the buffer keeps the rest for get_output. Undefined when nothing
+ * was captured. The caller hands over this attempt's buffer only: a failure
+ * before the proxy started leaves the previous launch's on the session.
+ */
+function outputBeforeFailure(buffer: ManagedSession['outputBuffer'] | undefined): string | undefined {
+  const tail = buffer?.renderTail(OUTPUT_BEFORE_FAILURE_CHARS) ?? '';
+  const lines = tail.split('\n').filter(line => line.trim().length > 0).slice(-OUTPUT_BEFORE_FAILURE_LINES);
+  if (lines.length === 0) {
+    return undefined;
+  }
+  return `The adapter's output before the failure (last ${lines.length} line${lines.length === 1 ? '' : 's'}; ` +
+    `get_output has all of it):\n${lines.join('\n')}`;
+}
+
 /** The warning surface's join: each note once, `'; '`-separated, absent when there is none. */
 function joinWarnings(...notes: (string | undefined)[]): string | undefined {
   return [...new Set(notes.filter((note): note is string => Boolean(note)))].join('; ') || undefined;
@@ -523,6 +545,9 @@ export class DebugLauncher {
       session.launchDebuggerOff = true;
     }
     let effectiveLaunchArgs = launchArgs;
+    // This attempt's output buffer is the one the proxy start creates: a
+    // failure before that point leaves the previous launch's here (issue #1036).
+    const outputBufferBefore = session.outputBuffer;
 
     try {
       const effectiveBreakOnExceptions =
@@ -841,7 +866,13 @@ export class DebugLauncher {
         ? diagnosticData
         : undefined;
 
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      // What the adapter said before it failed, when the proxy got as far as
+      // capturing anything (issue #1036) — after the adapter's own words.
+      const failureOutput = session.outputBuffer !== outputBufferBefore
+        ? outputBeforeFailure(session.outputBuffer)
+        : undefined;
+      const errorMessage =
+        `${error instanceof Error ? error.message : String(error)}${failureOutput ? ` ${failureOutput}` : ''}`;
 
       // Normalize error identity for callers/tests
       let errorType: string | undefined;
