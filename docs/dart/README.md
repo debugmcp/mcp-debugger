@@ -21,7 +21,8 @@ The measured facts behind every statement here are in [spike-notes.md](spike-not
   adapter runs that command itself as its toolchain probe, which also rebuilds a stale tool
   snapshot.
 - Flutter targets need their platform toolchain (`flutter doctor`): Visual Studio Build Tools for
-  `-d windows`, Chrome for `-d chrome`, the Android SDK and an emulator for `-d emulator-5554`.
+  `-d windows`, Xcode (with the iOS simulator runtime for a simulator) for `-d macos` and iOS,
+  Chrome for `-d chrome`, the Android SDK and an emulator for `-d emulator-5554`.
 
 ## Which adapter runs: the `runner`
 
@@ -52,7 +53,7 @@ Launch options, all under `adapterLaunchConfig` (or `dapLaunchArgs`):
 | Key | Runners | Meaning |
 |---|---|---|
 | `runner` | all | force `dart`, `dart-test`, `flutter` or `flutter-test` |
-| `deviceId` | Flutter | the `flutter run -d <id>` target (`windows`, `chrome`, `emulator-5554`, …; see `flutter devices`) |
+| `deviceId` | Flutter | the `flutter run -d <id>` target (`windows`, `macos`, `chrome`, `emulator-5554`, an iOS simulator's UDID, …; see `flutter devices`) |
 | `flutterMode` | Flutter | `debug` (default), `profile` or `release`; the Flutter tool turns the debugger off in the last two, and the launch response says so |
 | `toolArgs` | all | extra arguments for `dart run` / `flutter run` / `flutter test` |
 | `vmAdditionalArgs` | Dart | extra Dart VM flags |
@@ -103,7 +104,9 @@ Dart attaches by VM-service URI, never by process id:
   `flutter run --machine` reports in `app.debugPort` is that tool's own DDS proxy and never
   connects from a second tool (#882) — so do not pass it for a device app. A desktop app
   (`windows`, `macos`, `linux`) has no such discovery: pass its `app.debugPort` URI, which works;
-  a desktop `deviceId` without a URI is refused up front with that hint.
+  a desktop `deviceId` without a URI is refused up front with that hint. **An iOS simulator is the
+  desktop case**: its `app.debugPort` URI is a plain loopback socket and attaching through it works
+  (measured, #1011); `flutter attach -d <udid>` alone waits forever there (#1020).
 - Detach (`detach_from_process`, or closing the session) leaves the target running.
 
 After attaching to a running program the session is paused; an isolate idle in an `await` shows an
@@ -128,7 +131,9 @@ empty stack until it next runs code.
 ## Flutter targets
 
 `flutter test` runs headless on every platform. `flutter run` needs a device: `deviceId: "windows"`
-(desktop, Visual Studio required), `"chrome"` / `"edge"` (web, through dwds — measured: a `build()`
+(desktop, Visual Studio required), `"macos"` (desktop, Xcode required), `"<udid>"` (an iOS simulator
+— `flutter devices` lists a simulator under its UDID only while it is booted — or an iPhone),
+`"chrome"` / `"edge"` (web, through dwds — measured: a `build()`
 breakpoint in ~23 s on Chrome and ~24 s on Edge, headless too with
 `toolArgs: ["--web-browser-flag=--headless=new"]`, which is how CI runs it; `"web-server"` needs the
 Dart Debug browser extension and never stops on its own, so use a browser device), `"emulator-5554"`
@@ -170,6 +175,33 @@ stopping (relaunch if that happens). Attaching to an app another `flutter run` s
 emulator takes `adapterConfig: { runner: "flutter", deviceId: "emulator-5554", cwd }` and no
 URI (see [Attach](#attach)): measured at 5.1 s to the attach answer and 0.4 s more to the first
 breakpoint; `detach_from_process` leaves the app running.
+
+macOS desktop (`deviceId: "macos"`; measured on an Intel iMac Pro, macOS 15.8.1, Xcode 26.3, Flutter
+3.47.8, the same suite): a `build()` breakpoint under `flutter run -d macos` in ~20 s warm, ~53 s
+on the first launch of a fresh project (the Xcode runner build); an `integration_test` breakpoint
+in ~31 s on its first build, with the app's breakpoint hit 0.2 s after the test's tap;
+`restart_debugging` hot-restarts to the `build()` breakpoint in ~0.8 s and `hot_reload` re-hits it
+in ~0.1 s. Attach works the desktop way — pass the `app.debugPort` URI of the `flutter run
+--machine` that started the app (attach answers paused on a timer breakpoint ~4 s later); a `macos`
+`deviceId` without a URI is refused up front. Closing the session stops the app (the #885
+contract holds on macOS). The Flutter tool prints `Failed to foreground app; open returned 1` when
+it is not started from a GUI session: the app is running, only the bring-to-front failed. Flutter
+3.47 warns that Intel Macs are being deprecated; the warning is not an error yet.
+iOS simulator (`deviceId: "<udid>"`, as `flutter devices` lists a booted simulator; Xcode with the
+iOS simulator runtime, `xcrun simctl boot "<name>"`; measured the same way on the iMac Pro, iPhone
+Air on iOS 26.3.1): a `build()` breakpoint under `flutter run` in ~22 s warm, ~49 s on the first
+run after a build (the install), ~3.5 min more for the first `flutter build ios --simulator`, which
+the e2e helper does ahead of the timed cases; `restart_debugging` and `hot_reload` re-hit in
+~0.8 s / ~0.1 s. **Attach takes the `app.debugPort` URI of the `flutter run --machine` that
+started the app, like desktop** (attach answers in ~4 s, a timer breakpoint hits right after,
+detach leaves the app running); `deviceId` alone never connects on the simulator — the Android
+discovery path does not exist there (#1020). `integration_test` on the simulator does not work through the
+server yet: the SDK's test adapter answers the launch only after the build, install and
+VM-service connect, which is past the 30 s launch ceiling (#1019, see KNOWN_ISSUES; the test itself passes
+with `flutter test integration_test/app_test.dart -d <udid>`). `MCP_SKIP_FLUTTER_IOS=1` skips the
+simulator e2e cases; no CI lane runs them. A physical iPhone needs an Xcode that supports its iOS
+version (Xcode 26.3, the last for macOS 15, carries device support up to iOS 26.3; an iPhone on
+iOS 26.6 needs Xcode 26.4+ and so a Mac on macOS 26) — unmeasured.
 
 ## Troubleshooting
 

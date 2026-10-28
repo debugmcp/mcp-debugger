@@ -17,7 +17,7 @@ without `--overwrite`).
 
 | File | Breakpoint markers |
 |---|---|
-| `lib/main.dart` | `BP-FMAIN` (main's first line), `BP-INCREMENT` (inside `setState`), `BP-BUILD` (in `build`) |
+| `lib/main.dart` | `BP-FMAIN` (main's first line), `BP-TICK` (the 500 ms periodic timer in `initState`, fires on its own), `BP-INCREMENT` (inside `setState`), `BP-BUILD` (in `build`) |
 | `test/widget_test.dart` | `BP-WIDGET` (in the `increments` test body) |
 | `integration_test/app_test.dart` | `BP-INTEGRATION` (in the test body; the app's `BP-INCREMENT` hits when the test taps) |
 
