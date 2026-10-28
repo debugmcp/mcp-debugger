@@ -96,7 +96,7 @@ function launchWarnings(session: ManagedSession, ...notes: (string | undefined)[
 }
 
 const OUTPUT_BEFORE_FAILURE_LINES = 8;
-const OUTPUT_BEFORE_FAILURE_CHARS = 1200;
+const OUTPUT_BEFORE_FAILURE_LINE_CHARS = 300;
 
 /**
  * The output the adapter produced before a launch failed (issue #1036):
@@ -108,8 +108,15 @@ const OUTPUT_BEFORE_FAILURE_CHARS = 1200;
  * before the proxy started leaves the previous launch's on the session.
  */
 function outputBeforeFailure(buffer: ManagedSession['outputBuffer'] | undefined): string | undefined {
-  const tail = buffer?.renderTail(OUTPUT_BEFORE_FAILURE_CHARS) ?? '';
-  const lines = tail.split('\n').filter(line => line.trim().length > 0).slice(-OUTPUT_BEFORE_FAILURE_LINES);
+  // Per entry, then per line: an entry without a trailing newline (Delve's
+  // "Building <dir>") must not run into the next one the way the raw
+  // transcript would.
+  const lines = (buffer?.read(0, 1000).entries ?? [])
+    .flatMap(entry => entry.output.split('\n'))
+    .map(line => line.trim())
+    .filter(line => line.length > 0)
+    .slice(-OUTPUT_BEFORE_FAILURE_LINES)
+    .map(line => (line.length > OUTPUT_BEFORE_FAILURE_LINE_CHARS ? `${line.slice(0, OUTPUT_BEFORE_FAILURE_LINE_CHARS)}…` : line));
   if (lines.length === 0) {
     return undefined;
   }
