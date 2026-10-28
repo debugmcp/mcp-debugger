@@ -281,3 +281,24 @@ describe('getErrorMessage', () => {
     expect(getErrorMessage(42)).toBe('42');
   });
 });
+
+// Issue #1009: under breakOnExceptions 'none' the unarmed answer must not promise
+// a stop "for an uncaught exception the debugger catches by default" — that is
+// the filter the caller opted out of; a crash runs to the program's exit.
+describe("the unarmed launch wording under breakOnExceptions 'none' (issue #1009)", () => {
+  it('launchStillRunning names the mode and promises only the exit', () => {
+    const text = ErrorMessages.launchStillRunning(undefined, undefined, undefined, false);
+    expect(text).toMatch(/breakOnExceptions: 'none'/);
+    expect(text).toMatch(/report its exit|only report its exit/);
+    expect(text).not.toMatch(/catches by default/);
+    // The default wording is unchanged when the filter is armed.
+    expect(ErrorMessages.launchStillRunning(undefined)).toMatch(/catches by default/);
+  });
+
+  it('waitForStopPending names the mode and promises only the exit', () => {
+    const text = ErrorMessages.waitForStopPending(5, 'running', { uncaughtStops: false });
+    expect(text).toMatch(/breakOnExceptions: 'none'/);
+    expect(text).not.toMatch(/catches by default/);
+    expect(ErrorMessages.waitForStopPending(5, 'running')).toMatch(/catches by default/);
+  });
+});

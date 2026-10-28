@@ -106,7 +106,8 @@ Dart attaches by VM-service URI, never by process id:
   (`windows`, `macos`, `linux`) has no such discovery: pass its `app.debugPort` URI, which works;
   a desktop `deviceId` without a URI is refused up front with that hint. **An iOS simulator is the
   desktop case**: its `app.debugPort` URI is a plain loopback socket and attaching through it works
-  (measured, #1011); `flutter attach -d <udid>` alone waits forever there (#1020).
+  (measured, #1011); a simulator UDID without a URI is refused up front the same way, because
+  `flutter attach -d <udid>` alone waits forever there (#1020).
 - Detach (`detach_from_process`, or closing the session) leaves the target running.
 
 After attaching to a running program the session is paused; an isolate idle in an `await` shows an
@@ -194,8 +195,8 @@ run after a build (the install), ~3.5 min more for the first `flutter build ios 
 the e2e helper does ahead of the timed cases; `restart_debugging` and `hot_reload` re-hit in
 ~0.8 s / ~0.1 s. **Attach takes the `app.debugPort` URI of the `flutter run --machine` that
 started the app, like desktop** (attach answers in ~4 s, a timer breakpoint hits right after,
-detach leaves the app running); `deviceId` alone never connects on the simulator — the Android
-discovery path does not exist there (#1020). `integration_test` on the simulator does not work through the
+detach leaves the app running); `deviceId` alone is refused up front on the simulator with the URI
+hint — the Android discovery path does not exist there (#1020). `integration_test` on the simulator does not work through the
 server yet: the SDK's test adapter answers the launch only after the build, install and
 VM-service connect, which is past the 30 s launch ceiling (#1019, see KNOWN_ISSUES; the test itself passes
 with `flutter test integration_test/app_test.dart -d <udid>`). `MCP_SKIP_FLUTTER_IOS=1` skips the

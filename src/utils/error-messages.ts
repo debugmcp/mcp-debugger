@@ -257,7 +257,7 @@ export const ErrorMessages = {
   waitForStopPending: (
     seconds: number,
     state: 'running' | 'initializing',
-    why: { armedSummary?: string; debuggerOffWhy?: string; loggingSummary?: string } = {}
+    why: { armedSummary?: string; debuggerOffWhy?: string; loggingSummary?: string; uncaughtStops?: boolean } = {}
   ) => {
     if (state === 'initializing') {
       return `The session is still starting after ${seconds}s (its launch or attach has not completed). ` +
@@ -275,6 +275,15 @@ export const ErrorMessages = {
       return `The program is still running after ${seconds}s without reaching ${why.armedSummary}${logging}. ` +
         `Nothing was cancelled: what is armed stays armed, and the session becomes 'paused' when the program ` +
         `gets there. Call wait_for_stop again to keep waiting, or pause_execution to interrupt it.`;
+    }
+    // Under breakOnExceptions 'none' the uncaught filter is what the caller
+    // opted out of: a crash runs to the exit, and promising a stop for it
+    // described the default, not the mode chosen (issue #1009).
+    if (why.uncaughtStops === false) {
+      return `The program is still running after ${seconds}s${logging}, and nothing is armed to stop it ` +
+        `(no ${why.loggingSummary ? 'pausing ' : ''}breakpoint, and no exception filter — breakOnExceptions: 'none' runs a crash ` +
+        `to the program's exit): unless a step or a pause is still in flight, it will only report its exit. ` +
+        `Call wait_for_stop again to wait for it, or pause_execution to interrupt it.`;
     }
     return `The program is still running after ${seconds}s${logging}, and no ${why.loggingSummary ? 'pausing ' : ''}breakpoint ` +
       `or caught-exception filter is armed to stop it: unless a step or a pause is still in flight, it will stop ` +
@@ -319,8 +328,10 @@ export const ErrorMessages = {
    * @param debuggerOffWhy - The debugger-off sentence, when it applies
    * @param loggingSummary - Logpoints the adapter runs on ("1 logpoint(s) that log without stopping"), named apart
    *   because they never stop the program (issue #865); undefined when there are none
+   * @param uncaughtStops - Whether an uncaught exception still stops the program; false under
+   *   breakOnExceptions 'none', where the unarmed answer may promise only the exit (issue #1009)
    */
-  launchStillRunning: (armedSummary: string | undefined, debuggerOffWhy?: string, loggingSummary?: string) => {
+  launchStillRunning: (armedSummary: string | undefined, debuggerOffWhy?: string, loggingSummary?: string, uncaughtStops: boolean = true) => {
     if (debuggerOffWhy) {
       return `The program is running — ${debuggerOffWhy}. ` +
         `Call wait_for_stop to wait for it to end, or read get_output.`;
@@ -333,6 +344,12 @@ export const ErrorMessages = {
     }
     // "no breakpoints" to a caller who set a logpoint reads as "it was not
     // registered" — the first thing checked when a logpoint seems silent.
+    if (!uncaughtStops) {
+      return `The program is running${logging}${loggingSummary ? ',' : ''} and nothing is armed to stop it ` +
+        `(no ${loggingSummary ? 'pausing ' : ''}breakpoints, no entry stop, and no exception filter — breakOnExceptions: 'none' ` +
+        `runs a crash to the program's exit): it will only report its exit. Call wait_for_stop to wait for it, ` +
+        `read get_output, or set breakpoints — they take effect on the running program.`;
+    }
     return `The program is running${logging}${loggingSummary ? ',' : ''} and nothing is armed to stop it ` +
       `(no ${loggingSummary ? 'pausing ' : ''}breakpoints, no entry stop, no caught-exception filter): it will stop only ` +
       `for an uncaught exception the debugger catches by default, or report its exit. Call wait_for_stop to wait for ` +

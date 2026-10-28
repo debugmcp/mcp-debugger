@@ -569,8 +569,8 @@ warning (the Flutter issues that would turn it into an error for iOS/macOS targe
   the timer breakpoint hits 0.2 s later. Without a URI, `flutter attach -d <udid>` waits for a
   connection that never comes — the simulator has no logcat-style discovery of an app another tool
   started. The adapter currently lets a non-desktop id through to that wait with the note
-  "iOS is unmeasured" (`dart-debug-adapter.ts`); it should refuse with the URI hint as it does for
-  desktop ids (#1020).
+  "iOS is unmeasured" (`dart-debug-adapter.ts`) when this was measured; since #1020 a simulator
+  UDID without a URI is refused up front with the URI hint, as desktop ids are.
 - **`integration_test` on the simulator through the server is red** (measured twice, plus once
   with `DAP_TRACE=1`): the SDK's test adapter answers the DAP `launch` only once the VM service is
   connected; on the simulator the hidden "loading" test (Xcode build 17.8 s warm, install, launch)

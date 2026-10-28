@@ -224,6 +224,24 @@ describe('DartDebugAdapter attach', () => {
     await expect(a.transformAttachConfig(attach({ cwd: dir, deviceId: 'windows' }))).rejects.toThrow(/desktop.*vmServiceUri/);
   });
 
+  // Issue #1020, measured on an iMac Pro: the simulator has no logcat-style discovery of an app
+  // another tool started, so `flutter attach -d <udid>` alone waits forever; its `app.debugPort`
+  // URI is a plain loopback socket and works, like desktop. A simulator is listed under its UDID.
+  it('refuses an iOS simulator UDID with no URI: the simulator has no app discovery (issue #1020)', async () => {
+    const dir = project('flutter', FLUTTER_PUBSPEC, ['lib/main.dart']);
+    const a = new DartDebugAdapter(deps(), hooks());
+    await expect(a.transformAttachConfig(attach({ cwd: dir, deviceId: '2F2B0E5B-9C3D-4A1E-8F6A-1B2C3D4E5F60' }))).rejects.toThrow(/iOS simulator.*vmServiceUri/);
+  });
+
+  it('attaches to a simulator app by its URI and keeps -d <udid> for the tool (issue #1020)', async () => {
+    const dir = project('flutter', FLUTTER_PUBSPEC, ['lib/main.dart']);
+    const a = new DartDebugAdapter(deps(), hooks());
+    const udid = '2f2b0e5b-9c3d-4a1e-8f6a-1b2c3d4e5f60';
+    const out = await a.transformAttachConfig(attach({ cwd: dir, deviceId: udid, vmServiceUri: 'ws://127.0.0.1:50123/abc=/ws' }));
+    expect(out.toolArgs).toEqual(['-d', udid]);
+    expect(out.vmServiceUri).toBe('ws://127.0.0.1:50123/abc=/ws');
+  });
+
   it("puts -d before the caller's toolArgs on attach, as launch does", async () => {
     const dir = project('flutter', FLUTTER_PUBSPEC, ['lib/main.dart']);
     const a = new DartDebugAdapter(deps(), hooks());
