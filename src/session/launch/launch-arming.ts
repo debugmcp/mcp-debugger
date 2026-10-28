@@ -85,12 +85,16 @@ function noUncaughtStopOf(
   if (mode === 'none') {
     return 'opted-out';
   }
+  // Read the way the resolver reads the table — a policy double may answer
+  // no behavior at all, and the verdict then has nothing to say against it.
+  const behavior = policy.getInitializationBehavior?.() ?? {};
   // A filter is armed, or the engine stops at an uncaught exception with none
   // (CodeLLDB on POSIX: std::terminate → SIGABRT is a signal stop).
-  if (ids.length > 0 || policy.getInitializationBehavior().stopsOnUncaughtWithoutFilter === true) {
+  if (ids.length > 0 || behavior.stopsOnUncaughtWithoutFilter === true) {
     return undefined;
   }
-  if (mode === undefined && resolveExceptionFilters(policy, 'uncaught').length > 0) {
+  // The adapter has the filter, nobody asked for it: an attach with no mode.
+  if (mode === undefined && (behavior.exceptionFilters?.uncaught.length ?? 0) > 0) {
     return 'not-requested';
   }
   return 'unavailable';
