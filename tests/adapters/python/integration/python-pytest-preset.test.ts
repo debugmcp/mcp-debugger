@@ -2,10 +2,18 @@
  * The pytest preset end to end (issue #985 M1): `start_debugging { scriptPath:
  * <test file>, testRunner: "pytest", testTarget }` runs the test under a real
  * debugpy and pytest, and the launch answer is the autopsy — paused at the
- * failing assert with snapshot.exception, frames and locals — while a passing
+ * failing assert with the exception, frames and locals — while a passing
  * test runs to completion. The matrix behind these cases is measured in
  * docs/python/spike-notes-pytest.md; the fixture project is
  * tests/fixtures/python/pytest-project.
+ *
+ * Two answer shapes land the autopsy (issue #1006): when pytest reaches the
+ * assert inside the 1 s launch hold, `start_debugging` answers paused with
+ * `snapshot.exception`; when pytest's start-up outlasts the hold (measured
+ * 551–963 ms on an idle Windows box, over 1 s under load), the launch answers
+ * `pending` and the `wait_for_stop` that lands it carries the stop record
+ * (`lastStop`) instead — its snapshot omits the exception on purpose (#982).
+ * `landed()` and `exceptionOf()` read whichever came.
  *
  * Needs pytest importable by the Python the server picks (CI installs
  * requirements/pytest.txt); skipped otherwise.
@@ -110,6 +118,35 @@ async function landed(sessionId: string, answer: Record<string, unknown>): Promi
 const exitCodeOf = (answer: Record<string, unknown>): unknown =>
   answer.exitCode ?? (answer.data as { exitCode?: unknown } | undefined)?.exitCode;
 
+interface StopRecord {
+  text?: string;
+  description?: string;
+  exceptionInfo?: { exceptionId?: string; description?: string; details?: { typeName?: string; message?: string } };
+}
+
+/** pydevd appends "(note: full exception trace is shown but execution is paused at: …)" to the type name it reports. */
+const withoutPausedAtNote = (name: string | undefined): string | undefined => name?.split(/\s+\(note:/)[0]?.trim();
+
+/**
+ * The exception wherever the landed answer carries it (issue #1006): a launch
+ * answer's `snapshot.exception` (the hold caught the stop), else the
+ * wait_for_stop answer's `lastStop` — the merged `exceptionInfo` when debugpy's
+ * enrichment had landed, else the stopped event's own pair (`text` is the type,
+ * `description` the message). The snapshot composer strips pydevd's paused-at
+ * note from the type; the raw record carries it in `text`, `exceptionId` and
+ * `details.typeName` alike, so it is stripped here on every path.
+ */
+function exceptionOf(answer: Record<string, unknown>): { type?: string; message?: string } {
+  const snapshot = answer.snapshot as { exception?: { type?: string; message?: string } } | undefined;
+  if (snapshot?.exception) return snapshot.exception;
+  const stop = answer.lastStop as StopRecord | undefined;
+  const info = stop?.exceptionInfo;
+  return {
+    type: withoutPausedAtNote(info?.details?.typeName ?? info?.exceptionId ?? stop?.text),
+    message: info?.details?.message ?? info?.description ?? stop?.description
+  };
+}
+
 async function withSession<T>(name: string, body: (sessionId: string) => Promise<T>): Promise<T> {
   const created = await call('create_debug_session', { language: 'python', name });
   expect(created.success).toBe(true);
@@ -146,11 +183,12 @@ describe.skipIf(pythonMinor === 0)('pytest preset (issue #985 M1) @requires-pyth
       expect(started.warning).toContain('pytest.ini');
 
       const answer = await landed(sessionId, started);
-      expect(answer.state).toBe('paused');
-      const snapshot = answer.snapshot as { exception?: { type?: string; message?: string }; frames: Array<{ file: string; line: number; name: string }>; locals?: Record<string, string> };
-      // pydevd's "(note: full exception trace is shown but execution is paused at …)" is stripped.
-      expect(snapshot.exception?.type).toBe('AssertionError');
-      expect(snapshot.exception?.message).toContain('20.0 == 21.0');
+      expect(answer.state, JSON.stringify(answer)).toBe('paused');
+      const snapshot = answer.snapshot as { frames: Array<{ file: string; line: number; name: string }>; locals?: Record<string, string> };
+      // Either shape names the exception (the snapshot strips pydevd's "(note: … paused at …)"; the raw record is read around it).
+      const exception = exceptionOf(answer);
+      expect(exception.type, JSON.stringify(answer)).toBe('AssertionError');
+      expect(exception.message).toContain('20.0 == 21.0');
       expect(snapshot.frames[0].file.replace(/\\/g, '/')).toContain('pytest-project/tests/test_billing.py');
       expect(snapshot.frames[0].line).toBe(ASSERT_LINE);
       expect(snapshot.locals?.remaining).toBe('20.0');
@@ -169,7 +207,7 @@ describe.skipIf(pythonMinor === 0)('pytest preset (issue #985 M1) @requires-pyth
       // restart_debugging replays the preset: the same assert pauses again.
       const restarted = await landed(sessionId, await call('restart_debugging', { sessionId }));
       expect(restarted.state, JSON.stringify(restarted)).toBe('paused');
-      expect((restarted.snapshot as { exception?: { type?: string } }).exception?.type).toBe('AssertionError');
+      expect(exceptionOf(restarted).type, JSON.stringify(restarted)).toBe('AssertionError');
     });
   }, 120000);
 
@@ -195,7 +233,7 @@ describe.skipIf(pythonMinor === 0)('pytest preset (issue #985 M1) @requires-pyth
       let answer = await landed(sessionId, started);
       if (pythonMinor <= 11) {
         expect(answer.state, JSON.stringify(answer)).toBe('paused');
-        expect((answer.snapshot as { exception?: { type?: string } }).exception?.type).toBe('KeyError');
+        expect(exceptionOf(answer).type, JSON.stringify(answer)).toBe('KeyError');
         await call('continue_execution', { sessionId });
         answer = await call('wait_for_stop', { sessionId, timeout: 30000 });
       }
