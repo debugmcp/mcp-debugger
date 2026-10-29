@@ -5,7 +5,7 @@
 - **GnuCOBOL 3.1.2+ (`cobc`)** for source launch and for COBOL-shaped variables: `apt install gnucobol3` / `brew install gnucobol` / MSYS2 `pacman -S mingw-w64-ucrt-x86_64-gnucobol`. Found via `COBC_PATH`, then PATH, then the usual install directories (`C:\msys64\mingw64\bin`, `/opt/homebrew/bin`, `/usr/bin`, …). `mcp-debugger doctor cobol` shows what was found.
 - **CodeLLDB is vendored** (shared with Rust and C/C++; `CODELLDB_PATH` overrides). No system LLDB.
 - **Windows**: MSYS2's cobc needs `COB_CONFIG_DIR` and its `bin` on PATH when run outside an MSYS2 shell; the adapter sets both when it finds cobc, so you only care if a compile fails with `configuration error: …default.conf`.
-- The adapter compiles with `cobc -x -g -fdump=ALL --save-temps -t <lst> -ftsymbols -A "-O0 -gdwarf-4"` into `.debug-mcp/cobol/<name>/<buildKey>/` beside the source (a translate-only manifest for a prebuilt binary or an attach goes to `<name>-manifest/`) (`-gdwarf-4`: MinGW's default DWARF-5 line tables are unreadable by LLDB, breakpoints would never bind). A prebuilt executable must have been built with `cobc -g` the same way.
+- The adapter compiles with `cobc -x -g -fdump=ALL --save-temps -t <lst> -ftsymbols -A "-O0 -gdwarf-4"` into `.debug-mcp/cobol/<platform>-<arch>[-container]/<name>/<buildKey>/` beside the source (one environment root per host/container; a translate-only manifest for a prebuilt binary or an attach goes to `<name>-manifest/`) (`-gdwarf-4`: MinGW's default DWARF-5 line tables are unreadable by LLDB, breakpoints would never bind). A prebuilt executable must have been built with `cobc -g` the same way.
 - **Docker**: the image installs `gnucobol3`, so `.cob` launch compiles in-container; prebuilt binaries must be Linux-built for the image's architecture.
 
 ## Launch quickstart
@@ -33,7 +33,7 @@ close_debug_session   {"sessionId": "<id>"}
 
 ```json
 attach_to_process {"sessionId": "<id>", "processId": 4242, "adapterConfig": {"sources": ["C:/proj/src/payroll.cob"], "dialect": "ibm"}}
-attach_to_process {"sessionId": "<id>", "processId": 4242, "adapterConfig": {"manifestDirs": ["C:/proj/src/.debug-mcp/cobol/PAYROLL/<buildKey>"]}}
+attach_to_process {"sessionId": "<id>", "processId": 4242, "adapterConfig": {"manifestDirs": ["C:/proj/src/.debug-mcp/cobol/win32-x64/PAYROLL/<buildKey>"]}}
 ```
 
 - Numeric `processId` only (no host/port). Target held **paused** after attach (`stopOnEntry: false` to resume). `detach_from_process` leaves it running.

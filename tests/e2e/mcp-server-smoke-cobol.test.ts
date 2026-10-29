@@ -195,7 +195,8 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Debugging Smoke Test @requires-cob
 
       await startOrSkip(ctx, { scriptPath: sourcePath, dapLaunchArgs: { stopOnEntry: false } }, 'source');
       expect(await reachCobolLine(HELLO_COMPUTE_LINE, 'hello.cob'), 'session should pause at the COBOL breakpoint line').toBe(true);
-      expect(existsSync(path.join(COBOL_EXAMPLES_DIR, '.debug-mcp', 'cobol', 'hello')), 'adapter should compile into .debug-mcp/cobol/').toBe(true);
+      // One environment root per host/container (issue #1035): this is the host's.
+      expect(existsSync(path.join(COBOL_EXAMPLES_DIR, '.debug-mcp', 'cobol', `${process.platform}-${process.arch}`, 'hello')), 'adapter should compile into .debug-mcp/cobol/<platform>-<arch>/').toBe(true);
 
       const frames = await fetchStackTrace();
       const top = frames.find(isCobolFrame)!;

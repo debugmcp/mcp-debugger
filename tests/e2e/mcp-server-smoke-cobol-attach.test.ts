@@ -133,9 +133,9 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Attach Smoke Test @requires-cobol'
     expect(await pollState('paused', 20000), 'attached session should be paused (stopOnEntry)').toBe(true);
   }
 
-  /** The newest artifact directory a regeneration for the pause binary produced (beside the binary). */
+  /** The newest artifact directory a regeneration for the pause binary produced (beside the binary, under the host's environment root — issue #1035). */
   function newestPauseArtifactDir(binaryPath: string): string {
-    const root = path.join(path.dirname(binaryPath), '.debug-mcp', 'cobol', 'pause-manifest');
+    const root = path.join(path.dirname(binaryPath), '.debug-mcp', 'cobol', `${process.platform}-${process.arch}`, 'pause-manifest');
     const dirs = readdirSync(root, { withFileTypes: true })
       .filter(d => d.isDirectory() && existsSync(path.join(root, d.name, 'manifest-index.json')))
       .map(d => path.join(root, d.name))

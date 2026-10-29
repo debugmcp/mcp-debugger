@@ -10,7 +10,7 @@ Example programs for debugging GnuCOBOL with mcp-debugger's COBOL adapter (CodeL
   - **Windows**: MSYS2, then `pacman -S mingw-w64-ucrt-x86_64-gnucobol` (set `COBC_PATH` if `cobc.exe` is not on PATH)
 - CodeLLDB is vendored; nothing else to install.
 
-The adapter compiles with `cobc -x -g -fdump=ALL --save-temps -t <lst> -ftsymbols -A "-O0 -gdwarf-4"` into `.debug-mcp/cobol/<name>/<buildKey>/` next to the source. Build one yourself the same way if you want a prebuilt target (`-gdwarf-4` matters on MinGW).
+The adapter compiles with `cobc -x -g -fdump=ALL --save-temps -t <lst> -ftsymbols -A "-O0 -gdwarf-4"` into `.debug-mcp/cobol/<platform>-<arch>[-container]/<name>/<buildKey>/` next to the source (`win32-x64`, `linux-x64`, `linux-x64-container` inside the Docker image). Build one yourself the same way if you want a prebuilt target (`-gdwarf-4` matters on MinGW).
 
 ## Example Programs
 
@@ -46,9 +46,9 @@ Paths below are repo-relative for readability; real calls need absolute paths.
    **To debug (attach):**
    ```bash
    # 1. Source-launch pause.cob once through the adapter (start_debugging, then close_debug_session):
-   #    it builds examples/cobol/.debug-mcp/cobol/pause/<buildKey>/pause[.exe] plus pause.cobol-symbols.json.
+   #    it builds examples/cobol/.debug-mcp/cobol/<platform>-<arch>/pause/<buildKey>/pause[.exe] plus pause.cobol-symbols.json.
    # 2. Run that executable in the background:
-   examples/cobol/.debug-mcp/cobol/pause/<buildKey>/pause &
+   examples/cobol/.debug-mcp/cobol/<platform>-<arch>/pause/<buildKey>/pause &
    # 3. attach_to_process with the PID and adapterConfig {"manifestDirs": ["<that <buildKey> directory>"]}
    ```
 

@@ -24,7 +24,8 @@ export {
   ARTIFACT_ROOT_DIRNAME,
   MANIFEST_SUFFIX,
   MANIFEST_INDEX_NAME,
-  C_COMPILE_FLAGS
+  C_COMPILE_FLAGS,
+  buildEnvironmentSegment
 } from './gnucobol-builder.js';
 export type {
   CobolBuildMode,
