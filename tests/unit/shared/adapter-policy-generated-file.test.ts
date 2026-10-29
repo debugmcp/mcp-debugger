@@ -131,11 +131,14 @@ describe('lldbGeneratedFileCandidates (issue #950): the CodeLLDB family binds th
     }
   });
 
-  it("COBOL: declines the adapter's own build under .debug-mcp/cobol — keyed on the sources' content, so a touch-only change reuses an executable that is current by content, not by mtime", () => {
-    const built = at('.debug-mcp', 'cobol', 'payroll', 'a1b2c3', 'payroll.exe');
+  it("COBOL: declines the adapter's own build under .debug-mcp/cobol/<environment>/ — keyed on the sources' content, so a touch-only change reuses an executable that is current by content, not by mtime", () => {
+    const built = at('.debug-mcp', 'cobol', 'win32-x64', 'payroll', 'a1b2c3', 'payroll.exe');
     expect(CobolAdapterPolicy.generatedFileCandidates!({ sourcePath: at('payroll.cob'), program: built, launchConfig: { program: built } })).toBeUndefined();
-    const module = at('.debug-mcp', 'cobol', 'payroll', 'a1b2c3', 'payroll.dll');
+    const module = at('.debug-mcp', 'cobol', 'win32-x64', 'PAYROLL-module', 'a1b2c3', 'PAYROLL.dll');
     expect(CobolAdapterPolicy.generatedFileCandidates!({ sourcePath: at('common.cpy'), program: module, launchConfig: { program: module } })).toBeUndefined();
+    // The container's environment root (issue #1035) is the adapter's build too.
+    const inContainer = at('.debug-mcp', 'cobol', 'linux-x64-container', 'payroll', 'a1b2c3', 'payroll');
+    expect(CobolAdapterPolicy.generatedFileCandidates!({ sourcePath: at('payroll.cob'), program: inContainer, launchConfig: { program: inContainer } })).toBeUndefined();
   });
 
   it("COBOL: declines under runner \"cobcrun\", whose launched program is GnuCOBOL's loader, not the user's module", () => {

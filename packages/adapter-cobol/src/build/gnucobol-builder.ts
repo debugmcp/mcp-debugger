@@ -90,6 +90,8 @@ export interface SpawnLike {
 export interface GnuCobolBuilderDeps {
   cobc: CobcLocation;
   platform?: NodeJS.Platform;
+  arch?: NodeJS.Architecture;
+  /** Also where `MCP_CONTAINER` is read: a container build keeps an environment root of its own (issue #1035). */
   env?: NodeJS.ProcessEnv;
   logger?: GnuCobolBuilderLogger;
   spawnFn?: SpawnLike;
@@ -136,6 +138,17 @@ export const BUILD_INFO_NAME = 'build.json';
 export const LATEST_POINTER_NAME = 'latest.json';
 /** Older key directories kept per program (best effort; a locked directory is skipped). */
 export const KEEP_ARTIFACT_DIRS = 3;
+
+/**
+ * The environment segment between the cache root and a program's root:
+ * `<platform>-<arch>` (`linux-x64`, `win32-x64`), `-container` appended inside the Docker
+ * image (`MCP_CONTAINER=true`). A host and a container sharing one bind-mounted workspace
+ * each keep their own pointer, prune pool and key directories, so neither repoints,
+ * prunes or reuses the other's (issue #1035); the segment is part of the build key too.
+ */
+export function buildEnvironmentSegment(env: { platform: NodeJS.Platform; arch: string; container: boolean }): string {
+  return `${env.platform}-${env.arch}${env.container ? '-container' : ''}`;
+}
 
 const DEFAULT_TIMEOUT_MS = 180_000;
 /** C compiler flags forwarded through `-A` (see the module doc for why DWARF-4). */
@@ -320,14 +333,19 @@ function readJson<T>(filePath: string): T | undefined {
 
 export class GnuCobolBuilder {
   private readonly platform: NodeJS.Platform;
+  private readonly arch: NodeJS.Architecture;
   private readonly env: NodeJS.ProcessEnv;
+  /** `buildEnvironmentSegment` for this builder: the cache segment and the key's environment tag. */
+  private readonly environment: string;
   private readonly spawnFn: SpawnLike;
   private readonly timeoutMs: number;
   private readonly now: () => Date;
 
   constructor(private readonly deps: GnuCobolBuilderDeps) {
     this.platform = deps.platform ?? process.platform;
+    this.arch = deps.arch ?? process.arch;
     this.env = deps.env ?? process.env;
+    this.environment = buildEnvironmentSegment({ platform: this.platform, arch: this.arch, container: this.env.MCP_CONTAINER === 'true' });
     this.spawnFn = deps.spawnFn ?? (spawnCobc as unknown as SpawnLike);
     this.timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.now = deps.now ?? (() => new Date());
@@ -339,17 +357,19 @@ export class GnuCobolBuilder {
   }
 
   /**
-   * Where `program`'s artifacts live: `<artifactRoot>/<name>` for an executable,
-   * `<PROGRAM-ID>-module` for a module and `<name>-manifest` for a translate-only
-   * regeneration. One root per mode: each has its own `latest.json` and prune pool, so a
-   * module build, a prebuilt launch or an attach never repoints or prunes the directory a
-   * source launch of the same file is paused on (a module named SUB and a source launch
-   * of sub.cob would otherwise share a directory on a case-insensitive filesystem).
+   * Where `program`'s artifacts live: `<artifactRoot>/<environment>/<name>` for an
+   * executable, `<PROGRAM-ID>-module` for a module and `<name>-manifest` for a
+   * translate-only regeneration. One root per environment and mode, each with its own
+   * `latest.json` and prune pool: a module build, a prebuilt launch or an attach never
+   * repoints or prunes the directory a source launch of the same file is paused on (a
+   * module named SUB and a source launch of sub.cob would otherwise share a directory on
+   * a case-insensitive filesystem), and the host and the container sharing a bind mount
+   * never repoint, prune or reuse each other's builds (issue #1035).
    */
   programArtifactRoot(request: CobolBuildRequest, name = this.outputName(request)): string {
     const root = request.artifactRoot ?? path.join(path.dirname(request.program), ARTIFACT_ROOT_DIRNAME);
     const suffix = request.mode === 'manifest-only' ? '-manifest' : request.mode === 'module' ? '-module' : '';
-    return path.join(root, `${name}${suffix}`);
+    return path.join(root, this.environment, `${name}${suffix}`);
   }
 
   /** The output basename: `outputName`, else the PROGRAM-ID for a module (see scanProgramId), else the source basename. */
@@ -373,11 +393,11 @@ export class GnuCobolBuilder {
       : undefined;
 
     const provisionalArgs = cobcArguments(request, undefined, '<lst>', sources);
-    // Platform/arch are part of the key: an artifact directory can be shared
-    // through a mounted workspace (host ↔ container), and a Windows .exe must
-    // never be "reused" by a Linux launch.
+    // The environment (platform, arch, container) is part of the key as well as of the
+    // path: a Windows .exe must never be "reused" by a Linux launch, and a host build
+    // and a container build of one workspace must differ even at the same mount path.
     const keyFor = (files: string[]): string => computeBuildKey({
-      cobcVersion: `${this.deps.cobc.versionLine ?? 'unknown'} [${this.platform}/${process.arch}]`,
+      cobcVersion: `${this.deps.cobc.versionLine ?? 'unknown'} [${this.environment}]`,
       argv: keyArgv(provisionalArgs),
       files: files
         .filter((file, index, all) => all.indexOf(file) === index && fs.existsSync(file))
@@ -474,7 +494,7 @@ export class GnuCobolBuilder {
             buildKey,
             generatedAt,
             platform: this.platform,
-            arch: process.arch,
+            arch: this.arch,
             dumpComments: true
           }
         });
@@ -552,10 +572,15 @@ export class GnuCobolBuilder {
       path.join(artifactDir, BUILD_INFO_NAME),
       JSON.stringify({ buildKey, argv: args, cobc: this.deps.cobc.path, cobcVersion: this.deps.cobc.versionLine, sources, generatedAt }, null, 2)
     );
-    fs.writeFileSync(
-      path.join(programRoot, LATEST_POINTER_NAME),
-      JSON.stringify({ key: buildKey, artifactDir, binaryPath: index.binary, updatedAt: generatedAt }, null, 2)
-    );
+    const pointer = path.join(programRoot, LATEST_POINTER_NAME);
+    try {
+      fs.writeFileSync(pointer, JSON.stringify({ key: buildKey, artifactDir, binaryPath: index.binary, updatedAt: generatedAt }, null, 2));
+    } catch (error) {
+      // The build is good; only its reuse is lost (a pointer another user owns, say).
+      this.deps.logger?.warn?.(
+        `[GnuCobolBuilder] Cannot write ${pointer} (${error instanceof Error ? error.message : String(error)}); the next launch rebuilds instead of reusing ${artifactDir}`
+      );
+    }
     this.pruneOldArtifacts(programRoot, path.basename(artifactDir));
 
     return {

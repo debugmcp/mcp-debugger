@@ -36,6 +36,7 @@ import {
   LATEST_POINTER_NAME,
   KEEP_ARTIFACT_DIRS,
   C_COMPILE_FLAGS,
+  buildEnvironmentSegment,
   type CobolBuildRequest,
   type ManifestIndex,
   type SpawnLike
@@ -43,6 +44,8 @@ import {
 
 const BANNER = 'cobc (GnuCOBOL) 3.2.0';
 const NOW = new Date('2026-09-19T12:00:00.000Z');
+/** The environment segment a linux/x64 host builder puts between the cache root and the program root (issue #1035). */
+const ENV = 'linux-x64';
 
 interface SpawnPlan {
   /** Exit code emitted on `close` (default 0). */
@@ -222,6 +225,13 @@ describe('pure helpers', () => {
     expect(executableExtension('darwin')).toBe('');
   });
 
+  it('names the environment segment <platform>-<arch>, -container inside the image (issue #1035)', () => {
+    expect(buildEnvironmentSegment({ platform: 'linux', arch: 'x64', container: false })).toBe('linux-x64');
+    expect(buildEnvironmentSegment({ platform: 'linux', arch: 'x64', container: true })).toBe('linux-x64-container');
+    expect(buildEnvironmentSegment({ platform: 'win32', arch: 'x64', container: false })).toBe('win32-x64');
+    expect(buildEnvironmentSegment({ platform: 'darwin', arch: 'arm64', container: false })).toBe('darwin-arm64');
+  });
+
   it('keeps the artifact naming constants where the shim and docs expect them', () => {
     expect(ARTIFACT_ROOT_DIRNAME).toBe(path.join('.debug-mcp', 'cobol'));
     expect(MANIFEST_SUFFIX).toBe('.cobol-symbols.json');
@@ -301,6 +311,7 @@ describe('GnuCobolBuilder', () => {
     new GnuCobolBuilder({
       cobc,
       platform: 'linux',
+      arch: 'x64',
       env: { PATH: '/usr/bin' },
       logger,
       spawnFn: spawn.spawnFn,
@@ -350,15 +361,22 @@ describe('GnuCobolBuilder', () => {
   });
 
   describe('layout helpers', () => {
-    it('defaults the artifact root to .debug-mcp/cobol next to the program', () => {
+    it('defaults the artifact root to .debug-mcp/cobol/<platform>-<arch> next to the program (issue #1035)', () => {
       const builder = makeBuilder(fakeSpawn());
-      expect(builder.programArtifactRoot({ program, mode: 'executable' })).toBe(path.join(srcDir, '.debug-mcp', 'cobol', 'hello'));
+      expect(builder.programArtifactRoot({ program, mode: 'executable' })).toBe(path.join(srcDir, '.debug-mcp', 'cobol', ENV, 'hello'));
+    });
+
+    it('gives a container build, another architecture and another platform environment roots of their own', () => {
+      expect(makeBuilder(fakeSpawn(), { env: { PATH: '/usr/bin', MCP_CONTAINER: 'true' } }).programArtifactRoot(exeRequest())).toBe(path.join(artifactRoot, 'linux-x64-container', 'hello'));
+      expect(makeBuilder(fakeSpawn(), { env: { PATH: '/usr/bin', MCP_CONTAINER: 'false' } }).programArtifactRoot(exeRequest())).toBe(path.join(artifactRoot, ENV, 'hello'));
+      expect(makeBuilder(fakeSpawn(), { arch: 'arm64' }).programArtifactRoot(exeRequest())).toBe(path.join(artifactRoot, 'linux-arm64', 'hello'));
+      expect(makeBuilder(fakeSpawn(), { platform: 'win32' }).programArtifactRoot(exeRequest())).toBe(path.join(artifactRoot, 'win32-x64', 'hello'));
     });
 
     it('honours an explicit artifactRoot and outputName', () => {
       const builder = makeBuilder(fakeSpawn());
-      expect(builder.programArtifactRoot(exeRequest())).toBe(path.join(artifactRoot, 'hello'));
-      expect(builder.programArtifactRoot(exeRequest({ outputName: 'app' }))).toBe(path.join(artifactRoot, 'app'));
+      expect(builder.programArtifactRoot(exeRequest())).toBe(path.join(artifactRoot, ENV, 'hello'));
+      expect(builder.programArtifactRoot(exeRequest({ outputName: 'app' }))).toBe(path.join(artifactRoot, ENV, 'app'));
       expect(builder.outputName({ program: '/x/app.exe', mode: 'manifest-only' })).toBe('app');
     });
 
@@ -380,7 +398,7 @@ describe('GnuCobolBuilder', () => {
       expect(result.success).toBe(true);
       expect(result.compiled).toBe(true);
       expect(result.buildKey).toMatch(/^[0-9a-f]{12}$/);
-      const artifactDir = path.join(artifactRoot, 'hello', result.buildKey);
+      const artifactDir = path.join(artifactRoot, ENV, 'hello', result.buildKey);
       const outputPath = path.join(artifactDir, 'hello');
       const listingPath = path.join(artifactDir, 'hello.lst');
       expect(result.artifactDir).toBe(artifactDir);
@@ -419,7 +437,7 @@ describe('GnuCobolBuilder', () => {
           buildKey: result.buildKey,
           generatedAt: NOW.toISOString(),
           platform: 'linux',
-          arch: process.arch,
+          arch: 'x64',
           dumpComments: true
         }
       });
@@ -443,7 +461,7 @@ describe('GnuCobolBuilder', () => {
         sources: [program],
         generatedAt: NOW.toISOString()
       });
-      expect(readJson<Record<string, unknown>>(path.join(artifactRoot, 'hello', LATEST_POINTER_NAME))).toEqual({
+      expect(readJson<Record<string, unknown>>(path.join(artifactRoot, ENV, 'hello', LATEST_POINTER_NAME))).toEqual({
         key: result.buildKey,
         artifactDir,
         binaryPath: outputPath,
@@ -470,7 +488,7 @@ describe('GnuCobolBuilder', () => {
       expect(path.basename(dll.binaryPath ?? '')).toBe('HELLO.dll');
       expect(dll.argv[0]).toBe('-m');
       expect(dll.argv[dll.argv.indexOf('-o') + 1]).toBe(dll.binaryPath);
-      expect(dll.artifactDir).toContain(path.join('artifacts', 'HELLO-module'));
+      expect(dll.artifactDir).toContain(path.join('artifacts', 'win32-x64', 'HELLO-module'));
 
       const so = await makeBuilder(fakeSpawn(), { platform: 'linux' }).build(exeRequest({ mode: 'module' }));
       expect(path.basename(so.binaryPath ?? '')).toBe('HELLO.so');
@@ -540,10 +558,10 @@ describe('GnuCobolBuilder', () => {
 
     it('keeps translate-only artifacts in their own <name>-manifest root, apart from a source launch of the same file', () => {
       const builder = makeBuilder(fakeSpawn());
-      expect(builder.programArtifactRoot({ program, mode: 'manifest-only', sources: [program] })).toBe(path.join(srcDir, '.debug-mcp', 'cobol', 'hello-manifest'));
-      expect(builder.programArtifactRoot({ program: path.join(srcDir, 'hello'), mode: 'manifest-only', sources: [program] })).toBe(path.join(srcDir, '.debug-mcp', 'cobol', 'hello-manifest'));
-      expect(builder.programArtifactRoot({ program, mode: 'executable' })).toBe(path.join(srcDir, '.debug-mcp', 'cobol', 'hello'));
-      expect(builder.programArtifactRoot({ program, mode: 'module' })).toBe(path.join(srcDir, '.debug-mcp', 'cobol', 'HELLO-module'));
+      expect(builder.programArtifactRoot({ program, mode: 'manifest-only', sources: [program] })).toBe(path.join(srcDir, '.debug-mcp', 'cobol', ENV, 'hello-manifest'));
+      expect(builder.programArtifactRoot({ program: path.join(srcDir, 'hello'), mode: 'manifest-only', sources: [program] })).toBe(path.join(srcDir, '.debug-mcp', 'cobol', ENV, 'hello-manifest'));
+      expect(builder.programArtifactRoot({ program, mode: 'executable' })).toBe(path.join(srcDir, '.debug-mcp', 'cobol', ENV, 'hello'));
+      expect(builder.programArtifactRoot({ program, mode: 'module' })).toBe(path.join(srcDir, '.debug-mcp', 'cobol', ENV, 'HELLO-module'));
     });
 
     it('passes absolute, de-duplicated sources with the program first', async () => {
@@ -603,6 +621,8 @@ describe('GnuCobolBuilder', () => {
       expect(win.compiled).toBe(true);
       expect(win.buildKey).not.toBe(linux.buildKey);
       expect(win.artifactDir).not.toBe(linux.artifactDir);
+      expect(linux.artifactDir).toContain(path.join('artifacts', ENV, 'hello'));
+      expect(win.artifactDir).toContain(path.join('artifacts', 'win32-x64', 'hello'));
       expect(path.basename(win.binaryPath ?? '')).toBe('hello.exe');
       expect(spawn.calls).toHaveLength(2);
     });
@@ -621,7 +641,7 @@ describe('GnuCobolBuilder', () => {
       expect(second.artifactDir).not.toBe(first.artifactDir);
       expect(path.basename(second.artifactDir ?? '')).toBe(`${first.buildKey}-2`);
       expect(fs.existsSync(first.binaryPath ?? '')).toBe(true);
-      expect(readJson<{ artifactDir: string }>(path.join(artifactRoot, 'hello', LATEST_POINTER_NAME)).artifactDir).toBe(second.artifactDir);
+      expect(readJson<{ artifactDir: string }>(path.join(artifactRoot, ENV, 'hello', LATEST_POINTER_NAME)).artifactDir).toBe(second.artifactDir);
     });
 
     it('changes the build key when copybookDirs change: the -I value is part of the key', async () => {
@@ -659,7 +679,7 @@ describe('GnuCobolBuilder', () => {
       expect(spawn.calls).toHaveLength(2);
       expect(second.buildKey).not.toBe(first.buildKey);
       expect(fs.existsSync(first.artifactDir ?? '')).toBe(true);
-      expect(readJson<{ key: string }>(path.join(artifactRoot, 'hello', LATEST_POINTER_NAME)).key).toBe(second.buildKey);
+      expect(readJson<{ key: string }>(path.join(artifactRoot, ENV, 'hello', LATEST_POINTER_NAME)).key).toBe(second.buildKey);
     });
 
     it('records the copybooks it discovered in a content key: an unchanged relaunch reuses, a copybook edit rebuilds', async () => {
@@ -690,7 +710,7 @@ describe('GnuCobolBuilder', () => {
       expect(edited.buildKey).not.toBe(first.buildKey);
       expect(edited.artifactDir).not.toBe(first.artifactDir);
       expect(spawn.calls).toHaveLength(2);
-      expect(readJson<{ artifactDir: string }>(path.join(artifactRoot, 'hello', LATEST_POINTER_NAME)).artifactDir).toBe(edited.artifactDir);
+      expect(readJson<{ artifactDir: string }>(path.join(artifactRoot, ENV, 'hello', LATEST_POINTER_NAME)).artifactDir).toBe(edited.artifactDir);
     });
 
     it('does not reuse across a forced rebuild even when the content key matches', async () => {
@@ -731,7 +751,7 @@ describe('GnuCobolBuilder', () => {
     });
 
     it('prunes older key directories down to the newest three including the current one', async () => {
-      const programRoot = path.join(artifactRoot, 'hello');
+      const programRoot = path.join(artifactRoot, ENV, 'hello');
       fs.mkdirSync(programRoot, { recursive: true });
       const stale = ['aaaaaaaaaaa1', 'aaaaaaaaaaa2', 'aaaaaaaaaaa3', 'aaaaaaaaaaa4'];
       stale.forEach((name, index) => {
@@ -747,6 +767,54 @@ describe('GnuCobolBuilder', () => {
       const remaining = fs.readdirSync(programRoot, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
       expect(remaining).toEqual(['aaaaaaaaaaa3', 'aaaaaaaaaaa4', result.buildKey].sort());
       expect(fs.existsSync(path.join(programRoot, 'stray.txt'))).toBe(true);
+    });
+
+    it('keeps a host build and a container build of one source apart: own pointer, own prune pool, no reuse across (issue #1035)', async () => {
+      const spawn = fakeSpawn();
+      const host = makeBuilder(spawn);
+      const container = makeBuilder(spawn, { env: { PATH: '/usr/bin', MCP_CONTAINER: 'true' } });
+      const containerRoot = path.join(artifactRoot, 'linux-x64-container', 'hello');
+      // Stale container-side directories (root-owned, on a bind mount): a host prune must never see them.
+      const foreign = ['bbbbbbbbbbb1', 'bbbbbbbbbbb2', 'bbbbbbbbbbb3', 'bbbbbbbbbbb4'];
+      fs.mkdirSync(containerRoot, { recursive: true });
+      for (const name of foreign) fs.mkdirSync(path.join(containerRoot, name));
+
+      const first = await host.build(exeRequest());
+      expect(first.artifactDir).toBe(path.join(artifactRoot, ENV, 'hello', first.buildKey));
+      expect(fs.readdirSync(containerRoot).sort()).toEqual(foreign);
+
+      const inContainer = await container.build(exeRequest());
+      expect(inContainer.compiled).toBe(true);
+      expect(inContainer.artifactDir).toBe(path.join(containerRoot, inContainer.buildKey));
+      // Same inputs, different environment: a different key too, so the two can never be confused even at the same mount path.
+      expect(inContainer.buildKey).not.toBe(first.buildKey);
+      expect(fs.existsSync(first.artifactDir ?? '')).toBe(true);
+
+      // The host's next build reuses its own artifact: the container's pointer never replaced the host's.
+      const again = await host.build(exeRequest());
+      expect(again.compiled).toBe(false);
+      expect(again.artifactDir).toBe(first.artifactDir);
+      expect(spawn.calls).toHaveLength(2);
+      expect(readJson<{ artifactDir: string }>(path.join(artifactRoot, ENV, 'hello', LATEST_POINTER_NAME)).artifactDir).toBe(first.artifactDir);
+      expect(readJson<{ artifactDir: string }>(path.join(containerRoot, LATEST_POINTER_NAME)).artifactDir).toBe(inContainer.artifactDir);
+    });
+
+    it('still answers a build whose pointer cannot be written, with a warning, and rebuilds next time (issue #1035)', async () => {
+      const spawn = fakeSpawn();
+      const builder = makeBuilder(spawn);
+      // A directory where the pointer file goes: the write fails with EISDIR on every platform, whoever runs.
+      fs.mkdirSync(path.join(artifactRoot, ENV, 'hello', LATEST_POINTER_NAME), { recursive: true });
+
+      const first = await builder.build(exeRequest());
+
+      expect(first.success).toBe(true);
+      expect(first.compiled).toBe(true);
+      expect(fs.existsSync(first.binaryPath ?? '')).toBe(true);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/Cannot write .*latest\.json.*next launch rebuilds/));
+
+      const second = await builder.build(exeRequest());
+      expect(second.compiled).toBe(true);
+      expect(spawn.calls).toHaveLength(2);
     });
   });
 
@@ -767,7 +835,7 @@ describe('GnuCobolBuilder', () => {
       expect(result.binaryPath).toBe(exe);
       expect(fs.readFileSync(exe, 'utf8')).toBe('PREBUILT');
       // Translate-only artifacts live in their own root, apart from a source launch of `app` (review of #761).
-      const artifactDir = path.join(artifactRoot, 'app-manifest', result.buildKey);
+      const artifactDir = path.join(artifactRoot, ENV, 'app-manifest', result.buildKey);
       expect(result.artifactDir).toBe(artifactDir);
       expect(spawn.calls[0].args).toEqual([
         '-C', '-g', '-fdump=ALL', '--save-temps', '-t', path.join(artifactDir, 'app.lst'), '-ftsymbols', '-A', '-O0 -gdwarf-4', '-I', path.dirname(program), program
@@ -851,9 +919,9 @@ describe('GnuCobolBuilder', () => {
       expect(result.manifestPaths).toEqual([]);
       expect(result.manifests).toEqual([]);
       expect(result.buildKey).toMatch(/^[0-9a-f]{12}$/);
-      expect(result.artifactDir).toBe(path.join(artifactRoot, 'hello', result.buildKey));
+      expect(result.artifactDir).toBe(path.join(artifactRoot, ENV, 'hello', result.buildKey));
       expect(fs.existsSync(path.join(result.artifactDir ?? '', MANIFEST_INDEX_NAME))).toBe(false);
-      expect(fs.existsSync(path.join(artifactRoot, 'hello', LATEST_POINTER_NAME))).toBe(false);
+      expect(fs.existsSync(path.join(artifactRoot, ENV, 'hello', LATEST_POINTER_NAME))).toBe(false);
     };
 
     it('reports a compiler that could not be started', async () => {
