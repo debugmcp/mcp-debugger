@@ -64,8 +64,9 @@ function launchesUnderCobcrun(info: GeneratedFileContext): boolean {
 }
 
 /**
- * The adapter's own build output (`<dirname(program)>/.debug-mcp/cobol/<name>/<buildKey>/`,
- * `ARTIFACT_ROOT_DIRNAME` in the adapter's gnucobol-builder). Its build key is
+ * The adapter's own build output (`<dirname(program)>/.debug-mcp/cobol/<platform>-<arch>[-container]/<name>/<buildKey>/`,
+ * `ARTIFACT_ROOT_DIRNAME` and `buildEnvironmentSegment` in the adapter's gnucobol-builder;
+ * the pattern below is unanchored on purpose, so every environment root matches). Its build key is
  * a content hash over the sources and copybooks, so a launch that reuses it
  * has just verified the build current by content: a source saved without a
  * change, or re-checked-out, is newer by mtime and would be reported stale
