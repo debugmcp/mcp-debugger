@@ -6,7 +6,7 @@ This guide will help you set up your development environment for working on the 
 
 ### Required Software
 
-1. **Node.js** (v22.0.0 or higher)
+1. **Node.js** (v22.18.0 or higher to build — tsup 9's floor; the shipped server runs on v22.0.0+)
    - Download from [nodejs.org](https://nodejs.org/)
    - Verify installation: `node --version`
 
@@ -109,6 +109,7 @@ mcp-debugger/
 │   ├── adapter-dotnet/    # .NET debug adapter (netcoredbg)
 │   ├── adapter-cpp/       # C/C++ debug adapter (CodeLLDB)
 │   ├── adapter-cobol/     # COBOL debug adapter (GnuCOBOL + CodeLLDB)
+│   ├── adapter-dart/      # Dart/Flutter debug adapter (the SDK's own debug adapters)
 │   ├── adapter-ruby/      # Ruby debug adapter (rdbg)
 │   ├── adapter-mock/      # Mock adapter for testing
 │   ├── codelldb-darwin-arm64/  # Per-platform CodeLLDB binary packages. The

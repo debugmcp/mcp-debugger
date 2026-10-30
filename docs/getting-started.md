@@ -291,4 +291,4 @@ The [Troubleshooting guide](./troubleshooting.md) covers symptom-by-symptom fixe
 - [Usage guide](./usage.md) — longer debugging scenarios
 - Per-language guides: [python](./python/README.md) · [javascript](./javascript/README.md) ·
   [ruby](./ruby/README.md) · [go](./go/README.md) · [java](./java/README.md) ·
-  [dotnet](./dotnet/README.md) · [rust](./rust-debugging.md) · [cpp](./cpp/README.md) · [cobol](./cobol/README.md)
+  [dotnet](./dotnet/README.md) · [rust](./rust-debugging.md) · [cpp](./cpp/README.md) · [cobol](./cobol/README.md) · [dart](./dart/README.md)

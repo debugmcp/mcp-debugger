@@ -35,7 +35,8 @@ never forwarded anywhere.
 | ruby | A (or B in-pod) | 12345 (rdbg) | container path `/app/app.rb` | `localfsMap: "/app:<local>"` | `breakOnExceptions: "all"` (no uncaught-only); attach captures no stdout |
 | javascript | A (or B in-pod) | 9229 (inspector) | container path, or function | none (`adapterConfig` ignored) | needs `--preserve-symlinks-main` (see below) |
 | java | A (or B in-pod) | 5005 (JDWP) | **FQCN** `{"file": "App", "line": 4}` — no source needed | `sourcePaths` | `verifyTimeout` is ms — use `60000` for warming JVMs |
-| cpp / c | **B only** (attach by PID) | — | function, or DWARF compile path | `adapterConfig.program` | needs `--profile=general` (SYS_PTRACE) |
+| dart | A (or B in-pod) | VM service, e.g. 8181 (`dart --enable-vm-service=8181 --disable-service-auth-codes`) | container path (conditional breakpoints and logpoints; no function breakpoints) | none (the VM reports the paths it compiled) | `adapterConfig.vmServiceUri: "ws://127.0.0.1:8181/ws"`; with auth codes on, the URI must carry the token the VM printed; Flutter apps are host-only |
+| cpp / c / cobol | **B only** (attach by PID) | — | function, or DWARF compile path | `adapterConfig.program` | needs `--profile=general` (SYS_PTRACE) |
 | dotnet | — | — | — | — | PID-only attach + not in the Docker image → no k8s recipe today |
 | go, rust | — | — | — | — | attach not implemented |
 

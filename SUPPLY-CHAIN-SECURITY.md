@@ -58,7 +58,7 @@ The Docker image also copies the **Dart SDK** (BSD-3-Clause) from the official `
 #### npm (`@debugmcp/*` packages)
 
 - **OIDC trusted publishing**: every `@debugmcp/*` package is released via npm trusted publishing — CI exchanges its GitHub OIDC identity for a short-lived credential at publish time. CI holds no npm token.
-- **First-publish exception**: npm can attach a trusted publisher only to a package that already exists on the registry, so a brand-new package's *first* version is published once outside the release workflow (by a maintainer with 2FA, or a short-lived scoped token), then gets a trusted publisher. The five `@debugmcp/codelldb-<platform>` packages were the last to go through this, at v0.25.0.
+- **First-publish exception**: npm can attach a trusted publisher only to a package that already exists on the registry, so a brand-new package's *first* version is published once outside the release workflow (by a maintainer with 2FA, or a short-lived scoped token), then gets a trusted publisher. The five `@debugmcp/codelldb-<platform>` packages went through this at v0.25.0, and `@debugmcp/adapter-dart` on 2026-10-09, ahead of v0.26.0.
 - **Sigstore provenance**: All npm packages are published with provenance, generating sigstore attestations that link each package version to its source commit and build workflow.
 - **Workspace-dependency resolution**: `scripts/resolve-workspace-deps.cjs` rewrites pnpm `workspace:*` ranges to concrete pinned versions in the CI checkout before publishing, so published manifests contain only registry-resolvable, exact intra-project dependencies.
 

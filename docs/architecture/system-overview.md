@@ -257,7 +257,7 @@ node dist/index.js sse -p 3001          # SSE mode (deprecated)
 
 ### 3. Docker Container
 - Dockerfile configured for stdio and HTTP modes
-- Python and debugpy pre-installed in image
+- Python + debugpy, Node + js-debug, a JDK 21, CodeLLDB with g++, GnuCOBOL and the Dart SDK pre-installed; Go, .NET and Flutter are host-only
 - Volume mounting for workspace access
 - Uses bundled versions for minimal image size
 

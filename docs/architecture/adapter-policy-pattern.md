@@ -14,13 +14,13 @@ This document explains the AdapterPolicy pattern and how it relates to the main 
 - **Purpose**: Complete debug adapter implementation
 - **Scope**: Handles all DAP protocol communication and language runtime management
 - **Location**: `packages/adapter-<language>/`
-- **Examples**: `JavascriptDebugAdapter`, `PythonDebugAdapter`, `MockDebugAdapter`, `RustDebugAdapter`, `GoDebugAdapter`, `RubyDebugAdapter`, `JavaDebugAdapter`, `DotnetDebugAdapter`
+- **Examples**: `JavascriptDebugAdapter`, `PythonDebugAdapter`, `MockDebugAdapter`, `RustDebugAdapter`, `GoDebugAdapter`, `RubyDebugAdapter`, `JavaDebugAdapter`, `DotnetDebugAdapter`, `CppDebugAdapter`, `CobolDebugAdapter`, `DartDebugAdapter`
 
 ### AdapterPolicy (Supporting Pattern)
 - **Purpose**: Language-specific policies for session management
 - **Scope**: Lightweight behaviors used by SessionManager and DAP proxy layer
 - **Location**: `packages/shared/src/interfaces/adapter-policy-*.ts`
-- **All policies**: `DefaultAdapterPolicy`, `PythonAdapterPolicy`, `JsDebugAdapterPolicy`, `RubyAdapterPolicy`, `RustAdapterPolicy`, `CppAdapterPolicy`, `GoAdapterPolicy`, `JavaAdapterPolicy`, `DotnetAdapterPolicy`, `MockAdapterPolicy`
+- **All policies**: `DefaultAdapterPolicy`, `PythonAdapterPolicy`, `JsDebugAdapterPolicy`, `RubyAdapterPolicy`, `RustAdapterPolicy`, `CppAdapterPolicy`, `GoAdapterPolicy`, `JavaAdapterPolicy`, `DotnetAdapterPolicy`, `CobolAdapterPolicy`, `DartAdapterPolicy`, `MockAdapterPolicy`
 
 ## AdapterPolicy Interface
 
@@ -29,7 +29,7 @@ The `AdapterPolicy` interface is defined in `packages/shared/src/interfaces/adap
 ```typescript
 export interface AdapterPolicy {
   // === Identity ===
-  name: string;                              // e.g., 'default', 'python', 'js-debug', 'rust', 'go', 'java', 'dotnet', 'mock'
+  name: string;                              // e.g., 'default', 'python', 'js-debug', 'rust', 'cpp', 'cobol', 'go', 'java', 'dotnet', 'dart', 'mock'
 
   // === Child Session / Multi-session Support ===
   supportsReverseStartDebugging: boolean;
@@ -149,6 +149,8 @@ Client Request → Server → SessionManager
 | `GoAdapterPolicy` | `adapter-policy-go.ts` | `'go'` | `'dlv-dap'` | No | No |
 | `JavaAdapterPolicy` | `adapter-policy-java.ts` | `'java'` | `'java'` | No | No |
 | `DotnetAdapterPolicy` | `adapter-policy-dotnet.ts` | `'dotnet'` | `'coreclr'` | No | No |
+| `CobolAdapterPolicy` | `adapter-policy-cobol.ts` | `'cobol'` | `'lldb'` | No | No |
+| `DartAdapterPolicy` | `adapter-policy-dart.ts` | `'dart'` | `'dart'` | No | No |
 | `MockAdapterPolicy` | `adapter-policy-mock.ts` | `'mock'` | `'mock'` | No | No |
 
 ### Key Differences Between Policies

@@ -190,7 +190,7 @@ for pkg_dir in "${CODELLDB_PLATFORM_PKGS[@]}"; do
       fail "npm pack $pkg_name failed"
     fi
   else
-    warn "$pkg_name payload not staged locally — release runs scripts/stage-codelldb-packages.mjs --verify"
+    warn "$pkg_name payload not staged locally — release runs scripts/stage-codelldb-packages.mjs --verify-only"
   fi
 
   if npm view "${pkg_name}@${CODELLDB_PIN}" version > /dev/null 2>&1; then

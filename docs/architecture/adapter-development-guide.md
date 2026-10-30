@@ -16,7 +16,7 @@ Benefits:
 
 ## Prerequisites
 
-- Node.js 22+
+- Node.js 22.18+ to build (tsup 9's floor; the shipped server runs on 22+)
 - pnpm (not npm) — the monorepo uses `workspace:*` protocol
 - TypeScript 6.x (the root devDependency is `typescript` `^6.0.2`)
 - Familiarity with the [Debug Adapter Protocol (DAP)](https://microsoft.github.io/debug-adapter-protocol/)
@@ -42,7 +42,7 @@ packages/adapter-<language>/
 Naming conventions:
 - Package name: `@debugmcp/adapter-<language>`
 - Factory class: `<Language>AdapterFactory` (e.g., `GoAdapterFactory`)
-- File names: kebab-case is the recommended convention for new adapters (used by 9 of the 10 shipped adapters), e.g. `go-debug-adapter.ts`. The .NET adapter uses PascalCase (`DotnetAdapterFactory.ts`, `DotnetDebugAdapter.ts`) for historical reasons.
+- File names: kebab-case is the recommended convention for new adapters (used by 10 of the 11 shipped adapters), e.g. `go-debug-adapter.ts`. The .NET adapter uses PascalCase (`DotnetAdapterFactory.ts`, `DotnetDebugAdapter.ts`) for historical reasons.
 
 ---
 
@@ -295,7 +295,7 @@ The dynamic loader resolves adapters by **named export** — it looks for `<Lang
 
 ## Monorepo Wiring
 
-After creating the package, wire it into the monorepo. A language touches far more than the loader; the COBOL adapter (issue #759) is the most recent complete example, so the diff of its PR is the authoritative list. Every place, in build order:
+After creating the package, wire it into the monorepo. A language touches far more than the loader; the Dart/Flutter adapter (issue #790) is the most recent complete example, with the COBOL adapter (issue #759) before it, so the diffs of their PRs are the authoritative list. Every place, in build order:
 
 ### 1. Shared model and policy
 

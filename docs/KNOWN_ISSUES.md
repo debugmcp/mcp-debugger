@@ -33,15 +33,15 @@ with reasons. The gaps worth knowing up front:
   `Attach mode is not implemented for '<language>'` before any session state changes.
   Use `start_debugging` to launch the program instead.
 - **C/C++ attach is attach-by-PID only.** `attach_to_process` requires a numeric
-  `processId`; a `host`/`port` target is rejected with *"C/C++ attach requires a numeric
-  processId (attach-by-PID). Name/host-based attach is not supported yet."* On Linux,
+  `processId`; a `host`/`port` target is refused up front, by name — *"'cpp' does not attach
+  by port … Its attach_to_process takes: processId"* (the attach addressing contract, #903). On Linux,
   attaching to a process you did not start may also need `kernel.yama.ptrace_scope`
   relaxed. See the [C/C++ guide](./cpp/README.md). The COBOL adapter, which runs the
   same engine behind its DAP shim, has the same PID-only restriction
   ([COBOL guide](./cobol/README.md)).
 - **.NET attach is also PID-only.** netcoredbg has no host/port attach, so `processId` is
-  required and a `host`/`port` pair is dropped — there is no remote-attach form of the
-  call. See the [.NET guide](./dotnet/README.md).
+  required and a `host`/`port` pair is refused by name (#903) — there is no remote-attach form
+  of the call. See the [.NET guide](./dotnet/README.md).
 - **Dart/Flutter attach is by VM-service URI, never by PID.** `attach_to_process` takes
   `adapterConfig.vmServiceUri` (the `ws://…/<token>=/ws` URI a VM started with
   `--enable-vm-service` prints, or `flutter run --machine`'s `app.debugPort`) or
@@ -85,6 +85,16 @@ pause on raised exceptions in Ruby — it will also stop on caught ones.
 
 (Attach sessions never apply a language default; their `breakOnExceptions` default is
 `"none"` for every language.)
+
+## Python child processes run without the debugger
+
+Python launches and attaches send debugpy `subProcess: false`. With it on, pydevd hooks every
+Python child the program starts (`subprocess`, `multiprocessing`, pytest-xdist workers) and holds
+each one until a debug client attaches to it — which mcp-debugger never does — so the child never
+ran and the parent hung with no stop and no exit. Children now run undebugged: a breakpoint in code
+that only a child executes does not hit. An explicit `dapLaunchArgs: { subProcess: true }` is
+forwarded with a warning naming the hang. Debugging the children themselves is the open half of
+issue #1005.
 
 ## Dart/Flutter: what the SDK debug adapter does differently
 

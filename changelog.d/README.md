@@ -53,6 +53,6 @@ pnpm changelog:collate    # fold fragments into CHANGELOG.md, then delete them (
 
 ## CI
 
-A PR touching `src/`, `packages/`, or `tools/` must add a fragment. Test-only changes are exempt
+A PR touching `src/`, `packages/`, or `tools/`, or a shipping key of the root `package.json` (`dependencies`, `optionalDependencies`, `peerDependencies`, `bin`, `main`, `exports`, `files`, `engines`, `type`), must add a fragment. Test-only changes are exempt
 automatically. If a PR genuinely needs no entry — a pure refactor, a CI-internal change — apply the
 `no-changelog` label.

@@ -9,6 +9,7 @@
 - **Java**: Filters out JDK internal frames by default
 - **.NET/C#**: Filters out `System.*` and `Microsoft.*` runtime frames and sourceless frames by default
 - **Ruby**: Filters out `<internal:>` and `/gems/` frames by default
+- **Dart/Flutter**: Filters out the SDK's own frames (`dart:` libraries, `lib/_internal`, the SDK's `lib/` tree), frames with no source, and the `<asynchronous gap>` label frames of async stacks by default
 - **Rust**, **C/C++** and **COBOL**: Share one CodeLLDB filter (`filterLldbStackFrames` in `packages/shared/src/interfaces/lldb-policy-shared.ts`; COBOL adds its libcob rules on top) — LLDB-synthesized unnamed symbols (`___lldb_unnamed_symbol…`), glibc `__GI_` aliases, and libc/runtime plumbing and syscall wrappers *that also lack user source* (issue #369), with the Windows CRT start-up, kernel32/ntdll thread and wait plumbing and `pthread_*` under the same rule (issue #824)
 - **Python**: No filtering applied (shows all frames) — the only adapter policy that does not implement `filterStackFrames`
 - **Mock**: Implements the hook as a pass-through; every frame is returned
