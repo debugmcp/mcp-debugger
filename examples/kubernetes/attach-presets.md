@@ -153,6 +153,24 @@ and `/proc/1/maps` paths aren't openable from the sidecar. The target is
 every language (pass `false` to leave the target running). Expect `<optimized out>` locals on `-O2` builds and symbol-only
 breakpoints on stripped binaries.
 
+## dart
+
+**Target requirement**: start the VM service — `dart --enable-vm-service=8181 --disable-service-auth-codes bin/app.dart` (without `--disable-service-auth-codes` the URI carries a token: read it from the program's output, or from `--write-service-info=<file>`)
+**Port-forward**: `kubectl port-forward deploy/dart-demo 8181:8181`
+
+```json
+attach_to_process {"sessionId": "...", "breakOnExceptions": "uncaught",
+                   "adapterConfig": {"vmServiceUri": "ws://127.0.0.1:8181/ws"}}
+```
+
+**Breakpoints & paths**: container-side paths, the ones the VM compiled —
+`{"file": "/app/bin/app.dart", "line": 6}`. Conditional breakpoints and logpoints work; the SDK
+adapter has no function breakpoints.
+**Caveats**: attaching pauses the target, and an isolate idle in an `await` then shows an empty
+stack — set a breakpoint and `continue_execution`, or pass `stopOnEntry: false` to skip the
+pause. Flutter apps are host-only (a device or browser is involved), so they attach from a host
+deployment by `deviceId` or URI, not from a pod.
+
 ## dotnet — no Kubernetes recipe today
 
 .NET attach is **PID-only** (no host/port attach exists in netcoredbg), which

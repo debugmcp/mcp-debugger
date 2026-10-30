@@ -408,7 +408,6 @@ Evaluate Rust expressions in the current debug context. Note that CodeLLDB evalu
 See the `examples/rust/` directory for complete examples:
 - `hello_world/`: Basic Rust debugging
 - `async_example/`: Async/await with Tokio
-- More examples coming soon!
 
 ## Known Limitations
 

@@ -23,6 +23,9 @@ The measured facts behind every statement here are in [spike-notes.md](spike-not
 - Flutter targets need their platform toolchain (`flutter doctor`): Visual Studio Build Tools for
   `-d windows`, Xcode (with the iOS simulator runtime for a simulator) for `-d macos` and iOS,
   Chrome for `-d chrome`, the Android SDK and an emulator for `-d emulator-5554`.
+- **Docker**: the published image carries the Dart SDK (`DART_SDK=/usr/lib/dart`), so Dart programs
+  and `dart test` debug in-container; Flutter is host-only. See
+  [docker-support.md](../docker-support.md#dart-in-docker-flutter-is-host-only).
 
 ## Which adapter runs: the `runner`
 

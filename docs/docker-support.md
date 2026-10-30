@@ -112,6 +112,10 @@ The image vendors CodeLLDB for the image's own architecture — `linux-x64` or `
 - **COBOL** (issue #759): the image installs the `gnucobol3` package, so a `.cob`/`.cbl` launch compiles in-container (into `.debug-mcp/cobol/linux-<arch>-container/` beside the source, an environment root of its own — issue #1035) and the COBOL adapter is preloaded; the same Linux-binary rule applies to prebuilt COBOL executables. A prebuilt binary compiled on the host from a mounted project gets the same best-effort `sourceMap` derivation from its DWARF paths that C/C++ binaries get (a caller-supplied `sourceMap` always wins); pass `sources` as `/workspace/...` paths so the regenerated manifest names the paths the debugger reports. See [docs/cobol/README.md](cobol/README.md).
 - **Rust type summaries work out of the box** (issue #441): the image vendors the Rust toolchain's LLDB formatter scripts at `/opt/rust-sysroot/lib/rustlib/etc` and sets `CODELLDB_RUST_SYSROOT=/opt/rust-sysroot`, which the rust adapter translates into CodeLLDB's `lang.rust.sysroot` setting — so `&str`/`String`/`Vec` values render as values without any `rustc` in the image. Override with `-e CODELLDB_RUST_SYSROOT=/path/to/sysroot` (a sysroot root whose `lib/rustlib/etc` holds the formatters), or disable with `-e CODELLDB_RUST_SYSROOT=` to fall back to CodeLLDB's normal `rustc --print sysroot` lookup. Caveat: the vendored formatters track the Rust version pinned in the Dockerfile; a debuggee built by a much newer/older rustc may render some std types imperfectly.
 
+## Dart in Docker (Flutter is host-only)
+
+The image carries the Dart SDK (`/usr/lib/dart`, on `PATH`, `DART_SDK` set — the `dart-sdk` build stage copies it out of the official `dart` image), so a Dart program or a `dart test` file mounted under `/workspace` debugs in-container through `dart debug_adapter`, and the dart adapter is preloaded. Flutter is not in the image: `flutter run`/`flutter test` need a device or a browser and a multi-gigabyte checkout, so Flutter stays a host deployment. One container-specific detail: the SDK adapter waits for the VM's service-info file under the system temp directory, and a `/tmp` bind-mounted from the host under Docker Desktop delivers no file events, so the adapter sets `TMPDIR=/var/tmp` for itself when `MCP_CONTAINER=true` (set `TMPDIR` to a container-local directory for other layouts). See [docs/dart/README.md](dart/README.md).
+
 ## Ruby attach in Docker (attach-only)
 
 The image ships the Ruby adapter **without a Ruby runtime**. Launching Ruby scripts in the container is therefore unavailable, but **attach works**: Ruby attach is a direct TCP connection to a running `rdbg --open` DAP socket, so no local Ruby is needed. `list_supported_languages` reports this per-mode (`ruby.modes.launch.available: false`, `ruby.modes.attach.available: true`).
@@ -287,16 +291,18 @@ trusting a version quoted here:
    server into `/app/dist/bundle.cjs`
 2. **`rust-formatters`** (a `rust:*-slim` base) exists only to copy the Rust toolchain's
    LLDB formatter scripts out of `$(rustc --print sysroot)/lib/rustlib/etc` (issue #441)
-3. The **runtime stage** (an `ubuntu:*` base) installs the debug toolchains the image
+3. **`dart-sdk`** (a `dart:*` base) exists only to copy the Dart SDK into the runtime stage
+   (issue #790)
+4. The **runtime stage** (an `ubuntu:*` base) installs the debug toolchains the image
    ships -- Python 3 plus a hash-pinned debugpy, LLDB and `python3-lldb`, `g++`, GnuCOBOL
    (`gnucobol3`), and a headless JDK 21 -- then copies in the Node binary, the bundle, the runtime adapter
-   packages, and the vendored CodeLLDB from the earlier stages
-4. It sets the environment the server reads at runtime: `MCP_CONTAINER=true`,
-   `MCP_WORKSPACE_ROOT=/workspace`, `CODELLDB_PATH`, `CODELLDB_RUST_SYSROOT`, and
+   packages, the vendored CodeLLDB and the Dart SDK from the earlier stages
+5. It sets the environment the server reads at runtime: `MCP_CONTAINER=true`,
+   `MCP_WORKSPACE_ROOT=/workspace`, `CODELLDB_PATH`, `CODELLDB_RUST_SYSROOT`, `DART_SDK`, and
    `DEBUG_MCP_DISABLE_LANGUAGES=go,dotnet` (no Delve, no netcoredbg in the image)
-5. `tini` is PID 1, in front of the `scripts/docker-entry.sh` wrapper; the default
+6. `tini` is PID 1, in front of the `scripts/docker-entry.sh` wrapper; the default
    command is `stdio`
-6. The application runs from `/app`, keeping `/workspace` free for user mounts
+7. The application runs from `/app`, keeping `/workspace` free for user mounts
 
 This ensures all dependencies needed for both Node.js execution and Python debugging are available in the container.
 

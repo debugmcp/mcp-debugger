@@ -152,7 +152,7 @@ The language policies are singleton object constants implementing the `AdapterPo
 
 | Export | Kind | Description |
 |--------|------|-------------|
-| `DebugLanguage` | enum | Supported languages (Python, Ruby, JavaScript, Rust, Cpp, Go, Java, Dotnet, Mock) |
+| `DebugLanguage` | enum | Supported languages (Python, Ruby, JavaScript, Rust, Cpp, Cobol, Go, Java, Dotnet, Dart, Mock) |
 | `SessionState` | enum | Session states (CREATED → READY → RUNNING ⇄ PAUSED → STOPPED) |
 | `SessionLifecycleState` | enum | Coarse lifecycle (CREATED → ACTIVE → TERMINATED) |
 | `ExecutionState` | enum | Fine-grained execution state |

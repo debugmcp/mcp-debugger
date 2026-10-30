@@ -44,8 +44,8 @@ Out of scope (by design, documented in [SECURITY.md](../SECURITY.md#out-of-scope
 
 ## Residual risks, stated plainly
 
-1. Docker/PyPI artifacts lack independent attestation (planned; tracked in the ops backlog).
-2. First-publish npm packages use a scoped token once per package (transitional, self-eliminating).
+1. Docker Hub still needs a stored login for the image push (the image and the PyPI launcher themselves have been attested since v0.25.0, #422).
+2. A brand-new npm package's first version is published once outside the release workflow (a maintainer with 2FA, or a short-lived scoped token), because npm cannot attach a trusted publisher to a package that does not exist; every later version publishes through OIDC.
 3. A fully compromised GitHub organization owner account defeats most controls; 2FA enforcement and minimal-scope tokens reduce but do not eliminate this.
 4. The SBOMs enumerate package-manager dependencies; embedded binaries are disclosed via the pin manifests instead of appearing as SBOM components.
 

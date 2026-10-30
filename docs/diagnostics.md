@@ -1,6 +1,6 @@
 # Diagnostics Guide
 
-Eleven language adapters, each with its own external prerequisites — and nearly all real-world setup friction is environmental: debugpy missing from the active Python, `dlv` not on PATH, a JDK that is too old, `NETCOREDBG_PATH` unset, Yama blocking attach on Linux, a wrong volume mount in container mode. This guide gathers every prerequisite, failure signature, and diagnostic tool in one place.
+Ten language adapters plus the mock, each with its own external prerequisites — and nearly all real-world setup friction is environmental: debugpy missing from the active Python, `dlv` not on PATH, a JDK that is too old, `NETCOREDBG_PATH` unset, Yama blocking attach on Linux, a wrong volume mount in container mode. This guide gathers every prerequisite, failure signature, and diagnostic tool in one place.
 
 ## Start here: `mcp-debugger doctor`
 
@@ -24,6 +24,10 @@ java        Java 21.0.10 C:\...\jdk-21\bin\java.exe          JDI bridge C:\...\j
 dotnet      .NET SDK 8.0.420                                 netcoredbg 3.1.3-1 C:\...\netcoredbg.exe  ✅ ok
 cpp         C/C++ compiler g++ (MSYS2) 15.2.0                CodeLLDB 1.11.8 (vendored) C:\...         ✅ ok
 cobol       GnuCOBOL (cobc) 3.2.0 C:\...\cobc.exe            CodeLLDB 1.11.8 (vendored) C:\...         ✅ ok
+dart        Dart SDK 3.13.4 (Flutter 3.47.7 at C:\src\flutter)  dart debug_adapter 3.13.4 C:\...\dart.exe  ✅ ok
+
+Targets
+  dart Flutter devices: windows (Windows, windows-x64), chrome (Chrome, web-javascript), edge (Edge, web-javascript) (emulators: mcp_api35)
 
 Platform checks
   ✅ container mode: not running in container mode
@@ -33,7 +37,7 @@ Platform checks
 Fixes
   rust: Rust MSVC toolchain detected. CodeLLDB works best with the GNU toolchain (x86_64-pc-windows-gnu) or DWARF debug info.
 
-1 of 10 adapters need attention. Run 'mcp-debugger doctor <language>' to gate the exit code on a specific language.
+1 of 11 adapters need attention. Run 'mcp-debugger doctor <language>' to gate the exit code on a specific language.
 ```
 
 Usage notes:
@@ -184,7 +188,7 @@ In the Docker image the server runs with `MCP_CONTAINER=true` and resolves all p
 - **`MCP_WORKSPACE_ROOT` unset or not mounted** — you forgot `-v "$(pwd)":/workspace`, so every file lookup fails. Fix the mount; see [docs/docker-support.md](./docker-support.md).
 - **Mounted but empty** — the volume points at the wrong host directory.
 
-Go and .NET are disabled in the published image via `DEBUG_MCP_DISABLE_LANGUAGES`; use a host deployment for those. Rust/C++/COBOL in-container debugging works for **Linux-compiled** binaries only.
+Go and .NET are disabled in the published image via `DEBUG_MCP_DISABLE_LANGUAGES`; use a host deployment for those. Rust/C++/COBOL in-container debugging works for **Linux-compiled** binaries only. Dart debugs in-container with the image's own Dart SDK (`DART_SDK=/usr/lib/dart`); Flutter is host-only.
 
 ## Debugging the debugger
 

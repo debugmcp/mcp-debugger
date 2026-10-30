@@ -271,6 +271,7 @@ async endSession(exitCode: number) {
 
 ## Version History
 
+- **v0.26.0** - Dart/Flutter adapter (the SDK's own debug adapters behind a TCP-to-stdio bridge), 11 adapters total; `wait_for_stop`, stop snapshots on every stop answer, the pytest preset, `hot_reload`
 - **v0.25.0** - COBOL adapter (GnuCOBOL + CodeLLDB behind a DAP shim), 10 adapters total; CodeLLDB ships as per-platform npm packages
 - **v0.24.0** - C/C++ adapter, 9 adapters total; shared `@debugmcp/codelldb-common` CodeLLDB vendoring for Rust and C/C++
 - **v0.22.0** - Ruby adapter, 8 adapters total

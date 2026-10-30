@@ -23,7 +23,7 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 
 ### Prerequisites
 
-- Node.js 22+
+- Node.js 22.18+ to build (tsup 9's floor; the shipped server runs on 22+)
 - pnpm 12 (required — `workspace:*` protocol needs pnpm, not npm). The exact
   version is pinned via the `packageManager` field in `package.json`; pnpm
   10+ switches to it on its own, or run `corepack enable` to have corepack do
