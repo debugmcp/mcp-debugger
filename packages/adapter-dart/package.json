@@ -1,6 +1,6 @@
 {
   "name": "@debugmcp/adapter-dart",
-  "version": "0.26.0-beta.1",
+  "version": "0.26.0",
   "description": "Dart and Flutter debug adapter for MCP Debugger using the SDK's own DAP servers (dart debug_adapter / flutter debug-adapter)",
   "type": "module",
   "main": "./dist/index.js",
@@ -38,7 +38,7 @@
   ],
   "license": "MIT",
   "peerDependencies": {
-    "@debugmcp/shared": "0.26.0-beta.1"
+    "@debugmcp/shared": "0.26.0"
   },
   "dependencies": {
     "@debugmcp/shared": "workspace:*",

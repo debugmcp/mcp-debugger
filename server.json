@@ -9,12 +9,12 @@
     "source": "github",
     "id": "999492182"
   },
-  "version": "0.26.0-beta.1",
+  "version": "0.26.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@debugmcp/mcp-debugger",
-      "version": "0.26.0-beta.1",
+      "version": "0.26.0",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
@@ -30,7 +30,7 @@
     },
     {
       "registryType": "oci",
-      "identifier": "docker.io/debugmcp/mcp-debugger:0.26.0-beta.1",
+      "identifier": "docker.io/debugmcp/mcp-debugger:0.26.0",
       "runtimeHint": "docker",
       "transport": {
         "type": "stdio"
