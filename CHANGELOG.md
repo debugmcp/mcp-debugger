@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.26.0-beta.1] - 2026-10-30
+## [0.26.0] - 2026-10-31
 
 ### Highlights
 - **Dart and Flutter debugging, the tenth language** — the SDK's own debug adapters behind a TCP-to-stdio bridge, nothing vendored: Dart programs and `dart test`, Flutter apps and tests on Windows/macOS/Linux desktops, in Chrome or Edge, on Android emulators and devices and on the iOS simulator; attach by VM-service URI or, on Android, by `deviceId` alone; `hot_reload` and a hot `restart_debugging`; `doctor dart` lists the devices and emulators it sees. The Docker image carries the Dart SDK (Flutter is host-only) (#790, #882, #876, #877, #1011)
