@@ -4,6 +4,22 @@ import { fileURLToPath } from 'url';
 
 const FALLBACK_VERSION = '0.0.0';
 
+/**
+ * The release version esbuild bakes into the server bundle (`scripts/bundle.js`,
+ * `define`). The Docker image runs `dist/bundle.cjs` from `/app/dist` with no
+ * `package.json` beside it, so the file walk below found nothing there and the
+ * banner, `--version` and `serverInfo` all said `0.0.0` (issue #1054). Unbundled —
+ * `dist/index.js`, the npm CLI, vitest — the identifier is simply undefined and the
+ * walk is the answer. A global rather than an environment variable, so nothing on
+ * the host can spoof the version.
+ */
+declare const __MCP_DEBUGGER_VERSION__: string | undefined;
+
+function bakedVersion(): string | null {
+  const baked = typeof __MCP_DEBUGGER_VERSION__ === 'string' ? __MCP_DEBUGGER_VERSION__.trim() : '';
+  return baked.length > 0 ? baked : null;
+}
+
 function getModuleDirectory(): string {
   if (typeof __dirname === 'string') {
     return __dirname;
@@ -18,6 +34,9 @@ function getModuleDirectory(): string {
 }
 
 export function getVersion(): string {
+  const baked = bakedVersion();
+  if (baked) return baked;
+
   const moduleDir = getModuleDirectory();
   const candidatePaths = [
     path.resolve(moduleDir, '../../package.json'),
