@@ -105,7 +105,7 @@ export interface JdiBridgeStatus {
   dir: string | null;
   /** Resolved JdiDapServer.java, or null when no source ships with this install. */
   sourceFile: string | null;
-  /** True when `dir` holds a class older than `sourceFile` (a recompile was needed and did not happen). */
+  /** True when `dir` holds a class not compiled from `sourceFile` (a recompile was needed and did not happen). */
   stale: boolean;
   /** True when this call ran javac successfully. */
   recompiled: boolean;
@@ -197,9 +197,11 @@ export function ensureJdiBridge(): JdiBridgeStatus {
     return fallback(describeCompileFailure(err));
   }
   // Record what was compiled, or a record left by an older build would call this
-  // fresh class stale on every launch. A directory that refused the write would
-  // have refused javac first, so a failure here only means the next launch falls
-  // back to the mtime comparison.
+  // fresh class stale on every launch. Best effort: a directory that refused the
+  // write would have refused javac first; the one corner left — a record file
+  // that is itself read-only while the class is not — keeps the old record and
+  // recompiles on the next launch too, which is wrong permissions, not a verdict
+  // this code can improve on.
   try {
     writeBuildRecord(outDir, sourceFile);
   } catch {

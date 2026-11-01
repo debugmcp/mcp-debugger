@@ -46,8 +46,9 @@ describe.skipIf(SKIP_DOCKER)('Docker: Entrypoint Argument Passing', () => {
     expect(output).not.toContain('error:');
     // The image carries no package.json beside dist/bundle.cjs, so the version is baked
     // into the bundle at build time; the 0.0.0 fallback must never reach a published image
-    // (issue #1054). A semver-shaped match would let 0.0.0 through.
-    expect(output).toBe(EXPECTED_VERSION);
+    // (issue #1054). A semver-shaped match would let 0.0.0 through. Equality is on stdout
+    // alone: a daemon notice or a platform warning on stderr is not a version.
+    expect(stdout.trim()).toBe(EXPECTED_VERSION);
   }, 60000);
 
   it('doctor reports the release version in the image (issue #1054)', async () => {
