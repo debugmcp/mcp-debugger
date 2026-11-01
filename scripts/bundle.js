@@ -7,10 +7,28 @@ import * as esbuild from 'esbuild';
 import fs from 'fs';
 import path from 'path';
 
+/**
+ * The release version, baked into both bundles (issue #1054). The image runs the
+ * bundle from /app/dist with no package.json beside it — the runtime stage copies
+ * only dist/ and the adapter packages — so `getVersion()`'s package.json walk found
+ * nothing and the doctor banner, `--version` and `serverInfo` said 0.0.0.
+ * `src/cli/version.ts` reads this global first.
+ */
+function releaseVersion() {
+  const { version } = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+  if (typeof version !== 'string' || version.trim().length === 0) {
+    throw new Error('package.json has no version to bake into the bundle');
+  }
+  return version;
+}
+
 async function bundle() {
   console.log('Bundling MCP debugger server...');
-  
+
   try {
+    const version = releaseVersion();
+    console.log(`Baking version ${version} into the bundles`);
+
     // Bundle the main application
     const result = await esbuild.build({
       entryPoints: ['dist/index.js'],
@@ -21,7 +39,8 @@ async function bundle() {
       outfile: 'dist/bundle.cjs',
       define: {
         'import.meta.url': JSON.stringify('file:///app/dist/bundle.cjs'),
-        '__dirname': JSON.stringify('/app/dist')
+        '__dirname': JSON.stringify('/app/dist'),
+        '__MCP_DEBUGGER_VERSION__': JSON.stringify(version)
       },
       external: [
         // Keep native modules external
@@ -137,7 +156,8 @@ process.argv = process.argv.map(arg =>
       target: 'node20',
       define: {
         'import.meta.url': JSON.stringify('file:///app/dist/proxy/proxy-bundle.cjs'),
-        '__dirname': JSON.stringify('/app/dist/proxy')
+        '__dirname': JSON.stringify('/app/dist/proxy'),
+        '__MCP_DEBUGGER_VERSION__': JSON.stringify(version)
       },
       external: [], // Bundle ALL dependencies - don't exclude anything
       minify: false, // Keep readable for debugging

@@ -12,6 +12,7 @@ import {
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 import { buildServerInstructions } from './skill-content.js';
+import { getVersion } from './cli/version.js';
 import {
   SessionNotFoundError,
   SessionTerminatedError,
@@ -735,8 +736,10 @@ export class DebugMcpServer implements ToolContext {
       this.logger
     );
 
+    // The release version, not a literal: clients and the MCP Registry show this
+    // string, and the Docker bundle reads it baked in (issue #1054).
     this.server = new Server(
-      { name: 'debug-mcp-server', version: '0.1.0' },
+      { name: 'debug-mcp-server', version: getVersion() },
       {
         capabilities: { tools: {}, resources: { subscribe: true, listChanged: true }, prompts: {} },
         // Mode-gated (issue #271): the handshake must not teach restricted
@@ -804,7 +807,7 @@ export class DebugMcpServer implements ToolContext {
   public async start(): Promise<void> {
     // For MCP servers, start is handled by transport
     const buildTime = new Date().toISOString();
-    this.logger.info(`[MCP Server] Started at ${buildTime}, version: ${process.env.npm_package_version || 'dev'}`);
+    this.logger.info(`[MCP Server] Started at ${buildTime}, version: ${getVersion()}`);
   }
 
   public async stop(): Promise<void> {

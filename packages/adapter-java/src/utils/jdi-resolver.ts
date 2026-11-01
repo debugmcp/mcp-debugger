@@ -4,13 +4,32 @@
  * JdiDapServer.java compiles to java/out/JdiDapServer.class.
  * This module resolves that output directory for use by the adapter.
  */
-import { existsSync, mkdirSync, statSync } from 'fs';
+import { existsSync, mkdirSync, statSync, readFileSync, writeFileSync } from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
+import { createHash } from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+/**
+ * The build record the compile step leaves beside JdiDapServer.class (issue #1054):
+ * `{ sourceSha256, release }`. Staleness is decided by content when it exists —
+ * npm writes a package's files in tarball order, so on a fresh install the shipped
+ * `.java` lands a few milliseconds after the shipped `.class` and an mtime comparison
+ * calls every fresh install stale (doctor warns, the first launch recompiles into the
+ * install dir). The same name and shape are written by
+ * `packages/adapter-java/scripts/compile-jdi-bridge.js`, which cannot import this
+ * module at postinstall time.
+ */
+export const JDI_BRIDGE_RECORD = 'jdi-bridge-build.json';
+const JDI_BRIDGE_RELEASE = 21;
+
+interface JdiBridgeBuildRecord {
+  sourceSha256: string;
+  release: number;
+}
 
 /**
  * Resolve the JDI bridge class output directory (containing JdiDapServer.class).
@@ -109,10 +128,11 @@ export function isJdiBridgeStale(): boolean {
 
 /**
  * Ensure the JDI bridge is compiled. Compiles on-demand if needed, and also
- * recompiles when the .java source is newer than the cached .class — this
+ * recompiles when the .java source no longer matches the cached .class — this
  * prevents stale bridge classes from silently dropping CLI args added in
  * newer versions (e.g. --owner-pid for the orphan-reap markers). Every
- * launch goes through here (issue #646): a fresh class costs two stats.
+ * launch goes through here (issue #646): a fresh class costs one record read
+ * and one hash of the 155 KB source (or two stats where no record exists).
  */
 export function ensureJdiBridge(): JdiBridgeStatus {
   // Find source first so we can compare against any cached .class
@@ -168,15 +188,24 @@ export function ensureJdiBridge(): JdiBridgeStatus {
   // worker's stdio, so a failure can say why.
   try {
     mkdirSync(outDir, { recursive: true });
-    execFileSync(javac, ['--release', '21', sourceFile, '-d', outDir], {
+    execFileSync(javac, ['--release', String(JDI_BRIDGE_RELEASE), sourceFile, '-d', outDir], {
       stdio: ['ignore', 'pipe', 'pipe'],
       cwd: sourceDir,
       windowsHide: true
     });
-    return { dir: outDir, sourceFile, stale: false, recompiled: true };
   } catch (err) {
     return fallback(describeCompileFailure(err));
   }
+  // Record what was compiled, or a record left by an older build would call this
+  // fresh class stale on every launch. A directory that refused the write would
+  // have refused javac first, so a failure here only means the next launch falls
+  // back to the mtime comparison.
+  try {
+    writeBuildRecord(outDir, sourceFile);
+  } catch {
+    // best effort
+  }
+  return { dir: outDir, sourceFile, stale: false, recompiled: true };
 }
 
 /**
@@ -200,11 +229,26 @@ function describeCompileFailure(err: unknown): string {
 }
 
 /**
- * Returns true when the .java source has a newer mtime than the cached
- * .class. Stat failures are treated as "not stale" — a missing source
- * shouldn't trigger a rebuild attempt against a known-good cached class.
+ * Returns true when the cached .class was not compiled from the .java source
+ * beside it.
+ *
+ * With a build record beside the class the verdict is by content: the source's
+ * sha256 against the one recorded when the class was compiled; mtimes play no
+ * part (issue #1054). Without a record — a `JDI_BRIDGE_DIR` tree, the Docker
+ * image's raw `javac` step, a build from before the record existed — the
+ * source's mtime is compared with the class's as before. Read and stat failures
+ * are treated as "not stale": a missing source shouldn't trigger a rebuild
+ * attempt against a known-good cached class.
  */
 function isClassStale(sourceFile: string, classDir: string): boolean {
+  const record = readBuildRecord(classDir);
+  if (record) {
+    try {
+      return hashSource(sourceFile) !== record.sourceSha256;
+    } catch {
+      return false;
+    }
+  }
   const classFile = path.join(classDir, 'JdiDapServer.class');
   try {
     const sourceMtime = statSync(sourceFile).mtimeMs;
@@ -213,4 +257,25 @@ function isClassStale(sourceFile: string, classDir: string): boolean {
   } catch {
     return false;
   }
+}
+
+function hashSource(sourceFile: string): string {
+  return createHash('sha256').update(readFileSync(sourceFile)).digest('hex');
+}
+
+/** The build record beside the class, or null when there is none or it is unreadable. */
+function readBuildRecord(classDir: string): JdiBridgeBuildRecord | null {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path.join(classDir, JDI_BRIDGE_RECORD), 'utf-8'));
+    const sha = (parsed as { sourceSha256?: unknown } | null)?.sourceSha256;
+    if (typeof sha !== 'string' || sha.length === 0) return null;
+    return { sourceSha256: sha, release: Number((parsed as { release?: unknown }).release) || JDI_BRIDGE_RELEASE };
+  } catch {
+    return null;
+  }
+}
+
+function writeBuildRecord(classDir: string, sourceFile: string): void {
+  const record: JdiBridgeBuildRecord = { sourceSha256: hashSource(sourceFile), release: JDI_BRIDGE_RELEASE };
+  writeFileSync(path.join(classDir, JDI_BRIDGE_RECORD), JSON.stringify(record, null, 2) + '\n');
 }

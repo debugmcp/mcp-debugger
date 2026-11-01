@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import path from 'path';
+import { createHash } from 'crypto';
 
 // Mock fs module
 vi.mock('fs', async (importOriginal) => {
@@ -8,7 +9,9 @@ vi.mock('fs', async (importOriginal) => {
     ...actual,
     existsSync: vi.fn(),
     mkdirSync: vi.fn(),
-    statSync: vi.fn()
+    statSync: vi.fn(),
+    readFileSync: vi.fn(),
+    writeFileSync: vi.fn()
   };
 });
 
@@ -22,17 +25,34 @@ vi.mock('child_process', async (importOriginal) => {
   };
 });
 
-import { existsSync, mkdirSync, statSync } from 'fs';
+import { existsSync, mkdirSync, statSync, readFileSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { resolveJdiBridgeClassDir, ensureJdiBridgeCompiled, ensureJdiBridge, isJdiBridgeStale } from '@debugmcp/adapter-java';
 
 const mockExistsSync = vi.mocked(existsSync);
 const mockMkdirSync = vi.mocked(mkdirSync);
 const mockStatSync = vi.mocked(statSync);
+const mockReadFileSync = vi.mocked(readFileSync);
+const mockWriteFileSync = vi.mocked(writeFileSync);
 const mockExecFileSync = vi.mocked(execFileSync);
 
-/** Make both the source and the class exist, with the given mtimes (ms). */
-function bridgeOnDisk(opts: { sourceMtime: number; classMtime: number; javac?: boolean }): void {
+/** The build record the compile step leaves beside the class (issue #1054). */
+const BUILD_RECORD = 'jdi-bridge-build.json';
+const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex');
+
+/**
+ * Make both the source and the class exist, with the given mtimes (ms). `source` is the
+ * text of JdiDapServer.java; `record` is the sha256 the build record names (none = no
+ * record beside the class, the pre-#1054 layout the Docker image still produces).
+ */
+function bridgeOnDisk(opts: {
+  sourceMtime: number;
+  classMtime: number;
+  javac?: boolean;
+  source?: string;
+  record?: string;
+}): void {
+  const source = opts.source ?? 'public class JdiDapServer {}';
   mockExistsSync.mockImplementation((p: any) => {
     const pathStr = p.toString();
     if (pathStr.includes('JdiDapServer.class')) return true;
@@ -46,6 +66,14 @@ function bridgeOnDisk(opts: { sourceMtime: number; classMtime: number; javac?: b
     if (pathStr.endsWith('JdiDapServer.class')) return { mtimeMs: opts.classMtime } as any;
     throw new Error(`ENOENT: ${pathStr}`);
   }) as any);
+  mockReadFileSync.mockImplementation(((p: any) => {
+    const pathStr = p.toString();
+    if (pathStr.endsWith('JdiDapServer.java')) return Buffer.from(source);
+    if (pathStr.endsWith(BUILD_RECORD) && opts.record !== undefined) {
+      return JSON.stringify({ sourceSha256: opts.record, release: 21 });
+    }
+    throw new Error(`ENOENT: ${pathStr}`);
+  }) as any);
 }
 
 describe('jdi-resolver', () => {
@@ -55,6 +83,9 @@ describe('jdi-resolver', () => {
     // Default: nothing exists
     mockExistsSync.mockReturnValue(false);
     mockStatSync.mockImplementation(() => {
+      throw new Error('ENOENT');
+    });
+    mockReadFileSync.mockImplementation(() => {
       throw new Error('ENOENT');
     });
   });
@@ -342,6 +373,77 @@ describe('jdi-resolver', () => {
     it('isJdiBridgeStale is false when no class exists at all', () => {
       mockExistsSync.mockImplementation((p: any) => p.toString().includes('JdiDapServer.java'));
       expect(isJdiBridgeStale()).toBe(false);
+    });
+  });
+
+  describe('staleness by content (issue #1054)', () => {
+    const source = 'public class JdiDapServer { /* shipped */ }';
+
+    it('a class whose build record matches the source is fresh even when the source mtime is newer (npm extraction order)', () => {
+      vi.stubEnv('JAVA_HOME', '/usr/lib/jvm/java-21');
+      bridgeOnDisk({ sourceMtime: 3000, classMtime: 2000, source, record: sha256(source) });
+
+      expect(isJdiBridgeStale()).toBe(false);
+      const status = ensureJdiBridge();
+
+      expect(status).toMatchObject({ stale: false, recompiled: false });
+      expect(status.dir).toContain(path.join('java', 'out'));
+      expect(mockExecFileSync).not.toHaveBeenCalled();
+    });
+
+    it('a class whose build record names another source is stale even when the class mtime is newer', () => {
+      vi.stubEnv('JAVA_HOME', '/usr/lib/jvm/java-21');
+      bridgeOnDisk({ sourceMtime: 1000, classMtime: 2000, source, record: sha256('public class JdiDapServer { /* older */ }') });
+      mockExecFileSync.mockReturnValue(Buffer.from(''));
+
+      expect(isJdiBridgeStale()).toBe(true);
+      const status = ensureJdiBridge();
+
+      expect(status).toMatchObject({ stale: false, recompiled: true });
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        expect.stringContaining('javac'),
+        expect.arrayContaining(['--release', '21', '-d']),
+        expect.anything()
+      );
+    });
+
+    it('a successful recompile writes the build record beside the class', () => {
+      vi.stubEnv('JAVA_HOME', '/usr/lib/jvm/java-21');
+      bridgeOnDisk({ sourceMtime: 3000, classMtime: 2000, source });
+      mockExecFileSync.mockReturnValue(Buffer.from(''));
+
+      const status = ensureJdiBridge();
+
+      expect(status).toMatchObject({ stale: false, recompiled: true });
+      expect(mockWriteFileSync).toHaveBeenCalledTimes(1);
+      const [recordPath, recordText] = mockWriteFileSync.mock.calls[0] as [string, string];
+      expect(recordPath).toBe(path.join(status.dir!, BUILD_RECORD));
+      expect(JSON.parse(recordText)).toEqual({ sourceSha256: sha256(source), release: 21 });
+    });
+
+    it('a failed recompile writes no record', () => {
+      vi.stubEnv('JAVA_HOME', '/usr/lib/jvm/java-21');
+      bridgeOnDisk({ sourceMtime: 3000, classMtime: 2000, source });
+      mockExecFileSync.mockImplementation(() => {
+        throw new Error('compilation error');
+      });
+
+      expect(ensureJdiBridge()).toMatchObject({ stale: true, recompiled: false });
+      expect(mockWriteFileSync).not.toHaveBeenCalled();
+    });
+
+    it('an unreadable record falls back to the mtime comparison', () => {
+      vi.stubEnv('JAVA_HOME', '/usr/lib/jvm/java-21');
+      bridgeOnDisk({ sourceMtime: 1000, classMtime: 2000, source });
+      mockReadFileSync.mockImplementation(((p: any) => {
+        const pathStr = p.toString();
+        if (pathStr.endsWith('JdiDapServer.java')) return Buffer.from(source);
+        if (pathStr.endsWith(BUILD_RECORD)) return '{ not json';
+        throw new Error(`ENOENT: ${pathStr}`);
+      }) as any);
+
+      expect(isJdiBridgeStale()).toBe(false);
+      expect(ensureJdiBridge()).toMatchObject({ stale: false, recompiled: false });
     });
   });
 });
