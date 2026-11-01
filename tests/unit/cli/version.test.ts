@@ -14,6 +14,25 @@ describe('Version Utility', () => {
   afterEach(() => {
     consoleErrorSpy.mockRestore();
     vi.resetAllMocks();
+    delete (globalThis as { __MCP_DEBUGGER_VERSION__?: string }).__MCP_DEBUGGER_VERSION__;
+  });
+
+  // The Docker bundle runs from /app/dist with no package.json beside it, so esbuild bakes
+  // the version in as a global at bundle time (scripts/bundle.js); the banner, --version and
+  // serverInfo read that first (issue #1054). Unbundled, the identifier is undefined and the
+  // package.json walk below is the answer.
+  it('returns the version baked into the bundle without reading any package.json', () => {
+    (globalThis as { __MCP_DEBUGGER_VERSION__?: string }).__MCP_DEBUGGER_VERSION__ = '9.9.9';
+
+    expect(getVersion()).toBe('9.9.9');
+    expect(fs.readFileSync).not.toHaveBeenCalled();
+  });
+
+  it('ignores an empty baked version and falls through to package.json', () => {
+    (globalThis as { __MCP_DEBUGGER_VERSION__?: string }).__MCP_DEBUGGER_VERSION__ = '   ';
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ version: '1.2.3' }));
+
+    expect(getVersion()).toBe('1.2.3');
   });
 
   it('should return version from package.json', () => {
