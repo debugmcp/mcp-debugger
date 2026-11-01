@@ -78,12 +78,46 @@ const USER_VISIBLE_FILES = ['package.json'];
  *
  * `version` is absent on purpose. A release PR bumps it across every manifest, and the
  * changelog entry for a release is the collated section itself — requiring a *fragment* for
- * the bump that cuts the release would be circular.
+ * the bump that cuts the release would be circular. The same cut moves one more thing:
+ * `scripts/sync-versions.cjs` rewrites every non-`workspace:` spec on a workspace package
+ * (an adapter's `peerDependencies` on `@debugmcp/shared`) to that same new version, which
+ * is why {@link changedShippingKeys} sets those entries aside before comparing (#1056; the
+ * v0.26.0 final cut deleted no fragments and went red on six of them).
  */
 export const SHIPPING_SURFACE_KEYS = [
   'dependencies', 'optionalDependencies', 'peerDependencies',
   'bin', 'main', 'exports', 'files', 'engines', 'type'
 ];
+
+/** The dependency maps among {@link SHIPPING_SURFACE_KEYS}. */
+const DEPENDENCY_KEYS = ['dependencies', 'optionalDependencies', 'peerDependencies'];
+
+/** Workspace packages, as `sync-versions.cjs` knows them: every name under the org scope. */
+const WORKSPACE_SCOPE = '@debugmcp/';
+
+const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+/**
+ * Is this dependency entry the release cut's doing? `sync-versions.cjs` moves a workspace
+ * package's spec from the manifest's old `version` to its new one and nothing else, so an
+ * entry that sat at the old version on the base side and sits at the new version on the head
+ * side is the version bump wearing another key. A spec that moved anywhere else, or on a
+ * package outside the workspace, is a dependency change and stays.
+ */
+function movedWithVersion(dep, base, head, key) {
+  return dep.startsWith(WORKSPACE_SCOPE)
+    && typeof base.version === 'string' && typeof head.version === 'string'
+    && base[key][dep] === base.version
+    && head[key][dep] === head.version;
+}
+
+/** Both sides of one dependency map with the version-sync moves removed. */
+function withoutVersionSyncMoves(base, head, key) {
+  if (!isPlainObject(base[key]) || !isPlainObject(head[key])) return [base[key], head[key]];
+  const strip = (map) =>
+    Object.fromEntries(Object.entries(map).filter(([dep]) => !movedWithVersion(dep, base, head, key)));
+  return [strip(base[key]), strip(head[key])];
+}
 
 /**
  * Tests live inside `packages/`, so a package's test-only change would
@@ -113,7 +147,12 @@ export function changedShippingKeys(baseText, headText) {
   const head = JSON.parse(headText);
 
   return SHIPPING_SURFACE_KEYS
-    .filter(key => !isDeepStrictEqual(base[key], head[key]))
+    .filter(key => {
+      const [before, after] = DEPENDENCY_KEYS.includes(key)
+        ? withoutVersionSyncMoves(base, head, key)
+        : [base[key], head[key]];
+      return !isDeepStrictEqual(before, after);
+    })
     .sort();
 }
 
