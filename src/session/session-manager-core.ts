@@ -896,6 +896,29 @@ export abstract class SessionManagerCore extends EventEmitter {
             this.logger.error(`[ProxyManager ${sessionId}] Error auto-continuing:`, err);
           });
       } else {
+        // An adapter may decorate the exception name it reports — pydevd's
+        // "AssertionError       (note: full exception trace is shown but
+        // execution is paused at: <fn>)" at a user-unhandled stop (issue
+        // #985) — in the stopped event's text and in exceptionInfo's
+        // exceptionId / typeName alike. The policy says what the class is,
+        // and the record is normalized here, at the write, so every reader
+        // (wait_for_stop, list_debug_sessions, get_stack_trace, the snapshot)
+        // names the exception the same way (issue #1047). Nothing the adapter
+        // said is lost: the note's content, which frame is paused, is the
+        // answer's location. Exception stops only; a policy that has no hook,
+        // or a language with no policy, keeps the adapter's words.
+        let normalizeExceptionTypeName: ((name: string) => string) | undefined;
+        if (reason === 'exception') {
+          try {
+            const policy = this.sessionStore.selectPolicy(session.language);
+            normalizeExceptionTypeName = policy.normalizeExceptionTypeName?.bind(policy);
+          } catch {
+            // no policy for this language: keep the adapter's words
+          }
+        }
+        const exceptionName = (value: string): string =>
+          normalizeExceptionTypeName ? normalizeExceptionTypeName(value) : value;
+
         // Record why we stopped so it stays queryable after the fact
         // (list_debug_sessions / get_stack_trace, issue #214). Auto-continued
         // entry stops are deliberately not recorded — the user never saw them.
@@ -905,8 +928,8 @@ export abstract class SessionManagerCore extends EventEmitter {
           ...(reason !== rawReason ? { rawReason } : {}),
           threadId,
           timestamp: Date.now(),
-          ...(body?.description ? { description: body.description } : {}),
-          ...(body?.text ? { text: body.text } : {})
+          ...(body?.description ? { description: exceptionName(body.description) } : {}),
+          ...(body?.text ? { text: exceptionName(body.text) } : {})
         };
         this._updateSessionState(session, SessionState.PAUSED);
 
@@ -940,16 +963,19 @@ export abstract class SessionManagerCore extends EventEmitter {
                 return;
               }
               const details = info.details;
+              // The same lens as the stop record above (issue #1047): the
+              // type-name fields lose the adapter's decoration; message,
+              // description and stackTrace are kept as reported.
               stopRef.exceptionInfo = {
-                exceptionId: info.exceptionId,
+                exceptionId: exceptionName(info.exceptionId),
                 breakMode: info.breakMode,
                 ...(info.description ? { description: info.description } : {}),
                 ...(details
                   ? {
                       details: {
                         ...(details.message ? { message: details.message } : {}),
-                        ...(details.typeName ? { typeName: details.typeName } : {}),
-                        ...(details.fullTypeName ? { fullTypeName: details.fullTypeName } : {}),
+                        ...(details.typeName ? { typeName: exceptionName(details.typeName) } : {}),
+                        ...(details.fullTypeName ? { fullTypeName: exceptionName(details.fullTypeName) } : {}),
                         ...(details.stackTrace ? { stackTrace: details.stackTrace } : {})
                       }
                     }

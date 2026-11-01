@@ -124,17 +124,15 @@ interface StopRecord {
   exceptionInfo?: { exceptionId?: string; description?: string; details?: { typeName?: string; message?: string } };
 }
 
-/** pydevd appends "(note: full exception trace is shown but execution is paused at: …)" to the type name it reports. */
-const withoutPausedAtNote = (name: string | undefined): string | undefined => name?.split(/\s+\(note:/)[0]?.trim();
-
 /**
  * The exception wherever the landed answer carries it (issue #1006): a launch
  * answer's `snapshot.exception` (the hold caught the stop), else the
  * wait_for_stop answer's `lastStop` — the merged `exceptionInfo` when debugpy's
  * enrichment had landed, else the stopped event's own pair (`text` is the type,
- * `description` the message). The snapshot composer strips pydevd's paused-at
- * note from the type; the raw record carries it in `text`, `exceptionId` and
- * `details.typeName` alike, so it is stripped here on every path.
+ * `description` the message). pydevd appends "(note: full exception trace is
+ * shown but execution is paused at: …)" to the type name it reports; the core
+ * strips it when it stores the record (issue #1047), so both paths must name
+ * the bare class — read as-is here, nothing stripped.
  */
 function exceptionOf(answer: Record<string, unknown>): { type?: string; message?: string } {
   const snapshot = answer.snapshot as { exception?: { type?: string; message?: string } } | undefined;
@@ -142,7 +140,7 @@ function exceptionOf(answer: Record<string, unknown>): { type?: string; message?
   const stop = answer.lastStop as StopRecord | undefined;
   const info = stop?.exceptionInfo;
   return {
-    type: withoutPausedAtNote(info?.details?.typeName ?? info?.exceptionId ?? stop?.text),
+    type: info?.details?.typeName ?? info?.exceptionId ?? stop?.text,
     message: info?.details?.message ?? info?.description ?? stop?.description
   };
 }
@@ -185,7 +183,7 @@ describe.skipIf(pythonMinor === 0)('pytest preset (issue #985 M1) @requires-pyth
       const answer = await landed(sessionId, started);
       expect(answer.state, JSON.stringify(answer)).toBe('paused');
       const snapshot = answer.snapshot as { frames: Array<{ file: string; line: number; name: string }>; locals?: Record<string, string> };
-      // Either shape names the exception (the snapshot strips pydevd's "(note: … paused at …)"; the raw record is read around it).
+      // Either shape names the exception bare: the snapshot and the stored record both come through the policy's lens (#1047).
       const exception = exceptionOf(answer);
       expect(exception.type, JSON.stringify(answer)).toBe('AssertionError');
       expect(exception.message).toContain('20.0 == 21.0');
