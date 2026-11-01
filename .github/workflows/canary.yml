@@ -32,6 +32,10 @@ on:
         type: choice
         options: [all, npm, docker]
         default: 'all'
+      allow_missing_languages:
+        description: 'Let the cobol and dart legs pass with a notice when the artifact lacks the adapter — only for a version older than 0.25.0 (COBOL) or 0.26.0 (Dart), which shipped them'
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -41,6 +45,13 @@ concurrency:
 
 env:
   CANARY_VERSION: ${{ github.event.inputs.version || 'latest' }}
+  # The cobol and dart legs are strict (issue #1053): a published artifact whose
+  # list_supported_languages lacks the adapter fails its leg instead of passing
+  # with a notice, so a release that failed to ship one cannot show green. The
+  # era gate (--skip-if-missing) survives only behind the dispatch input above,
+  # for a canary of a version from before those adapters existed; on the
+  # scheduled run the input is absent and this is empty.
+  SKIP_IF_MISSING: ${{ inputs.allow_missing_languages == true && '--skip-if-missing' || '' }}
 
 jobs:
   npm-smoke:
@@ -272,7 +283,7 @@ jobs:
         env:
           COBC_PATH: ${{ runner.os == 'Windows' && 'C:\msys64\ucrt64\bin\cobc.exe' || '' }}
         run: |
-          node scripts/canary-smoke.mjs --lang cobol --skip-if-missing \
+          node scripts/canary-smoke.mjs --lang cobol $SKIP_IF_MISSING \
             --program "$GITHUB_WORKSPACE/examples/cobol/hello.cob" \
             --break-file "$GITHUB_WORKSPACE/examples/cobol/hello.cob" --line 46 \
             --expect-line --expect-var WS-TOTAL --expect-var WS-SCALED \
@@ -289,7 +300,7 @@ jobs:
 
       - name: Smoke cycle (dart — SDK debug adapter behind the stdio bridge)
         run: |
-          node scripts/canary-smoke.mjs --lang dart --skip-if-missing \
+          node scripts/canary-smoke.mjs --lang dart $SKIP_IF_MISSING \
             --program "$GITHUB_WORKSPACE/examples/dart/hello.dart" \
             --break-file "$GITHUB_WORKSPACE/examples/dart/hello.dart" --line 3 \
             --expect-line --expect-var greeting \
@@ -416,7 +427,7 @@ jobs:
         # The image installs gnucobol3, so the adapter compiles the fixture
         # inside the container against the /workspace mount (issue #759).
         run: |
-          node scripts/canary-smoke.mjs --lang cobol --skip-if-missing \
+          node scripts/canary-smoke.mjs --lang cobol $SKIP_IF_MISSING \
             --program /workspace/examples/cobol/hello.cob \
             --break-file /workspace/examples/cobol/hello.cob --line 46 \
             --expect-line --expect-var WS-TOTAL --expect-var WS-SCALED \
@@ -427,7 +438,7 @@ jobs:
         # The image copies the Dart SDK from the official dart image (issue #790);
         # hello.dart needs no pubspec, so the /workspace mount suffices.
         run: |
-          node scripts/canary-smoke.mjs --lang dart --skip-if-missing \
+          node scripts/canary-smoke.mjs --lang dart $SKIP_IF_MISSING \
             --program /workspace/examples/dart/hello.dart \
             --break-file /workspace/examples/dart/hello.dart --line 3 \
             --expect-line --expect-var greeting \
