@@ -219,6 +219,40 @@ describe('changedShippingKeys (issues #629, #630)', () => {
     expect(changedShippingKeys(manifest(), manifest({ version: '0.25.0' }))).toEqual([]);
   });
 
+  // sync-versions.cjs rewrites every non-`workspace:` spec on a workspace package to the
+  // manifest's own new version. The v0.26.0 final cut (#1052) deleted no fragments, so the
+  // gate saw six adapters' `peerDependencies` move and went red for the same circular reason
+  // the `version` key is exempt (#1056).
+  it('ignores a workspace dependency spec that moved in step with the manifest version (the release cut)', () => {
+    const before = manifest({ version: '0.26.0-beta.1', peerDependencies: { '@debugmcp/shared': '0.26.0-beta.1' } });
+    const after = manifest({ version: '0.26.0', peerDependencies: { '@debugmcp/shared': '0.26.0' } });
+    expect(changedShippingKeys(before, after)).toEqual([]);
+  });
+
+  it('still names a workspace dependency spec that moved to something other than the new version', () => {
+    const before = manifest({ version: '0.26.0-beta.1', peerDependencies: { '@debugmcp/shared': '0.26.0-beta.1' } });
+    const after = manifest({ version: '0.26.0', peerDependencies: { '@debugmcp/shared': '^0.27.0' } });
+    expect(changedShippingKeys(before, after)).toEqual(['peerDependencies']);
+  });
+
+  it('still names a workspace dependency spec that moved while the version did not', () => {
+    const before = manifest({ version: '0.26.0', peerDependencies: { '@debugmcp/shared': '0.26.0-beta.1' } });
+    const after = manifest({ version: '0.26.0', peerDependencies: { '@debugmcp/shared': '0.26.0' } });
+    expect(changedShippingKeys(before, after)).toEqual(['peerDependencies']);
+  });
+
+  it('still names a non-workspace dependency that happens to move with the version', () => {
+    const before = manifest({ version: '0.26.0-beta.1', dependencies: { which: '0.26.0-beta.1' } });
+    const after = manifest({ version: '0.26.0', dependencies: { which: '0.26.0' } });
+    expect(changedShippingKeys(before, after)).toEqual(['dependencies']);
+  });
+
+  it('still names a workspace dependency that appeared on only one side of the cut', () => {
+    const before = manifest({ version: '0.26.0-beta.1', peerDependencies: {} });
+    const after = manifest({ version: '0.26.0', peerDependencies: { '@debugmcp/shared': '0.26.0' } });
+    expect(changedShippingKeys(before, after)).toEqual(['peerDependencies']);
+  });
+
   it('ignores npm scripts, which no consumer of the package observes', () => {
     const after = manifest({ scripts: { build: 'tsc -b', 'test:new': 'vitest run' } });
     expect(changedShippingKeys(manifest(), after)).toEqual([]);
@@ -285,6 +319,23 @@ describe('requiresFragment manifest carve-out (issue #629)', () => {
     );
 
     expect(result.required).toBe(false);
+  });
+
+  it('lets a final release cut through: the version and the workspace peer specs move together, no fragment is deleted (#1056)', () => {
+    const cut = (version: string): string =>
+      manifest({ version, peerDependencies: { '@debugmcp/shared': version } });
+    const result = requiresFragment(
+      [RUBY_MANIFEST, GO_MANIFEST, 'package.json', 'CHANGELOG.md', 'server.json'],
+      [],
+      resolverOver({
+        [RUBY_MANIFEST]: [cut('0.26.0-beta.1'), cut('0.26.0')],
+        [GO_MANIFEST]: [cut('0.26.0-beta.1'), cut('0.26.0')],
+        'package.json': [manifest({ version: '0.26.0-beta.1' }), manifest({ version: '0.26.0' })]
+      })
+    );
+
+    expect(result.required).toBe(false);
+    expect(result.offenders).toEqual([]);
   });
 
   it('keeps a manifest the resolver cannot place, since added or deleted is user-visible', () => {

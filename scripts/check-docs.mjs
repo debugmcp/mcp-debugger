@@ -17,6 +17,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMain } from './lib/is-main.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -37,9 +38,18 @@ const COUNTS_EXEMPT = (f) =>
 const problems = [];
 const report = (file, line, msg) => problems.push({ file, line, msg });
 
-function trackedMarkdown() {
-  const out = execFileSync('git', ['ls-files', '*.md'], { windowsHide: true, cwd: ROOT, encoding: 'utf8' });
-  return out.split('\n').filter((f) => f && !FROZEN.some((p) => f.startsWith(p)));
+/**
+ * Every tracked `*.md` outside the frozen trees that is still on disk. `git ls-files` lists
+ * index entries whether or not the file exists: `pnpm changelog:collate` deletes the fragments
+ * from disk and leaves them in the index until `git add -A`, and reading that gap used to
+ * crash the whole gate with a raw ENOENT instead of its problem list (issue #1056).
+ */
+export function trackedMarkdown(root = ROOT) {
+  const out = execFileSync('git', ['ls-files', '*.md'], { windowsHide: true, cwd: root, encoding: 'utf8' });
+  return out
+    .split('\n')
+    .filter((f) => f && !FROZEN.some((p) => f.startsWith(p)))
+    .filter((f) => fs.existsSync(path.join(root, f)));
 }
 
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
@@ -188,4 +198,6 @@ function main() {
   process.exit(1);
 }
 
-main();
+if (isMain(import.meta.url)) {
+  main();
+}
