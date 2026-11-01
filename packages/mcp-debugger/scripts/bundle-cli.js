@@ -260,9 +260,12 @@ async function bundleCLI() {
     console.warn('Warning: packages/adapter-dart/dist/bridge/dap-stdio-bridge.js not found; Dart debugging will fail in NPX distribution.');
   }
 
-  // Copy the Java JDI bridge (source + compiled class). The bundled CLI has no
-  // node_modules, so without this the jdi-resolver only finds the bridge via a
-  // process.cwd() fallback that happens to work inside a repo checkout (#354).
+  // Copy the Java JDI bridge (source + compiled class + build record). The bundled
+  // CLI has no node_modules, so without this the jdi-resolver only finds the bridge
+  // via a process.cwd() fallback that happens to work inside a repo checkout (#354).
+  // The record (jdi-bridge-build.json, the source's sha256) is what lets a fresh
+  // install tell its shipped class is current: npm extracts the .java after the
+  // .class, so by mtime every fresh install looked stale (issue #1054).
   const javaBridgeSrc = path.join(repoRoot, 'packages/adapter-java/java');
   if (fs.existsSync(path.join(javaBridgeSrc, 'JdiDapServer.java'))) {
     const javaBridgeDest = path.join(distDir, 'packages', 'adapter-java', 'java');
@@ -272,10 +275,13 @@ async function bundleCLI() {
       filter: (src) => {
         const stat = fs.statSync(src);
         if (stat.isDirectory()) return true;
-        return src.endsWith('.java') || src.endsWith('.class');
+        return src.endsWith('.java') || src.endsWith('.class') || path.basename(src) === 'jdi-bridge-build.json';
       }
     });
-    console.log('Copied Java JDI bridge (JdiDapServer.java + compiled classes).');
+    if (!fs.existsSync(path.join(javaBridgeDest, 'out', 'jdi-bridge-build.json'))) {
+      console.warn('Warning: packages/adapter-java/java/out/jdi-bridge-build.json not found; a fresh install of this bundle will call the JDI bridge stale by mtime (issue #1054).');
+    }
+    console.log('Copied Java JDI bridge (JdiDapServer.java + compiled classes + build record).');
   } else {
     console.warn('Warning: packages/adapter-java/java/JdiDapServer.java not found; Java debugging will fail in NPX distribution.');
   }
