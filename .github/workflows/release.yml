@@ -19,6 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      prerelease: ${{ steps.release.outputs.prerelease }}
 
     steps:
     - name: Checkout code
@@ -26,7 +28,32 @@ jobs:
       with:
         fetch-depth: 0
         ref: ${{ github.event.inputs.ref || github.ref }}
-    
+
+    # One answer to "is this a prerelease?" for every job below (issue #1055). The
+    # four publishing jobs used to decide it four ways — docker-publish withheld
+    # `latest` for -alpha/-beta/-rc, npm-publish and create-release only for
+    # -alpha/-beta, the registry job for any version with a '-' — so an -rc tag
+    # would have moved npm `latest` and created a full GitHub Release while
+    # Docker `latest` stayed put. The registry's rule is SemVer's: a version
+    # with a '-' is a prerelease. Read from the dispatch input or the pushed ref
+    # (never ref_name) so a workflow_dispatch says what its input says.
+    - name: Decide whether this is a prerelease
+      id: release
+      env:
+        RELEASE_REF: ${{ github.event.inputs.ref || github.ref }}
+      run: |
+        # The last path segment: v0.26.0-beta.1 from refs/tags/v0.26.0-beta.1. (Not
+        # `#refs/tags/`: scripts/release-dry-run.sh finds the changelog-extraction
+        # step by that spelling and must keep finding that step first.)
+        VERSION="${RELEASE_REF##*/}"
+        if [[ "$VERSION" == *-* ]]; then
+          echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          echo "${RELEASE_REF} is a prerelease: npm dist-tag beta, Docker latest untouched, GitHub prerelease, no registry listing"
+        else
+          echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          echo "${RELEASE_REF} is a release"
+        fi
+
     - name: Setup pnpm
       uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413  # v6.1.0
       # version comes from package.json "packageManager" (issue #478)
@@ -132,11 +159,12 @@ jobs:
         GITHUB_REF_TYPE: ${{ github.ref_type }}
         GITHUB_REF_NAME: ${{ github.ref_name }}
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        PRERELEASE: ${{ needs.build-and-test.outputs.prerelease }}
       run: |
         if [[ "${GITHUB_REF_TYPE}" == "branch" && "${GITHUB_REF_NAME}" == "${DEFAULT_BRANCH}" ]]; then
           echo "PUBLISH_LATEST=true" >> "$GITHUB_ENV"
           echo "latest will track default branch build (${GITHUB_REF_NAME})"
-        elif [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" != *"-alpha"* && "${GITHUB_REF_NAME}" != *"-beta"* && "${GITHUB_REF_NAME}" != *"-rc"* ]]; then
+        elif [[ "${GITHUB_REF_TYPE}" == "tag" && "${PRERELEASE}" != "true" ]]; then
           echo "PUBLISH_LATEST=true" >> "$GITHUB_ENV"
           echo "latest will point to release ${GITHUB_REF_NAME}"
         else
@@ -338,9 +366,13 @@ jobs:
         node -e 'console.log("CLI_VERSION="+require("./packages/mcp-debugger/package.json").version)' >> $GITHUB_ENV
         # CodeLLDB platform packages are versioned by the vendored CodeLLDB release (issue #383)
         node -e 'console.log("CODELLDB_PKG_VERSION="+require("./packages/codelldb-common/vendor-manifest.json").codelldb.version)' >> $GITHUB_ENV
+    # Every prerelease (-beta, -alpha, -rc alike) goes to the `beta` dist-tag; only a
+    # release moves `latest` (issue #1055, the predicate build-and-test decided).
     - name: Set npm dist-tag
+      env:
+        PRERELEASE: ${{ needs.build-and-test.outputs.prerelease }}
       run: |
-        if [[ "${CLI_VERSION}" == *"-beta"* ]] || [[ "${CLI_VERSION}" == *"-alpha"* ]]; then
+        if [[ "${PRERELEASE}" == "true" ]]; then
           echo "NPM_TAG=beta" >> $GITHUB_ENV
         else
           echo "NPM_TAG=latest" >> $GITHUB_ENV
@@ -428,13 +460,31 @@ jobs:
     - name: Publish packages to npm (OIDC trusted publishing)
       run: |
         # Dependency order: shared first, the CLI last. Re-runs are safe: a
-        # version that already exists is skipped.
+        # version that already exists is skipped. The same E404-vs-transient
+        # guard as the platform loop above (issue #1055): only a true 404 means
+        # "not published"; a registry hiccup is retried, then fails the step,
+        # because publishing over an existing version would kill the job after
+        # earlier packages had already gone out.
         publish_if_missing() {
-          if npm view "@debugmcp/$1@$2" version >/dev/null 2>&1; then
-            echo "@debugmcp/$1@$2 already exists, skipping"
-          else
-            npm publish -w "@debugmcp/$1" --access public --provenance --tag "${NPM_TAG}"
-          fi
+          local pkg="$1" ver="$2" attempt view_out view_code
+          for attempt in 1 2 3; do
+            set +e
+            view_out=$(npm view "@debugmcp/${pkg}@${ver}" version 2>&1)
+            view_code=$?
+            set -e
+            if [ "$view_code" -eq 0 ]; then
+              echo "@debugmcp/${pkg}@${ver} already exists, skipping"
+              return 0
+            elif echo "$view_out" | grep -q "E404"; then
+              npm publish -w "@debugmcp/${pkg}" --access public --provenance --tag "${NPM_TAG}"
+              return 0
+            fi
+            echo "npm view for @debugmcp/${pkg}@${ver} failed with a non-404 error (attempt ${attempt}/3):"
+            echo "$view_out"
+            if [ "$attempt" -lt 3 ]; then sleep 10; fi
+          done
+          echo "refusing to guess whether @debugmcp/${pkg}@${ver} exists; not publishing it"
+          return 1
         }
         publish_if_missing shared "${SHARED_VERSION}"
         publish_if_missing adapter-mock "${ADAPTER_MOCK_VERSION}"
@@ -529,8 +579,10 @@ jobs:
   # namespace, so no secret is stored. Prerelease tags stay off the registry.
   mcp-registry-publish:
     name: Publish to the MCP Registry
-    needs: [npm-publish, docker-publish]
-    if: ${{ !contains(github.event.inputs.ref || github.ref, '-') }}
+    # build-and-test is listed so its prerelease output is visible to this job's `if`
+    # (needs.*.outputs reach direct dependents only).
+    needs: [build-and-test, npm-publish, docker-publish]
+    if: ${{ needs.build-and-test.outputs.prerelease != 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -588,7 +640,8 @@ jobs:
 
   create-release:
     name: Create GitHub Release
-    needs: [docker-publish, pypi-publish, npm-publish, provenance]
+    # build-and-test is listed for its prerelease output (needs.*.outputs reach direct dependents only).
+    needs: [build-and-test, docker-publish, pypi-publish, npm-publish, provenance]
     runs-on: ubuntu-latest
     permissions:
       contents: write  # Grant permission to create releases
@@ -712,8 +765,8 @@ jobs:
         See the [README](https://github.com/debugmcp/mcp-debugger#readme) for usage instructions.
         EOF
         
-        # Determine if this is a prerelease
-        if [[ "${{ github.ref_name }}" == *"-beta"* ]] || [[ "${{ github.ref_name }}" == *"-alpha"* ]]; then
+        # Prerelease or not: the one predicate build-and-test decided (issue #1055)
+        if [[ "${{ needs.build-and-test.outputs.prerelease }}" == "true" ]]; then
           PRERELEASE_FLAG="--prerelease"
         else
           PRERELEASE_FLAG=""

@@ -43,10 +43,12 @@ Pre-release validation for mcp-debugger. Run `npm run release:dry-run` to automa
 | Changelog empty in GitHub Release | `release.yml` doesn't strip `v` from tag | Use `${RELEASE_REF#refs/tags/v}` |
 | Build fails in `npm-publish` | Missing toolchain (Go/Java/etc.) | Mirror `build-and-test` toolchain setup in `npm-publish` job |
 | `workspace:*` resolution error in CLI pack | pnpm pack without resolving workspace deps | Check `scripts/prepare-pack.js` handles new packages |
+| npm job fails mid-loop with `E403`/`EPUBLISHCONFLICT` on a package that already exists | A transient `npm view` failure read as "not published" | `publish_if_missing` publishes only on a true `E404`, retries anything else three times, then fails the step before publishing (#1055); rerun with `gh run rerun <run-id> --failed` |
+| A prerelease tag moved npm `latest` or created a full GitHub Release | Jobs disagreed on what a prerelease is | One predicate: `build-and-test` outputs `prerelease=true` for any version with a `-` (`-beta`, `-alpha`, `-rc`), and Docker `latest`, the npm dist-tag (`beta`), the GitHub prerelease flag and the registry skip all read it (#1055) |
 
 ## After Tagging
 
-- [ ] Monitor GitHub Actions → Release workflow (all **7** jobs: build-and-test, docker-publish, npm-publish, pypi-publish, **provenance**, **mcp-registry-publish** (skipped for prerelease tags), create-release)
+- [ ] Monitor GitHub Actions → Release workflow (all **7** jobs: build-and-test, docker-publish, npm-publish, pypi-publish, **provenance**, **mcp-registry-publish** (skipped for prerelease tags — any version with a `-`, as `build-and-test`'s `prerelease` output decides for every job, #1055), create-release)
 - [ ] GitHub Release has all expected assets: one `.tgz` per published package, `multiple.intoto.jsonl`, `multiple.sigstore.json`, `sbom.spdx.json`, `sbom.cyclonedx.json`
 - [ ] GitHub Release body has the correct changelog content
 - [ ] Verify provenance: `gh attestation verify debugmcp-mcp-debugger-x.y.z.tgz --repo debugmcp/mcp-debugger` (download the asset first)
