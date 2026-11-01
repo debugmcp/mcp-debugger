@@ -12,6 +12,9 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { readFileSync } from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { buildDockerImage } from './docker-test-utils.js';
 
 const execAsync = promisify(exec);
@@ -19,12 +22,17 @@ const execAsync = promisify(exec);
 const SKIP_DOCKER = process.env.SKIP_DOCKER_TESTS === 'true';
 const IMAGE_NAME = process.env.DOCKER_IMAGE_NAME || 'mcp-debugger:local';
 
+/** The version the image was built from: the root manifest's, which sync-versions stamps. */
+const EXPECTED_VERSION: string = JSON.parse(
+  readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../package.json'), 'utf8')
+).version;
+
 describe.skipIf(SKIP_DOCKER)('Docker: Entrypoint Argument Passing', () => {
   beforeAll(async () => {
     await buildDockerImage({ imageName: IMAGE_NAME });
   }, 240000);
 
-  it('should pass --version without argument corruption', async () => {
+  it('should pass --version without argument corruption, and report the release version', async () => {
     // --version should work cleanly. With the quoting bug, it would produce
     // error: unknown option '--version"' (note trailing literal quote)
     const { stdout, stderr } = await execAsync(
@@ -36,9 +44,21 @@ describe.skipIf(SKIP_DOCKER)('Docker: Entrypoint Argument Passing', () => {
     // Should contain a version string, not an error about unknown options
     expect(output).not.toContain('unknown option');
     expect(output).not.toContain('error:');
-    // Version output should be a semver-like string
-    expect(output).toMatch(/\d+\.\d+/);
+    // The image carries no package.json beside dist/bundle.cjs, so the version is baked
+    // into the bundle at build time; the 0.0.0 fallback must never reach a published image
+    // (issue #1054). A semver-shaped match would let 0.0.0 through.
+    expect(output).toBe(EXPECTED_VERSION);
   }, 60000);
+
+  it('doctor reports the release version in the image (issue #1054)', async () => {
+    // `doctor mock --json` exits 0 (mock is built-in) and carries the banner's version.
+    const { stdout } = await execAsync(
+      `docker run --rm ${IMAGE_NAME} doctor mock --json`,
+      { timeout: 60000 }
+    );
+    const report = JSON.parse(stdout) as { version: string };
+    expect(report.version).toBe(EXPECTED_VERSION);
+  }, 90000);
 
   it('should pass sse --help without argument corruption', async () => {
     // With the quoting bug: \"sse\" is passed as the command name,

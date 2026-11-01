@@ -24,6 +24,8 @@ vi.mock('@modelcontextprotocol/sdk/server/index.js');
 vi.mock('@modelcontextprotocol/sdk/server/stdio.js');
 vi.mock('../../../../src/session/session-manager.js');
 vi.mock('../../../../src/container/dependencies.js');
+// serverInfo.version is the real release version (issue #1054), not a literal.
+vi.mock('../../../../src/cli/version.js', () => ({ getVersion: () => '1.2.3-test' }));
 
 describe('Server Initialization Tests', () => {
   let debugServer: DebugMcpServer;
@@ -55,7 +57,7 @@ describe('Server Initialization Tests', () => {
       debugServer = new DebugMcpServer({ logLevel: 'debug' });
       
       expect(Server).toHaveBeenCalledWith(
-        { name: 'debug-mcp-server', version: '0.1.0' },
+        { name: 'debug-mcp-server', version: '1.2.3-test' },
         {
           capabilities: { tools: {}, resources: { subscribe: true, listChanged: true }, prompts: {} },
           instructions: expect.stringContaining('mcp-debugger drives real step-through debuggers')
