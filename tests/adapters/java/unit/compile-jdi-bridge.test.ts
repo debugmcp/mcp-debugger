@@ -4,9 +4,23 @@
  * the one thing this script does that these tests do not run.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, rmSync, readFileSync, existsSync } from 'fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  utimesSync,
+  rmSync,
+  rmdirSync,
+  unlinkSync,
+  readFileSync,
+  existsSync,
+  lstatSync,
+  symlinkSync
+} from 'fs';
+import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 import {
   BUILD_RECORD,
@@ -106,5 +120,40 @@ describe('compile-jdi-bridge', () => {
     writeFileSync(path.join(outDir, BUILD_RECORD), foreign);
     expect(ensureBuildRecord({ sourceFile, classFile, outDir })).toBe(false);
     expect(readFileSync(path.join(outDir, BUILD_RECORD), 'utf8')).toBe(foreign);
+  });
+});
+
+describe('compile-jdi-bridge as an entry point', () => {
+  const SCRIPTS_DIR = fileURLToPath(new URL('../../../../packages/adapter-java/scripts', import.meta.url));
+
+  /**
+   * Node realpaths the entry module for `import.meta.url` but leaves `process.argv[1]`
+   * as typed, so a guard that compares the two never fires on a checkout reached through
+   * a symlink or a Windows directory junction: `build:adapter` would exit 0 having compiled
+   * nothing. scripts/lib/is-main.mjs exists for exactly this (#562); the build script must
+   * use it. A junction to the real scripts dir reproduces the layout; it is removed as a
+   * link (rmdir/unlink), never recursively, so the real directory is never touched.
+   */
+  it('runs main() when invoked through a junctioned path (the shared isMain guard)', () => {
+    const parent = mkdtempSync(path.join(tmpdir(), 'jdi-link-'));
+    const link = path.join(parent, 'scripts');
+    symlinkSync(SCRIPTS_DIR, link, 'junction');
+    try {
+      expect(lstatSync(link).isSymbolicLink()).toBe(true);
+      const out = execFileSync(process.execPath, [path.join(link, 'compile-jdi-bridge.js')], {
+        env: { ...process.env, SKIP_JDI_COMPILE: '1' },
+        encoding: 'utf8',
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+      expect(out).toContain('[compile-jdi-bridge] Skipping (SKIP_JDI_COMPILE set)');
+    } finally {
+      try {
+        rmdirSync(link);
+      } catch {
+        unlinkSync(link);
+      }
+      rmdirSync(parent);
+    }
   });
 });

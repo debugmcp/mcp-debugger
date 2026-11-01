@@ -21,6 +21,12 @@ import { existsSync, statSync, mkdirSync, readFileSync, writeFileSync } from 'fs
 import { resolve, dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
+// The repo's entry-point guard (issue #562): Node realpaths the entry for
+// import.meta.url but leaves process.argv[1] as typed, so a plain comparison
+// never matches on a checkout reached through a symlink or a Windows junction
+// and the build would exit 0 having compiled nothing. Not shipped: the npm
+// package carries dist/ and java/ only, so this import never leaves the repo.
+import { isMain } from '../../../scripts/lib/is-main.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -183,6 +189,6 @@ function main() {
 }
 
 // Run if called directly (the tests import the functions above instead)
-if (process.argv[1] && resolve(process.argv[1]) === __filename) {
+if (isMain(import.meta.url)) {
   main();
 }

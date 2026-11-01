@@ -12,8 +12,9 @@ import { tmpdir } from 'os';
 import path from 'path';
 import { trackedMarkdown } from '../../../scripts/check-docs.mjs';
 
+// A nonexistent hooks dir, so a developer's global core.hooksPath never runs on the temp commit.
 const git = (cwd: string, ...args: string[]): string =>
-  execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...args], {
+  execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', '-c', `core.hooksPath=${path.join(cwd, 'no-hooks')}`, ...args], {
     cwd,
     encoding: 'utf8',
     windowsHide: true,
