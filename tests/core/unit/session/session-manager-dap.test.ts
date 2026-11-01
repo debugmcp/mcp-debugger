@@ -11,6 +11,7 @@ import {
   DebugLanguage,
   JavaAdapterPolicy,
   JsDebugAdapterPolicy,
+  PythonAdapterPolicy,
   RubyAdapterPolicy,
   RustAdapterPolicy,
   SessionState
@@ -4366,6 +4367,79 @@ describe('SessionManager - DAP Operations', () => {
         description: 'Mock uncaught exception',
         details: { message: 'Mock uncaught exception', typeName: 'MockError' }
       });
+    });
+
+    /**
+     * pydevd decorates the exception name it reports at a user-unhandled stop:
+     * "AssertionError       (note: full exception trace is shown but execution is
+     * paused at: test_x)" — in the stopped event's `text` and in exceptionInfo's
+     * `exceptionId` and `details.typeName` alike. The snapshot composer already
+     * strips it through the policy's normalizeExceptionTypeName; the stored
+     * record did not, so wait_for_stop, list_debug_sessions and get_stack_trace
+     * answered with the note inside the type name (issue #1047). The stop
+     * handler reads policy through the store's selectPolicy, so the hook is
+     * patched there.
+     */
+    const PYDEVD_NOTE = '       (note: full exception trace is shown but execution is paused at: test_assert_fails)';
+    function withPythonExceptionNames(manager: SessionManager): void {
+      const store = (manager as unknown as { sessionStore: { selectPolicy: (language: string) => AdapterPolicy } }).sessionStore;
+      const original = store.selectPolicy.bind(store);
+      vi.spyOn(store, 'selectPolicy').mockImplementation((language: string) => ({
+        ...original(language),
+        normalizeExceptionTypeName: PythonAdapterPolicy.normalizeExceptionTypeName
+      }));
+    }
+
+    it("stores the exception name without pydevd's paused-at note, in the stop record and the merged exceptionInfo (issue #1047)", async () => {
+      const session = await createPausedSession(sessionManager, dependencies);
+      withPythonExceptionNames(sessionManager);
+      dependencies.mockProxyManager.simulateEvent('adapter-capabilities', capsWithExceptionInfo);
+      dependencies.mockProxyManager.setDapRequestHandler(async (command) => {
+        if (command === 'exceptionInfo') {
+          return {
+            success: true,
+            body: {
+              exceptionId: `AssertionError${PYDEVD_NOTE}`,
+              breakMode: 'always',
+              description: 'assert 20.0 == 21.0',
+              details: { message: 'assert 20.0 == 21.0', typeName: `AssertionError${PYDEVD_NOTE}`, stackTrace: 'File "test_x.py", line 3' }
+            }
+          };
+        }
+        return { success: true };
+      });
+
+      dependencies.mockProxyManager.simulateStopped(1, 'exception', {
+        reason: 'exception',
+        threadId: 1,
+        description: 'assert 20.0 == 21.0',
+        text: `AssertionError${PYDEVD_NOTE}`
+      });
+      await vi.runAllTimersAsync();
+
+      const lastStop = sessionManager.getSession(session.id)?.lastStop;
+      expect(lastStop?.text).toBe('AssertionError');
+      expect(lastStop?.description).toBe('assert 20.0 == 21.0');
+      expect(lastStop?.exceptionInfo).toEqual({
+        exceptionId: 'AssertionError',
+        breakMode: 'always',
+        description: 'assert 20.0 == 21.0',
+        details: { message: 'assert 20.0 == 21.0', typeName: 'AssertionError', stackTrace: 'File "test_x.py", line 3' }
+      });
+    });
+
+    it('leaves a non-exception stop\'s words alone even when the policy has the hook', async () => {
+      const session = await createPausedSession(sessionManager, dependencies);
+      withPythonExceptionNames(sessionManager);
+
+      dependencies.mockProxyManager.simulateStopped(1, 'pause', {
+        reason: 'pause',
+        threadId: 1,
+        description: `paused by request${PYDEVD_NOTE}`
+      });
+      await vi.runAllTimersAsync();
+
+      expect(sessionManager.getSession(session.id)?.lastStop?.description).toBe(`paused by request${PYDEVD_NOTE}`);
     });
 
     it('does not request exceptionInfo when the adapter lacks the capability', async () => {

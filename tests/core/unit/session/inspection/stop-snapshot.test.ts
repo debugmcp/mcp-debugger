@@ -377,8 +377,9 @@ describe('composeStopSnapshot exception mapping', () => {
   // Issue #985: at a userUnhandled stop pydevd appends a note to the exception
   // name everywhere it reports it — `text`, `exceptionId`, `typeName`:
   // "AssertionError       (note: full exception trace is shown but execution is
-  // paused at: test_x)". The stored record keeps debugpy's words; the
-  // snapshot's type is the class.
+  // paused at: test_x)". The core strips it when it stores the record (issue
+  // #1047); the composer applies the same lens, so a record that still carries
+  // the note — written before #1047 — yields the class all the same.
   it("strips pydevd's paused-at note from the exception type, with exceptionInfo merged", async () => {
     const noted = 'AssertionError       (note: full exception trace is shown but execution is paused at: test_assert_fails)';
     const { ctx } = makeCtx({

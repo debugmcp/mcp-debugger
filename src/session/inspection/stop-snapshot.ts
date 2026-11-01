@@ -102,9 +102,10 @@ export async function composeStopSnapshot(
       const source = ctx.redactionEnabled() ? redactStopInfo(stop) : stop;
       // An adapter may decorate the exception name it reports (pydevd's
       // "(note: … paused at: <fn>)" at a user-unhandled stop, issue #985):
-      // the policy says what the class is. The stored record keeps the
-      // adapter's words; the snapshot's type is the class, and the pair's
-      // shape is read through the same lens.
+      // the policy says what the class is. The core already normalizes the
+      // stored record at the write (issue #1047); applying the same lens here
+      // keeps the snapshot right for a record written before that, and reads
+      // the pair's shape through it.
       const normalizeTypeName = ctx.selectPolicy?.(session.language)?.normalizeExceptionTypeName;
       const withoutPausedAtNote = (value: string | undefined): string | undefined =>
         value === undefined || normalizeTypeName === undefined ? value : normalizeTypeName(value);

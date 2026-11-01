@@ -620,8 +620,12 @@ export interface AdapterPolicy {
    * the name it reports (issue #985): at a user-unhandled stop pydevd appends
    * "       (note: full exception trace is shown but execution is paused at:
    * <fn>)" to the name on `text`, `exceptionId` and `typeName` alike. The
-   * stop snapshot's `exception.type` is read through this; the stored stop
-   * record keeps the adapter's words. Undefined means the name is used as is.
+   * core applies this when it stores an exception stop (`text`,
+   * `description`, and the merged exceptionInfo's `exceptionId`, `typeName`
+   * and `fullTypeName`, issue #1047), and the stop snapshot reads its
+   * `exception.type` through the same lens, so every answer names the class
+   * the same way; the DAP mirror replays the adapter's raw body untouched.
+   * Undefined means the name is used as is.
    */
   normalizeExceptionTypeName?(name: string): string;
 
