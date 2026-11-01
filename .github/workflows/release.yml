@@ -164,7 +164,7 @@ jobs:
         if [[ "${GITHUB_REF_TYPE}" == "branch" && "${GITHUB_REF_NAME}" == "${DEFAULT_BRANCH}" ]]; then
           echo "PUBLISH_LATEST=true" >> "$GITHUB_ENV"
           echo "latest will track default branch build (${GITHUB_REF_NAME})"
-        elif [[ "${GITHUB_REF_TYPE}" == "tag" && "${PRERELEASE}" != "true" ]]; then
+        elif [[ "${GITHUB_REF_TYPE}" == "tag" && "${PRERELEASE}" == "false" ]]; then
           echo "PUBLISH_LATEST=true" >> "$GITHUB_ENV"
           echo "latest will point to release ${GITHUB_REF_NAME}"
         else
@@ -368,14 +368,15 @@ jobs:
         node -e 'console.log("CODELLDB_PKG_VERSION="+require("./packages/codelldb-common/vendor-manifest.json").codelldb.version)' >> $GITHUB_ENV
     # Every prerelease (-beta, -alpha, -rc alike) goes to the `beta` dist-tag; only a
     # release moves `latest` (issue #1055, the predicate build-and-test decided).
+    # Fail closed: `latest` only when the token reads exactly "false".
     - name: Set npm dist-tag
       env:
         PRERELEASE: ${{ needs.build-and-test.outputs.prerelease }}
       run: |
-        if [[ "${PRERELEASE}" == "true" ]]; then
-          echo "NPM_TAG=beta" >> $GITHUB_ENV
-        else
+        if [[ "${PRERELEASE}" == "false" ]]; then
           echo "NPM_TAG=latest" >> $GITHUB_ENV
+        else
+          echo "NPM_TAG=beta" >> $GITHUB_ENV
         fi
     
     - name: Build project
@@ -582,7 +583,7 @@ jobs:
     # build-and-test is listed so its prerelease output is visible to this job's `if`
     # (needs.*.outputs reach direct dependents only).
     needs: [build-and-test, npm-publish, docker-publish]
-    if: ${{ needs.build-and-test.outputs.prerelease != 'true' }}
+    if: ${{ needs.build-and-test.outputs.prerelease == 'false' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -714,6 +715,7 @@ jobs:
     - name: Create Release with GitHub CLI
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        PRERELEASE: ${{ needs.build-and-test.outputs.prerelease }}
       run: |
         # Create the release body in a file: heading, the changelog body chosen by
         # scripts/release-notes.mjs, then the fixed installation and verification text.
@@ -765,11 +767,12 @@ jobs:
         See the [README](https://github.com/debugmcp/mcp-debugger#readme) for usage instructions.
         EOF
         
-        # Prerelease or not: the one predicate build-and-test decided (issue #1055)
-        if [[ "${{ needs.build-and-test.outputs.prerelease }}" == "true" ]]; then
-          PRERELEASE_FLAG="--prerelease"
-        else
+        # Prerelease or not: the one predicate build-and-test decided (issue #1055).
+        # Fail closed: a full release only when the token reads exactly "false".
+        if [[ "${PRERELEASE}" == "false" ]]; then
           PRERELEASE_FLAG=""
+        else
+          PRERELEASE_FLAG="--prerelease"
         fi
         
         # Create the release using GitHub CLI, attaching the npm tarballs and

@@ -76,7 +76,31 @@ describe('release.yml prerelease predicate (issue #1055)', () => {
     }
   );
 
-  it('the registry job keeps skipping prereleases', () => {
-    expect(job('mcp-registry-publish')).toMatch(/if: \$\{\{ needs\.build-and-test\.outputs\.prerelease != 'true' \}\}/);
+  // Fail closed: the guarantee is "a prerelease never moves latest", so each consumer
+  // acts on the release path only when the token reads exactly 'false'; an empty or odd
+  // value lands on the prerelease side.
+  it('the registry job publishes only when the predicate reads false', () => {
+    expect(job('mcp-registry-publish')).toMatch(/if: \$\{\{ needs\.build-and-test\.outputs\.prerelease == 'false' \}\}/);
+  });
+
+  it('docker moves latest for a tag only when the predicate reads false', () => {
+    expect(job('docker-publish')).toMatch(/"\$\{GITHUB_REF_TYPE\}" == "tag" && "\$\{PRERELEASE\}" == "false"/);
+  });
+
+  it('npm picks the latest dist-tag only when the predicate reads false', () => {
+    expect(job('npm-publish')).toMatch(/if \[\[ "\$\{PRERELEASE\}" == "false" \]\]; then\n\s+echo "NPM_TAG=latest"/);
+  });
+
+  it('create-release takes the predicate through env and flags a prerelease unless it reads false', () => {
+    const release = job('create-release');
+    expect(release).toMatch(/PRERELEASE: \$\{\{ needs\.build-and-test\.outputs\.prerelease \}\}/);
+    expect(release).toMatch(/if \[\[ "\$\{PRERELEASE\}" == "false" \]\]; then\n\s+PRERELEASE_FLAG=""/);
+    expect(release).not.toMatch(/\[\[ "\$\{\{ needs\.build-and-test\.outputs\.prerelease \}\}"/);
+  });
+
+  it('no consumer reads the predicate fail-open', () => {
+    expect(yml).not.toMatch(/prerelease != 'true'/);
+    expect(yml).not.toMatch(/"\$\{PRERELEASE\}" != "true"/);
+    expect(yml).not.toMatch(/"\$\{PRERELEASE\}" == "true"/);
   });
 });
