@@ -23,7 +23,7 @@ Rust debugging as unmeasured until a harness exists to back it.
 | **MSVC (`x86_64-pc-windows-msvc`)** | PDB | Partial — strings/`Vec`/structs often `<unavailable>` | Control flow only |
 | **Linux / macOS (default toolchains)** | DWARF | Full | Supported |
 
-CodeLLDB is pinned to **1.11.8** (`packages/codelldb-common/vendor-manifest.json`,
+CodeLLDB is pinned to **1.12.3** (`packages/codelldb-common/vendor-manifest.json`,
 which also carries the per-platform SHA-256 digests the vendoring script verifies).
 
 ## Known Behavioral Characteristics
@@ -90,7 +90,7 @@ order, first hit wins:
    `darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64`, and `win32-x64`. This is the
    intended path for `npm`/`npx` users: the package manager installs only the entry matching
    the host's os/cpu, so no manual vendoring step is needed. They are published
-   (first at v0.25.0, versioned by the CodeLLDB release, currently 1.11.8). Installing with `--omit=optional` skips them by design,
+   (first at v0.25.0, versioned by the CodeLLDB release, currently 1.12.3). Installing with `--omit=optional` skips them by design,
    in which case set `CODELLDB_PATH`.
 
 ## Recommendations

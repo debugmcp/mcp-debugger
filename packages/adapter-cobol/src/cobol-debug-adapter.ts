@@ -707,7 +707,8 @@ export class CobolDebugAdapter extends EventEmitter implements IDebugAdapter {
         throw new AdapterError(`stdinFile not found: ${stdinPath}`, AdapterErrorCode.SCRIPT_NOT_FOUND);
       }
       // Measured (issue #759 spike): CodeLLDB 1.11's launch `stdio` key does not
-      // feed a file on either platform; LLDB's own target.input-path setting does.
+      // feed a file on either platform; LLDB's own target.input-path setting does
+      // — the route the COBOL smoke exercises on every pin since (1.12.3 included).
       (launchConfig.preRunCommands as string[]).unshift(`settings set target.input-path ${quoteLldbPath(stdinPath)}`);
     }
 

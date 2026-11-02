@@ -78,7 +78,7 @@ describe('CobolAdapterFactory.getMetadata', () => {
 describe('CobolAdapterFactory.validate', () => {
   beforeEach(() => {
     vi.mocked(resolveCodeLLDBExecutableWithSource).mockResolvedValue({ path: '/vendor/codelldb', source: 'vendored' });
-    vi.mocked(getCodeLLDBVersion).mockResolvedValue('1.11.8');
+    vi.mocked(getCodeLLDBVersion).mockResolvedValue('1.12.3');
     vi.mocked(findCobc).mockResolvedValue(cobc);
   });
 
@@ -90,7 +90,7 @@ describe('CobolAdapterFactory.validate', () => {
     expect(result.warnings).toEqual([]);
     expect(result.details).toEqual({
       codelldbPath: '/vendor/codelldb',
-      codelldbVersion: '1.11.8',
+      codelldbVersion: '1.12.3',
       codelldbSource: 'vendored',
       cobcPath: cobc.path,
       cobcVersion: '3.2.0',

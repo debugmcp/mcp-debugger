@@ -126,6 +126,15 @@ describe('codelldb platform packages', () => {
     expect(extractPlatformDirs(sh)).toEqual(new Set(SUPPORTED_CODELLDB_PLATFORM_DIRS));
   });
 
+  it('release-dry-run.sh reminds the runner of the 48-hour trusted-publisher step when a platform package at the pin is not on npm yet (issue #1049)', () => {
+    // After a pin bump the next tag publishes every codelldb-* through OIDC, and an
+    // unvalidated trusted-publisher configuration expires 48 h after creation. The
+    // dry-run used to warn only in the opposite case (already published → skipped).
+    const sh = readFileSync(new URL('../../../scripts/release-dry-run.sh', import.meta.url), 'utf-8');
+    const check = sh.slice(sh.indexOf('npm view "${pkg_name}@${CODELLDB_PIN}"'));
+    expect(check).toMatch(/already published[\s\S]*?\belse\b[\s\S]*?warn "[^"]*not published[^"]*trusted publisher[^"]*48 h[^"]*"/);
+  });
+
   it('@debugmcp/mcp-debugger lists all five platform packages as optionalDependencies', () => {
     const pkg = JSON.parse(
       readFileSync(new URL('../../mcp-debugger/package.json', import.meta.url), 'utf-8')

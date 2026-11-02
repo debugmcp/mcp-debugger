@@ -345,6 +345,83 @@ describe('MCP Server Rust Debugging Smoke Test', () => {
     120000
   );
 
+  it(
+    'answers get_local_variables with an Option<String>::None local in scope (CodeLLDB #1379, issue #1049)',
+    async (ctx) => {
+      // CodeLLDB 1.11.8's Rust formatters hung the variables request on an
+      // Option<String>::None local under rustc 1.93+ (upstream #1379, fixed in
+      // 1.12.2); the fixture's describe_item() keeps one next to a Some.
+      const OPTION_NONE_LINE = 73;
+      const { sourcePath, binaryPath } = await prepareRustExample('async_example');
+
+      const createResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'create_debug_session',
+        arguments: { language: 'rust', name: 'rust-option-none-locals' }
+      }));
+      expect(createResponse.success).toBe(true);
+      sessionId = createResponse.sessionId as string;
+
+      const breakpointResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'set_breakpoint',
+        arguments: { sessionId, file: sourcePath, line: OPTION_NONE_LINE }
+      }));
+      expect(breakpointResponse.success).toBe(true);
+
+      const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'start_debugging',
+        arguments: {
+          sessionId,
+          scriptPath: binaryPath,
+          dapLaunchArgs: { stopOnEntry: false },
+          adapterLaunchConfig: { sourceLanguages: ['rust'] }
+        }
+      }));
+      skipIfSpawnBlocked(ctx, startResponse, 'Rust');
+      expect(startResponse.success).toBe(true);
+
+      const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+      const topFixtureFrameLine = async (): Promise<number | undefined> => {
+        const stack = parseSdkToolResult(await mcpClient!.callTool({
+          name: 'get_stack_trace',
+          arguments: { sessionId }
+        })) as { stackFrames?: Array<{ file?: string; line?: number }> };
+        return stack.stackFrames?.find(
+          f => f.file?.replace(/\\/g, '/').includes('/examples/rust/async_example/src/')
+        )?.line;
+      };
+      // The first stop may be a launch-time system stop; bounded continues until the frame is live.
+      let reached = false;
+      for (let attempt = 0; attempt < 10 && !reached; attempt++) {
+        const sessions = parseSdkToolResult(await mcpClient!.callTool({ name: 'list_debug_sessions', arguments: {} }))
+          .sessions as Array<{ id: string; state?: string }> | undefined;
+        if (sessions?.find(s => s.id === sessionId)?.state === 'paused') {
+          if ((await topFixtureFrameLine()) === OPTION_NONE_LINE) {
+            reached = true;
+            break;
+          }
+          await callToolSafely(mcpClient!, 'continue_execution', { sessionId });
+        }
+        await wait(500);
+      }
+      expect(reached, 'breakpoint inside describe_item() not reached').toBe(true);
+
+      // The hang showed as a variables request that never answered: the tool
+      // call must come back promptly, and with both locals.
+      const startedAt = Date.now();
+      const localsResponse = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'get_local_variables',
+        arguments: { sessionId }
+      })) as { success?: boolean; variables?: Array<{ name: string; value: string }> };
+      const elapsedMs = Date.now() - startedAt;
+      expect(localsResponse.success, JSON.stringify(localsResponse)).toBe(true);
+      const localsByName = new Map((localsResponse.variables ?? []).map(v => [v.name, v.value]));
+      expect(localsByName.has('missing'), `locals: ${[...localsByName.keys()].join(', ')}`).toBe(true);
+      expect(localsByName.get('present')).toContain('item 0');
+      expect(elapsedMs).toBeLessThan(20000);
+    },
+    120000
+  );
+
   // Shared driver for the continue-to-completion tests below: sets one
   // breakpoint, launches, and issues bounded continues (up to 10) until the
   // user frame at `line` is live. Returns `reached: false` if the breakpoint

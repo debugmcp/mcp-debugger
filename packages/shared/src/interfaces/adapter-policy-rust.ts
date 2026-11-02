@@ -149,9 +149,10 @@ export const RustAdapterPolicy = {
       // CodeLLDB filter IDs. Note (issue #260): CodeLLDB 1.11.8 advertises
       // only cpp_throw/cpp_catch in exceptionBreakpointFilters, yet
       // setExceptionBreakpoints with rust_panic still succeeds and fires
-      // (legacy acceptance, confirmed live). Keep rust_panic; the capability
-      // drift warning in session-manager-core is the early alarm if a future
-      // CodeLLDB drops the legacy id.
+      // (legacy acceptance, confirmed live; the same on 1.12.3 / LLDB 22.1.8,
+      // #1049). Keep rust_panic; the capability drift warning in
+      // session-manager-core is the early alarm if a future CodeLLDB drops
+      // the legacy id.
       exceptionFilters: {
         uncaught: ['rust_panic'],
         all: ['rust_panic', 'cpp_throw']

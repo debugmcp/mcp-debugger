@@ -230,6 +230,8 @@ describeDockerRust.sequential('Docker: Rust Debugging Smoke Tests', () => {
       })) as { entries?: Array<{ output: string }> };
       const outputText = (outputResponse.entries ?? []).map(e => e.output).join('');
       expect(outputText).not.toContain('Failed to initialize language support');
+      // CodeLLDB 1.12.3's wording of the same failure (issue #1049).
+      expect(outputText).not.toContain('Could not locate Rust toolchain');
 
       const continueResult1 = await mcpClient!.callTool({
         name: 'continue_execution',
@@ -409,7 +411,9 @@ describeDockerRust.sequential('Docker: Rust formatter degradation warning (issue
         }
         await wait(250);
       }
-      expect(outputText).toContain('Failed to initialize language support for rust');
+      // CodeLLDB 1.11.8 said "Failed to initialize language support for rust";
+      // 1.12.3's language-support loader says this instead (issue #1049).
+      expect(outputText).toContain('Could not locate Rust toolchain');
       expect(outputText).toContain('[mcp-debugger] Warning: Rust type summaries are unavailable');
 
       const closeResult = await mcpClient!.callTool({

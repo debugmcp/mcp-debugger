@@ -1,6 +1,6 @@
 {
   "name": "@debugmcp/codelldb-darwin-arm64",
-  "version": "1.11.8",
+  "version": "1.12.3",
   "description": "CodeLLDB debug adapter binaries for macOS arm64 (Apple Silicon), vendored for @debugmcp/mcp-debugger (Rust/C++ debugging)",
   "repository": {
     "type": "git",

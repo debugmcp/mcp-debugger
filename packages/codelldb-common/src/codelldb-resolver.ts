@@ -17,7 +17,7 @@ const __dirname = path.dirname(__filename);
 const nodeRequire = createRequire(import.meta.url);
 
 /** Keep in sync with the pinned version in vendor-manifest.json (the vendor script's default) */
-export const DEFAULT_CODELLDB_VERSION = '1.11.8';
+export const DEFAULT_CODELLDB_VERSION = '1.12.3';
 
 /**
  * The vendor directory names produced by scripts/vendor-codelldb.js.

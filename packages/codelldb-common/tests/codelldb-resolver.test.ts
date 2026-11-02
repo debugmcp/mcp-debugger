@@ -278,6 +278,18 @@ describe('codelldb-resolver', () => {
         expect(digest, `digest for ${asset}`).toMatch(/^[0-9a-f]{64}$/);
       }
     });
+
+    it('pins a digest for every supported platform payload (issue #1049)', () => {
+      // The Dockerfile, the canary and the release staging read the digest by
+      // asset name; a key missing here fails only there, on another machine.
+      const manifest = JSON.parse(
+        readFileSync(new URL('../vendor-manifest.json', import.meta.url), 'utf-8')
+      ) as { codelldb: { assets: Record<string, string> } };
+
+      expect(new Set(Object.keys(manifest.codelldb.assets))).toEqual(
+        new Set(SUPPORTED_CODELLDB_PLATFORM_DIRS.map((dir) => `codelldb-${dir}.vsix`))
+      );
+    });
   });
 
   describe('getCodeLLDBPlatformDir', () => {

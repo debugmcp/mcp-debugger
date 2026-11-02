@@ -460,7 +460,7 @@ describe('CppAdapterFactory', () => {
       path: '/vendor/codelldb',
       source: 'vendored'
     });
-    vi.mocked(getCodeLLDBVersion).mockResolvedValue('1.11.8');
+    vi.mocked(getCodeLLDBVersion).mockResolvedValue('1.12.3');
     vi.mocked(findAnyCompiler).mockResolvedValue('clang++');
 
     const result = await factory.validate();
@@ -469,7 +469,7 @@ describe('CppAdapterFactory', () => {
     expect(result.warnings).toHaveLength(0);
     expect(result.details).toMatchObject({
       codelldbPath: '/vendor/codelldb',
-      codelldbVersion: '1.11.8',
+      codelldbVersion: '1.12.3',
       codelldbSource: 'vendored',
       compiler: 'clang++'
     });
@@ -488,7 +488,7 @@ describe('CppAdapterFactory', () => {
       path: '/vendor/codelldb',
       source: 'env:CODELLDB_PATH'
     });
-    vi.mocked(getCodeLLDBVersion).mockResolvedValue('1.11.8');
+    vi.mocked(getCodeLLDBVersion).mockResolvedValue('1.12.3');
     vi.mocked(findAnyCompiler).mockResolvedValue(null);
     result = await factory.validate();
     expect(result.valid).toBe(true);
