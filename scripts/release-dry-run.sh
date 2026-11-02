@@ -195,6 +195,10 @@ for pkg_dir in "${CODELLDB_PLATFORM_PKGS[@]}"; do
 
   if npm view "${pkg_name}@${CODELLDB_PIN}" version > /dev/null 2>&1; then
     warn "${pkg_name}@${CODELLDB_PIN} already published — will be skipped"
+  else
+    # A pin bump (#1049): the tag publishes this package through OIDC, and an
+    # unvalidated trusted-publisher configuration expires 48 h after creation.
+    warn "${pkg_name}@${CODELLDB_PIN} not published (or npm unreachable) — the tag publishes it through OIDC: recreate its trusted publisher on npmjs.com within 48 h before tagging (docs/release-checklist.md, CodeLLDB bump procedure)"
   fi
 done
 
