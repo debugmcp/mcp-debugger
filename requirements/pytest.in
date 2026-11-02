@@ -1,3 +1,8 @@
 # Input for requirements/pytest.txt (see requirements/README.md): the pytest the
 # Python test-runner preset integration test runs under debugpy (issue #985).
 pytest==9.2.0
+# pytest's win32-only dependency (colorama>=0.4; sys_platform == "win32"), pinned here so
+# pip-compile keeps it in pytest.txt on every OS. Dependabot compiles on Linux, where the
+# marker drops it, and the windows-latest --require-hashes install then refuses it as an
+# unpinned transitive. It installs anywhere.
+colorama==0.4.6
