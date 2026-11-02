@@ -139,3 +139,72 @@ export function pinnedAssetCandidate(pin, version) {
     return null;
   }
 }
+
+/**
+ * Whether the vendored artifact already matches what this run would vendor
+ * (issue #1049). The script used to skip whenever vsDebugServer.js and its
+ * sidecars existed, so a bumped pin in vendor-manifest.json was invisible on
+ * every checkout that had vendored once — until JS_DEBUG_FORCE_REBUILD=true or
+ * a clean:vendor — and a Docker image built from such a checkout carried the
+ * old engine. The verdict reads vendor/js-debug/manifest.json, which every
+ * success path writes, and compares its version with the requested one.
+ *
+ * A local override (JS_DEBUG_LOCAL_PATH) is kept only while the variable still
+ * names the file it was vendored from; otherwise the requested version
+ * replaces it. 'latest' keeps whatever is vendored: what latest is cannot be
+ * known without the API, and the force flag exists for a refresh.
+ *
+ * @param {{ source?: string, version?: string, original?: string } | null | undefined} manifest
+ *   The vendored manifest beside the artifact, or null when there is none
+ * @param {string} requestedVersion `JS_DEBUG_VERSION` or the pin
+ * @param {Record<string, string | undefined>} env
+ * @returns {{ current: boolean, reason: string }}
+ */
+export function vendoredArtifactIsCurrent(manifest, requestedVersion, env) {
+  if (!manifest || typeof manifest !== 'object') {
+    return { current: false, reason: 'no vendored manifest beside the artifact (a partial vendoring)' };
+  }
+  const vendored = String(manifest.version || '');
+  if (manifest.source === 'local') {
+    const requested = normalizePath(String(env?.JS_DEBUG_LOCAL_PATH || ''));
+    if (requested && requested === normalizePath(String(manifest.original || ''))) {
+      return { current: true, reason: `local override ${requested} is still requested` };
+    }
+    return {
+      current: false,
+      reason: `vendored a local override (${manifest.original || 'unknown path'}) that JS_DEBUG_LOCAL_PATH no longer names; vendoring ${requestedVersion}`
+    };
+  }
+  if (requestedVersion === 'latest') {
+    return { current: true, reason: `'latest' requested; keeping vendored ${vendored || 'artifact'} (JS_DEBUG_FORCE_REBUILD=true refreshes it)` };
+  }
+  if (vendored === requestedVersion) {
+    return { current: true, reason: `vendored ${vendored} matches the requested version` };
+  }
+  return { current: false, reason: `vendored ${vendored || 'an unknown version'}, requested ${requestedVersion}` };
+}
+
+/**
+ * The digest the extracted server file must match, or null when nothing binds
+ * it (issue #1049). vendor-manifest.json records `derived.<name>`, the sha256
+ * of the server file inside the pinned archive; until now it was written but
+ * never read. It pins WHICH file findServerEntry picked out of the archive, and
+ * it is enforced exactly when the archive digest was, so a
+ * JS_DEBUG_ALLOW_UNPINNED experiment on another tag is not failed by a digest
+ * that belongs to the pinned one.
+ *
+ * @param {{ derived?: Record<string, string> }} pin The `js-debug` entry of vendor-manifest.json
+ * @param {boolean} archiveWasPinned Whether the archive digest was verified on this run
+ * @param {string} name The canonical server file name (`vsDebugServer.js`)
+ * @returns {string | null}
+ * @throws {Error} when the archive was pinned but the manifest has no derived digest for `name`
+ */
+export function pinnedDerivedDigest(pin, archiveWasPinned, name) {
+  if (!archiveWasPinned) return null;
+  const digest = pin?.derived?.[name];
+  if (typeof digest === 'string' && /^[0-9a-f]{64}$/i.test(digest)) return digest.toLowerCase();
+  throw new Error(
+    `vendor-manifest.json pins the archive but has no derived digest for ${name}. ` +
+    `Record the sha256 of the extracted server file under derived["${name}"] (the bump note in the manifest says how).`
+  );
+}
