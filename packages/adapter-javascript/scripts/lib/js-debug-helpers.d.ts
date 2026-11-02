@@ -42,6 +42,8 @@ export interface JsDebugPin {
   upstream?: string;
   /** asset file name → expected sha256 of the archive */
   assets?: Record<string, string>;
+  /** canonical server file name → expected sha256 of the file extracted from the pinned archive */
+  derived?: Record<string, string>;
 }
 
 /**
@@ -51,3 +53,37 @@ export interface JsDebugPin {
  * (`latest`, a version override, or a pin that names no archive).
  */
 export function pinnedAssetCandidate(pin: JsDebugPin, version: string): SelectedAsset | null;
+
+/** The manifest the vendor script writes beside the artifact (`vendor/js-debug/manifest.json`). */
+export interface VendoredManifest {
+  source?: string;
+  version?: string;
+  original?: string;
+  [key: string]: unknown;
+}
+
+/** Whether the vendored artifact can be kept, and why. */
+export interface VendoredVerdict {
+  current: boolean;
+  reason: string;
+}
+
+/**
+ * Whether the vendored artifact already matches what this run would vendor
+ * (issue #1049): the vendored manifest's version against the requested one,
+ * a local override only while `JS_DEBUG_LOCAL_PATH` still names it, and
+ * `latest` kept as is. `null` (no manifest) is never current.
+ */
+export function vendoredArtifactIsCurrent(
+  manifest: VendoredManifest | null | undefined,
+  requestedVersion: string,
+  env: Record<string, string | undefined>
+): VendoredVerdict;
+
+/**
+ * The digest the extracted server file must match when the archive digest was
+ * enforced, or `null` when it was not (issue #1049).
+ *
+ * @throws {Error} when the archive was pinned but the manifest has no derived digest for `name`
+ */
+export function pinnedDerivedDigest(pin: JsDebugPin, archiveWasPinned: boolean, name: string): string | null;
