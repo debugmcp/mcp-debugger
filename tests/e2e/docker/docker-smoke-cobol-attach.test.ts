@@ -53,10 +53,15 @@ describe.skipIf(process.env.SKIP_DOCKER_TESTS === 'true')('Docker: COBOL attach-
     if (container && ctx.task.result?.state === 'fail') console.log(await getDockerLogs(container));
     if (sessionId && client) await call('close_debug_session').catch(() => undefined);
     if (pid && container) await exec('kill', '-KILL', String(pid)).catch(() => undefined);
-    // Only this container's dedicated log mount is changed. Preserve readable,
-    // removable local artifacts without leaving root-owned shared session logs.
+    // Only this container's dedicated log mount and the examples' build cache are
+    // changed. Preserve readable, removable local artifacts without leaving root-owned
+    // shared session logs — or root-owned key directories under the bind-mounted
+    // examples/cobol/.debug-mcp, which the manifestDirs case writes as root and a host
+    // test's rmSync would then trip over (EACCES).
     if (container && typeof process.getuid === 'function' && typeof process.getgid === 'function') {
-      await exec('chown', '-R', `${process.getuid()}:${process.getgid()}`, '/tmp').catch(() => undefined);
+      const owner = `${process.getuid()}:${process.getgid()}`;
+      await exec('chown', '-R', owner, '/tmp').catch(() => undefined);
+      await exec('chown', '-R', owner, '/workspace/cobol/.debug-mcp').catch(() => undefined);
     }
     await cleanup?.();
     client = undefined;

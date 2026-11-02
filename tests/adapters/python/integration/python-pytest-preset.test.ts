@@ -33,32 +33,51 @@ const testFile = path.join(projectDir, 'tests', 'test_billing.py');
 const ASSERT_LINE = 16; // `assert remaining == expected` in test_assert_fails
 
 /**
- * The minor version of the Python the server will pick (3.11 → 11), or 0 when
- * none has pytest and debugpy. pydevd's exception machinery has two
- * implementations — frame tracing up to 3.11, `sys.monitoring` from 3.12 —
- * and one measured shape differs between them (see the pytest.raises case).
+ * Which of pydevd's two exception implementations the Python the server will
+ * pick runs — frame tracing, or `sys.monitoring` — or null when none has
+ * pytest and debugpy. One measured shape differs between them (see the
+ * pytest.raises case). The implementation is debugpy's choice, not Python's:
+ * `sys.monitoring` needs Python 3.12+ AND the pydevd vendored since debugpy
+ * 1.8.6 (`PYDEVD_USE_SYS_MONITORING` in `_pydevd_bundle.pydevd_constants`, which
+ * also honours the env override of the same name); an older debugpy, such as
+ * Ubuntu 24.04's packaged 1.8.0, traces frames on 3.12 too. So the probe asks
+ * pydevd itself rather than reading the version.
  */
-function pythonMinorWithPytest(): number {
-  const env: Record<string, string> = {};
+type PydevdExceptionPath = 'frame-tracing' | 'sys.monitoring';
+
+const PYDEVD_PROBE = [
+  'import sys, pytest, debugpy',
+  'import debugpy._vendored.force_pydevd',
+  'try:',
+  '    from _pydevd_bundle.pydevd_constants import PYDEVD_USE_SYS_MONITORING as m',
+  'except ImportError:',
+  '    m = False',
+  'print(int(bool(m)))'
+].join('\n');
+
+function pydevdExceptionPath(): PydevdExceptionPath | null {
+  const env: Record<string, string> = { PYDEVD_DISABLE_FILE_VALIDATION: '1' };
   for (const key in process.env) {
     if (process.env[key] !== undefined) env[key] = process.env[key] as string;
   }
   ensurePythonOnPath(env);
   for (const python of [process.env.PYTHON_PATH, 'python', 'python3'].filter((p): p is string => Boolean(p))) {
     try {
-      const probe = spawnSync(python, ['-c', 'import sys, pytest, debugpy; print(sys.version_info[1])'], {
+      const probe = spawnSync(python, ['-c', PYDEVD_PROBE], {
         env, timeout: 20000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true
       });
-      const minor = Number.parseInt(String(probe.stdout).trim(), 10);
-      if (probe.status === 0 && Number.isFinite(minor)) return minor;
+      const verdict = String(probe.stdout).trim();
+      if (probe.status === 0 && (verdict === '0' || verdict === '1')) {
+        return verdict === '1' ? 'sys.monitoring' : 'frame-tracing';
+      }
     } catch {
       // try the next spelling
     }
   }
-  return 0;
+  return null;
 }
 
-const pythonMinor = pythonMinorWithPytest();
+const exceptionPath = pydevdExceptionPath();
 
 let client: Client | null = null;
 
@@ -163,7 +182,7 @@ const preset = (testTarget: string, extra: Record<string, unknown> = {}) => ({
   ...extra
 });
 
-describe.skipIf(pythonMinor === 0)('pytest preset (issue #985 M1) @requires-python', () => {
+describe.skipIf(exceptionPath === null)('pytest preset (issue #985 M1) @requires-python', () => {
   beforeAll(async () => {
     await startTestServer();
   }, 30000);
@@ -220,16 +239,17 @@ describe.skipIf(pythonMinor === 0)('pytest preset (issue #985 M1) @requires-pyth
   }, 90000);
 
   // Measured on both of pydevd's implementations (docs/python/spike-notes-pytest.md):
-  // `sys.monitoring` (3.12+) only sees the exception unwind out of the test
-  // frame, which a handled `pytest.raises` never does; frame tracing (≤3.11)
-  // decides at the raise and does not count the `with` handler as a catch, so
-  // the expected exception pauses once and the test then passes.
-  it('handles an exception pytest.raises expects: no stop on 3.12+, one stop then a pass on 3.11', async () => {
+  // `sys.monitoring` (3.12+ on debugpy 1.8.6 or later) only sees the exception
+  // unwind out of the test frame, which a handled `pytest.raises` never does;
+  // frame tracing (≤3.11, or an older debugpy on any Python) decides at the
+  // raise and does not count the `with` handler as a catch, so the expected
+  // exception pauses once and the test then passes.
+  it('handles an exception pytest.raises expects: no stop under sys.monitoring, one stop then a pass under frame tracing', async () => {
     await withSession('pytest-raises', async (sessionId) => {
       const started = await call('start_debugging', { sessionId, ...preset('test_raises_around_helper') });
       expect(started.success, JSON.stringify(started)).toBe(true);
       let answer = await landed(sessionId, started);
-      if (pythonMinor <= 11) {
+      if (exceptionPath === 'frame-tracing') {
         expect(answer.state, JSON.stringify(answer)).toBe('paused');
         expect(exceptionOf(answer).type, JSON.stringify(answer)).toBe('KeyError');
         await call('continue_execution', { sessionId });
