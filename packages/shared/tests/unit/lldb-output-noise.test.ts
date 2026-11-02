@@ -103,6 +103,8 @@ describe('lldbShouldSuppressOutputEvent — CodeLLDB console housekeeping (issue
 
 const RUST_LANG_SUPPORT_FAILURE =
   "Failed to initialize language support for rust [Errno 2] No such file or directory: 'rustc'\n";
+// CodeLLDB 1.12.3 (issue #1049): the same failure, reworded by its new language-support loader.
+const RUST_TOOLCHAIN_NOT_LOCATED = 'Could not locate Rust toolchain\n';
 
 describe('lldbAnnotateOutputEvent (issue #441)', () => {
   it('annotates the rust language-support failure line on console and stderr', () => {
@@ -112,6 +114,15 @@ describe('lldbAnnotateOutputEvent (issue #441)', () => {
       expect(note).toContain('Rust type summaries are unavailable');
       expect(note).toContain('CODELLDB_RUST_SYSROOT');
     }
+  });
+
+  it('annotates CodeLLDB 1.12.3\'s wording of the same failure (issue #1049)', () => {
+    for (const category of ['console', 'stderr']) {
+      const note = lldbAnnotateOutputEvent(category, RUST_TOOLCHAIN_NOT_LOCATED);
+      expect(note, `${category}: ${RUST_TOOLCHAIN_NOT_LOCATED.trim()}`).toBeDefined();
+      expect(note).toContain('Rust type summaries are unavailable');
+    }
+    expect(lldbAnnotateOutputEvent('stdout', RUST_TOOLCHAIN_NOT_LOCATED)).toBeUndefined();
   });
 
   it('returns undefined for ordinary output', () => {

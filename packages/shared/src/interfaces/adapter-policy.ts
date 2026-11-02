@@ -680,8 +680,9 @@ export interface AdapterPolicy {
   /**
    * Return an attributed explanation for a DAP 'output' event that signals a
    * known adapter-level capability degradation (issue #441 — e.g. CodeLLDB's
-   * "Failed to initialize language support for rust" when no rustc is
-   * available, which leaves Rust values rendering as raw LLDB structures).
+   * "Could not locate Rust toolchain" (1.12) or "Failed to initialize language
+   * support for rust" (1.11) when no rustc is available, which leaves Rust
+   * values rendering as raw LLDB structures).
    * Consulted by the session manager's output capture AFTER the event is
    * recorded; the returned text is pushed to the session's output buffer as a
    * `[mcp-debugger] Warning:` entry and, when it arrives before the launch

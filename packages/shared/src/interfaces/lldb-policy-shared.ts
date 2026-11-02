@@ -499,8 +499,13 @@ export function lldbShouldSuppressOutputEvent(category: string, text: string): b
  * init throws — for Rust, typically because `rustc --print=sysroot` is not
  * available to locate the formatter scripts (issue #441). The session keeps
  * working, but &str/String/collection values render as raw LLDB structures.
+ * 1.11.8 says "Failed to initialize language support for rust"; 1.12.3's
+ * reworked loader says "Could not locate Rust toolchain" (issue #1049) —
+ * the same degradation, measured in the Docker image with no rustc and
+ * CODELLDB_RUST_SYSROOT cleared.
  */
-const LLDB_RUST_LANG_SUPPORT_FAILURE = /Failed to initialize language support for rust/i;
+const LLDB_RUST_LANG_SUPPORT_FAILURE =
+  /Failed to initialize language support for rust|Could not locate Rust toolchain/i;
 
 /**
  * Annotate a DAP output event that signals CodeLLDB failed to load its Rust
