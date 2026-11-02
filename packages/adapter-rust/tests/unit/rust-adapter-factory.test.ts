@@ -17,7 +17,7 @@ vi.mock('child_process', async () => {
 vi.mock('../../src/utils/codelldb-resolver.js', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   resolveCodeLLDBExecutableWithSource: vi.fn(async () => ({ path: '/mock/codelldb', source: 'vendored' })),
-  getCodeLLDBVersion: vi.fn(async () => '1.11.8')
+  getCodeLLDBVersion: vi.fn(async () => '1.12.3')
 }));
 
 const cargoChild = (stdout: string, code: number) => {

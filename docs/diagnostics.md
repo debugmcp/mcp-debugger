@@ -18,12 +18,12 @@ mock        (built-in)                                       (built-in)         
 python      Python 3.13.12 C:\...\py.EXE                     debugpy 1.8.20                            ✅ ok
 javascript  Node.js v24.14.1                                 js-debug (vendored)                       ✅ ok
 ruby        Ruby 3.4.9 C:\Ruby34-x64\bin\ruby.exe            rdbg 1.11.0 C:\Ruby34-x64\bin\rdbg.bat    ✅ ok
-rust        Rust 1.94.1                                      CodeLLDB 1.11.8 (vendored) C:\...         ⚠️ warn
+rust        Rust 1.94.1                                      CodeLLDB 1.12.3 (vendored) C:\...         ⚠️ warn
 go          Go 1.26.1 C:\Program Files\Go\bin\go.exe         Delve 1.26.3 ~\go\bin\dlv.exe             ✅ ok
 java        Java 21.0.10 C:\...\jdk-21\bin\java.exe          JDI bridge C:\...\java\out                ✅ ok
 dotnet      .NET SDK 8.0.420                                 netcoredbg 3.1.3-1 C:\...\netcoredbg.exe  ✅ ok
-cpp         C/C++ compiler g++ (MSYS2) 15.2.0                CodeLLDB 1.11.8 (vendored) C:\...         ✅ ok
-cobol       GnuCOBOL (cobc) 3.2.0 C:\...\cobc.exe            CodeLLDB 1.11.8 (vendored) C:\...         ✅ ok
+cpp         C/C++ compiler g++ (MSYS2) 15.2.0                CodeLLDB 1.12.3 (vendored) C:\...         ✅ ok
+cobol       GnuCOBOL (cobc) 3.2.0 C:\...\cobc.exe            CodeLLDB 1.12.3 (vendored) C:\...         ✅ ok
 dart        Dart SDK 3.13.4 (Flutter 3.47.7 at C:\src\flutter)  dart debug_adapter 3.13.4 C:\...\dart.exe  ✅ ok
 
 Targets

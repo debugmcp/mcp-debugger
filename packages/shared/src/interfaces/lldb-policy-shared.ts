@@ -77,9 +77,10 @@ export function lldbGeneratedFileCandidates(
  *
  * 2. An exception-filter hit (rust_panic, cpp_throw) is reported as reason
  *    'breakpoint' because CodeLLDB implements filters as internal
- *    breakpoints (issue #260). Live capture (CodeLLDB 1.11.8): the stopped
- *    body is only {allThreadsStopped, hitBreakpointIds, reason, threadId} —
- *    no description/text to match on — so the discriminator is that the hit
+ *    breakpoints (issue #260). Live capture (CodeLLDB 1.11.8, re-captured
+ *    unchanged on 1.12.3 / LLDB 22.1.8, #1049): the stopped body is only
+ *    {allThreadsStopped, hitBreakpointIds, reason, threadId} — no
+ *    description/text to match on — so the discriminator is that the hit
  *    ids are disjoint from every user-set breakpoint id. Both sides must
  *    be known: no hitBreakpointIds (e.g. a step completion mislabeled as
  *    'breakpoint', the issue #255 trace) or no userBreakpointIds
@@ -716,7 +717,9 @@ export function getLldbDapClientBehavior(): DapClientBehavior {
  * detach with no step, leave it running. A DAP continue ahead of the
  * disconnect is the fix on the debugger's own terms (`resumeBeforeDetach`);
  * the ptrace-based Linux/macOS plugins have no such resume loop, so the
- * request stays win32-only.
+ * request stays win32-only. Still required on CodeLLDB 1.12.3 / LLDB 22.1.8
+ * (#1049): with the resume switched off, the cpp attach smoke's
+ * step-then-detach case exits the target with 0x80000004 as before.
  */
 export function getLldbAttachBehavior(
   platform: NodeJS.Platform = process.platform

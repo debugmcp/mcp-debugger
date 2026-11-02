@@ -61,4 +61,14 @@ async fn process_item(item: u32) {
     println!("Processing item: {}", item);
     sleep(Duration::from_millis(50)).await;
     println!("Item {} processed", item);
+    let _ = describe_item(item);
+}
+
+/// Issue #1049: inspecting an `Option<String>::None` local hung CodeLLDB 1.11.8 under
+/// rustc 1.93+ (upstream vadimcn/codelldb#1379, fixed in 1.12.2). The e2e smoke stops on
+/// the `format!` line below and asks for the locals; keep both locals in scope there.
+fn describe_item(item: u32) -> String {
+    let missing: Option<String> = None;
+    let present: Option<String> = Some(format!("item {}", item));
+    format!("{:?} / {:?}", present, missing)
 }
