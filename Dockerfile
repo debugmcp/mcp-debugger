@@ -149,7 +149,7 @@ RUN rm -rf /app/node_modules/@debugmcp && \
 # setting lang.rust.sysroot (_adapterSettings.scriptConfig). Digest is the
 # multi-arch OCI index, so amd64 and arm64 TARGETARCH builds both resolve.
 # Bump alongside CodeLLDB bumps or when formatter drift is reported.
-FROM rust:1.99.0-slim@sha256:2752b332db73fdbb7dc576f06c82ed1f312005784ef913d7e04a28f5f55dc581 AS rust-formatters
+FROM rust:1.99.1-slim@sha256:b8e062b1c3a80183df83d9ba187cadd2b5ab84bc78d453dbfeb2fccd5f982247 AS rust-formatters
 RUN cp -r "$(rustc --print sysroot)/lib/rustlib/etc" /rust-etc
 
 # Stage 2: Create runtime image with full LLDB dependencies
