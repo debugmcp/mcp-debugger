@@ -149,7 +149,7 @@ RUN rm -rf /app/node_modules/@debugmcp && \
 # setting lang.rust.sysroot (_adapterSettings.scriptConfig). Digest is the
 # multi-arch OCI index, so amd64 and arm64 TARGETARCH builds both resolve.
 # Bump alongside CodeLLDB bumps or when formatter drift is reported.
-FROM rust:1.99.0-slim@sha256:2752b332db73fdbb7dc576f06c82ed1f312005784ef913d7e04a28f5f55dc581 AS rust-formatters
+FROM rust:1.99.1-slim@sha256:b8e062b1c3a80183df83d9ba187cadd2b5ab84bc78d453dbfeb2fccd5f982247 AS rust-formatters
 RUN cp -r "$(rustc --print sysroot)/lib/rustlib/etc" /rust-etc
 
 # Stage 2: Create runtime image with full LLDB dependencies
@@ -158,7 +158,7 @@ RUN cp -r "$(rustc --print sysroot)/lib/rustlib/etc" /rust-etc
 # display or device and a multi-gigabyte checkout. Pinned to the dart:3.13 manifest list.
 FROM dart:3.13@sha256:8604cbd137b6d67c24f49b916f2aa9b67d71b539576e0178bf161d831c9e344f AS dart-sdk
 
-FROM ubuntu:26.04@sha256:c098726dd9b9733f3e885f8de0ef375206a311b0a317eadc40d347b1115fb944
+FROM ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c
 # Disabled languages: go has no attach implementation and no Delve here,
 # dotnet has no netcoredbg here. Ruby is intentionally present but attach-only
 # (adapter shipped, no Ruby runtime — attach connects directly to a remote
