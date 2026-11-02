@@ -20,7 +20,7 @@ export async function handleExposeSession(ctx: ToolContext, sessionId: string): 
     let message =
       `Session exposed for IDE attach at ${result.host}:${result.port}. ` +
       `VS Code: add a launch.json config {"name": "Mirror: agent debug session", ` +
-      `"type": "<your language's debug type, e.g. python>", "request": "attach", ` +
+      `"type": "<your language's debug type, e.g. debugpy>", "request": "attach", ` +
       `"debugServer": ${result.port}, "mirrorToken": "${result.token}"} and start it. ` +
       `The mirror is inspect-only; execution control stays with this session. ` +
       `Full guidance: docs/tool-reference.md#expose_session.`;
