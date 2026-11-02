@@ -10,7 +10,8 @@
  * - Deterministic output:
  *    - vendor/js-debug/vsDebugServer.js
  *    - vendor/js-debug/vsDebugServer.js.sha256
- *    - vendor/js-debug/manifest.json
+ *    - vendor/js-debug/manifest.json (read back on the next run: a vendored
+ *      version other than the requested one is re-vendored — issue #1049)
  *
  * Environment variables:
  *   - JS_DEBUG_VERSION: tag or 'latest' (default: the pin in vendor-manifest.json)
@@ -34,7 +35,13 @@ import { spawn } from 'node:child_process';
 import { extract as tarExtract } from 'tar';
 import extractZip from 'extract-zip';
 import { ensureDir, copy as fsxCopy } from 'fs-extra';
-import { selectBestAsset, normalizePath, pinnedAssetCandidate } from './lib/js-debug-helpers.js';
+import {
+  selectBestAsset,
+  normalizePath,
+  pinnedAssetCandidate,
+  vendoredArtifactIsCurrent,
+  pinnedDerivedDigest
+} from './lib/js-debug-helpers.js';
 import { determineVendoringPlan } from './lib/vendor-strategy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -358,6 +365,15 @@ async function writeManifest({ source, repo, version, asset, sha256, original })
   await fsp.writeFile(MANIFEST_FILE, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
 }
 
+/** The manifest a previous vendoring wrote beside the artifact, or null when there is none or it is unreadable. */
+function readVendoredManifest() {
+  try {
+    return JSON.parse(fs.readFileSync(MANIFEST_FILE, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Spawn a command cross-platform, returning stdout on success.
  * Falls back to shell=true on Windows when necessary and logs a short summary.
@@ -497,13 +513,20 @@ async function main() {
     return;
   }
 
-  // Idempotent skip only if artifact AND required sidecars exist
+  // Idempotent skip only if the artifact, its required sidecars AND the version
+  // the vendored manifest names all match what this run would vendor. The
+  // existence check alone kept a bumped pin invisible on every checkout that
+  // had vendored once — and in a Docker image built from one (issue #1049).
   const bootloaderRequired = path.join(VENDOR_DIR, 'bootloader.js');
   const hashRequired = path.join(VENDOR_DIR, 'hash.js');
   if (!FORCE && fs.existsSync(VENDOR_FILE) && fs.existsSync(bootloaderRequired) && fs.existsSync(hashRequired)) {
-    logInfo(`Artifact already present at ${normalizePath(VENDOR_FILE)} and required sidecars present (bootloader.js, hash.js). Set JS_DEBUG_FORCE_REBUILD=true to rebuild.`);
-    process.exitCode = 0;
-    return;
+    const verdict = vendoredArtifactIsCurrent(readVendoredManifest(), VERSION, process.env);
+    if (verdict.current) {
+      logInfo(`Artifact already present at ${normalizePath(VENDOR_FILE)} with required sidecars (bootloader.js, hash.js); ${verdict.reason}. Set JS_DEBUG_FORCE_REBUILD=true to rebuild.`);
+      process.exitCode = 0;
+      return;
+    }
+    logInfo(`Artifact present at ${normalizePath(VENDOR_FILE)} but ${verdict.reason}; re-vendoring.`);
   }
   if (!FORCE && fs.existsSync(VENDOR_FILE) && (!fs.existsSync(bootloaderRequired) || !fs.existsSync(hashRequired))) {
     const missing = [
@@ -539,7 +562,7 @@ async function main() {
     await ensureDir(VENDOR_DIR);
     await fsp.copyFile(localPath, VENDOR_FILE);
     // Also emit a .cjs copy to force CommonJS execution regardless of parent package type
-    try { await fsp.copyFile(VENDOR_FILE, VENDOR_FILE_CJS); } catch {}
+    try { await fsp.copyFile(VENDOR_FILE, VENDOR_FILE_CJS); } catch { /* best effort: the .cjs twin is a convenience copy */ }
     const sha = await writeChecksum(VENDOR_FILE, CHECKSUM_FILE);
     await writeManifest({
       source: 'local',
@@ -627,12 +650,30 @@ async function main() {
 
     logInfo('Locating DAP server entry in extracted contents...');
     const found = await findServerEntry(extractDir);
- 
+
+    // The derived digest binds the archive pin to WHICH file was picked out of
+    // it (issue #1049). Enforced exactly when the archive digest was: an
+    // allowed unpinned experiment reports the digest instead, for recording.
+    const serverSha = await sha256File(found.abs);
+    const expectedServerSha = pinnedDerivedDigest(PIN, Boolean(expectedSha), path.basename(VENDOR_FILE));
+    if (expectedServerSha) {
+      if (serverSha !== expectedServerSha) {
+        throw new Error(
+          `Integrity check FAILED for ${normalizePath(found.rel)}: expected sha256 ${expectedServerSha}, got ${serverSha}. ` +
+          'The server file inside the pinned archive does not match the derived digest in vendor-manifest.json. ' +
+          'Do NOT bypass this without investigating; if the pin was updated deliberately, record the new derived digest too.'
+        );
+      }
+      logInfo(`Integrity check passed: ${normalizePath(found.rel)} matches the pinned derived digest.`);
+    } else {
+      logWarn(`UNPINNED server file ${normalizePath(found.rel)} (sha256 ${serverSha}) — record it under derived["${path.basename(VENDOR_FILE)}"] in vendor-manifest.json before shipping.`);
+    }
+
   // Copy artifact normalized to canonical filename
   await ensureDir(VENDOR_DIR);
   await fsp.copyFile(found.abs, VENDOR_FILE);
   // Also emit a .cjs copy to force CommonJS execution regardless of parent package type
-  try { await fsp.copyFile(VENDOR_FILE, VENDOR_FILE_CJS); } catch {}
+  try { await fsp.copyFile(VENDOR_FILE, VENDOR_FILE_CJS); } catch { /* best effort: the .cjs twin is a convenience copy */ }
   // Copy known sidecar assets required by js-debug runtime (wasm, maps, json, native, and JS sidecars)
   try {
     const serverDir = path.dirname(found.abs);
@@ -715,8 +756,10 @@ async function main() {
     void 0;
   }
 
-  // Write checksum and manifest
-    const sha = await writeChecksum(VENDOR_FILE, CHECKSUM_FILE);
+  // Write checksum and manifest. The copy is byte for byte the server file
+  // verified above, so its digest is written rather than computed again.
+    await fsp.writeFile(CHECKSUM_FILE, `${serverSha}\n`, 'utf8');
+    const sha = serverSha;
     await writeManifest({
       source: 'prebuilt',
       repo: `${REPO_OWNER}/${REPO_NAME}`,
@@ -740,7 +783,7 @@ async function main() {
         await ensureDir(VENDOR_DIR);
         await fsp.copyFile(builtPath, VENDOR_FILE);
         // Also emit a .cjs copy to force CommonJS execution regardless of parent package type
-        try { await fsp.copyFile(VENDOR_FILE, VENDOR_FILE_CJS); } catch {}
+        try { await fsp.copyFile(VENDOR_FILE, VENDOR_FILE_CJS); } catch { /* best effort: the .cjs twin is a convenience copy */ }
         // Copy sidecar assets from the same directory as the built server file
         try {
           const serverDir = path.dirname(builtPath);
@@ -787,7 +830,7 @@ async function main() {
         await ensureDir(VENDOR_DIR);
         await fsp.copyFile(builtPath, VENDOR_FILE);
         // Also emit a .cjs copy to force CommonJS execution regardless of parent package type
-        try { await fsp.copyFile(VENDOR_FILE, VENDOR_FILE_CJS); } catch {}
+        try { await fsp.copyFile(VENDOR_FILE, VENDOR_FILE_CJS); } catch { /* best effort: the .cjs twin is a convenience copy */ }
         // Copy sidecar assets from the same directory as the built server file
         try {
           const serverDir = path.dirname(builtPath);

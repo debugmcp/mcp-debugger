@@ -10,7 +10,7 @@ export const JS_LAUNCH_CONSUMED_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * js-debug v1.112.0's node launch options (src/configuration.ts), plus our
+ * js-debug v1.140.0's node launch options (src/configuration.ts; unchanged since v1.112.0), plus our
  * generic/derived inputs. Editor-only tasks/console UI options are excluded.
  * Recognition is advisory: new upstream options remain reachable (#709).
  */

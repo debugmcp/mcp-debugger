@@ -270,6 +270,12 @@ RUN node --input-type=module -e "await import('@debugmcp/adapter-javascript')"
 # adapter degrades silently without. Fail the build if the copy is missing.
 RUN test -f /app/node_modules/@debugmcp/adapter-javascript/assets/exitcode-shim.cjs
 
+# The vendored js-debug must be the pinned release (issue #1049). The host's
+# vendor tree is part of the build context, and until the vendor script read
+# its own manifest back an image built from a stale checkout shipped the old
+# engine. The CodeLLDB twin of this fence is the `test -x "$CODELLDB_PATH"` above.
+RUN node -e "const d='/app/node_modules/@debugmcp/adapter-javascript/';const pin=require(d+'vendor-manifest.json')['js-debug'].version;const got=require(d+'vendor/js-debug/manifest.json').version;if(got!==pin){console.error('vendored js-debug '+got+' but the pin is '+pin);process.exit(1)}console.log('js-debug '+got)"
+
 # Expose ports
 EXPOSE 3001 5679
 
