@@ -10,12 +10,23 @@ import { spawnSync } from 'child_process';
 import { existsSync, mkdirSync, statSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { buildEnvironmentSegment } from '@debugmcp/adapter-cobol';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '../..');
 export const COBOL_EXAMPLES_DIR = path.join(ROOT, 'examples', 'cobol');
 const BUILD_DIR = path.join(COBOL_EXAMPLES_DIR, '.debug-mcp-test');
+
+/**
+ * The host's own build-cache root under examples/cobol — one environment root per
+ * host/container (issue #1035). A host test clears and inspects only this one: the
+ * container's sibling root (`…-container`) is written through the bind mount, by root
+ * in the Docker attach lane, and `rmSync` on it fails with EACCES.
+ */
+export function hostCobolCacheRoot(): string {
+  return path.join(COBOL_EXAMPLES_DIR, '.debug-mcp', 'cobol', buildEnvironmentSegment({ platform: process.platform, arch: process.arch, container: false }));
+}
 
 export type CobolExampleName = 'hello' | 'calls' | 'copybook' | 'rterror' | 's0c7' | 'sysin' | 'pause' | 'dyn' | 'perform';
 

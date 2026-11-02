@@ -24,6 +24,7 @@ import {
   cobolExtraSources,
   cobolModuleSources,
   cobolCopybookDir,
+  hostCobolCacheRoot,
   COBOL_EXAMPLES_DIR
 } from './cobol-example-utils.js';
 
@@ -187,7 +188,8 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Debugging Smoke Test @requires-cob
     'source-launches hello.cob and shows COBOL-shaped WORKING-STORAGE at a breakpoint',
     async (ctx) => {
       const sourcePath = cobolSourcePath('hello');
-      rmSync(path.join(COBOL_EXAMPLES_DIR, '.debug-mcp'), { recursive: true, force: true });
+      // Only the host's root (issue #1035): the container's sibling root may be root-owned.
+      rmSync(hostCobolCacheRoot(), { recursive: true, force: true });
 
       sessionId = (await call('create_debug_session', { language: 'cobol', name: 'cobol-smoke-source' })).sessionId as string;
       expect(sessionId).toBeDefined();
@@ -196,7 +198,7 @@ describe.skipIf(SKIP_COBOL)('MCP Server COBOL Debugging Smoke Test @requires-cob
       await startOrSkip(ctx, { scriptPath: sourcePath, dapLaunchArgs: { stopOnEntry: false } }, 'source');
       expect(await reachCobolLine(HELLO_COMPUTE_LINE, 'hello.cob'), 'session should pause at the COBOL breakpoint line').toBe(true);
       // One environment root per host/container (issue #1035): this is the host's.
-      expect(existsSync(path.join(COBOL_EXAMPLES_DIR, '.debug-mcp', 'cobol', `${process.platform}-${process.arch}`, 'hello')), 'adapter should compile into .debug-mcp/cobol/<platform>-<arch>/').toBe(true);
+      expect(existsSync(path.join(hostCobolCacheRoot(), 'hello')), 'adapter should compile into .debug-mcp/cobol/<platform>-<arch>/').toBe(true);
 
       const frames = await fetchStackTrace();
       const top = frames.find(isCobolFrame)!;
