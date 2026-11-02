@@ -1568,7 +1568,7 @@ Note: the mirror serves a human's IDE and proxies DAP responses directly, so it 
 // .vscode/launch.json
 {
   "name": "Mirror: agent debug session",
-  "type": "python",            // your language's debug type — see table below
+  "type": "debugpy",           // your language's debug type — see table below
   "request": "attach",
   "debugServer": 52341,         // the port from expose_session
   "mirrorToken": "<token from expose_session>"
@@ -1579,7 +1579,7 @@ Note: the mirror serves a human's IDE and proxies DAP responses directly, so it 
 
 | Session language | VS Code `type` |
 |---|---|
-| python | `python` |
+| python | `debugpy` (`python` is the extension's deprecated alias) |
 | javascript | `node` |
 | java | `java` |
 | go | `go` |
@@ -1588,6 +1588,8 @@ Note: the mirror serves a human's IDE and proxies DAP responses directly, so it 
 | ruby | `rdbg` |
 
 Other DAP clients (nvim-dap, etc.): connect a TCP DAP client to the host/port and include `mirrorToken` in the `attach` request arguments.
+
+**Measured** (2026-11-02, VS Code 1.116.0 with ms-python.debugpy 2026.6.0, a Python launch paused at a breakpoint): F5 on the config above — `type: debugpy`, no `connect` block, nothing else — lands the IDE on the paused frame with the call stack, Locals and the Debug Console's `evaluate` served live from the adapter; the IDE follows every stop the MCP session drives (`step_over`, `continue_execution` to the next breakpoint); pressing Continue or Step in VS Code shows the mirror's refusal as a warning (`The mcp-debugger mirror is read-only; 'continue' is controlled by the primary session`) and the IDE stays attached; `unexpose_session` ends the IDE's debug session cleanly, with no error dialog.
 
 **What the mirror serves:**
 - Answered locally: `initialize` (from the adapter's real capabilities, with control affordances masked off), `attach`/`launch` (token check), `configurationDone` (also the trigger for the late-join stopped replay below), `disconnect` (that client only), `cancel`.
