@@ -22,20 +22,10 @@
  *                                  or restart to settle (default: 15000)
  */
 
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import {
-  ListToolsRequestSchema,
-  CallToolRequestSchema,
-  ListResourcesRequestSchema,
-  ReadResourceRequestSchema,
-  SubscribeRequestSchema,
-  UnsubscribeRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { Client, SSEClientTransport, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
+import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+import { Server } from '@modelcontextprotocol/server';
 import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
@@ -457,7 +447,7 @@ class BackendManager {
     }
     // Not the SDK defaults: those cap every call at 60 s and leave a call the
     // client cancelled running in the backend (issue #854).
-    return await this.mcpClient.callTool({ name, arguments: args }, undefined, backendCallOptions(signal));
+    return await this.mcpClient.callTool({ name, arguments: args }, backendCallOptions(signal));
   }
 
   /**
@@ -883,8 +873,8 @@ async function main() {
   // ListTools: forward live to backend, fall back to dev-tools-only when backend is down.
   // The wait keeps the first inventory from being taken before the backend has
   // started (issue #716); a cancelled request stops waiting with the client.
-  server.setRequestHandler(ListToolsRequestSchema, async (_request, extra) => {
-    await backend.whenReady({ signal: extra?.signal });
+  server.setRequestHandler('tools/list', async (_request, ctx) => {
+    await backend.whenReady({ signal: ctx?.mcpReq.signal });
     if (backend.state === 'running' && backend.mcpClient) {
       try {
         const result = await backend.mcpClient.listTools();
@@ -897,7 +887,7 @@ async function main() {
   });
 
   // CallTool: route dev_* locally, forward everything else to backend
-  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+  server.setRequestHandler('tools/call', async (request, ctx) => {
     const { name, arguments: args } = request.params;
 
     // Dev tools are always handled locally — status and recovery stay callable
@@ -908,7 +898,7 @@ async function main() {
 
     // Forward to backend
     try {
-      const result = await backend.callTool(name, args || {}, { signal: extra?.signal });
+      const result = await backend.callTool(name, args || {}, { signal: ctx?.mcpReq.signal });
       return result;
     } catch (err) {
       // A well-formed JSON-RPC error from a running backend (e.g. -32602
@@ -936,7 +926,7 @@ async function main() {
   // Resources: pure passthrough to the backend (issue #218). Note that
   // subscriptions live in the backend process, so they are lost when the
   // backend is restarted (dev_rebuild_and_restart) — re-subscribe after.
-  server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  server.setRequestHandler('resources/list', async () => {
     if (backend.state === 'running' && backend.mcpClient) {
       try {
         return await backend.mcpClient.listResources();
@@ -947,20 +937,20 @@ async function main() {
     return { resources: [] };
   });
 
-  server.setRequestHandler(ReadResourceRequestSchema, async (request, extra) => {
-    await backend.whenReady({ signal: extra?.signal });
+  server.setRequestHandler('resources/read', async (request, ctx) => {
+    await backend.whenReady({ signal: ctx?.mcpReq.signal });
     assertBackendAvailable(backend);
     return await backend.mcpClient.readResource(request.params);
   });
 
-  server.setRequestHandler(SubscribeRequestSchema, async (request, extra) => {
-    await backend.whenReady({ signal: extra?.signal });
+  server.setRequestHandler('resources/subscribe', async (request, ctx) => {
+    await backend.whenReady({ signal: ctx?.mcpReq.signal });
     assertBackendAvailable(backend);
     return await backend.mcpClient.subscribeResource(request.params);
   });
 
-  server.setRequestHandler(UnsubscribeRequestSchema, async (request, extra) => {
-    await backend.whenReady({ signal: extra?.signal });
+  server.setRequestHandler('resources/unsubscribe', async (request, ctx) => {
+    await backend.whenReady({ signal: ctx?.mcpReq.signal });
     assertBackendAvailable(backend);
     return await backend.mcpClient.unsubscribeResource(request.params);
   });

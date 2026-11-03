@@ -2,7 +2,7 @@
  * Inspection tools: get_variables, get_stack_trace, get_scopes,
  * evaluate_expression, get_source_context, get_local_variables.
  */
-import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import { SessionState } from '@debugmcp/shared';
 import { SessionTerminatedError } from '../../errors/debug-errors.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
@@ -178,7 +178,7 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
         ? sessionErrorToResult(error, { diagnostics })!
         : sessionResult;
     }
-    if (error instanceof Error && !(error instanceof McpError)) {
+    if (error instanceof Error && !(error instanceof ProtocolError)) {
       // DAP-level failures (e.g. "Child session not ready ...")
       // must surface as errors, not as an empty-but-successful
       // stack trace (issue #124).
@@ -210,7 +210,7 @@ export async function handleEvaluateExpression(ctx: ToolContext, args: { session
 
     // Check expression length (sanity check)
     if (args.expression.length > 10240) {
-      throw new McpError(McpErrorCode.InvalidParams, 'Expression too long (max 10KB)');
+      throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Expression too long (max 10KB)');
     }
 
     // Call SessionManager's evaluateExpression method (no context is passed here;

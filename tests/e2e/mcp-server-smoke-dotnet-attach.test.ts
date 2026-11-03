@@ -16,8 +16,8 @@ import path from 'path';
 import { execSync, spawn, type ChildProcess } from 'child_process';
 import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { Client } from '@modelcontextprotocol/client';
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);

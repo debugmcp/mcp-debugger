@@ -4,9 +4,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { Server, ProtocolError } from '@modelcontextprotocol/server';
 import { DebugMcpServer } from '../../src/server';
-import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { SessionLifecycleState, SessionState } from '@debugmcp/shared';
 import { createProductionDependencies } from '../../src/container/dependencies.js';
 import { SessionManager } from '../../src/session/session-manager.js';
@@ -21,7 +20,8 @@ import {
 // construction here used to open winston's shared file transport and a session
 // log directory that nothing ever closed: ~10 MaxListenersExceededWarning lines
 // per run and a /tmp/test.log that grew with it (issue #578).
-vi.mock('@modelcontextprotocol/sdk/server/index.js');
+vi.mock('@modelcontextprotocol/server', async () =>
+  (await import('../test-utils/mocks/sdk-server-module.js')).sdkServerModuleMock());
 vi.mock('../../src/container/dependencies.js');
 vi.mock('../../src/session/session-manager.js');
 
@@ -105,7 +105,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       mockSessionManager.getSession.mockReturnValue(null);
 
       await expect(server.setBreakpoint({ sessionId: 'invalid-session', file: 'test.py', line: 10 }))
-        .rejects.toThrow(McpError);
+        .rejects.toThrow(ProtocolError);
     });
 
     it('should handle terminated session error', async () => {
@@ -115,7 +115,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       });
 
       await expect(server.continueExecution('test-session'))
-        .rejects.toThrow(McpError);
+        .rejects.toThrow(ProtocolError);
     });
   });
 

@@ -18,8 +18,8 @@ import net from 'net';
 import { fileURLToPath } from 'url';
 import { execSync, spawn, ChildProcess } from 'child_process';
 import fs from 'fs';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { Client } from '@modelcontextprotocol/client';
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);

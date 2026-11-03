@@ -5,9 +5,9 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import path from 'node:path';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { McpError, type ReadResourceResult } from '@modelcontextprotocol/sdk/types.js';
+import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+import { Server, ProtocolError } from '@modelcontextprotocol/server';
+import type { ReadResourceResult } from '@modelcontextprotocol/server';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { createProductionDependencies, type Dependencies } from '../../../../src/container/dependencies.js';
@@ -22,8 +22,9 @@ import {
   type MockSessionManager
 } from './server-test-helpers.js';
 
-vi.mock('@modelcontextprotocol/sdk/server/index.js');
-vi.mock('@modelcontextprotocol/sdk/server/stdio.js');
+vi.mock('@modelcontextprotocol/server', async () =>
+  (await import('../../../test-utils/mocks/sdk-server-module.js')).sdkServerModuleMock());
+vi.mock('@modelcontextprotocol/server/stdio');
 vi.mock('../../../../src/session/session-manager.js');
 vi.mock('../../../../src/container/dependencies.js');
 
@@ -195,7 +196,7 @@ describe('Server Output Resources Tests', () => {
       await expect(readResourceHandler({
         method: 'resources/read',
         params: { uri: 'debug://sessions/sess-1/proxy-log' }
-      })).rejects.toBeInstanceOf(McpError);
+      })).rejects.toBeInstanceOf(ProtocolError);
     });
 
     it('rejects unknown URIs and unknown sessions', async () => {
@@ -205,12 +206,12 @@ describe('Server Output Resources Tests', () => {
       await expect(readResourceHandler({
         method: 'resources/read',
         params: { uri: 'debug://sessions/ghost/output' }
-      })).rejects.toBeInstanceOf(McpError);
+      })).rejects.toBeInstanceOf(ProtocolError);
 
       await expect(readResourceHandler({
         method: 'resources/read',
         params: { uri: 'file:///etc/passwd' }
-      })).rejects.toBeInstanceOf(McpError);
+      })).rejects.toBeInstanceOf(ProtocolError);
     });
   });
 
@@ -246,7 +247,7 @@ describe('Server Output Resources Tests', () => {
 
     it('rejects subscribing to an unknown session', async () => {
       mockSessionManager.getSession.mockReturnValue(undefined);
-      await expect(subscribe('debug://sessions/ghost/output')).rejects.toBeInstanceOf(McpError);
+      await expect(subscribe('debug://sessions/ghost/output')).rejects.toBeInstanceOf(ProtocolError);
     });
 
     it('keeps subscriptions output-resource-only', async () => {
@@ -254,7 +255,7 @@ describe('Server Output Resources Tests', () => {
         mockSession({ logDir: path.join('/logs', 'sess-1', 'run-123') })
       );
 
-      await expect(subscribe('debug://sessions/sess-1/proxy-log')).rejects.toBeInstanceOf(McpError);
+      await expect(subscribe('debug://sessions/sess-1/proxy-log')).rejects.toBeInstanceOf(ProtocolError);
     });
 
     it('stops pinging after unsubscribe, cancelling any pending timer', async () => {

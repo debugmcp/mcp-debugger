@@ -54,7 +54,6 @@ vi.mock('../../../../src/session/session-manager.js', () => ({
 }));
 
 // Import the schema we need to check against
-import { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { registerToolHandlers } from '../../../../src/server/tool-dispatch.js';
 import { findToolIn } from './server-test-helpers.js';
 
@@ -72,18 +71,19 @@ async function getToolsFromServer(server: DebugMcpServer): Promise<Array<{
   // the live server to capture the tools/list handler it registers
   let capturedHandler: unknown = null;
   
-  // Spy on setRequestHandler
-  const originalSetRequestHandler = server.server.setRequestHandler.bind(server.server);
+  // Spy on setRequestHandler. The SDK keys handlers by method string; the
+  // cast narrows its overloads to the two-argument form this spy forwards.
+  type Registration = [method: string, handler: unknown];
+  const originalSetRequestHandler = server.server.setRequestHandler.bind(server.server) as unknown as
+    (...registration: Registration) => void;
   server.server.setRequestHandler = vi.fn().mockImplementation(
-    (
-      schema: Parameters<typeof originalSetRequestHandler>[0],
-      handler: Parameters<typeof originalSetRequestHandler>[1]
-    ) => {
-      // Check if this is the ListToolsRequestSchema
-      if (schema === ListToolsRequestSchema) {
+    (...registration: Registration) => {
+      const [schema, handler] = registration;
+      // Capture the tools/list registration
+      if (schema === 'tools/list') {
         capturedHandler = handler;
       }
-      return originalSetRequestHandler(schema, handler);
+      return originalSetRequestHandler(...registration);
     }
   );
   

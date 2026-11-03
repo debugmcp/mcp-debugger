@@ -6,8 +6,7 @@
  */
 
 import { spawn } from 'child_process';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { Client, SSEClientTransport } from '@modelcontextprotocol/client';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import net from 'net';

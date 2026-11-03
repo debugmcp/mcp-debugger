@@ -7,8 +7,8 @@
  * `redacted` flag, and to mention redaction in the initialize instructions.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+import { Server } from '@modelcontextprotocol/server';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { createProductionDependencies, type Dependencies } from '../../../../src/container/dependencies.js';
@@ -25,8 +25,9 @@ import {
 } from './server-test-helpers.js';
 import { OutputRingBuffer } from '../../../../src/session/output-buffer.js';
 
-vi.mock('@modelcontextprotocol/sdk/server/index.js');
-vi.mock('@modelcontextprotocol/sdk/server/stdio.js');
+vi.mock('@modelcontextprotocol/server', async () =>
+  (await import('../../../test-utils/mocks/sdk-server-module.js')).sdkServerModuleMock());
+vi.mock('@modelcontextprotocol/server/stdio');
 vi.mock('../../../../src/session/session-manager.js');
 vi.mock('../../../../src/container/dependencies.js');
 

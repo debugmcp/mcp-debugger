@@ -4,8 +4,7 @@ import * as os from 'os';
 import * as net from 'net';
 import { existsSync } from 'fs';
 import { spawn, ChildProcess } from 'child_process';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { Client, SSEClientTransport } from '@modelcontextprotocol/client';
 import {
   executeDebugSequence,
   waitForHealthEndpoint

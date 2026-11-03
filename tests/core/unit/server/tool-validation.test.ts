@@ -2,7 +2,7 @@
  * Intake validation shared by the tool handlers.
  */
 import { describe, it, expect } from 'vitest';
-import { McpError, ErrorCode as McpErrorCode } from '@modelcontextprotocol/sdk/types.js';
+import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import { IEnvironment } from '@debugmcp/shared';
 import type { ToolArguments } from '../../../../src/server/tool-arguments.js';
 import {
@@ -32,7 +32,7 @@ describe('requireSessionId', () => {
 
   it.each([{}, { sessionId: '' }])('rejects %j with the unified message', (raw) => {
     const args = raw as ToolArguments;
-    expect(() => requireSessionId(args)).toThrow(McpError);
+    expect(() => requireSessionId(args)).toThrow(ProtocolError);
     expect(() => requireSessionId(args)).toThrow('Missing required parameter: sessionId');
   });
 });
@@ -147,10 +147,16 @@ describe('enforceExplicitNames', () => {
     expect(() => enforceExplicitNames(environment, 'get_variables', ['user'])).not.toThrow();
     for (const names of [undefined, []]) {
       const call = () => enforceExplicitNames(environment, 'get_variables', names);
-      expect(call).toThrow(McpError);
-      // McpError renders its code into the message, so this pins both.
-      expect(call).toThrow(`MCP error ${McpErrorCode.InvalidParams}`);
+      expect(call).toThrow(ProtocolError);
       expect(call).toThrow('get_variables requires "names"');
+      // The code rides on the error, not in its message.
+      let thrown: unknown;
+      try {
+        call();
+      } catch (error) {
+        thrown = error;
+      }
+      expect((thrown as ProtocolError).code).toBe(ProtocolErrorCode.InvalidParams);
     }
   });
 });

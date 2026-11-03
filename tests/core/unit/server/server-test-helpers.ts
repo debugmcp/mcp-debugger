@@ -2,22 +2,7 @@
  * Shared test helpers and mock setup for server tests
  */
 import { vi } from 'vitest';
-import {
-  ListToolsRequestSchema,
-  CallToolRequestSchema,
-  ListResourcesRequestSchema,
-  ReadResourceRequestSchema,
-  SubscribeRequestSchema,
-  UnsubscribeRequestSchema,
-  ListPromptsRequestSchema,
-  GetPromptRequestSchema,
-  type EmptyResult,
-  type GetPromptResult,
-  type ListPromptsResult,
-  type ListResourcesResult,
-  type ReadResourceResult,
-  type Tool
-} from '@modelcontextprotocol/sdk/types.js';
+import type { EmptyResult, GetPromptResult, ListPromptsResult, ListResourcesResult, ReadResourceResult, Tool } from '@modelcontextprotocol/server';
 import type { IAdapterRegistry } from '@debugmcp/shared';
 import { DebugMcpServer } from '../../../../src/server.js';
 import type { SessionManager } from '../../../../src/session/session-manager.js';
@@ -84,7 +69,7 @@ export type MockSessionManager = ReturnType<typeof createMockSessionManager>;
  * the JSON-RPC envelope entirely.
  */
 export type TestRequest = { method?: string; params?: Record<string, unknown>; jsonrpc?: string };
-export type CallToolHandler = (request: TestRequest, extra?: { signal?: AbortSignal }) => Promise<ToolResult>;
+export type CallToolHandler = (request: TestRequest, callCtx?: { mcpReq: { signal?: AbortSignal } }) => Promise<ToolResult>;
 export type ListToolsHandler = (request?: TestRequest) => Promise<{ tools: Tool[] }>;
 
 /**
@@ -219,25 +204,25 @@ export function createMockToolContext(): DebugMcpServer {
 }
 
 /**
- * Find the handler registered for a request schema. Lookup is by schema
- * identity rather than registration position, so the registration order in
- * src/server.ts (tools, resources, prompts) is not a hidden test contract;
- * @modelcontextprotocol/sdk/types.js is never mocked, so the identity is safe.
+ * Find the handler registered for a request method. Lookup is by the method
+ * string the SDK registers handlers under rather than by registration
+ * position, so the registration order in src/server.ts (tools, resources,
+ * prompts) is not a hidden test contract.
  */
-function findHandler(mockServer: MockServer, schema: unknown): unknown {
+function findHandler(mockServer: MockServer, method: string): unknown {
   const call = mockServer.setRequestHandler.mock.calls.find(
-    ([registered]: unknown[]) => registered === schema
+    ([registered]: unknown[]) => registered === method
   );
   return call?.[1];
 }
 
 // The `as <Handler>` casts below are the one sanctioned cast per lookup:
 // `mock.calls` of an untyped `vi.fn` is `any[]`, so the registered handler
-// comes back as `unknown` and only the schema identity says which it is.
+// comes back as `unknown` and only the method string says which it is.
 export function getToolHandlers(mockServer: MockServer) {
   return {
-    listToolsHandler: findHandler(mockServer, ListToolsRequestSchema) as ListToolsHandler,
-    callToolHandler: findHandler(mockServer, CallToolRequestSchema) as CallToolHandler
+    listToolsHandler: findHandler(mockServer, 'tools/list') as ListToolsHandler,
+    callToolHandler: findHandler(mockServer, 'tools/call') as CallToolHandler
   };
 }
 
@@ -245,13 +230,13 @@ export function getToolHandlers(mockServer: MockServer) {
 // getToolHandlers.
 export function getResourceHandlers(mockServer: MockServer) {
   return {
-    listResourcesHandler: findHandler(mockServer, ListResourcesRequestSchema) as
+    listResourcesHandler: findHandler(mockServer, 'resources/list') as
       (request?: TestRequest) => Promise<ListResourcesResult>,
-    readResourceHandler: findHandler(mockServer, ReadResourceRequestSchema) as
+    readResourceHandler: findHandler(mockServer, 'resources/read') as
       (request: TestRequest) => Promise<ReadResourceResult>,
-    subscribeHandler: findHandler(mockServer, SubscribeRequestSchema) as
+    subscribeHandler: findHandler(mockServer, 'resources/subscribe') as
       (request: TestRequest) => Promise<EmptyResult>,
-    unsubscribeHandler: findHandler(mockServer, UnsubscribeRequestSchema) as
+    unsubscribeHandler: findHandler(mockServer, 'resources/unsubscribe') as
       (request: TestRequest) => Promise<EmptyResult>
   };
 }
@@ -259,9 +244,9 @@ export function getResourceHandlers(mockServer: MockServer) {
 // Casts: see the note above getToolHandlers.
 export function getPromptHandlers(mockServer: MockServer) {
   return {
-    listPromptsHandler: findHandler(mockServer, ListPromptsRequestSchema) as
+    listPromptsHandler: findHandler(mockServer, 'prompts/list') as
       (request?: TestRequest) => Promise<ListPromptsResult>,
-    getPromptHandler: findHandler(mockServer, GetPromptRequestSchema) as
+    getPromptHandler: findHandler(mockServer, 'prompts/get') as
       (request: TestRequest) => Promise<GetPromptResult>
   };
 }

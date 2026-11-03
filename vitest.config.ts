@@ -35,7 +35,7 @@ const sharedResolve = {
 
 // Handle ESM modules that need to be transformed
 const sharedOptimizeDeps = {
-  include: ['@modelcontextprotocol/sdk', '@vscode/debugprotocol']
+  include: ['@modelcontextprotocol/server', '@modelcontextprotocol/client', '@vscode/debugprotocol']
 };
 
 // Shared test-level options (everything EXCEPT pool/parallelism/timeout, which

@@ -4,7 +4,7 @@
  * variable-access gating), so the advertised schemas can be built and
  * snapshot-tested without a server.
  */
-import { Tool } from '@modelcontextprotocol/sdk/types.js';
+import { Tool } from '@modelcontextprotocol/server';
 import { IEnvironment } from '@debugmcp/shared';
 import { isContainerMode } from '../utils/container-path-utils.js';
 import {

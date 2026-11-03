@@ -4,8 +4,8 @@ import { DebugProtocol } from '@vscode/debugprotocol';
 import path from 'path';
 import fs from 'node:fs'; // Import the native fs module
 import { fileURLToPath } from 'url';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { Client } from '@modelcontextprotocol/client';
 import { ensurePythonOnPath } from './env-utils.js';
 
 // --- SDK-based MCP Client for Testing ---

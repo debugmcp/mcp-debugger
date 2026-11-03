@@ -6,7 +6,7 @@
  * back into hand-mirrored loops.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { Server } from '@modelcontextprotocol/server';
 import type { AdapterMetadata, IAdapterFactory, IAdapterRegistry } from '@debugmcp/shared';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
@@ -24,8 +24,9 @@ import {
   getToolHandlers
 } from './server-test-helpers.js';
 
-vi.mock('@modelcontextprotocol/sdk/server/index.js');
-vi.mock('@modelcontextprotocol/sdk/server/stdio.js');
+vi.mock('@modelcontextprotocol/server', async () =>
+  (await import('../../../test-utils/mocks/sdk-server-module.js')).sdkServerModuleMock());
+vi.mock('@modelcontextprotocol/server/stdio');
 vi.mock('../../../../src/session/session-manager.js');
 vi.mock('../../../../src/container/dependencies.js');
 

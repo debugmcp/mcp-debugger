@@ -11,7 +11,7 @@ import { promisify } from 'util';
 import { exec } from 'child_process';
 import { buildDockerImage, createDockerMcpClient, hostToContainerPath, getDockerLogs } from './docker-test-utils.js';
 import { parseSdkToolResult, pollUntil } from '../smoke-test-utils.js';
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import type { Client } from '@modelcontextprotocol/client';
 
 const execAsync = promisify(exec);
 

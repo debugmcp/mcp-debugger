@@ -13,9 +13,8 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { ResourceUpdatedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { Client } from '@modelcontextprotocol/client';
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -108,7 +107,7 @@ describe('MCP Server Python Debugging Smoke Test', () => {
     // assert that resources/updated pings arrive as the debuggee prints.
     const outputResourceUri = `debug://sessions/${sessionId}/output`;
     const updatedUris: string[] = [];
-    mcpClient!.setNotificationHandler(ResourceUpdatedNotificationSchema, (notification) => {
+    mcpClient!.setNotificationHandler('notifications/resources/updated', (notification) => {
       updatedUris.push(notification.params.uri);
     });
     await mcpClient!.subscribeResource({ uri: outputResourceUri });

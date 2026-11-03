@@ -1,4 +1,3 @@
-
 /**
  * Debug MCP Server - Main Server Implementation
  *
@@ -6,11 +5,7 @@
  * the sibling directory src/server/ (NodeNext resolves ./server.js and
  * ./server/x.js without conflict).
  */
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import {
-  ErrorCode as McpErrorCode,
-  McpError,
-} from '@modelcontextprotocol/sdk/types.js';
+import { Server, ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import { buildServerInstructions } from './skill-content.js';
 import { getVersion } from './cli/version.js';
 import {
@@ -181,7 +176,7 @@ export class DebugMcpServer implements ToolContext {
     const compileCheck = (): void => {
       const problem = logMessage !== undefined ? policy.validateLogMessage?.(logMessage, condition) : undefined;
       if (problem) {
-        throw new McpError(McpErrorCode.InvalidParams, `Invalid logpoint: ${problem}`);
+        throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Invalid logpoint: ${problem}`);
       }
     };
 
@@ -254,14 +249,14 @@ export class DebugMcpServer implements ToolContext {
     // snapshotted process.env, so only the live read sees them.
     const allowInContainer = isContainerRuntime() && requested === DebugLanguage.PYTHON;
     if (isLanguageDisabled(requested)) {
-      throw new McpError(
-        McpErrorCode.InvalidParams,
+      throw new ProtocolError(
+        ProtocolErrorCode.InvalidParams,
         `Language '${params.language}' is disabled in this runtime. Available languages: ${supported.join(', ')}`,
       );
     }
     if (!allowInContainer && !supported.includes(requested)) {
-      throw new McpError(
-        McpErrorCode.InvalidParams, 
+      throw new ProtocolError(
+        ProtocolErrorCode.InvalidParams, 
         `Language '${params.language}' is not supported. Available languages: ${supported.join(', ')}`
       );
     }
@@ -277,7 +272,7 @@ export class DebugMcpServer implements ToolContext {
     } catch (error) {
       const errorMessage = (error as Error).message || String(error);
       this.logger.error('Failed to create debug session', { error: errorMessage, stack: (error as Error).stack });
-      throw new McpError(McpErrorCode.InternalError, `Failed to create debug session: ${errorMessage}`);
+      throw new ProtocolError(ProtocolErrorCode.InternalError, `Failed to create debug session: ${errorMessage}`);
     }
   }
 
@@ -397,8 +392,8 @@ export class DebugMcpServer implements ToolContext {
 
     // Addressing-parameter combinations (issue #271)
     if (req.statement !== undefined && req.line !== undefined) {
-      throw new McpError(
-        McpErrorCode.InvalidParams,
+      throw new ProtocolError(
+        ProtocolErrorCode.InvalidParams,
         'Provide line or statement, not both. Use nearLine (with statement) to disambiguate repeated statements.'
       );
     }
@@ -420,20 +415,20 @@ export class DebugMcpServer implements ToolContext {
           strippedExp !== '' &&
           (strippedStmt.includes(strippedExp) || strippedExp.includes(strippedStmt)));
       if (!compatible) {
-        throw new McpError(
-          McpErrorCode.InvalidParams,
+        throw new ProtocolError(
+          ProtocolErrorCode.InvalidParams,
           'statement and expectedContent disagree; a statement anchor is already content-addressed. Provide one or the other (a matching expectedContent is accepted as redundant).'
         );
       }
     }
     if (req.nearLine !== undefined && req.statement === undefined) {
-      throw new McpError(
-        McpErrorCode.InvalidParams,
+      throw new ProtocolError(
+        ProtocolErrorCode.InvalidParams,
         'nearLine only disambiguates a statement anchor — provide it together with statement.'
       );
     }
     if (req.line === undefined && req.statement === undefined) {
-      throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameters: provide line or statement');
+      throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Missing required parameters: provide line or statement');
     }
 
     const resolved = await this.resolveBreakpointFile(req.sessionId, req.file, { requireExists: true });
@@ -466,12 +461,12 @@ export class DebugMcpServer implements ToolContext {
           resolved.nonAddressableReason === 'attach'
             ? `${feature} is not supported for ${attachWhy}; ${remedy}`
             : `${feature} requires a source file readable by the mcp-debugger server; "${req.file}" is a class name or remote path — ${remedy}`;
-        throw new McpError(McpErrorCode.InvalidParams, reason);
+        throw new ProtocolError(ProtocolErrorCode.InvalidParams, reason);
       }
       const lines = await this.lineReader.getFileLines(resolved.path);
       if (!lines) {
-        throw new McpError(
-          McpErrorCode.InvalidParams,
+        throw new ProtocolError(
+          ProtocolErrorCode.InvalidParams,
           `Breakpoint not set: could not read ${resolved.path} to verify content (binary, too large, or unreadable). Use plain line addressing to skip verification.`
         );
       }
@@ -489,7 +484,7 @@ export class DebugMcpServer implements ToolContext {
       const lines = await readLinesForContentAddressing('statement addressing');
       const resolution = resolveStatement(lines, req.statement, resolved.path, req.nearLine);
       if (!resolution.ok) {
-        throw new McpError(McpErrorCode.InvalidParams, resolution.message);
+        throw new ProtocolError(ProtocolErrorCode.InvalidParams, resolution.message);
       }
       line = resolution.line;
       if (resolution.candidates !== undefined) {
@@ -509,7 +504,7 @@ export class DebugMcpServer implements ToolContext {
           statementHint: supportsStatementAnchors(mode)
         });
         if (!check.ok) {
-          throw new McpError(McpErrorCode.InvalidParams, check.message);
+          throw new ProtocolError(ProtocolErrorCode.InvalidParams, check.message);
         }
         if (check.matchQuality === 'substring') {
           addressingWarning =
@@ -752,6 +747,15 @@ export class DebugMcpServer implements ToolContext {
         })
       }
     );
+    // The protocol version each client negotiates, so the move to the
+    // 2026-07-28 revision can be timed from real traffic (issue #1025).
+    this.server.oninitialized = () => {
+      const client = this.server.getClientVersion();
+      this.logger.info('[MCP Server] Client initialized', {
+        protocolVersion: this.server.getNegotiatedProtocolVersion(),
+        client: client ? `${client.name} ${client.version}` : undefined
+      });
+    };
 
     const sessionManagerConfig: SessionManagerConfig = {
       logDirBase: containerConfig.sessionLogDirBase
@@ -793,11 +797,11 @@ export class DebugMcpServer implements ToolContext {
   }
 
   /** @internal ToolContext service. */
-  public fileNotFoundError(label: string, originalPath: string, fileCheck: FileExistenceResult): McpError {
+  public fileNotFoundError(label: string, originalPath: string, fileCheck: FileExistenceResult): ProtocolError {
     const containerHint = isContainerMode(this.environment)
       ? `\nHint: Ensure the Docker volume mount maps your project root to ${getWorkspaceRoot(this.environment)} (e.g., -v /path/to/project:${getWorkspaceRoot(this.environment)})`
       : '';
-    return new McpError(McpErrorCode.InvalidParams,
+    return new ProtocolError(ProtocolErrorCode.InvalidParams,
       `${label} not found: '${originalPath}'\nLooked for: '${fileCheck.effectivePath}'${fileCheck.errorMessage ? `\nError: ${fileCheck.errorMessage}` : ''}${containerHint}`);
   }
 

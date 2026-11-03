@@ -11,8 +11,8 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { Client } from '@modelcontextprotocol/client';
 import { parseSdkToolResult, callToolSafely } from './smoke-test-utils.js';
 import { TOOL_NAMES } from '../../src/server/tool-schemas.js';
 import {

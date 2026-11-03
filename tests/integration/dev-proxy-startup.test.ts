@@ -4,9 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { Client } from '@modelcontextprotocol/client';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const devTools = ['dev_restart_debugger', 'dev_rebuild_and_restart', 'dev_server_status'];
@@ -31,7 +30,7 @@ async function connect(env: Record<string, string> = {}) {
   const client = new Client({ name: 'startup-test', version: '1.0.0' });
   clients.push(client);
   const notifications: string[] = [];
-  client.setNotificationHandler(ToolListChangedNotificationSchema, async (notification) => {
+  client.setNotificationHandler('notifications/tools/list_changed', async (notification) => {
     notifications.push(notification.method);
   });
   const transport = new StdioClientTransport({

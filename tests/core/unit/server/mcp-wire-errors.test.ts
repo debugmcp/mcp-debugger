@@ -2,17 +2,16 @@
  * Protocol errors as an SDK client sees them (issue #659).
  *
  * The SDK's Protocol copies a thrown error's `.message` verbatim into the
- * JSON-RPC error and the client-side McpError constructor prefixes
- * `MCP error <code>: ` again, so an McpError thrown from a request handler
- * used to reach clients doubled. These tests drive the real handlers through
- * a real Server/Client pair over the SDK's in-memory transport and pin the
- * exact client-side message: one prefix, then the reason.
+ * JSON-RPC error. With the v1 SDK the client-side constructor prefixed
+ * `MCP error <code>: ` again, so an error thrown from a request handler used
+ * to reach clients doubled; the v2 SDK's client adds nothing. These tests
+ * drive the real handlers through a real Server/Client pair over the SDK's
+ * in-memory transport and pin the exact client-side message: the reason,
+ * once, with the code beside it.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { McpError, ErrorCode as McpErrorCode } from '@modelcontextprotocol/sdk/types.js';
+import { Server, InMemoryTransport, ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
+import { Client } from '@modelcontextprotocol/client';
 import { registerToolHandlers } from '../../../../src/server/tool-dispatch.js';
 import { registerPromptHandlers } from '../../../../src/server/prompts.js';
 import { registerResourceHandlers } from '../../../../src/server/output-resources.js';
@@ -48,17 +47,17 @@ async function connect(server: Server): Promise<Client> {
   return client;
 }
 
-async function caught(promise: Promise<unknown>): Promise<McpError> {
+async function caught(promise: Promise<unknown>): Promise<ProtocolError> {
   try {
     await promise;
   } catch (error) {
-    expect(error).toBeInstanceOf(McpError);
-    return error as McpError;
+    expect(error).toBeInstanceOf(ProtocolError);
+    return error as ProtocolError;
   }
   throw new Error('expected the request to be rejected');
 }
 
-describe('protocol errors reach SDK clients with a single MCP error prefix', () => {
+describe('protocol errors reach SDK clients as the bare reason, with the code beside it', () => {
   let server: Server;
   let client: Client;
 
@@ -79,8 +78,8 @@ describe('protocol errors reach SDK clients with a single MCP error prefix', () 
     client = await connect(server);
 
     const error = await caught(client.callTool({ name: 'set_breakpoint', arguments: { file: '/x.py', line: 1 } }));
-    expect(error.code).toBe(McpErrorCode.InvalidParams);
-    expect(error.message).toBe(`MCP error ${McpErrorCode.InvalidParams}: Missing required parameter: sessionId`);
+    expect(error.code).toBe(ProtocolErrorCode.InvalidParams);
+    expect(error.message).toBe('Missing required parameter: sessionId');
   });
 
   it('a handler rejection that is not an McpError is wrapped once as InternalError', async () => {
@@ -95,10 +94,8 @@ describe('protocol errors reach SDK clients with a single MCP error prefix', () 
     client = await connect(server);
 
     const error = await caught(client.callTool({ name: 'list_supported_languages', arguments: {} }));
-    expect(error.code).toBe(McpErrorCode.InternalError);
-    expect(error.message).toBe(
-      `MCP error ${McpErrorCode.InternalError}: Failed to list supported languages: registry exploded`
-    );
+    expect(error.code).toBe(ProtocolErrorCode.InternalError);
+    expect(error.message).toBe('Failed to list supported languages: registry exploded');
   });
 
   it('an unknown tool', async () => {
@@ -106,8 +103,8 @@ describe('protocol errors reach SDK clients with a single MCP error prefix', () 
     client = await connect(server);
 
     const error = await caught(client.callTool({ name: 'no_such_tool', arguments: {} }));
-    expect(error.code).toBe(McpErrorCode.MethodNotFound);
-    expect(error.message).toBe(`MCP error ${McpErrorCode.MethodNotFound}: Unknown tool: no_such_tool`);
+    expect(error.code).toBe(ProtocolErrorCode.MethodNotFound);
+    expect(error.message).toBe('Unknown tool: no_such_tool');
   });
 
   it('an unknown prompt', async () => {
@@ -115,8 +112,8 @@ describe('protocol errors reach SDK clients with a single MCP error prefix', () 
     client = await connect(server);
 
     const error = await caught(client.getPrompt({ name: 'nope' }));
-    expect(error.code).toBe(McpErrorCode.InvalidParams);
-    expect(error.message).toBe(`MCP error ${McpErrorCode.InvalidParams}: Unknown prompt: nope`);
+    expect(error.code).toBe(ProtocolErrorCode.InvalidParams);
+    expect(error.message).toBe('Unknown prompt: nope');
   });
 
   it('an unknown resource (read and subscribe)', async () => {
@@ -131,8 +128,8 @@ describe('protocol errors reach SDK clients with a single MCP error prefix', () 
     const uri = 'debug://sessions/ghost/output';
     for (const request of [client.readResource({ uri }), client.subscribeResource({ uri })]) {
       const error = await caught(request);
-      expect(error.code).toBe(McpErrorCode.InvalidParams);
-      expect(error.message).toBe(`MCP error ${McpErrorCode.InvalidParams}: Unknown resource: ${uri}`);
+      expect(error.code).toBe(ProtocolErrorCode.InvalidParams);
+      expect(error.message).toBe(`Unknown resource: ${uri}`);
     }
   });
 });

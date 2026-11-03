@@ -3,9 +3,9 @@
  * agent skill in-band (prompts/list + prompts/get).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { McpError, type PromptMessage } from '@modelcontextprotocol/sdk/types.js';
+import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+import { Server, ProtocolError } from '@modelcontextprotocol/server';
+import type { PromptMessage } from '@modelcontextprotocol/server';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { createProductionDependencies } from '../../../../src/container/dependencies.js';
@@ -19,8 +19,9 @@ import {
   type MockServer
 } from './server-test-helpers.js';
 
-vi.mock('@modelcontextprotocol/sdk/server/index.js');
-vi.mock('@modelcontextprotocol/sdk/server/stdio.js');
+vi.mock('@modelcontextprotocol/server', async () =>
+  (await import('../../../test-utils/mocks/sdk-server-module.js')).sdkServerModuleMock());
+vi.mock('@modelcontextprotocol/server/stdio');
 vi.mock('../../../../src/session/session-manager.js');
 vi.mock('../../../../src/container/dependencies.js');
 
@@ -82,7 +83,7 @@ describe('Server Prompts Tests', () => {
     const { getPromptHandler } = getPromptHandlers(mockServer);
     await expect(
       getPromptHandler({ method: 'prompts/get', params: { name: 'nope' } })
-    ).rejects.toThrow(McpError);
+    ).rejects.toThrow(ProtocolError);
   });
 
   it('points attach guidance at the Kubernetes recipe (issue #452)', async () => {
