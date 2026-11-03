@@ -5,12 +5,32 @@
  * died with a raw ENOENT instead of its problem list (issue #1056). A real temp repo here;
  * the only mock-free way to produce a deleted-but-indexed file.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { trackedMarkdown } from '../../../scripts/check-docs.mjs';
+
+// Git exports its repo-locating variables to the hooks it runs. Under a pre-push hook from a
+// linked worktree, GIT_DIR names the real repository, and every git this file spawns — the
+// scratch repo's commands below and trackedMarkdown's own `git ls-files` — would act on it
+// instead of the temp directory (it once committed the scratch tree onto the real branch).
+// This worker drops those variables for the file's lifetime.
+const REPO_LOCATING_GIT_VARS = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY', 'GIT_PREFIX', 'GIT_NAMESPACE'];
+const inheritedGitVars: Record<string, string> = {};
+beforeAll(() => {
+  for (const key of REPO_LOCATING_GIT_VARS) {
+    const value = process.env[key];
+    if (value !== undefined) {
+      inheritedGitVars[key] = value;
+      delete process.env[key];
+    }
+  }
+});
+afterAll(() => {
+  Object.assign(process.env, inheritedGitVars);
+});
 
 // A nonexistent hooks dir, so a developer's global core.hooksPath never runs on the temp commit.
 const git = (cwd: string, ...args: string[]): string =>
