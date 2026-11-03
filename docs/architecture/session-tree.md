@@ -9,8 +9,8 @@ in what order). It is built from the measured facts in
 [the JavaScript spike notes](../javascript/spike-notes-forks.md); every claim about an adapter
 below cites one of those or a source named in the survey.
 
-Status: design accepted 2026-11-03 (the decisions and their owners are listed at the end);
-implementation is tracked by [#1081](https://github.com/debugmcp/mcp-debugger/issues/1081) (M1, Python)
+Status: decisions taken 2026-11-03 (listed with their owners at the end); the document is under
+review in [#1083](https://github.com/debugmcp/mcp-debugger/pull/1083); implementation is tracked by [#1081](https://github.com/debugmcp/mcp-debugger/issues/1081) (M1, Python)
 and [#1082](https://github.com/debugmcp/mcp-debugger/issues/1082) (M2, js-debug). Nothing here is
 shipped yet.
 Scope: debuggee children reported by the adapter (debugpy subprocesses, js-debug forks and, later,
@@ -251,8 +251,9 @@ What the table decides:
   an endpoint instead of a report. Adopting it would mean reading the child's announcement off the
   launch session's captured stderr and attaching to that port, which is the adapter's existing
   attach path. It is feasible in this design (a policy whose report source is an output line) and
-  unmeasured; `fork` does not exist on Windows, so the spike runs on Linux. It is a milestone only
-  after that spike.
+  unmeasured; `fork` does not exist on Windows, so the spike runs on Linux
+  ([#1085](https://github.com/debugmcp/mcp-debugger/issues/1085)). It is a milestone only after that
+  spike.
 - Delve's follow-exec folds children into one session, which is the multiplexing shape this design
   rejects for the tree (below); it is not adopted here. Whether a Delve launch with `followExec`
   should be forwarded as-is for users who want Delve's own behaviour is a Go adapter question, not a
@@ -442,7 +443,7 @@ expects adoption. Unblocks #985 M2 (jest and vitest workers as sessions).
 spike: the same mechanism, one session per page, frame and worker; the attach-addressing form is
 new (CDP URL or port) and goes through the attach contract.
 
-**Conditional — rdbg forks.** Gated on a Linux spike of the debug gem's fork behaviour under
+**Conditional — rdbg forks ([#1085](https://github.com/debugmcp/mcp-debugger/issues/1085)).** Gated on a Linux spike of the debug gem's fork behaviour under
 `rdbg --open --port` (what the child opens, how the announcement reaches the launch session's
 output, whether a second direct connection debugs it). A milestone only if that spike is a go.
 
