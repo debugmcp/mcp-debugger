@@ -548,6 +548,52 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
     sessionId = null;
   });
 
+  it('provides a stack trace and locals on a launch with no dapLaunchArgs (the adapter default stopOnEntry), locals read first', async () => {
+    // Ported from the JavaScript smoke suite of the removed legacy transport:
+    // start_debugging with no dapLaunchArgs key at all, so the adapter
+    // policy's own stopOnEntry and justMyCode defaults apply, then locals
+    // BEFORE any stack-trace call — the order an agent that never asks for
+    // frames takes. Both must come back non-empty once the line-11
+    // breakpoint is hit.
+    const scriptPath = JS_SCRIPT_PATH;
+
+    const createResult = await mcpClient!.callTool({
+      name: 'create_debug_session',
+      arguments: { language: 'javascript', name: 'js-default-launch-args' }
+    });
+    sessionId = parseSdkToolResult(createResult).sessionId as string;
+
+    const bpResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'set_breakpoint',
+      arguments: { sessionId, file: scriptPath, line: 11 } // [a, b] = [b, a];
+    }));
+    expect(bpResponse.success).toBe(true);
+
+    const startResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'start_debugging',
+      arguments: { sessionId, scriptPath, args: [] }
+    }));
+    expect(startResponse.success, JSON.stringify(startResponse)).toBe(true);
+
+    // Polled rather than slept: the retired suite waited a fixed 10 s here.
+    const variables = await pollUntil(async () => {
+      const vars = parseSdkToolResult(await mcpClient!.callTool({
+        name: 'get_local_variables',
+        arguments: { sessionId }
+      }));
+      const list = Array.isArray(vars.variables) ? (vars.variables as unknown[]) : [];
+      return list.length > 0 ? list : undefined;
+    }, 20000, 250);
+    expect(variables, 'no local variables reported at the line-11 stop').toBeDefined();
+
+    const stackResponse = parseSdkToolResult(await mcpClient!.callTool({
+      name: 'get_stack_trace',
+      arguments: { sessionId }
+    }));
+    const frames = Array.isArray(stackResponse.stackFrames) ? (stackResponse.stackFrames as unknown[]) : [];
+    expect(frames.length, JSON.stringify(stackResponse)).toBeGreaterThan(0);
+  }, 60000);
+
   it('should retrieve source context', async () => {
     const scriptPath = JS_SCRIPT_PATH;
     

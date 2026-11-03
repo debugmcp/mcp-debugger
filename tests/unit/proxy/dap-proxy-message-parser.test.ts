@@ -317,7 +317,7 @@ describe('MessageParser', () => {
       });
     });
 
-    describe('string-to-type coercion (Claude Code SSE bug workaround)', () => {
+    describe('string-to-type coercion (Claude Code double-stringify bug workaround)', () => {
       const basePayload = {
         cmd: 'init',
         sessionId: 'test-session',

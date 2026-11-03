@@ -165,7 +165,6 @@
     "@modelcontextprotocol/client": "^2.4.0",
     "@modelcontextprotocol/server": "^2.4.0",
     "@modelcontextprotocol/node": "^2.1.2",
-    "@modelcontextprotocol/server-legacy": "^2.4.0",
     "@modelcontextprotocol/core": "^2.4.0"
   },
   "optionalDependencies": {

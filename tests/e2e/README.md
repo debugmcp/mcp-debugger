@@ -4,10 +4,10 @@ This directory contains end-to-end smoke tests that verify the MCP debugger serv
 
 ## Test Files
 
-### 1. `mcp-server-smoke-sse.test.ts`
-- Tests SSE (Server-Sent Events) transport
+### 1. `mcp-server-smoke-http.test.ts`
+- Tests the Streamable HTTP transport (`http -p <port>`, the `/mcp` endpoint)
 - Uses dynamic port allocation to avoid conflicts
-- Verifies HTTP/SSE connection and debugging workflow
+- Verifies the HTTP connection and the Python debugging workflow
 - Tests spawning from different working directories
 
 ### 2. Docker smoke tests (`docker/` subdirectory)
@@ -95,25 +95,21 @@ This directory contains end-to-end smoke tests that verify the MCP debugger serv
   run` stops and reinstalls on its own anyway), and before each launch stops a leftover instance
   and removes that emulator's own adb forwards. Never runs on CI
 
-### 13. `mcp-server-smoke-javascript-sse.test.ts`
-- Tests JavaScript adapter over SSE transport
-- Validates SSE connection with JavaScript debugging workflow
-
-### 14. `comprehensive-mcp-tools.test.ts`
+### 13. `comprehensive-mcp-tools.test.ts`
 - Comprehensive tests for all MCP tool operations
 - Validates full debugging tool coverage end-to-end
 
-### 15. `debugpy-connection.test.ts`
+### 14. `debugpy-connection.test.ts`
 - Tests direct debugpy connection behavior
 - Validates DAP protocol communication with debugpy
 
-### 16. `smoke-test-utils.ts`
+### 15. `smoke-test-utils.ts`
 - Shared utilities for all smoke tests
 - Common debug sequence execution
-- SSE helper functions
+- HTTP server readiness helper (`waitForHealthEndpoint`)
 - Cross-platform compatibility utilities
 
-### 17. `rust-example-utils.ts`
+### 16. `rust-example-utils.ts`
 - Shared utilities for Rust E2E tests
 - Rust example project building and management
 
@@ -121,7 +117,7 @@ This directory contains end-to-end smoke tests that verify the MCP debugger serv
 - Shared utilities for Docker smoke tests
 - Container lifecycle management, health checks, and Docker availability detection
 
-### 18. NPX smoke tests (`npx/` subdirectory)
+### 17. NPX smoke tests (`npx/` subdirectory)
 - `npx-smoke-python.test.ts` - Tests Python debugging via the npx distribution
 - `npx-smoke-javascript.test.ts` - Tests JavaScript debugging via the npx distribution
 - `npx-smoke-rust.test.ts` - Tests Rust debugging via the npx distribution, which exercises
@@ -138,7 +134,7 @@ npm run test:e2e
 npm run test:e2e:smoke
 
 # Run individual smoke test
-npx vitest run tests/e2e/mcp-server-smoke-sse.test.ts
+npx vitest run tests/e2e/mcp-server-smoke-http.test.ts
 npx vitest run tests/e2e/docker/  # Docker smoke tests
 npx vitest run tests/e2e/mcp-server-smoke-javascript.test.ts
 npx vitest run tests/e2e/mcp-server-smoke-python.test.ts
@@ -149,7 +145,6 @@ npx vitest run tests/e2e/mcp-server-smoke-java-attach.test.ts
 npx vitest run tests/e2e/mcp-server-smoke-java-evaluate.test.ts
 npx vitest run tests/e2e/mcp-server-smoke-java-inner-class.test.ts
 npx vitest run tests/e2e/mcp-server-smoke-dotnet.test.ts
-npx vitest run tests/e2e/mcp-server-smoke-javascript-sse.test.ts
 npx vitest run tests/e2e/comprehensive-mcp-tools.test.ts
 npx vitest run tests/e2e/debugpy-connection.test.ts
 npx vitest run tests/e2e/npx/  # NPX smoke tests
@@ -182,7 +177,7 @@ npx vitest run tests/e2e/npx/  # NPX smoke tests
 - `cd examples/dart/dart_probe && dart pub get` once; with the winget SDK keep the checkout out of `%LOCALAPPDATA%\Temp` (package:test cannot start from there)
 - Tests skip automatically if no Dart SDK is found
 
-### For SSE Tests
+### For HTTP Transport Tests
 - No special requirements (uses dynamic port allocation)
 
 ### For Container Tests
@@ -192,7 +187,7 @@ npx vitest run tests/e2e/npx/  # NPX smoke tests
 ## Test Coverage
 
 The smoke tests provide comprehensive coverage of:
-1. **Transport Methods**: stdio, SSE, JavaScript-SSE, containerized stdio
+1. **Transport Methods**: stdio, Streamable HTTP, containerized stdio
 2. **Language Adapters**: All 11 adapters (Python, JavaScript, Rust, Go, Java, .NET/C#, Ruby, C/C++, COBOL, Dart/Flutter, Mock)
 3. **Path Resolution**: Different working directories, path translation, absolute vs relative paths
 4. **Environment Handling**: Container environment variables, volume mounts
@@ -224,7 +219,7 @@ The smoke tests provide comprehensive coverage of:
 
 ## Troubleshooting
 
-### SSE Test Failures
+### HTTP Transport Test Failures
 - Check if port is already in use (tests use dynamic ports to minimize this)
 - Verify the server health endpoint is responding
 - Check server logs for startup errors

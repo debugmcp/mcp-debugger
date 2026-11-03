@@ -54,8 +54,8 @@ export function isIntentionalTransportAbort(err) {
  *   StdioServerTransport only attaches 'data'/'error' listeners, and its 'data'
  *   listener keeps the stream flowing so 'end' fires at EOF.
  * @param {{ stop(): Promise<void> }} deps.backend
- *   Backend manager to stop before exit. stop() handles all three transport
- *   modes (http/sse/stdio) including a backend that is still starting.
+ *   Backend manager to stop before exit. stop() handles both transport
+ *   modes (http/stdio) including a backend that is still starting.
  * @param {{ onclose?: (() => void) | undefined }} [deps.server]
  *   MCP Server whose onclose is chained (not replaced). Note: hook the SERVER,
  *   never transport.onclose — Protocol.connect() owns transport.onclose and

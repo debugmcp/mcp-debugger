@@ -3,13 +3,13 @@
  *
  * Ensures that debug operations produce identical results across:
  * - STDIO transport
- * - SSE transport
+ * - Streamable HTTP transport
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, ChildProcess } from 'child_process';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
-import { Client, SSEClientTransport } from '@modelcontextprotocol/client';
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 
@@ -39,13 +39,13 @@ interface TransportTestResult {
 }
 
 class TransportTester {
-  private sseServer: ChildProcess | null = null;
+  private httpServer: ChildProcess | null = null;
 
-  async setupSSETransport(port: number): Promise<void> {
+  async setupHttpTransport(port: number): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.sseServer = spawn('node', [
+      this.httpServer = spawn('node', [
         path.join(PROJECT_ROOT, 'dist', 'index.js'),
-        'sse',
+        'http',
         '-p', port.toString(),
         '--log-level', 'error'
       ], {
@@ -56,10 +56,10 @@ class TransportTester {
 
       const timeout = setTimeout(() => {
         clearInterval(checkReady);
-        if (this.sseServer && !this.sseServer.killed) {
-          this.sseServer.kill('SIGKILL');
+        if (this.httpServer && !this.httpServer.killed) {
+          this.httpServer.kill('SIGKILL');
         }
-        reject(new Error('SSE server startup timeout'));
+        reject(new Error('HTTP server startup timeout'));
       }, 15000);
 
       // Wait for server to be ready
@@ -76,7 +76,7 @@ class TransportTester {
         }
       }, 500);
 
-      this.sseServer.on('error', (err) => {
+      this.httpServer.on('error', (err) => {
         clearInterval(checkReady);
         clearTimeout(timeout);
         reject(err);
@@ -86,25 +86,25 @@ class TransportTester {
       // collision), surface the real failure immediately instead of waiting
       // out the full startup timeout.
       let stderrBuf = '';
-      this.sseServer.stderr?.on('data', (d) => { stderrBuf += d.toString(); });
-      this.sseServer.on('exit', (code) => {
+      this.httpServer.stderr?.on('data', (d) => { stderrBuf += d.toString(); });
+      this.httpServer.on('exit', (code) => {
         if (code !== null && code !== 0) {
           clearInterval(checkReady);
           clearTimeout(timeout);
-          reject(new Error(`SSE server exited (code ${code}) before ready: ${stderrBuf.trim()}`));
+          reject(new Error(`HTTP server exited (code ${code}) before ready: ${stderrBuf.trim()}`));
         }
       });
     });
   }
   
-  async teardownSSE(): Promise<void> {
-    if (this.sseServer) {
-      this.sseServer.kill('SIGTERM');
+  async teardownHttp(): Promise<void> {
+    if (this.httpServer) {
+      this.httpServer.kill('SIGTERM');
       await new Promise(resolve => setTimeout(resolve, 1000));
-      if (!this.sseServer.killed) {
-        this.sseServer.kill('SIGKILL');
+      if (!this.httpServer.killed) {
+        this.httpServer.kill('SIGKILL');
       }
-      this.sseServer = null;
+      this.httpServer = null;
     }
   }
 
@@ -271,38 +271,38 @@ class TransportTester {
     }
   }
 
-  async testSSETransport(): Promise<TransportTestResult> {
-    console.log('\nTesting SSE transport...');
+  async testHttpTransport(): Promise<TransportTestResult> {
+    console.log('\nTesting HTTP transport...');
     try {
       const port = 4500 + Math.floor(Math.random() * 500);
-      await this.setupSSETransport(port);
+      await this.setupHttpTransport(port);
 
       const client = new Client({
-        name: 'cross-transport-sse-test',
+        name: 'cross-transport-http-test',
         version: '1.0.0'
       });
 
-      const transport = new SSEClientTransport(new URL(`http://127.0.0.1:${port}/sse`));
+      const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`));
       await client.connect(transport);
-      console.log('  Connected via SSE');
+      console.log('  Connected via Streamable HTTP');
 
       const result = await this.runDebugSequence(client);
 
       await client.close();
 
       return {
-        transport: 'SSE',
+        transport: 'HTTP',
         success: result.errors.length === 0,
         result
       };
     } catch (error) {
       return {
-        transport: 'SSE',
+        transport: 'HTTP',
         success: false,
         error: error instanceof Error ? error.message : String(error)
       };
     } finally {
-      await this.teardownSSE();
+      await this.teardownHttp();
     }
   }
 
@@ -327,7 +327,7 @@ describeStress('Cross-Transport Parity Tests', () => {
   });
 
   afterAll(async () => {
-    await tester.teardownSSE();
+    await tester.teardownHttp();
   });
 
   it('should produce identical results across transports', async () => {
@@ -337,9 +337,9 @@ describeStress('Cross-Transport Parity Tests', () => {
     const stdioResult = await tester.testStdioTransport();
     results.push(stdioResult);
     
-    // Test SSE transport
-    const sseResult = await tester.testSSETransport();
-    results.push(sseResult);
+    // Test HTTP transport
+    const httpResult = await tester.testHttpTransport();
+    results.push(httpResult);
     
     // Display results summary
     console.log('\n========== RESULTS SUMMARY ==========');
@@ -368,21 +368,21 @@ describeStress('Cross-Transport Parity Tests', () => {
     // Compare results for parity
     if (results.length >= 2 && allSucceeded) {
       const stdioData = results.find(r => r.transport === 'STDIO')?.result;
-      const sseData = results.find(r => r.transport === 'SSE')?.result;
+      const httpData = results.find(r => r.transport === 'HTTP')?.result;
       
-      if (stdioData && sseData) {
+      if (stdioData && httpData) {
         // Key metrics should match
-        expect(sseData.sessionCreated).toBe(stdioData.sessionCreated);
-        expect(sseData.breakpointSet).toBe(stdioData.breakpointSet);
-        expect(sseData.debugStarted).toBe(stdioData.debugStarted);
+        expect(httpData.sessionCreated).toBe(stdioData.sessionCreated);
+        expect(httpData.breakpointSet).toBe(stdioData.breakpointSet);
+        expect(httpData.debugStarted).toBe(stdioData.debugStarted);
         
         // Stack frames should be similar (allowing for minor differences)
-        expect(sseData.stackFrameCount).toBeGreaterThan(0);
+        expect(httpData.stackFrameCount).toBeGreaterThan(0);
         expect(stdioData.stackFrameCount).toBeGreaterThan(0);
-        expect(Math.abs(sseData.stackFrameCount - stdioData.stackFrameCount)).toBeLessThanOrEqual(1);
+        expect(Math.abs(httpData.stackFrameCount - stdioData.stackFrameCount)).toBeLessThanOrEqual(1);
         
         // Variables should match
-        expect(sseData.variableCount).toBe(stdioData.variableCount);
+        expect(httpData.variableCount).toBe(stdioData.variableCount);
       }
     }
   }, TEST_TIMEOUT);

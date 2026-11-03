@@ -6,24 +6,23 @@
  * A lightweight MCP proxy that sits between Claude Code (stdio) and mcp-debugger,
  * allowing the backend to be killed and restarted without Claude Code seeing a disconnection.
  *
- * Architecture (three backend transport modes):
+ * Architecture (two backend transport modes):
  *   Claude Code <--stdio--> dev-proxy.mjs (stable) <--HTTP---> mcp-debugger (Streamable HTTP, default)
- *   Claude Code <--stdio--> dev-proxy.mjs (stable) <--SSE----> mcp-debugger (legacy, deprecated)
  *   Claude Code <--stdio--> dev-proxy.mjs (stable) <--stdio--> mcp-debugger (restartable)
  *
  * Configuration (all env vars, all optional):
- *   DEV_PROXY_PORT               - Backend HTTP port (default: 3001, http/sse modes only)
+ *   DEV_PROXY_PORT               - Backend HTTP port (default: 3001, http mode only)
  *   DEV_PROXY_BUILD_CMD          - Build command (default: "npm run build")
  *   DEV_PROXY_BUILD_TIMEOUT_MS   - Build timeout in milliseconds (default: 120000)
  *   DEV_PROXY_ROOT               - Project root (default: auto-detected)
- *   DEV_PROXY_BACKEND_TRANSPORT  - "http" (default), "sse" (legacy), or "stdio"
+ *   DEV_PROXY_BACKEND_TRANSPORT  - "http" (default) or "stdio"; anything else refuses to start
  *   DEV_PROXY_BACKEND_CMD        - Custom backend command override (e.g. "docker run ...")
  *   DEV_PROXY_DISCOVERY_WAIT_MS  - How long a request waits for a backend start
  *                                  or restart to settle (default: 15000)
  */
 
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
-import { Client, SSEClientTransport, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { Server } from '@modelcontextprotocol/server';
 import { spawn } from 'child_process';
@@ -45,7 +44,12 @@ import {
   isDockerRunInvocation,
   removeOwnedDockerContainers,
 } from './docker-backend.mjs';
-import { buildBackendEnvironment, resolveBackendPort, updateBackendEnvOverrides } from './backend-env.mjs';
+import {
+  buildBackendEnvironment,
+  resolveBackendPort,
+  resolveBackendTransport,
+  updateBackendEnvOverrides,
+} from './backend-env.mjs';
 import { LifecycleQueue, queueGenerationCleanup } from './lifecycle-queue.mjs';
 import { runBuild } from './build-runner.mjs';
 import { ensurePortFree, forceKillPid } from './process-cleanup.mjs';
@@ -61,7 +65,10 @@ const __dirname = path.dirname(__filename);
 const BACKEND_PORT = resolveBackendPort(process.env.DEV_PROXY_PORT);
 const BUILD_CMD = process.env.DEV_PROXY_BUILD_CMD || 'npm run build';
 const PROJECT_ROOT = process.env.DEV_PROXY_ROOT || path.resolve(__dirname, '..', '..');
-const BACKEND_TRANSPORT = process.env.DEV_PROXY_BACKEND_TRANSPORT || 'http';
+// Validated up front: an unrecognised value used to fall through to the
+// since-removed legacy transport's client silently. A throw here exits the
+// proxy with the message on stderr.
+const BACKEND_TRANSPORT = resolveBackendTransport(process.env.DEV_PROXY_BACKEND_TRANSPORT);
 const BACKEND_CMD = process.env.DEV_PROXY_BACKEND_CMD || null;
 
 const parsedTimeout = parseInt(process.env.DEV_PROXY_BUILD_TIMEOUT_MS || '', 10);
@@ -159,7 +166,7 @@ class BackendManager {
     this.stdioPid = null;
     /** @type {number | null} */
     this.startedAt = null;
-    /** @type {'http' | 'sse' | 'stdio'} */
+    /** @type {'http' | 'stdio'} */
     this.backendTransport = BACKEND_TRANSPORT;
     /** @type {Record<string, string>} */
     this.backendEnvOverrides = {};
@@ -189,8 +196,6 @@ class BackendManager {
 
       if (this.backendTransport === 'stdio') {
         invocation = { command: process.execPath, args: [entryPoint, 'stdio'] };
-      } else if (this.backendTransport === 'sse') {
-        invocation = { command: process.execPath, args: [entryPoint, 'sse', '--port', String(BACKEND_PORT)] };
       } else {
         // http (default): Streamable HTTP transport
         invocation = { command: process.execPath, args: [entryPoint, 'http', '--port', String(BACKEND_PORT)] };
@@ -240,7 +245,7 @@ class BackendManager {
         throw err;
       }
     } else {
-      // HTTP / SSE mode: we spawn the child manually, wait for health, then connect
+      // HTTP mode: we spawn the child manually, wait for health, then connect
       log(`Starting backend (${this.backendTransport}) on port ${BACKEND_PORT}...`);
 
       // Kill any orphan process holding the port from a previous crash
@@ -271,7 +276,7 @@ class BackendManager {
         this._onChildExit(spawnedChild);
       });
 
-      // Wait for /health to respond, then connect MCP Client (HTTP or SSE)
+      // Wait for /health to respond, then connect MCP Client (Streamable HTTP)
       // If either fails, kill the child so it doesn't become an orphan holding the port
       try {
         await this._waitForHealth();
@@ -297,8 +302,9 @@ class BackendManager {
 
   stop() {
     // Terminal: queued restarts must not resurrect a backend after stdin EOF.
-    // Aborting SSE's live fetch can close the transport before queued _stop()
-    // runs. Mark the intent first so it cannot take the backend-crash path.
+    // Aborting the HTTP transport's live stream can close the transport before
+    // queued _stop() runs. Mark the intent first so it cannot take the
+    // backend-crash path.
     if (this.transportCloseState) this.transportCloseState.expected = true;
     this.shutdownController.abort();
     return this.lifecycleQueue.run(() => this._stop());
@@ -329,8 +335,8 @@ class BackendManager {
     // Close MCP client first (for stdio, this also kills the child via AbortController)
     await this._disconnectClient();
 
-    if (this.backendTransport === 'sse' || this.backendTransport === 'http') {
-      // HTTP / SSE mode: manually kill the child we spawned
+    if (this.backendTransport === 'http') {
+      // HTTP mode: manually kill the child we spawned
       await this._killChild();
     } else {
       // stdio mode: extra safety — force-kill if the process lingers
@@ -486,7 +492,7 @@ class BackendManager {
   // ---- Internal helpers ----------------------------------------------------
 
   _onChildExit(exitedChild) {
-    // Used for HTTP / SSE modes (manually spawned child)
+    // Used for HTTP mode (manually spawned child)
     if (this.child !== exitedChild) return;
     // Cleared for every exit, not only a crash while 'running' — _waitForHealth
     // reads this to notice a child that died before it ever served /health.
@@ -500,7 +506,7 @@ class BackendManager {
   }
 
   async _waitForHealth() {
-    // Used for HTTP / SSE modes
+    // Used for HTTP mode
     const url = `http://127.0.0.1:${BACKEND_PORT}/health`;
     const deadline = Date.now() + HEALTH_POLL_TIMEOUT_MS;
 
@@ -589,8 +595,9 @@ class BackendManager {
       this.stdioPid = transport.pid;
       await connecting;
       log('MCP Client connected to backend via stdio');
-    } else if (this.backendTransport === 'http') {
-      // Streamable HTTP mode: SDK handles reconnection internally; no phantom hack needed
+    } else {
+      // Streamable HTTP mode (the only other value resolveBackendTransport
+      // admits): SDK handles reconnection internally.
       const mcpUrl = new URL(`http://127.0.0.1:${BACKEND_PORT}/mcp`);
       const transport = new StreamableHTTPClientTransport(mcpUrl);
 
@@ -615,53 +622,6 @@ class BackendManager {
 
       await this.mcpClient.connect(transport, { signal: this.shutdownController.signal });
       log('MCP Client connected to backend via Streamable HTTP');
-    } else {
-      // SSE mode (legacy): connect to running HTTP server
-      const sseUrl = new URL(`http://127.0.0.1:${BACKEND_PORT}/sse`);
-
-      // Block EventSource auto-reconnection: eventsource@4.0.0 reconnects when the
-      // SSE stream reader returns done, creating a phantom 2nd session that overwrites
-      // the 1st transport in Protocol._transport. Returning 204 on reconnect attempts
-      // causes EventSource to permanently close (no further reconnection per SSE spec).
-      let initialFetchDone = false;
-      const transport = new SSEClientTransport(sseUrl, {
-        eventSourceInit: {
-          fetch: async (url, init) => {
-            if (initialFetchDone) {
-              log('Blocking EventSource auto-reconnection (returning 204)');
-              return new Response(null, { status: 204 });
-            }
-            const signal = init?.signal
-              ? AbortSignal.any([init.signal, this.shutdownController.signal])
-              : this.shutdownController.signal;
-            const resp = await globalThis.fetch(url, { ...init, signal });
-            initialFetchDone = true;
-            return resp;
-          },
-        },
-      });
-
-      transport.onerror = (err) => {
-        if (!this._shouldSuppressTransportError(closeState, err)) {
-          log(`SSE transport error: ${err.message}`);
-        }
-      };
-
-      transport.onclose = () => {
-        log('SSE transport closed');
-        if (!closeState.expected && this.transportCloseState === closeState && this.state === 'running') {
-          this.state = 'stopped';
-          this.startedAt = null;
-          log('Killing orphaned child process after SSE transport close');
-          const child = this.child;
-          queueGenerationCleanup(this.lifecycleQueue,
-            () => this.transportCloseState === closeState,
-            () => this._killChild(child)).catch(() => {});
-        }
-      };
-
-      await this.mcpClient.connect(transport, { signal: this.shutdownController.signal });
-      log('MCP Client connected to backend via SSE');
     }
   }
 
@@ -683,7 +643,7 @@ class BackendManager {
   }
 
   async _killChild(child = this.child) {
-    // Used for HTTP / SSE modes (manually spawned child)
+    // Used for HTTP mode (manually spawned child)
     if (!child) {
       // Even with no child, a Docker container may be orphaned on our port
       await this._killDockerContainer();

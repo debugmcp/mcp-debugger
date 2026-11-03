@@ -63,7 +63,7 @@ async function bundle() {
     
     const consoleSilencer = `#!/usr/bin/env node
 // CRITICAL: Console silencing MUST be first - before ANY code runs
-// This prevents stdout pollution in transport modes (stdio/SSE) which breaks MCP protocol
+// This prevents stdout pollution in transport modes (stdio/http) which breaks MCP protocol
 (function() {
   const stripQuotes = (value) => typeof value === 'string'
     ? value.toLowerCase().replace(/^["']|["']$/g, '')
@@ -86,9 +86,8 @@ async function bundle() {
   };
 
   const hasStdio = process.argv.some(arg => matchesKeyword(arg, 'stdio'));
-  const hasSse = process.argv.some(arg => matchesKeyword(arg, 'sse'));
-  
-  if (hasStdio || hasSse || process.env.CONSOLE_OUTPUT_SILENCED === '1') {
+
+  if (hasStdio || process.env.CONSOLE_OUTPUT_SILENCED === '1') {
     const noop = () => {};
     console.log = noop;
     console.error = noop;

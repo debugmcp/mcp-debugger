@@ -11,7 +11,7 @@ import path from 'path';
 import fs from 'fs';
 import {
   ROOT, waitForHealth, sleep,
-  connectSSEClient, callTool, callToolSafe,
+  connectHttpClient, callTool, callToolSafe,
   createTestRunner, assert, assertDefined, findAvailablePort
 } from './helpers.mjs';
 
@@ -60,7 +60,7 @@ async function main() {
 
   try {
     execSync(
-      `docker run -d --name ${containerName} -p ${hostPort}:3001 -v "${hostPath}:/workspace" mcp-debugger:local sse -p 3001`,
+      `docker run -d --name ${containerName} -p ${hostPort}:3001 -v "${hostPath}:/workspace" mcp-debugger:local http -p 3001`,
       { stdio: 'pipe', timeout: 30000 }
     );
     console.log('  Container started');
@@ -87,7 +87,7 @@ async function main() {
     console.log('  Container healthy\n');
 
     // Connect MCP client
-    client = await connectSSEClient(hostPort, 'exploratory-docker');
+    client = await connectHttpClient(hostPort, 'exploratory-docker');
     console.log('  MCP client connected\n');
 
     // ========== Test 2.1: List Supported Languages ==========

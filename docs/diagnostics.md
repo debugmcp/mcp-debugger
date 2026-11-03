@@ -247,11 +247,11 @@ The runtime-affecting variables the server and its adapters read (the [developme
 | `MCP_CONTAINER` | `true` marks container mode (set by the Docker image) |
 | `MCP_WORKSPACE_ROOT` | Path-resolution root in container mode (image default `/workspace`) |
 | `DEBUG_MCP_LOG_LEVEL` | Server log level (`error`, `warn`, `info`, `debug`) |
-| `MCP_EXIT_ON_STDIN_CLOSE` | `1`/`true`: an `http`/`sse` server exits when its stdin pipe closes — a parent-death signal for supervised backends |
+| `MCP_EXIT_ON_STDIN_CLOSE` | `1`/`true`: an `http` server exits when its stdin pipe closes — a parent-death signal for supervised backends |
 | `MCP_HTTP_STALE_SESSION_MS` | Idle time before an HTTP session that never opened an SSE stream is reaped (default `1800000`; `0` disables that path) |
 | `MCP_HTTP_STREAM_LOST_SESSION_MS` | Idle time before an HTTP session whose SSE stream dropped and never returned is reaped — a crashed SDK client's debug sessions, and any paused attach target they hold, are released this soon (default `120000`; `0` falls back to the stale window; issue #658) |
 | `MCP_HTTP_STALE_SWEEP_INTERVAL_MS` | How often that reap sweep runs (default `60000`) |
-| `MCP_HTTP_ALLOWED_HOSTS` | Comma-separated `Host`/`Origin` hostnames the `http` (and deprecated `sse`) endpoint accepts besides the loopback trio (same as repeating `--allowed-host`); an unusable entry stops startup with the entry named |
+| `MCP_HTTP_ALLOWED_HOSTS` | Comma-separated `Host`/`Origin` hostnames the `http` endpoint accepts besides the loopback trio (same as repeating `--allowed-host`); an unusable entry stops startup with the entry named |
 | `DAP_TRACE` / `DAP_TRACE_FILE` | Enable per-session DAP frame capture / choose its file |
 | `DEBUG_MCP_NO_REDACT` | Disable secret redaction in captured output (diagnosis only) |
 | `DEBUG_MCP_BP_ADDRESSING` | `content` (default) \| `assert` \| `line` — how much breakpoint addressing `set_breakpoint` exposes (modes are cumulative) |

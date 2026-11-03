@@ -126,7 +126,7 @@ tests/
 ├── e2e/                       # End-to-end tests
 │   ├── mcp-server-smoke-*.ts  # Per-language smoke tests (python, javascript, ruby, rust, go,
 │   │                          #   java, dotnet, cpp, cobol, dart) plus attach, function-breakpoint,
-│   │                          #   SSE, restart and stale-reap variants
+│   │                          #   HTTP-transport, restart and stale-reap variants
 │   ├── docker/                # Docker container tests (python, javascript, rust, cpp, cobol,
 │   │                          #   dart, cpp-attach, ruby-attach, entrypoint)
 │   └── npx/                   # NPX distribution tests (python, javascript, rust)
@@ -139,10 +139,10 @@ tests/
 │   └── python/                # Python debuggee scripts for attach/E2E tests
 │
 ├── integration/rust/          # Rust cross-component integration tests
-├── manual/                    # Manual/interactive test scripts (SSE, debugpy, js-debug)
+├── manual/                    # Manual/interactive test scripts (dev-proxy orphan check, debugpy launch)
 │
 ├── proxy/                     # DAP proxy tests (worker, child sessions, client behavior)
-├── stress/                    # Stress tests (SSE stress, cross-transport parity)
+├── stress/                    # Stress tests (cross-transport parity)
 │
 ├── test-utils/                # Shared test utilities
 │   ├── fakes/                 # Compile-checked fakes (classes that `implements` an interface)
@@ -157,7 +157,7 @@ tests/
 │   ├── adapter-python/        # Python debug adapter tests
 │   ├── adapters/              # Adapter loader, registry, lease, JS/mock adapter tests
 │   ├── changelog/             # Changelog fragment validation
-│   ├── cli/                   # CLI command tests (stdio, sse, http, doctor, check-rust-binary,
+│   ├── cli/                   # CLI command tests (stdio, http, doctor, check-rust-binary,
 │   │                          #   setup, version)
 │   ├── container/             # Dependency injection tests
 │   ├── dap-core/              # DAP handlers and state tests
@@ -194,13 +194,13 @@ packages/
 
 **Integration tests** (`tests/integration/`, `tests/adapters/*/integration/`) test interactions between components — e.g., a full debug session lifecycle through the adapter layer for a specific language.
 
-**E2E tests** (`tests/e2e/`) run complete debugging workflows against real debug runtimes. Includes per-language smoke tests, Docker container tests, NPX distribution tests, and SSE transport tests.
+**E2E tests** (`tests/e2e/`) run complete debugging workflows against real debug runtimes. Includes per-language smoke tests, Docker container tests, NPX distribution tests, and an HTTP transport smoke test.
 
 **Proxy tests** (`tests/proxy/`) test the DAP proxy worker, child session manager, and DAP client behavior.
 
-**Stress tests** (`tests/stress/`) test SSE connection handling under load and cross-transport parity. Gated behind `RUN_STRESS_TESTS=true`.
+**Stress tests** (`tests/stress/`) test cross-transport parity (stdio against Streamable HTTP). Gated behind `RUN_STRESS_TESTS=true`.
 
-**Manual tests** (`tests/manual/`) are interactive scripts for ad-hoc debugging of SSE connections, debugpy, and js-debug transport.
+**Manual tests** (`tests/manual/`) are interactive scripts for ad-hoc checks of the dev proxy's orphan handling and the debugpy launch path.
 
 **Validation tests** (`tests/validation/`) verify protocol-level correctness (e.g., debugpy breakpoint message formats).
 

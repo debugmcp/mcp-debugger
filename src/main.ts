@@ -17,7 +17,6 @@ import { setupErrorHandlers } from './cli/error-handlers.js';
 import {
   createCLI,
   setupStdioCommand,
-  setupSSECommand,
   setupHttpCommand,
   setupCheckRustBinaryCommand,
   setupDoctorCommand,
@@ -66,15 +65,9 @@ export async function main(): Promise<void> {
     return handleStdioCommand(options, { logger, serverFactory: createDebugMcpServer });
   });
 
-  // The SSE/HTTP command modules pull in express and the SDK's HTTP transport
-  // stacks; import them only when their subcommand actually runs so stdio mode
-  // (the common case) never pays for them (issue #400).
-  setupSSECommand(program, async (options) => {
-    kickStartupJanitor();
-    const { handleSSECommand } = await import('./cli/sse-command.js');
-    return handleSSECommand(options, { logger, serverFactory: createDebugMcpServer });
-  });
-
+  // The HTTP command module pulls in express and the SDK's HTTP transport
+  // stack; import it only when the subcommand actually runs so stdio mode
+  // (the common case) never pays for it (issue #400).
   setupHttpCommand(program, async (options) => {
     kickStartupJanitor();
     const { handleHttpCommand } = await import('./cli/http-command.js');

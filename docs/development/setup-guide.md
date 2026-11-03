@@ -197,21 +197,13 @@ node dist/index.js stdio
 node dist/index.js http -p 3001
 ```
 
-#### SSE Mode (deprecated)
-
-SSE transport is deprecated -- use the `http` subcommand instead.
-
-```bash
-node dist/index.js sse -p 3001
-```
-
 #### With Debug Logging
 
 ```bash
 node dist/index.js http -p 3001 --log-level debug --log-file ./logs/debug.log
 ```
 
-Note: Console output is unconditionally silenced at process startup for all transport modes (STDIO, HTTP, and SSE) to prevent any stray output from corrupting protocol communication. Use `--log-file` to capture logs.
+Note: Console output is unconditionally silenced at process startup for all transport modes (STDIO and HTTP) to prevent any stray output from corrupting protocol communication. Use `--log-file` to capture logs.
 
 ## VS Code Setup
 
@@ -252,10 +244,10 @@ Create `.vscode/launch.json`:
     {
       "type": "node",
       "request": "launch",
-      "name": "Debug Server (SSE)",
+      "name": "Debug Server (HTTP)",
       "skipFiles": ["<node_internals>/**"],
       "program": "${workspaceFolder}/dist/index.js",
-      "args": ["sse", "-p", "6111", "--log-level", "debug"],
+      "args": ["http", "-p", "6111", "--log-level", "debug"],
       "outFiles": ["${workspaceFolder}/dist/**/*.js"],
       "preLaunchTask": "npm: build"
     },

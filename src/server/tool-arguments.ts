@@ -62,8 +62,8 @@ export interface ToolArguments {
  * Schema-driven type coercion for MCP tool arguments.
  *
  * Works around a known Claude Code bug (anthropics/claude-code#11359) where
- * SSE-transport tool arguments arrive as strings instead of their declared
- * JSON-Schema types.  Called once per request on the fresh args object — no
+ * tool arguments arrive as strings instead of their declared JSON-Schema
+ * types over a network transport.  Called once per request on the fresh args object — no
  * shared state is mutated.
  */
 export const TOOL_ARG_EXPECTED_TYPES: Record<string, 'number' | 'boolean' | 'object' | 'array'> = {
