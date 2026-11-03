@@ -206,6 +206,8 @@ to inspect these decisions inside a running mcp-debugger server.
 
 ### Child Process Debugging
 
+> One child is adopted today and every further fork is released to run undebugged ([#501](https://github.com/debugmcp/mcp-debugger/issues/501)); the [session tree](../architecture/session-tree.md) design makes each fork a session of its own, from the facts measured in [spike-notes-forks.md](spike-notes-forks.md).
+
 The adapter can attach to child processes, but `autoAttachChildProcesses` defaults to `false`. To enable automatic child process attachment, pass it explicitly in `dapLaunchArgs`:
 
 ```javascript

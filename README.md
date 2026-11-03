@@ -461,6 +461,7 @@ Then get the local variables:
 - 🔧 [Adapter Development](./docs/architecture/adapter-development-guide.md) – Add new languages
 - 🔌 [Dynamic Loading Architecture](./docs/architecture/dynamic-loading-architecture.md) – Runtime discovery, lazy loading, caching
 - 🧩 [Adapter API Reference](./docs/architecture/adapter-api-reference.md) – Adapter, factory, loader, and registry contracts
+- 🌳 [Session Tree Design](./docs/architecture/session-tree.md) – A debuggee's child processes as debug sessions (design for issue #1005, not yet shipped)
 - 🔄 [CHANGELOG](./CHANGELOG.md) – Release history and upgrade notes
 - 🐍 [Python Debugging Guide](./docs/python/README.md) – Python-specific features
 - 💎 [Ruby Debugging Guide](./docs/ruby/README.md) – Ruby debugging with `rdbg`, including remote attach
