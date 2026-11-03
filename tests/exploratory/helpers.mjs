@@ -1,8 +1,7 @@
 /**
  * Shared helpers for exploratory testing
  */
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { Client, SSEClientTransport } from '@modelcontextprotocol/client';
 import net from 'net';
 import path from 'path';
 import { fileURLToPath } from 'url';

@@ -5,7 +5,7 @@
  * DebugMcpServer delegates that no longer exist.)
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { McpError, ErrorCode as McpErrorCode } from '@modelcontextprotocol/sdk/types.js';
+import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import { DotnetAdapterPolicy, SessionLifecycleState } from '@debugmcp/shared';
 import {
   getStackTraceTool,
@@ -409,7 +409,7 @@ describe('inspection tool handlers', () => {
 
     it('does not classify an untyped McpError from its message text', async () => {
       ctx.validateSession = vi.fn().mockImplementation(() => {
-        throw new McpError(McpErrorCode.InvalidRequest, 'Session is not paused');
+        throw new ProtocolError(ProtocolErrorCode.InvalidRequest, 'Session is not paused');
       });
 
       await expect(handleGetLocalVariables(ctx, {

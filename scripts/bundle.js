@@ -34,7 +34,7 @@ async function bundle() {
       entryPoints: ['dist/index.js'],
       bundle: true,
       platform: 'node',
-      target: 'node18',
+      target: 'node22',
       format: 'cjs',
       outfile: 'dist/bundle.cjs',
       define: {

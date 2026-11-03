@@ -10,8 +10,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawn, ChildProcess } from 'child_process';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { Client, SSEClientTransport } from '@modelcontextprotocol/client';
 import * as path from 'path';
 import * as net from 'net';
 

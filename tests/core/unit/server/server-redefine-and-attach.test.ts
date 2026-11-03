@@ -2,9 +2,8 @@
  * Tests for hot_reload tool and attach stopOnEntry behavior
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { McpError, ErrorCode as McpErrorCode } from '@modelcontextprotocol/sdk/types.js';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+import { ProtocolError, Server, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { DebugSessionInfo, DebugLanguage, SessionState } from '@debugmcp/shared';
@@ -24,8 +23,9 @@ import {
   type MockSessionManager
 } from './server-test-helpers.js';
 
-vi.mock('@modelcontextprotocol/sdk/server/index.js');
-vi.mock('@modelcontextprotocol/sdk/server/stdio.js');
+vi.mock('@modelcontextprotocol/server', async () =>
+  (await import('../../../test-utils/mocks/sdk-server-module.js')).sdkServerModuleMock());
+vi.mock('@modelcontextprotocol/server/stdio');
 vi.mock('../../../../src/session/session-manager.js');
 vi.mock('../../../../src/container/dependencies.js');
 
@@ -951,7 +951,7 @@ describe('hot_reload and attach stopOnEntry tests', () => {
 
     it('rethrows unrelated errors', async () => {
       mockSessionManager.detachFromProcess.mockRejectedValue(
-        new McpError(McpErrorCode.InternalError, 'adapter exploded mid-flight')
+        new ProtocolError(ProtocolErrorCode.InternalError, 'adapter exploded mid-flight')
       );
 
       await expect(callDetach({ sessionId: 'sess-1' })).rejects.toThrow(/adapter exploded/);

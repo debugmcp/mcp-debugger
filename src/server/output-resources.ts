@@ -7,14 +7,7 @@
  * resources/updated pings as output arrives; structured/cursor access is
  * available via the get_output tool.
  */
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import {
-  ListResourcesRequestSchema,
-  ReadResourceRequestSchema,
-  SubscribeRequestSchema,
-  UnsubscribeRequestSchema,
-  ErrorCode as McpErrorCode
-} from '@modelcontextprotocol/sdk/types.js';
+import { Server, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import { ILogger, type IFileSystem } from '@debugmcp/shared';
 import { WireMcpError } from '../errors/debug-errors.js';
 import type { SessionManager } from '../session/session-manager.js';
@@ -132,7 +125,7 @@ export function registerResourceHandlers(
   notifier: OutputResourceNotifier,
   fileSystem: Pick<IFileSystem, 'readTail'>
 ): void {
-  server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  server.setRequestHandler('resources/list', async () => {
     const sessions = sessionManager.getAllSessions();
     return {
       resources: sessions.flatMap(session => {
@@ -155,18 +148,18 @@ export function registerResourceHandlers(
     };
   });
 
-  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  server.setRequestHandler('resources/read', async (request) => {
     const uri = request.params.uri;
     const outputSessionId = parseOutputResourceUri(uri);
     const proxyLogSessionId = parseProxyLogResourceUri(uri);
     const sessionId = outputSessionId ?? proxyLogSessionId;
     const session = sessionId ? sessionManager.getSession(sessionId) : undefined;
     if (!session) {
-      throw new WireMcpError(McpErrorCode.InvalidParams, `Unknown resource: ${uri}`);
+      throw new WireMcpError(ProtocolErrorCode.InvalidParams, `Unknown resource: ${uri}`);
     }
     if (proxyLogSessionId) {
       if (!session.logDir) {
-        throw new WireMcpError(McpErrorCode.InvalidParams, `Unknown resource: ${uri}`);
+        throw new WireMcpError(ProtocolErrorCode.InvalidParams, `Unknown resource: ${uri}`);
       }
       const text = await readProxyLogTail(
         fileSystem,
@@ -186,17 +179,17 @@ export function registerResourceHandlers(
     };
   });
 
-  server.setRequestHandler(SubscribeRequestSchema, async (request) => {
+  server.setRequestHandler('resources/subscribe', async (request) => {
     const uri = request.params.uri;
     const sessionId = parseOutputResourceUri(uri);
     if (!sessionId || !sessionManager.getSession(sessionId)) {
-      throw new WireMcpError(McpErrorCode.InvalidParams, `Unknown resource: ${uri}`);
+      throw new WireMcpError(ProtocolErrorCode.InvalidParams, `Unknown resource: ${uri}`);
     }
     notifier.subscribe(uri);
     return {};
   });
 
-  server.setRequestHandler(UnsubscribeRequestSchema, async (request) => {
+  server.setRequestHandler('resources/unsubscribe', async (request) => {
     const uri = request.params.uri;
     notifier.unsubscribe(uri);
     return {};

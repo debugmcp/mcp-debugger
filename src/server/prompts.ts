@@ -4,12 +4,7 @@
  * guidance without a separate skill install (the full skill with per-language
  * references ships in skills/debugging/).
  */
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import {
-  ListPromptsRequestSchema,
-  GetPromptRequestSchema,
-  ErrorCode as McpErrorCode
-} from '@modelcontextprotocol/sdk/types.js';
+import { Server, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import { IEnvironment } from '@debugmcp/shared';
 import { WireMcpError } from '../errors/debug-errors.js';
 import { buildDebuggingWorkflowPrompt } from '../skill-content.js';
@@ -22,13 +17,13 @@ export function registerPromptHandlers(server: Server, environment: IEnvironment
       'How to debug effectively with mcp-debugger: session golden path, root-cause discipline, attach/remote recipes, and per-language quirks.'
   };
 
-  server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+  server.setRequestHandler('prompts/list', async () => ({
     prompts: [promptDescriptor]
   }));
 
-  server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+  server.setRequestHandler('prompts/get', async (request) => {
     if (request.params.name !== promptDescriptor.name) {
-      throw new WireMcpError(McpErrorCode.InvalidParams, `Unknown prompt: ${request.params.name}`);
+      throw new WireMcpError(ProtocolErrorCode.InvalidParams, `Unknown prompt: ${request.params.name}`);
     }
     return {
       description: promptDescriptor.description,

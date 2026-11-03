@@ -16,7 +16,6 @@
  * the JSON body parser.
  */
 import type { RequestHandler } from 'express';
-import { ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { jsonRpcErrorBody } from './json-rpc-error.js';
 import { StartupRefusalError } from './startup-refusal.js';
 
@@ -26,8 +25,13 @@ export const LOOPBACK_HOSTS: readonly string[] = Object.freeze(['localhost', '12
 export const ALLOWED_HOSTS_ENV_KEY = 'MCP_HTTP_ALLOWED_HOSTS';
 export const ALLOWED_HOST_FLAG = '--allowed-host';
 
-/** The code the SDK's own hostHeaderValidation answers a refused Host with; kept for parity. */
-export const HOST_REJECTED_CODE: number = ErrorCode.ConnectionClosed;
+/**
+ * The code the SDK's own hostHeaderValidation answers a refused Host with;
+ * kept for parity. The v1 SDK spelled it `ErrorCode.ConnectionClosed`; the v2
+ * SDK's `SdkErrorCode` is a string enum, and its hostHeaderValidationResponse
+ * still puts this number on the wire.
+ */
+export const HOST_REJECTED_CODE: number = -32000;
 
 export type AllowedHostSource = typeof ALLOWED_HOST_FLAG | typeof ALLOWED_HOSTS_ENV_KEY;
 

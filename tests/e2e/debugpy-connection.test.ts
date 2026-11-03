@@ -12,9 +12,7 @@ import * as net from 'net';
 import * as path from 'path';
 import { writeFile, rm } from 'node:fs/promises'; // Native promise-based fs
 import { existsSync as nativeNodeExistsSync } from 'node:fs';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-import { ServerResult } from '@modelcontextprotocol/sdk/types.js';
+import { Client, SSEClientTransport, ServerResult } from '@modelcontextprotocol/client';
 import { waitUntil, delay } from '../test-utils/helpers/test-utils.js';
 // No mocking of python-utils - E2E tests should use real Python discovery
 const TEST_TIMEOUT = 60000;

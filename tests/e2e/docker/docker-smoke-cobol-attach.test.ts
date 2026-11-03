@@ -3,7 +3,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import type { Client } from '@modelcontextprotocol/client';
 import { buildDockerImage, createDockerMcpClient, getDockerLogs } from './docker-test-utils.js';
 import { parseSdkToolResult } from '../smoke-test-utils.js';
 

@@ -1,8 +1,7 @@
 /** A test-owned child transport: EOF asks the supervisor to exit without SDK kill timers. */
 import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from 'node:child_process';
-import { ReadBuffer, serializeMessage } from '@modelcontextprotocol/sdk/shared/stdio.js';
-import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
+import { ReadBuffer, serializeMessage } from '@modelcontextprotocol/server';
+import type { Transport, JSONRPCMessage } from '@modelcontextprotocol/server';
 import { FORCE_EXIT_DELAY_MS } from '../../../tools/dev-proxy/shutdown.mjs';
 
 export class OwnedStdioTransport implements Transport {

@@ -26,7 +26,7 @@ import {
   type ExceptionBreakMode
 } from '@debugmcp/shared';
 import { isTerminalSessionState } from '@debugmcp/shared';
-import { McpError } from '@modelcontextprotocol/sdk/types.js';
+import { ProtocolError } from '@modelcontextprotocol/server';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import { checkLaunchToolchain } from '../../utils/language-availability.js';
 import { setCuratedMessage } from '../breakpoints/hit-verification.js';
@@ -358,7 +358,7 @@ export class DebugLauncher {
     const errorMessage = error instanceof Error ? error.message : String(error);
     let errorType: string | undefined;
     let errorCode: number | undefined;
-    if (error instanceof McpError) {
+    if (error instanceof ProtocolError) {
       errorType = error.constructor.name || 'McpError';
       errorCode = error.code as number | undefined;
     } else if (error instanceof Error) {
@@ -893,9 +893,9 @@ export class DebugLauncher {
       // Normalize error identity for callers/tests
       let errorType: string | undefined;
       let errorCode: number | undefined;
-      if (error instanceof McpError) {
-        errorType = (error as McpError).constructor.name || 'McpError';
-        errorCode = (error as McpError).code as number | undefined;
+      if (error instanceof ProtocolError) {
+        errorType = (error as ProtocolError).constructor.name || 'McpError';
+        errorCode = (error as ProtocolError).code as number | undefined;
       } else if (error instanceof Error) {
         errorType = error.constructor.name || 'Error';
       }

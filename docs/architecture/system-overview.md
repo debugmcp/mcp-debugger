@@ -221,7 +221,7 @@ sequenceDiagram
 - **Bundling**: tsup with `noExternal` for self-contained distributions
 
 ### Key Dependencies
-- `@modelcontextprotocol/sdk` - MCP server implementation
+- `@modelcontextprotocol/server` (with `node`, `core`, `client` and `server-legacy`; the v2 MCP TypeScript SDK) - MCP server implementation and transports
 - `@vscode/debugprotocol` - DAP type definitions
 - `MinimalDapClient (src/proxy/minimal-dap.ts)` - DAP client for adapter communication
 - `winston` - Structured logging

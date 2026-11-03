@@ -4,7 +4,7 @@
  * names gate. Pure functions over the arguments (plus the environment where a
  * mode gate needs it) — no session state, no ToolContext.
  */
-import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import { ExceptionBreakMode, IEnvironment } from '@debugmcp/shared';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { getVariableAccessMode, requiresExplicitNames } from '../utils/variable-access.js';
@@ -26,8 +26,8 @@ export function assertRequiredToolArguments(
   for (const parameterName of definition.inputSchema.required ?? []) {
     const value = args[parameterName];
     if (value === undefined || value === null || value === '') {
-      throw new McpError(
-        McpErrorCode.InvalidParams,
+      throw new ProtocolError(
+        ProtocolErrorCode.InvalidParams,
         `Missing required parameter: ${parameterName}`
       );
     }
@@ -46,7 +46,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  */
 export function requireSessionId(args: ToolArguments): asserts args is WithSessionId {
   if (!args.sessionId) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameter: sessionId');
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Missing required parameter: sessionId');
   }
 }
 
@@ -58,7 +58,7 @@ export function assertPlainObjectArg(value: unknown, parameterName: string): voi
   if (value === undefined || isPlainObject(value)) {
     return;
   }
-  throw new McpError(McpErrorCode.InvalidParams, `${parameterName} must be an object when provided`);
+  throw new ProtocolError(ProtocolErrorCode.InvalidParams, `${parameterName} must be an object when provided`);
 }
 
 export function validateBreakOnExceptions(value: string | undefined): ExceptionBreakMode | undefined {
@@ -66,8 +66,8 @@ export function validateBreakOnExceptions(value: string | undefined): ExceptionB
     return undefined;
   }
   if (value !== 'uncaught' && value !== 'all' && value !== 'none') {
-    throw new McpError(
-      McpErrorCode.InvalidParams,
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
       `breakOnExceptions must be one of 'uncaught', 'all', 'none' (got '${value}')`
     );
   }
@@ -182,8 +182,8 @@ export function enforceExplicitNames(
     return;
   }
   if (!names || names.length === 0) {
-    throw new McpError(
-      McpErrorCode.InvalidParams,
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
       `${toolName} requires "names" in least-privilege mode (DEBUG_MCP_VARIABLE_ACCESS=explicit): ` +
       `pass the exact variable names you need, e.g. names:["user","order_total"]. ` +
       `Unfiltered scope dumps are disabled by this server's configuration.`

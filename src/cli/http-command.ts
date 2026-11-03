@@ -3,8 +3,8 @@ import type { Express, Request, Response, NextFunction } from 'express';
 import express from 'express';
 import { randomUUID } from 'crypto';
 import { IncomingMessage, ServerResponse } from 'http';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { ErrorCode, isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+import { isInitializeRequest, ProtocolErrorCode } from '@modelcontextprotocol/server';
+import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
 import { DebugMcpServer, type DebugMcpServerOptions } from '../server.js';
 import { attachSharedFileTransport } from '../utils/logger.js';
 import type { HttpOptions } from './setup.js';
@@ -76,7 +76,7 @@ export interface HttpCommandDependencies {
 }
 
 interface SessionData {
-  transport: StreamableHTTPServerTransport;
+  transport: NodeStreamableHTTPServerTransport;
   server: DebugMcpServer;
   /** Timestamp of the last routed request (or stream close) for this session. */
   lastActivity: number;
@@ -318,7 +318,7 @@ export function createHttpApp(
       const sessionIdHeader = req.headers['mcp-session-id'];
       const sessionId = Array.isArray(sessionIdHeader) ? sessionIdHeader[0] : sessionIdHeader;
 
-      let transport: StreamableHTTPServerTransport;
+      let transport: NodeStreamableHTTPServerTransport;
 
       if (sessionId && httpSessions.has(sessionId)) {
         // Existing session — route to its transport
@@ -349,9 +349,9 @@ export function createHttpApp(
 
         // Forward declarations so the closures below can refer to the transport.
         // The SDK assigns its own internal sessionId before invoking onsessioninitialized.
-        let createdTransport: StreamableHTTPServerTransport | null = null;
+        let createdTransport: NodeStreamableHTTPServerTransport | null = null;
 
-        const newTransport = new StreamableHTTPServerTransport({
+        const newTransport = new NodeStreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (sid: string) => {
             if (createdTransport) {
@@ -399,7 +399,7 @@ export function createHttpApp(
         });
         res.status(400).json(
           jsonRpcErrorBody(
-            ErrorCode.InvalidRequest,
+            ProtocolErrorCode.InvalidRequest,
             'Bad Request: missing Mcp-Session-Id, and this is not an initialize request'
           )
         );
@@ -411,7 +411,7 @@ export function createHttpApp(
       logger.error('Error handling MCP request', { error });
       if (!res.headersSent) {
         res.status(500).json(
-          jsonRpcErrorBody(ErrorCode.InternalError, 'Internal error', error instanceof Error ? error.message : 'Unknown error')
+          jsonRpcErrorBody(ProtocolErrorCode.InternalError, 'Internal error', error instanceof Error ? error.message : 'Unknown error')
         );
       }
     }
@@ -487,16 +487,16 @@ function classifyRequestError(err: unknown): { status: number; code: number; mes
   const status =
     typeof candidate.status === 'number' && candidate.status >= 400 && candidate.status < 600 ? candidate.status : 500;
   if (status >= 500) {
-    return { status, code: ErrorCode.InternalError, message: 'Internal error', detail };
+    return { status, code: ProtocolErrorCode.InternalError, message: 'Internal error', detail };
   }
   if (candidate.type === 'entity.too.large') {
-    return { status, code: ErrorCode.InvalidRequest, message: `Request body too large (limit ${JSON_BODY_LIMIT})`, detail };
+    return { status, code: ProtocolErrorCode.InvalidRequest, message: `Request body too large (limit ${JSON_BODY_LIMIT})`, detail };
   }
   if (candidate.type === 'entity.parse.failed') {
-    return { status, code: ErrorCode.ParseError, message: `Parse error: ${detail}`, detail };
+    return { status, code: ProtocolErrorCode.ParseError, message: `Parse error: ${detail}`, detail };
   }
   // http-errors marks 4xx messages as safe to expose; anything else stays generic.
-  return { status, code: ErrorCode.InvalidRequest, message: candidate.expose === false ? 'Bad Request' : detail, detail };
+  return { status, code: ProtocolErrorCode.InvalidRequest, message: candidate.expose === false ? 'Bad Request' : detail, detail };
 }
 
 export async function handleHttpCommand(

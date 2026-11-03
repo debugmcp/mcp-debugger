@@ -14,7 +14,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { buildDockerImage, createDockerMcpClient, getDockerLogs } from './docker-test-utils.js';
 import { parseSdkToolResult, type ParsedToolResult } from '../smoke-test-utils.js';
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import type { Client } from '@modelcontextprotocol/client';
 
 const execAsync = promisify(exec);
 

@@ -152,7 +152,6 @@
   },
   "dependencies": {
     "@debugmcp/shared": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.32.2",
     "@types/which": "^3.0.4",
     "@vscode/debugprotocol": "^1.68.0",
     "commander": "^15.0.0",
@@ -162,7 +161,12 @@
     "lru-cache": "^11.5.3",
     "uuid": "^14.0.3",
     "which": "^7.0.0",
-    "winston": "^3.19.0"
+    "winston": "^3.19.0",
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "@modelcontextprotocol/node": "^2.1.2",
+    "@modelcontextprotocol/server-legacy": "^2.4.0",
+    "@modelcontextprotocol/core": "^2.4.0"
   },
   "optionalDependencies": {
     "@debugmcp/adapter-cobol": "workspace:*",

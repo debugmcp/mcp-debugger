@@ -1,8 +1,7 @@
 /**
  * Shared utilities for smoke tests
  */
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { ServerResult } from '@modelcontextprotocol/sdk/types.js';
+import { Client, ServerResult } from '@modelcontextprotocol/client';
 
 /**
  * Parse SDK tool results

@@ -4,9 +4,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { requireCliBundle } from '../test-utils/helpers/cli-bundle.js';
 import { parseSdkToolResult } from './smoke-test-utils.js';
 

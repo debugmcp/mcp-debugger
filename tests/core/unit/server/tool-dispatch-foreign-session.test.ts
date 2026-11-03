@@ -10,9 +10,8 @@
  * (stdio, SSE) dispatches exactly as before.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { Server, InMemoryTransport } from '@modelcontextprotocol/server';
+import { Client } from '@modelcontextprotocol/client';
 import { registerToolHandlers } from '../../../../src/server/tool-dispatch.js';
 import type { ToolContext } from '../../../../src/server/tool-context.js';
 import { SessionNotFoundError } from '../../../../src/errors/debug-errors.js';

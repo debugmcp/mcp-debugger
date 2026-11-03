@@ -10,7 +10,7 @@
  *
  * Type-only imports throughout; this module never imports src/server.ts.
  */
-import type { McpError } from '@modelcontextprotocol/sdk/types.js';
+import type { ProtocolError } from '@modelcontextprotocol/server';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import type {
   Breakpoint,
@@ -77,7 +77,7 @@ export interface ToolContext {
    * or undefined when the id is simply unknown. Absent for stdio and SSE.
    */
   describeForeignSession?(sessionId: string): string | undefined;
-  fileNotFoundError(label: string, originalPath: string, fileCheck: FileExistenceResult): McpError;
+  fileNotFoundError(label: string, originalPath: string, fileCheck: FileExistenceResult): ProtocolError;
   getSupportedLanguagesAsync(): Promise<string[]>;
   getLanguageMetadata(): Promise<LanguageMetadata[]>;
 

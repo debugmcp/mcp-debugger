@@ -1,6 +1,6 @@
 /** The session-error catch helpers classify only typed lifecycle failures. */
 import { describe, it, expect } from 'vitest';
-import { McpError, ErrorCode as McpErrorCode } from '@modelcontextprotocol/sdk/types.js';
+import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import {
   failureResult,
   isTypedSessionError,
@@ -43,11 +43,11 @@ describe('typed session errors', () => {
     expect(isTypedSessionError(new ProxyNotRunningError('s1', 'pause'))).toBe(true);
   });
 
-  it('converts ProxyNotRunningError to its plain detail, without the McpError prefix (#647)', () => {
+  it('converts ProxyNotRunningError to its plain detail (#647)', () => {
     const error = new ProxyNotRunningError('s1', 'pause');
-    // McpError prefixes its own .message with the JSON-RPC code; that prefix is
-    // for the protocol path and must not reach the envelope.
-    expect(error.message).toBe('MCP error -32600: Cannot pause: no active proxy for session s1');
+    // The v1 SDK prefixed .message with the JSON-RPC code and the v2 SDK does
+    // not; the envelope reports the recorded detail either way.
+    expect(error.message).toBe('Cannot pause: no active proxy for session s1');
     expect(payload(sessionErrorToResult(error)!)).toEqual({
       success: false,
       error: 'Cannot pause: no active proxy for session s1'
@@ -56,7 +56,7 @@ describe('typed session errors', () => {
 
   it('converts all typed lifecycle errors to their detail', () => {
     for (const error of [new SessionTerminatedError('s1'), new SessionNotFoundError('s1')]) {
-      expect(error.message).toMatch(/^MCP error -\d+: /);
+      expect(error.message).toBe(error.detail);
       expect(payload(sessionErrorToResult(error)!)).toEqual({
         success: false,
         error: error.detail
@@ -71,7 +71,7 @@ describe('typed session errors', () => {
     expect(new SessionNotFoundError('s1').detail).toBe('Session not found: s1');
   });
   it('does NOT convert a look-alike McpError that is not one of the typed classes', () => {
-    const error = new McpError(McpErrorCode.InvalidRequest, 'Session is terminated: s1');
+    const error = new ProtocolError(ProtocolErrorCode.InvalidRequest, 'Session is terminated: s1');
     expect(isTypedSessionError(error)).toBe(false);
     expect(sessionErrorToResult(error)).toBeUndefined();
   });
@@ -96,7 +96,7 @@ describe('typed session errors', () => {
     'Session is not paused',
     'user expression: conn.closed'
   ])('does not classify user-controlled look-alike text: %s', (message) => {
-    const error = new McpError(McpErrorCode.InvalidParams, message);
+    const error = new ProtocolError(ProtocolErrorCode.InvalidParams, message);
     expect(sessionErrorToResult(error)).toBeUndefined();
   });
 });
@@ -108,14 +108,14 @@ describe('sessionErrorResultOrThrow', () => {
   });
 
   it('re-throws the original error untouched otherwise', () => {
-    const error = new McpError(McpErrorCode.InvalidParams, 'Breakpoint file not found');
+    const error = new ProtocolError(ProtocolErrorCode.InvalidParams, 'Breakpoint file not found');
     expect(() => sessionErrorResultOrThrow(error)).toThrow(error);
   });
 });
 
 describe('rethrowAsMcpError', () => {
   it('passes an McpError through unchanged', () => {
-    const error = new McpError(McpErrorCode.InvalidParams, 'bad params');
+    const error = new ProtocolError(ProtocolErrorCode.InvalidParams, 'bad params');
     expect(() => rethrowAsMcpError(error, 'Failed to pause execution')).toThrow(error);
   });
 
@@ -126,9 +126,9 @@ describe('rethrowAsMcpError', () => {
     } catch (error) {
       thrown = error;
     }
-    expect(thrown).toBeInstanceOf(McpError);
-    expect((thrown as McpError).code).toBe(McpErrorCode.InternalError);
-    expect((thrown as McpError).message).toContain('Failed to list threads: unexpected');
+    expect(thrown).toBeInstanceOf(ProtocolError);
+    expect((thrown as ProtocolError).code).toBe(ProtocolErrorCode.InternalError);
+    expect((thrown as ProtocolError).message).toContain('Failed to list threads: unexpected');
   });
 
   it('stringifies a non-Error throw instead of reporting undefined', () => {
@@ -138,7 +138,7 @@ describe('rethrowAsMcpError', () => {
     } catch (error) {
       thrown = error;
     }
-    expect((thrown as McpError).message).toContain('Failed to expose session: boom');
-    expect((thrown as McpError).message).not.toContain('undefined');
+    expect((thrown as ProtocolError).message).toContain('Failed to expose session: boom');
+    expect((thrown as ProtocolError).message).not.toContain('undefined');
   });
 });

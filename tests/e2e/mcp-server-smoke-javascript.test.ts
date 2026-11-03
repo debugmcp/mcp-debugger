@@ -12,8 +12,8 @@ import { fileURLToPath } from 'url';
 import * as fs from 'fs';
 import * as os from 'os';
 import ts from 'typescript';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { Client } from '@modelcontextprotocol/client';
 import { requireCliBundle } from '../test-utils/helpers/cli-bundle.js';
 import { parseSdkToolResult, pollUntil } from './smoke-test-utils.js';
 

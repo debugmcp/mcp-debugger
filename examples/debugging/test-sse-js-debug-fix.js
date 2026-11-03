@@ -6,8 +6,7 @@
  */
 
 const { spawn } = require('child_process');
-const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
-const { SSEClientTransport } = require('@modelcontextprotocol/sdk/client/sse.js');
+const { Client, SSEClientTransport } = require('@modelcontextprotocol/client');
 const path = require('path');
 
 const PORT = 3100; // Use a specific port for testing

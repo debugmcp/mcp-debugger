@@ -23,8 +23,8 @@ import path from 'path';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'url';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { Client } from '@modelcontextprotocol/client';
 import { ensurePythonOnPath } from './env-utils.js';
 
 const currentDirName = path.dirname(fileURLToPath(import.meta.url));

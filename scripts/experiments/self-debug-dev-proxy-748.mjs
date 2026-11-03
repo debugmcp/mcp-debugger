@@ -2,8 +2,8 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { Client } from '@modelcontextprotocol/client';
 
 const root = process.cwd();
 const file = path.join(root, 'tools/dev-proxy/dev-proxy.mjs');
@@ -54,14 +54,14 @@ try {
   assert(ready, 'target adoption did not complete');
   const pause = call('pause_execution');
   await delay(1000);
-  const firstStatus = targetClient.callTool({ name: 'dev_server_status', arguments: {} }, undefined, { timeout: 10000 })
+  const firstStatus = targetClient.callTool({ name: 'dev_server_status', arguments: {} }, { timeout: 10000 })
     .then(result => ({ result }), error => ({ error: error.message }));
   assert.equal((await pause).state, 'paused');
   await call('set_breakpoint', { function: 'process.stderr.write', condition: 'this === process.stderr' });
   await call('continue_execution');
   assert.equal((await firstStatus).error, undefined);
   let buildSettled = false;
-  const build = targetClient.callTool({ name: 'dev_rebuild_and_restart', arguments: {} }, undefined, { timeout: 15000 })
+  const build = targetClient.callTool({ name: 'dev_rebuild_and_restart', arguments: {} }, { timeout: 15000 })
     .then(result => { buildSettled = true; return { result: parsed(result) }; }, error => ({ error: error.message }));
   let paused = false;
   for (let i = 0; i < 100; i++) {

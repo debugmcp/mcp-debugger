@@ -15,8 +15,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect } from 'vitest';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { Client } from '@modelcontextprotocol/client';
 
 /** The repository root (this file lives at tests/test-utils/helpers/). */
 const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
@@ -157,7 +157,6 @@ export async function startStdioClient(options: StdioClientOptions): Promise<Std
     async call<T extends ToolAnswer = ToolAnswer>(name: string, args: Record<string, unknown> = {}): Promise<T> {
       const raw = await client.callTool(
         { name, arguments: { ...(handle.sessionId ? { sessionId: handle.sessionId } : {}), ...args } },
-        undefined,
         { timeout }
       );
       expect(raw.isError, JSON.stringify(raw)).not.toBe(true);
@@ -174,7 +173,7 @@ export async function startStdioClient(options: StdioClientOptions): Promise<Std
       try {
         if (handle.sessionId) {
           await client
-            .callTool({ name: 'close_debug_session', arguments: { sessionId: handle.sessionId } }, undefined, { timeout: closeTimeout })
+            .callTool({ name: 'close_debug_session', arguments: { sessionId: handle.sessionId } }, { timeout: closeTimeout })
             .catch(() => {});
         }
       } finally {

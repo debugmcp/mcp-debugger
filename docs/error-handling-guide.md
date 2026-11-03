@@ -8,15 +8,15 @@ The MCP Debugger uses a typed error system for specific backend and session-mana
 
 ### Typed Error Classes
 
-Typed debugger-domain errors extend from the MCP SDK's `McpError` class and are defined in `src/errors/debug-errors.ts`. Note that not all failures in the stack are represented as these typed errors; some paths return structured `DebugResult` failure objects or normalize generic errors:
+Typed debugger-domain errors extend from the MCP SDK's `ProtocolError` class (`McpError` in the v1 SDK) and are defined in `src/errors/debug-errors.ts`. Note that not all failures in the stack are represented as these typed errors; some paths return structured `DebugResult` failure objects or normalize generic errors:
 
 ```typescript
-import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
+import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 
-export class SessionNotFoundError extends McpError {
+export class SessionNotFoundError extends ProtocolError {
   constructor(sessionId: string) {
     super(
-      ErrorCode.InvalidParams,
+      ProtocolErrorCode.InvalidParams,
       `Session not found: ${sessionId}`,
       { sessionId }
     );
@@ -72,8 +72,8 @@ if (!session.proxyManager?.isRunning()) {
 
 The error handling uses a mixed strategy across three layers:
 
-1. **Implementation Layer (Backend)** - Uses typed `McpError` subclasses (e.g., `SessionNotFoundError`, `ProxyNotRunningError`) for infrastructure failures (unknown session, terminated session, proxy not running). These are defined in `src/errors/debug-errors.ts`. Operation-level failures (e.g., session not paused, missing thread ID) return structured `DebugResult` objects with `success: false` rather than throwing.
-2. **Server Layer** - Missing required parameters are rejected at the MCP boundary in `src/server/tool-dispatch.ts`, before handler dispatch, as an `McpError` with `InvalidParams`; unexpected internal errors are wrapped as `McpError` with `InternalError`. The typed session-lifecycle errors (`SessionNotFoundError`, `SessionTerminatedError`, `ProxyNotRunningError`) -- thrown by the server's own `validateSession` pre-check and by the implementation layer -- are converted into a *successful* tool response whose JSON payload has `success: false, error: <message>`; they are not propagated as protocol-level `McpError`. `DebugResult` failures are likewise returned as successful tool responses with `success: false`.
+1. **Implementation Layer (Backend)** - Uses typed `ProtocolError` subclasses (e.g., `SessionNotFoundError`, `ProxyNotRunningError`) for infrastructure failures (unknown session, terminated session, proxy not running). These are defined in `src/errors/debug-errors.ts`. Operation-level failures (e.g., session not paused, missing thread ID) return structured `DebugResult` objects with `success: false` rather than throwing.
+2. **Server Layer** - Missing required parameters are rejected at the MCP boundary in `src/server/tool-dispatch.ts`, before handler dispatch, as an `ProtocolError` with `InvalidParams`; unexpected internal errors are wrapped as `ProtocolError` with `InternalError`. The typed session-lifecycle errors (`SessionNotFoundError`, `SessionTerminatedError`, `ProxyNotRunningError`) -- thrown by the server's own `validateSession` pre-check and by the implementation layer -- are converted into a *successful* tool response whose JSON payload has `success: false, error: <message>`; they are not propagated as protocol-level `ProtocolError`. `DebugResult` failures are likewise returned as successful tool responses with `success: false`.
 
    The conversion is not hand-written per handler. Four shared helpers in `src/server/tool-result.ts` own it -- `isTypedSessionError()`, `sessionErrorToResult()`, `sessionErrorResultOrThrow()` and `rethrowAsMcpError()` -- and the handlers themselves live in `src/server/handlers/*-tools.ts`, one module per tool family, over `src/server/handlers/shared.ts`. `src/server.ts` is a composition root: it holds `validateSession` and the public facade methods, not the request plumbing.
 3. **Client Layer** - Receives either a protocol-level MCP error (from invalid-parameter checks or unexpected internal errors) or a structured failure result with `success: false` (for typed session errors and `DebugResult` failures), depending on which layer the failure originated in
@@ -132,7 +132,7 @@ await expect(operations.continue('invalid'))
 // Or check specific properties
 await expect(operations.continue('invalid'))
   .rejects.toMatchObject({
-    code: ErrorCode.InvalidParams,  // import { ErrorCode } from '@modelcontextprotocol/sdk/types.js'
+    code: ProtocolErrorCode.InvalidParams,  // import { ProtocolErrorCode } from '@modelcontextprotocol/server'
                                      // or import { McpErrorCode } from 'src/errors/debug-errors' for the local alias
     sessionId: 'invalid'
   });
@@ -326,10 +326,10 @@ To add a new error type:
 
 1. Define the error class in `src/errors/debug-errors.ts`:
    ```typescript
-   export class MyNewError extends McpError {
+   export class MyNewError extends ProtocolError {
      constructor(context: string) {
        super(
-         ErrorCode.InvalidRequest,
+         ProtocolErrorCode.InvalidRequest,
          `My error message: ${context}`,
          { context }
        );

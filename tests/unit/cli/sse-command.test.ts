@@ -9,14 +9,15 @@ import { attachSharedFileTransport } from '../../../src/utils/logger.js';
 
 // Mock modules
 vi.mock('../../../src/server.js');
-vi.mock('@modelcontextprotocol/sdk/server/sse.js');
+vi.mock('@modelcontextprotocol/server-legacy/sse');
 vi.mock('express');
 vi.mock('../../../src/utils/logger.js', () => ({
   attachSharedFileTransport: vi.fn(),
 }));
 
 // Import mocked module
-import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import { SSEServerTransport } from '@modelcontextprotocol/server-legacy/sse';
+
 const MockedSSEServerTransport = vi.mocked(SSEServerTransport);
 
 describe('SSE Command Handler', () => {
