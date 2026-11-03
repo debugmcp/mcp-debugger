@@ -2,7 +2,7 @@
  * Breakpoint tools: set_breakpoint (function and line branches),
  * list_breakpoints, remove_breakpoint, clear_breakpoints.
  */
-import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import { Breakpoint, FunctionBreakpoint } from '@debugmcp/shared';
 import {
   BP_ADDRESSING_ENV_KEY,
@@ -39,7 +39,7 @@ function debuggerOffNote(ctx: ToolContext, sessionId: string, verified: boolean)
 export const setBreakpointTool: ToolHandler = async (ctx, args) => {
   const isFunctionBp = args.function !== undefined;
   if (!isFunctionBp && (!args.file || (args.line === undefined && args.statement === undefined))) {
-    throw new McpError(McpErrorCode.InvalidParams, 'Missing required parameters');
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams, 'Missing required parameters');
   }
 
   // Addressing-mode gating (issue #271): reject params outside the
@@ -49,20 +49,20 @@ export const setBreakpointTool: ToolHandler = async (ctx, args) => {
   // are caught too.
   const bpMode = getBpAddressingMode(ctx.environment);
   if (args.expectedContent !== undefined && !supportsExpectedContent(bpMode)) {
-    throw new McpError(
-      McpErrorCode.InvalidParams,
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
       `expectedContent is disabled (${BP_ADDRESSING_ENV_KEY}=${bpMode}). Use plain line addressing.`
     );
   }
   if ((args.statement !== undefined || args.nearLine !== undefined) && !supportsStatementAnchors(bpMode)) {
-    throw new McpError(
-      McpErrorCode.InvalidParams,
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
       `statement addressing is disabled (${BP_ADDRESSING_ENV_KEY}=${bpMode}). Use line addressing.`
     );
   }
   if (isFunctionBp && !supportsStatementAnchors(bpMode)) {
-    throw new McpError(
-      McpErrorCode.InvalidParams,
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
       `function breakpoints are disabled (${BP_ADDRESSING_ENV_KEY}=${bpMode}). Use line addressing.`
     );
   }
@@ -84,20 +84,20 @@ async function setFunctionBreakpointBranch(ctx: ToolContext, args: WithSessionId
   // no line, no content anchor, no logpoint, no suspend policy
   // (DAP FunctionBreakpoint supports name + condition only).
   if (args.file !== undefined) {
-    throw new McpError(McpErrorCode.InvalidParams,
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams,
       'Function breakpoints are not file-scoped; omit file. The adapter resolves the symbol name across the whole program.');
   }
   if (args.line !== undefined || args.statement !== undefined ||
       args.expectedContent !== undefined || args.nearLine !== undefined) {
-    throw new McpError(McpErrorCode.InvalidParams,
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams,
       'Provide function alone (optionally with condition) — it cannot be combined with line, statement, expectedContent, or nearLine.');
   }
   if (args.logMessage !== undefined) {
-    throw new McpError(McpErrorCode.InvalidParams,
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams,
       'logMessage is not supported on function breakpoints (DAP has no logpoint form for them); use a line or statement breakpoint.');
   }
   if (args.suspendPolicy !== undefined) {
-    throw new McpError(McpErrorCode.InvalidParams,
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams,
       'suspendPolicy is not supported on function breakpoints.');
   }
 
@@ -301,8 +301,8 @@ export const listBreakpointsTool: ToolHandler = async (ctx, args) => {
 export const removeBreakpointTool: ToolHandler = async (ctx, args) => {
   requireSessionId(args);
   if (!args.breakpointId && args.function === undefined && (!args.file || args.line === undefined)) {
-    throw new McpError(
-      McpErrorCode.InvalidParams,
+    throw new ProtocolError(
+      ProtocolErrorCode.InvalidParams,
       'Provide breakpointId, function, or file and line together'
     );
   }

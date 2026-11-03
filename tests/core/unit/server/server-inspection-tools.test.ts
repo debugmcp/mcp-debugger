@@ -2,9 +2,8 @@
  * Server variable and stack inspection tools tests
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+import { Server, ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { createProductionDependencies, type Dependencies } from '../../../../src/container/dependencies.js';
@@ -22,8 +21,9 @@ import { OutputRingBuffer } from '../../../../src/session/output-buffer.js';
 import { CppAdapterPolicy, JavaAdapterPolicy, JsDebugAdapterPolicy, SessionState, type AdapterPolicy } from '@debugmcp/shared';
 
 // Mock dependencies
-vi.mock('@modelcontextprotocol/sdk/server/index.js');
-vi.mock('@modelcontextprotocol/sdk/server/stdio.js');
+vi.mock('@modelcontextprotocol/server', async () =>
+  (await import('../../../test-utils/mocks/sdk-server-module.js')).sdkServerModuleMock());
+vi.mock('@modelcontextprotocol/server/stdio');
 vi.mock('../../../../src/session/session-manager.js');
 vi.mock('../../../../src/container/dependencies.js');
 
@@ -116,8 +116,8 @@ describe('Server Inspection Tools Tests', () => {
           }
         }
       })).rejects.toSatisfy((error) => {
-        expect(error).toBeInstanceOf(McpError);
-        expect(error.code).toBe(McpErrorCode.InvalidParams);
+        expect(error).toBeInstanceOf(ProtocolError);
+        expect(error.code).toBe(ProtocolErrorCode.InvalidParams);
         // The server returns a generic "Missing required parameters" message
         // This is proper parameter validation behavior, preventing undefined values
         // from propagating to the session manager

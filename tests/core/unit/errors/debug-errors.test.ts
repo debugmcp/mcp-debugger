@@ -1,11 +1,12 @@
 /**
  * The typed error hierarchy keeps two views of one message (issue #647):
- * `.message` carries the SDK's `MCP error <code>: ` prefix for logs and
- * in-process callers, `.detail` is the plain text tool result envelopes report
- * and the JSON-RPC boundary sends on the wire (issue #659).
+ * `.message` is whatever the SDK's constructor makes of it (the v1 SDK
+ * prefixed `MCP error <code>: `, the v2 SDK adds nothing), `.detail` is the
+ * plain text tool result envelopes report and the JSON-RPC boundary sends on
+ * the wire (issue #659).
  */
 import { describe, it, expect } from 'vitest';
-import { McpError } from '@modelcontextprotocol/sdk/types.js';
+import { ProtocolError } from '@modelcontextprotocol/server';
 import {
   DebugError,
   DebugSessionCreationError,
@@ -83,11 +84,11 @@ describe('DebugError hierarchy', () => {
     }
   ];
 
-  it.each(cases)('$name keeps the prefixed .message and the plain .detail', ({ error, code, detail, data }) => {
-    expect(error).toBeInstanceOf(McpError);
+  it.each(cases)('$name keeps .message and the plain .detail', ({ error, code, detail, data }) => {
+    expect(error).toBeInstanceOf(ProtocolError);
     expect(error).toBeInstanceOf(DebugError);
     expect(error.code).toBe(code);
-    expect(error.message).toBe(`MCP error ${code}: ${detail}`);
+    expect(error.message).toBe(detail);
     expect(error.detail).toBe(detail);
     expect(error.detail).not.toContain('MCP error');
     expect(error.data).toEqual(data);
@@ -99,24 +100,24 @@ describe('DebugError hierarchy', () => {
 
   it('getErrorMessage still passes plain errors and non-errors through', () => {
     expect(getErrorMessage(new Error('boom'))).toBe('boom');
-    expect(getErrorMessage(new McpError(McpErrorCode.InternalError, 'raw'))).toBe('MCP error -32603: raw');
+    expect(getErrorMessage(new ProtocolError(McpErrorCode.InternalError, 'raw'))).toBe('raw');
     expect(getErrorMessage('text')).toBe('text');
   });
 });
 
 describe('the JSON-RPC boundary shape (issue #659)', () => {
-  it('mcpErrorDetail strips exactly one prefix, matching the error\'s own code', () => {
-    expect(mcpErrorDetail(new McpError(McpErrorCode.InvalidParams, 'bad arg'))).toBe('bad arg');
+  it('mcpErrorDetail reports the plain text', () => {
+    expect(mcpErrorDetail(new ProtocolError(McpErrorCode.InvalidParams, 'bad arg'))).toBe('bad arg');
     expect(mcpErrorDetail(new SessionNotFoundError('s1'))).toBe('Session not found: s1');
-    // A detail that itself starts with a prefix (a client re-wrapping a wire
-    // message) keeps that one: only the layer this error added comes off.
-    expect(mcpErrorDetail(new McpError(McpErrorCode.InvalidParams, 'MCP error -32602: nested')))
+    // The v2 SDK adds no prefix of its own, so a message that carries one (a
+    // client re-wrapping a wire message) carries it on purpose and keeps it.
+    expect(mcpErrorDetail(new ProtocolError(McpErrorCode.InvalidParams, 'MCP error -32602: nested')))
       .toBe('MCP error -32602: nested');
   });
 
   it('WireMcpError is an McpError whose .message is the bare detail', () => {
     const error = new WireMcpError(McpErrorCode.InvalidParams, 'bad arg', { k: 1 });
-    expect(error).toBeInstanceOf(McpError);
+    expect(error).toBeInstanceOf(ProtocolError);
     expect(error.code).toBe(McpErrorCode.InvalidParams);
     expect(error.message).toBe('bad arg');
     expect(error.data).toEqual({ k: 1 });

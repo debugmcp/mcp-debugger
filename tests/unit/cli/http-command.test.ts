@@ -9,7 +9,7 @@ import type { Logger as WinstonLoggerType } from 'winston';
 import { DebugMcpServer } from '../../../src/server.js';
 
 vi.mock('../../../src/server.js');
-vi.mock('@modelcontextprotocol/sdk/server/streamableHttp.js');
+vi.mock('@modelcontextprotocol/node');
 
 // The app is built with express() directly (issues #667/#670): the default
 // export hands back the per-test mockApp, and express.json() returns one
@@ -23,8 +23,9 @@ const expressMock = vi.hoisted(() => {
 });
 vi.mock('express', () => ({ default: expressMock.express }));
 
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-const MockedStreamableHTTPServerTransport = vi.mocked(StreamableHTTPServerTransport);
+import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
+
+const MockedStreamableHTTPServerTransport = vi.mocked(NodeStreamableHTTPServerTransport);
 
 /** Drive a Host-checking middleware with one request; returns what it did. */
 function runHost(middleware: (req: any, res: any, next: any) => void, host: string) {

@@ -1,6 +1,6 @@
 import type { Logger as WinstonLoggerType } from 'winston';
 import express from 'express';
-import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import { SSEServerTransport } from '@modelcontextprotocol/server-legacy/sse';
 import { IncomingMessage, ServerResponse } from 'http';
 import { DebugMcpServer } from '../server.js';
 import { attachSharedFileTransport } from '../utils/logger.js';

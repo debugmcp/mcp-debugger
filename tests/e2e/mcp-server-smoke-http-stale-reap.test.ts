@@ -19,8 +19,7 @@ import * as os from 'os';
 import * as net from 'net';
 import { existsSync, readFileSync, rmSync, mkdtempSync } from 'fs';
 import { spawn, ChildProcess } from 'child_process';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { parseSdkToolResult, waitForHealthEndpoint, pollUntil } from './smoke-test-utils.js';
 import { listTaggedProxies } from '../../src/utils/proxy-orphan-reaper.js';
 

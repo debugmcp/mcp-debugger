@@ -1,5 +1,5 @@
 import type { Logger as WinstonLoggerType } from 'winston';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { DebugMcpServer } from '../server.js';
 import type { StdioOptions } from './setup.js';
 import type { ProcessLike } from '../interfaces/process-interfaces.js';
@@ -75,10 +75,9 @@ export async function handleStdioCommand(
       ]).finally(() => exitProcess(code));
     };
 
-    // Ensure deterministic shutdown on transport close
-    // NOTE: `onclose` relies on an undocumented MCP SDK property
-    const transportWithClose = transport as unknown as { onclose?: () => void };
-    transportWithClose.onclose = () => {
+    // Ensure deterministic shutdown on transport close (the Transport
+    // contract's own hook; the v1 SDK left it undocumented)
+    transport.onclose = () => {
       shutdownAndExit(0, 'Transport closed');
     };
     

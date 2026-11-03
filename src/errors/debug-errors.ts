@@ -5,27 +5,29 @@
  * avoiding string-based error detection and fragile error wrapping.
  */
 
-import { McpError } from '@modelcontextprotocol/sdk/types.js';
+import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 
-// Re-export error codes for convenience
-export { ErrorCode as McpErrorCode } from '@modelcontextprotocol/sdk/types.js';
-import { ErrorCode as McpErrorCode } from '@modelcontextprotocol/sdk/types.js';
+// Re-exported under the v1 name: the protocol's JSON-RPC codes. (The v2 SDK's
+// own transport codes split off into SdkErrorCode, a string enum.)
+export { ProtocolErrorCode as McpErrorCode } from '@modelcontextprotocol/server';
 
 /**
  * Base for mcp-debugger's typed errors.
  *
- * McpError's constructor bakes `MCP error <code>: ` into `.message`, which is
- * right for logs and in-process callers and wrong inside a tool result
- * envelope, where it reads like a transport failure (issue #647). The SDK
- * keeps no copy of the plain text, so this base records it as `detail`; tool
- * result envelopes and getErrorMessage() report that, and the JSON-RPC
- * boundary sends it on the wire (toWireError, issue #659).
+ * The v1 SDK's McpError constructor baked `MCP error <code>: ` into
+ * `.message`, which was right for logs and in-process callers and wrong
+ * inside a tool result envelope, where it read like a transport failure
+ * (issue #647), so this base records the plain text as `detail`; tool result
+ * envelopes and getErrorMessage() report that, and the JSON-RPC boundary
+ * sends it on the wire (toWireError, issue #659). The v2 SDK's ProtocolError
+ * adds no prefix, so `.message` and `.detail` now coincide; `detail` stays
+ * the one name the envelopes read, whatever the SDK does to `.message`.
  */
-export abstract class DebugError extends McpError {
-  /** The message without the SDK's `MCP error <code>: ` prefix. */
+export abstract class DebugError extends ProtocolError {
+  /** The plain text, without any `MCP error <code>: ` prefix the SDK may put on `.message`. */
   public readonly detail: string;
 
-  protected constructor(code: McpErrorCode, detail: string, data?: unknown) {
+  protected constructor(code: ProtocolErrorCode, detail: string, data?: unknown) {
     super(code, detail, data);
     this.detail = detail;
   }
@@ -40,7 +42,7 @@ export class LanguageRuntimeNotFoundError extends DebugError {
 
   constructor(language: string, executablePath: string) {
     super(
-      McpErrorCode.InvalidParams,
+      ProtocolErrorCode.InvalidParams,
       `${language} runtime not found at: ${executablePath}`,
       { language, executablePath }
     );
@@ -66,7 +68,7 @@ export class SessionNotFoundError extends DebugError {
 
   constructor(sessionId: string) {
     super(
-      McpErrorCode.InvalidParams,
+      ProtocolErrorCode.InvalidParams,
       `Session not found: ${sessionId}`,
       { sessionId }
     );
@@ -83,7 +85,7 @@ export class SessionTerminatedError extends DebugError {
 
   constructor(sessionId: string, state: string = 'TERMINATED') {
     super(
-      McpErrorCode.InvalidRequest,
+      ProtocolErrorCode.InvalidRequest,
       `Session is terminated: ${sessionId}`,
       { sessionId, state }
     );
@@ -101,7 +103,7 @@ export class UnsupportedLanguageError extends DebugError {
 
   constructor(language: string, availableLanguages: string[]) {
     super(
-      McpErrorCode.InvalidParams,
+      ProtocolErrorCode.InvalidParams,
       `Language '${language}' is not supported. Available languages: ${availableLanguages.join(', ')}`,
       { language, availableLanguages }
     );
@@ -120,7 +122,7 @@ export class UnsupportedFeatureError extends DebugError {
 
   constructor(feature: string, language: string, detail?: string) {
     super(
-      McpErrorCode.InvalidParams,
+      ProtocolErrorCode.InvalidParams,
       `${feature} not supported by the ${language} adapter${detail ? `: ${detail}` : ''}`,
       { feature, language }
     );
@@ -138,7 +140,7 @@ export class ProxyNotRunningError extends DebugError {
 
   constructor(sessionId: string, operation: string) {
     super(
-      McpErrorCode.InvalidRequest,
+      ProtocolErrorCode.InvalidRequest,
       `Cannot ${operation}: no active proxy for session ${sessionId}`,
       { sessionId, operation }
     );
@@ -156,7 +158,7 @@ export class DebugSessionCreationError extends DebugError {
 
   constructor(reason: string, originalError?: Error) {
     super(
-      McpErrorCode.InternalError,
+      ProtocolErrorCode.InternalError,
       `Failed to create debug session: ${reason}`,
       {
         reason,
@@ -170,40 +172,37 @@ export class DebugSessionCreationError extends DebugError {
 }
 
 /**
- * The plain text of an McpError: a DebugError's recorded `detail`, otherwise
- * `.message` with the single `MCP error <code>: ` prefix its constructor added.
- * Only the error's own code is stripped, and only once — a message that
- * legitimately begins with that text for another reason is left alone.
+ * The plain text of a ProtocolError: a DebugError's recorded `detail`,
+ * otherwise `.message`. The v1 SDK's constructor prefixed `.message` with
+ * `MCP error <code>: ` and this stripped exactly that one layer; the v2 SDK's
+ * ProtocolError adds nothing, so the message is the detail and a message that
+ * begins with that text carries it on purpose.
  */
-export function mcpErrorDetail(error: McpError): string {
-  if (error instanceof DebugError) {
-    return error.detail;
-  }
-  const prefix = `MCP error ${error.code}: `;
-  return error.message.startsWith(prefix) ? error.message.slice(prefix.length) : error.message;
+export function mcpErrorDetail(error: ProtocolError): string {
+  return error instanceof DebugError ? error.detail : error.message;
 }
 
 /**
- * The McpError shape the JSON-RPC boundary throws (issue #659).
+ * The ProtocolError shape the JSON-RPC boundary throws (issue #659).
  *
  * The SDK's Protocol copies a thrown error's `.code` and `.message` verbatim
- * into the JSON-RPC error, and the client-side McpError constructor prefixes
- * `MCP error <code>: ` again — so an ordinary McpError thrown from a request
- * handler reaches SDK clients as `MCP error -32602: MCP error -32602: …`.
- * This subclass keeps the class (instanceof, `.code`, `.data`) and resets
- * `.message` to the bare detail so the wire carries the text once. It is for
- * the request-handler boundary only; everything upstream keeps throwing
- * McpError / DebugError, whose prefixed `.message` is right in logs.
+ * into the JSON-RPC error. With the v1 SDK the client-side constructor then
+ * prefixed `MCP error <code>: ` again, so an ordinary McpError thrown from a
+ * request handler reached SDK clients as `MCP error -32602: MCP error -32602: …`.
+ * This subclass keeps the class (instanceof, `.code`, `.data`) and sets
+ * `.message` to the bare detail so the wire carries the text exactly once,
+ * whichever SDK generation built the error. It is for the request-handler
+ * boundary only; everything upstream keeps throwing ProtocolError / DebugError.
  */
-export class WireMcpError extends McpError {
-  constructor(code: McpErrorCode, detail: string, data?: unknown) {
+export class WireMcpError extends ProtocolError {
+  constructor(code: ProtocolErrorCode, detail: string, data?: unknown) {
     super(code, detail, data);
     this.message = detail;
   }
 }
 
-/** Convert an McpError for the JSON-RPC boundary; a WireMcpError passes through. */
-export function toWireError(error: McpError): WireMcpError {
+/** Convert a ProtocolError for the JSON-RPC boundary; a WireMcpError passes through. */
+export function toWireError(error: ProtocolError): WireMcpError {
   if (error instanceof WireMcpError) {
     return error;
   }

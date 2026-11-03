@@ -29,7 +29,7 @@ import {
   getCodeLLDBPlatformDir,
   getCodeLLDBExecutableName
 } from '@debugmcp/codelldb-common';
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import type { Client } from '@modelcontextprotocol/client';
 
 const execAsync = promisify(exec);
 

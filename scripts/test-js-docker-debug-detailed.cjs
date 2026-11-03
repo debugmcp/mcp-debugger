@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 const { spawn, execSync } = require('child_process');
-const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
-const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
+const { Client } = require('@modelcontextprotocol/client');
+const { StdioClientTransport } = require('@modelcontextprotocol/client/stdio');
 
 const containerName = `mcp-debugger-js-test-${Date.now()}`;
 const imageName = 'mcp-debugger:local';

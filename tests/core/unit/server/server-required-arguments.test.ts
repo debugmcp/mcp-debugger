@@ -2,9 +2,8 @@
  * Schema-driven required-argument enforcement at the MCP dispatch boundary.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+import { Server, ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { createProductionDependencies } from '../../../../src/container/dependencies.js';
@@ -18,8 +17,9 @@ import {
   type CallToolHandler
 } from './server-test-helpers.js';
 
-vi.mock('@modelcontextprotocol/sdk/server/index.js');
-vi.mock('@modelcontextprotocol/sdk/server/stdio.js');
+vi.mock('@modelcontextprotocol/server', async () =>
+  (await import('../../../test-utils/mocks/sdk-server-module.js')).sdkServerModuleMock());
+vi.mock('@modelcontextprotocol/server/stdio');
 vi.mock('../../../../src/session/session-manager.js');
 vi.mock('../../../../src/container/dependencies.js');
 
@@ -84,8 +84,8 @@ describe('schema-driven required arguments', () => {
           caught = error;
         }
 
-        expect(caught, `${definition.name}.${missing}`).toBeInstanceOf(McpError);
-        expect((caught as McpError).code, `${definition.name}.${missing}`).toBe(McpErrorCode.InvalidParams);
+        expect(caught, `${definition.name}.${missing}`).toBeInstanceOf(ProtocolError);
+        expect((caught as ProtocolError).code, `${definition.name}.${missing}`).toBe(ProtocolErrorCode.InvalidParams);
         expect((caught as Error).message, `${definition.name}.${missing}`)
           .toContain(`Missing required parameter: ${missing}`);
       }

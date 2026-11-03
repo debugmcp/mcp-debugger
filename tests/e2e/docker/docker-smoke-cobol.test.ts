@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import { buildDockerImage, createDockerMcpClient, getDockerLogs } from './docker-test-utils.js';
 import { parseSdkToolResult } from '../smoke-test-utils.js';
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import type { Client } from '@modelcontextprotocol/client';
 
 const SKIP_DOCKER = process.env.SKIP_DOCKER_TESTS === 'true';
 

@@ -2,8 +2,8 @@
  * Server debugging control tools tests
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+import { Server } from '@modelcontextprotocol/server';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { Breakpoint, SessionLifecycleState } from '@debugmcp/shared';
@@ -21,8 +21,9 @@ import {
 } from './server-test-helpers.js';
 
 // Mock dependencies
-vi.mock('@modelcontextprotocol/sdk/server/index.js');
-vi.mock('@modelcontextprotocol/sdk/server/stdio.js');
+vi.mock('@modelcontextprotocol/server', async () =>
+  (await import('../../../test-utils/mocks/sdk-server-module.js')).sdkServerModuleMock());
+vi.mock('@modelcontextprotocol/server/stdio');
 vi.mock('../../../../src/session/session-manager.js');
 vi.mock('../../../../src/container/dependencies.js');
 
@@ -1037,7 +1038,7 @@ describe('Server Control Tools Tests', () => {
         method: 'tools/call',
         // A string: the SSE transport quirk the schema-driven coercion exists for.
         params: { name: 'wait_for_stop', arguments: { sessionId: 'test-session', timeout: '45000' } }
-      }, { signal: controller.signal });
+      }, { mcpReq: { signal: controller.signal } });
 
       expect(mockSessionManager.waitForStop).toHaveBeenCalledWith('test-session', 45000, controller.signal);
       const content = JSON.parse(result.content[0].text);

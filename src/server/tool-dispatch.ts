@@ -4,14 +4,7 @@
  * TOOL_HANDLERS. The unknown-tool check sits inside the try so an unknown
  * name produces the same tool:error log line as a failing handler.
  */
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import {
-  ListToolsRequestSchema,
-  CallToolRequestSchema,
-  ErrorCode as McpErrorCode,
-  McpError,
-  ServerResult
-} from '@modelcontextprotocol/sdk/types.js';
+import { Server, ProtocolError, ProtocolErrorCode, type CallToolResult } from '@modelcontextprotocol/server';
 import { toWireError } from '../errors/debug-errors.js';
 import { coerceToolArguments, ToolArguments } from './tool-arguments.js';
 import { extractPayloadSuccess, failureResult, sanitizeRequest, type ToolResult } from './tool-result.js';
@@ -57,7 +50,7 @@ export function registerToolHandlers(server: Server, ctx: ToolContext): void {
       .map((definition) => [definition.name, definition] as const)
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
+  server.setRequestHandler('tools/list', async () => {
     ctx.logger.debug('Handling ListToolsRequest');
     
     // Get supported languages dynamically - deferred until request time
@@ -66,9 +59,11 @@ export function registerToolHandlers(server: Server, ctx: ToolContext): void {
     return { tools: buildToolDefinitions({ supportedLanguages, environment: ctx.environment }) };
   });
 
+  // `callCtx` is the SDK's per-request context (`ctx` is the ToolContext); the
+  // unit tests invoke the handler without one.
   server.setRequestHandler(
-    CallToolRequestSchema,
-    async (request, extra): Promise<ServerResult> => {
+    'tools/call',
+    async (request, callCtx): Promise<CallToolResult> => {
       // A former name resolves to its replacement; the handler sees the name the caller
       // used, so the answer can say it is deprecated (issue #876).
       const requestedName = request.params.name;
@@ -86,16 +81,16 @@ export function registerToolHandlers(server: Server, ctx: ToolContext): void {
 
       try {
         if (!isToolName(toolName)) {
-          throw new McpError(McpErrorCode.MethodNotFound, `Unknown tool: ${requestedName}`);
+          throw new ProtocolError(ProtocolErrorCode.MethodNotFound, `Unknown tool: ${requestedName}`);
         }
         const definition = dispatchDefinitions.get(toolName);
         if (!definition) {
-          throw new McpError(McpErrorCode.MethodNotFound, `Unknown tool: ${toolName}`);
+          throw new ProtocolError(ProtocolErrorCode.MethodNotFound, `Unknown tool: ${toolName}`);
         }
         assertRequiredToolArguments(definition, args as unknown as Record<string, unknown>);
         const result =
           foreignSessionResult(ctx, definition, args.sessionId) ??
-          await TOOL_HANDLERS[toolName](ctx, args, requestedName, { signal: extra?.signal });
+          await TOOL_HANDLERS[toolName](ctx, args, requestedName, { signal: callCtx?.mcpReq.signal });
         
         // Log tool response; success mirrors the payload's own success flag (issue #397)
         ctx.logger.info('tool:response', {
@@ -122,9 +117,9 @@ export function registerToolHandlers(server: Server, ctx: ToolContext): void {
         // The JSON-RPC boundary: the SDK copies .message onto the wire and the
         // client prefixes it again, so send the bare detail (issue #659).
         throw toWireError(
-          error instanceof McpError
+          error instanceof ProtocolError
             ? error
-            : new McpError(McpErrorCode.InternalError, `Failed to execute tool ${toolName}: ${errorMessage}`)
+            : new ProtocolError(ProtocolErrorCode.InternalError, `Failed to execute tool ${toolName}: ${errorMessage}`)
         );
       }
     }

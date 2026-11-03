@@ -7,9 +7,8 @@
  * DEBUG_MCP_BP_ADDRESSING precedent.
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { ErrorCode as McpErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+import { Server, ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { createProductionDependencies } from '../../../../src/container/dependencies.js';
@@ -23,8 +22,9 @@ import {
   getToolHandlers
 } from './server-test-helpers.js';
 
-vi.mock('@modelcontextprotocol/sdk/server/index.js');
-vi.mock('@modelcontextprotocol/sdk/server/stdio.js');
+vi.mock('@modelcontextprotocol/server', async () =>
+  (await import('../../../test-utils/mocks/sdk-server-module.js')).sdkServerModuleMock());
+vi.mock('@modelcontextprotocol/server/stdio');
 vi.mock('../../../../src/session/session-manager.js');
 vi.mock('../../../../src/container/dependencies.js');
 
@@ -138,9 +138,9 @@ describe('Variable access gating (issue #237)', () => {
         method: 'tools/call',
         params: { name: 'get_variables', arguments: { sessionId: 'test-session', scope: 100 } }
       })).rejects.toSatisfy((error: unknown) => {
-        expect(error).toBeInstanceOf(McpError);
-        expect((error as McpError).code).toBe(McpErrorCode.InvalidParams);
-        expect((error as McpError).message).toContain('Missing required parameter: names');
+        expect(error).toBeInstanceOf(ProtocolError);
+        expect((error as ProtocolError).code).toBe(ProtocolErrorCode.InvalidParams);
+        expect((error as ProtocolError).message).toContain('Missing required parameter: names');
         return true;
       });
     });
@@ -151,7 +151,7 @@ describe('Variable access gating (issue #237)', () => {
       await expect(callToolHandler({
         method: 'tools/call',
         params: { name: 'get_variables', arguments: { sessionId: 'test-session', scope: 100, names: [] } }
-      })).rejects.toBeInstanceOf(McpError);
+      })).rejects.toBeInstanceOf(ProtocolError);
     });
 
     it('rejects get_local_variables without names', async () => {
@@ -161,9 +161,9 @@ describe('Variable access gating (issue #237)', () => {
         method: 'tools/call',
         params: { name: 'get_local_variables', arguments: { sessionId: 'test-session' } }
       })).rejects.toSatisfy((error: unknown) => {
-        expect(error).toBeInstanceOf(McpError);
-        expect((error as McpError).code).toBe(McpErrorCode.InvalidParams);
-        expect((error as McpError).message).toContain('Missing required parameter: names');
+        expect(error).toBeInstanceOf(ProtocolError);
+        expect((error as ProtocolError).code).toBe(ProtocolErrorCode.InvalidParams);
+        expect((error as ProtocolError).message).toContain('Missing required parameter: names');
         return true;
       });
     });

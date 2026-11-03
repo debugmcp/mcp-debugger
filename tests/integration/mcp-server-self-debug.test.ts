@@ -5,8 +5,7 @@ import { readFileSync } from 'node:fs';
 import net, { type AddressInfo } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { serverEnvironment, startStdioClient } from '../test-utils/helpers/mcp-stdio-client.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -34,7 +33,7 @@ function environment(): Record<string, string> {
 }
 
 async function call<T extends ToolResult = ToolResult>(client: Client, name: string, args: Record<string, unknown> = {}): Promise<T> {
-  const raw = await client.callTool({ name, arguments: args }, undefined, { timeout: 30_000 });
+  const raw = await client.callTool({ name, arguments: args }, { timeout: 30_000 });
   expect(raw.isError, JSON.stringify(raw)).not.toBe(true);
   const content = raw.content as Array<{ type: string; text?: string }>;
   const text = content.find(item => item.type === 'text')?.text;

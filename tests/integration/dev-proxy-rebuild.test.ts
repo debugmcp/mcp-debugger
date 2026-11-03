@@ -10,9 +10,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { OwnedStdioTransport } from '../test-utils/helpers/owned-stdio-transport.js';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { Client } from '@modelcontextprotocol/client';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const devTools = ['dev_restart_debugger', 'dev_rebuild_and_restart', 'dev_server_status'];
@@ -133,7 +132,7 @@ async function connect(extraEnv: Record<string, string> = {}, options: ConnectOp
   const client = new Client({ name: 'rebuild-test', version: '1.0.0' });
   clients.push(client);
   const notifications: string[] = [];
-  client.setNotificationHandler(ToolListChangedNotificationSchema, async n => { notifications.push(n.method); });
+  client.setNotificationHandler('notifications/tools/list_changed', async n => { notifications.push(n.method); });
   const parameters = {
     command: process.execPath,
     args: [
@@ -168,7 +167,7 @@ async function connect(extraEnv: Record<string, string> = {}, options: ConnectOp
   await client.listTools();
   await expect.poll(() => notifications.length).toBe(1);
   const call = (name: string, args: Record<string, unknown> = {}) => client.callTool(
-    { name, arguments: args }, undefined, { timeout: 10000 }
+    { name, arguments: args }, { timeout: 10000 }
   );
   const diagnostics = async (pids: number[]) => {
     const events = await readEvents(directory);

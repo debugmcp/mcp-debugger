@@ -5,7 +5,7 @@
  * CallTool dispatch (request sanitizing for logs, payload-success extraction
  * for the tool:response log line).
  */
-import { ErrorCode as McpErrorCode, McpError, ServerResult } from '@modelcontextprotocol/sdk/types.js';
+import { ProtocolError, ServerResult, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import path from 'path';
 import {
   getErrorMessage,
@@ -84,10 +84,10 @@ export function sessionErrorResultOrThrow(
  * InternalError with the tool's own prefix.
  */
 export function rethrowAsMcpError(error: unknown, prefix: string): never {
-  if (error instanceof McpError) {
+  if (error instanceof ProtocolError) {
     throw error;
   }
-  throw new McpError(McpErrorCode.InternalError, `${prefix}: ${getErrorMessage(error)}`);
+  throw new ProtocolError(ProtocolErrorCode.InternalError, `${prefix}: ${getErrorMessage(error)}`);
 }
 
 /**

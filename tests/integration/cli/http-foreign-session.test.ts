@@ -11,8 +11,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import net, { type AddressInfo } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { serverEnvironment } from '../../test-utils/helpers/mcp-stdio-client.js';
 import { waitForHealthEndpoint } from '../../e2e/smoke-test-utils.js';
 
@@ -64,7 +63,7 @@ async function connect(port: number, name: string): Promise<Client> {
 }
 
 async function call(client: Client, name: string, args: Record<string, unknown> = {}): Promise<Answer> {
-  const raw = await client.callTool({ name, arguments: args }, undefined, { timeout: 30_000 });
+  const raw = await client.callTool({ name, arguments: args }, { timeout: 30_000 });
   const text = (raw.content as Array<{ type: string; text?: string }>).find(item => item.type === 'text')?.text;
   expect(text, JSON.stringify(raw)).toBeDefined();
   return JSON.parse(text!) as Answer;
