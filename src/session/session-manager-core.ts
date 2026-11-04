@@ -506,6 +506,19 @@ export abstract class SessionManagerCore extends EventEmitter {
       }
     }
 
+    // A root that ended while its children lived kept its worker for them
+    // (issue #1081): an explicit close of the root stops it now.
+    if (session.deferredWorkerStop) {
+      const deferred = session.deferredWorkerStop;
+      session.deferredWorkerStop = undefined;
+      try {
+        await deferred.stop();
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(`[SessionManager] Error stopping the deferred worker of session ${sessionId}:`, message);
+      }
+    }
+
     // A terminal event handler may have cleared proxyManager and left its
     // stop() in flight; await it so close cannot outrun the teardown and
     // report success while the worker is still dying (issue #502).
@@ -526,7 +539,14 @@ export abstract class SessionManagerCore extends EventEmitter {
     // Anything still waiting on this session learns it is gone (issue #849).
     this.notifySessionStateListeners(sessionId);
     this.sessionStateListeners.delete(sessionId);
-    this.verifyProxyReaped(sessionId, session.lastProxyPid);
+    if (session.parentSessionId) {
+      // A child's view reports the shared worker's pid, which legitimately
+      // lives on (issue #1081); the leak probe is the root's. Its end may
+      // settle the root's deferred reap, though.
+      this.reapDeferredWorkerIfIdle(session);
+    } else {
+      this.verifyProxyReaped(sessionId, session.lastProxyPid);
+    }
     return true;
   }
 
@@ -636,6 +656,53 @@ export abstract class SessionManagerCore extends EventEmitter {
       result.push(child);
     }
     return result;
+  }
+
+  /**
+   * The reap a terminal handler asks for (issues #122, #502), scoped to the
+   * session tree (issue #1081): a child's proxy view stops only its own
+   * connection; a root that ended while child sessions are live keeps its
+   * worker for them and the stop is deferred until the last child ends or
+   * is closed. A child that ends also settles its root's deferred reap.
+   */
+  private stopOrDeferWorker(session: ManagedSession, proxyManager: IProxyManager, after: string): void {
+    if (!session.parentSessionId) {
+      const liveChildren = this.descendantsDeepestFirst(session.id).filter((s) => !isTerminalSessionState(s.state));
+      if (liveChildren.length > 0) {
+        this.logger.info(
+          `[SessionManager] Session ${session.id} ended after '${after}' with ${liveChildren.length} live child session(s); its worker is reaped when the last ends`
+        );
+        session.deferredWorkerStop = proxyManager;
+        return;
+      }
+    }
+    session.pendingProxyStop = proxyManager.stop().catch((err) => {
+      this.logger.warn(
+        `[SessionManager] Error stopping proxy after '${after}' for session ${session.id}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    });
+    if (session.parentSessionId) {
+      this.reapDeferredWorkerIfIdle(session);
+    }
+  }
+
+  /** Run a root's deferred worker stop once none of its descendants is live. */
+  protected reapDeferredWorkerIfIdle(session: ManagedSession): void {
+    const root = this.rootOf(session);
+    const deferred = root.deferredWorkerStop;
+    if (!deferred) {
+      return;
+    }
+    if (this.descendantsDeepestFirst(root.id).some((s) => !isTerminalSessionState(s.state))) {
+      return;
+    }
+    root.deferredWorkerStop = undefined;
+    this.logger.info(`[SessionManager] Last child session of ${root.id} ended; reaping its worker`);
+    root.pendingProxyStop = deferred.stop().catch((err) => {
+      this.logger.warn(
+        `[SessionManager] Error stopping the deferred worker of session ${root.id}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    });
   }
 
   /** How many of a tree's children are still live: the cap counts the whole tree. */
@@ -1372,11 +1439,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       // Windows especially, orphans accumulate (issue #122). stop() is
       // idempotent against an already-exiting worker and force-kills after 5s.
       // The promise is retained so closeSession can await it (issue #502).
-      session.pendingProxyStop = proxyManager.stop().catch((err) => {
-        this.logger.warn(
-          `[SessionManager] Error stopping proxy after 'terminated' for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`
-        );
-      });
+      this.stopOrDeferWorker(session, proxyManager, 'terminated');
     };
     proxyManager.on('terminated', handleTerminated);
     handlers.set('terminated', handleTerminated);
@@ -1402,11 +1465,7 @@ export abstract class SessionManagerCore extends EventEmitter {
 
       // Reap the proxy process (see handleTerminated for rationale, issue
       // #122); promise retained for closeSession (issue #502).
-      session.pendingProxyStop = proxyManager.stop().catch((err) => {
-        this.logger.warn(
-          `[SessionManager] Error stopping proxy after 'exited' for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`
-        );
-      });
+      this.stopOrDeferWorker(session, proxyManager, 'exited');
     };
     proxyManager.on('exited', handleExited);
     handlers.set('exited', handleExited);
@@ -1661,11 +1720,7 @@ export abstract class SessionManagerCore extends EventEmitter {
 
       // Reap the proxy process (see handleTerminated for rationale, issue
       // #122); promise retained for closeSession (issue #502).
-      session.pendingProxyStop = proxyManager.stop().catch((err) => {
-        this.logger.warn(
-          `[SessionManager] Error stopping proxy after 'error' for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`
-        );
-      });
+      this.stopOrDeferWorker(session, proxyManager, 'error');
     };
     proxyManager.on('error', handleError);
     handlers.set('error', handleError);
@@ -1730,11 +1785,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       // gone. The undefined case is the real child-process exit, where the
       // process is already dead and handleProxyExit cleaned up (issue #502).
       if (expected !== undefined) {
-        session.pendingProxyStop = proxyManager.stop().catch((err) => {
-          this.logger.warn(
-            `[SessionManager] Error stopping proxy after 'exit' for session ${sessionId}: ${err instanceof Error ? err.message : String(err)}`
-          );
-        });
+        this.stopOrDeferWorker(session, proxyManager, 'exit');
       }
     };
     proxyManager.on('exit', handleExit);

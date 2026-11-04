@@ -109,6 +109,10 @@ export interface ManagedSession extends DebugSessionInfo {
   // awaits this so it cannot report success while the worker may still be
   // dying — or failing to die (issue #502).
   pendingProxyStop?: Promise<void>;
+  // A root that ended while child sessions were live keeps its worker for
+  // them (the session tree, issue #1081): the stop deferred here runs when
+  // the last child ends or is closed, or on an explicit close of the root.
+  deferredWorkerStop?: IProxyManager;
   // Worker OS pid retained across teardown so closeSession can verify the
   // worker actually died and log a leak otherwise (issue #502).
   lastProxyPid?: number;

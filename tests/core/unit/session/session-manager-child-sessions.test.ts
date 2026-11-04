@@ -148,6 +148,74 @@ describe('SessionManager child sessions (issue #1081)', () => {
     expect(childView.dapRequestCalls.filter((c) => c.command === 'childRelease').map((c) => (c.args as { reportId: string }).reportId)).toEqual(['r3']);
   });
 
+  describe('terminal cleanup is scoped to the connection', () => {
+    async function rootWithChild(): Promise<{ rootId: string; childId: string; view: MockChildProxyView }> {
+      const rootId = await startRoot();
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+      await vi.runAllTimersAsync();
+      const childId = childOf(rootId)!.id;
+      const view = dependencies.mockProxyManager.childViews.get(childId)!;
+      dependencies.mockProxyManager.stopCalls = 0;
+      return { rootId, childId, view };
+    }
+
+    it("a child's end stops its own view only, never the worker", async () => {
+      const { rootId, childId, view } = await rootWithChild();
+
+      view.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+
+      expect(sessionManager.getSession(childId)!.state).toBe(SessionState.STOPPED);
+      expect(view.stopCalls).toBe(1);
+      expect(dependencies.mockProxyManager.stopCalls).toBe(0);
+      expect(sessionManager.getSession(rootId)!.state).not.toBe(SessionState.STOPPED);
+    });
+
+    it("the root's natural end with a live child defers the worker reap until the child ends", async () => {
+      const { rootId, childId, view } = await rootWithChild();
+
+      dependencies.mockProxyManager.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+
+      expect(sessionManager.getSession(rootId)!.state).toBe(SessionState.STOPPED);
+      expect(dependencies.mockProxyManager.stopCalls).toBe(0);
+      // The child is still debuggable: its row and view are untouched.
+      expect(sessionManager.getSession(childId)!.state).toBe(SessionState.RUNNING);
+      expect(view.stopCalls).toBe(0);
+
+      view.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+
+      expect(view.stopCalls).toBe(1);
+      expect(dependencies.mockProxyManager.stopCalls).toBe(1);
+    });
+
+    it("the root's natural end with an already ended child reaps the worker at once", async () => {
+      const { view } = await rootWithChild();
+      view.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+
+      dependencies.mockProxyManager.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+
+      expect(dependencies.mockProxyManager.stopCalls).toBe(1);
+    });
+
+    it("the root's status-driven exit with a live child defers the reap the same way", async () => {
+      const { rootId, view } = await rootWithChild();
+
+      dependencies.mockProxyManager.simulateEvent('exit', 0, undefined, true);
+      await vi.runAllTimersAsync();
+
+      expect(sessionManager.getSession(rootId)!.state).toBe(SessionState.STOPPED);
+      expect(dependencies.mockProxyManager.stopCalls).toBe(0);
+
+      view.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+      expect(dependencies.mockProxyManager.stopCalls).toBe(1);
+    });
+  });
+
   it('a failed adoption releases the child, removes its row and warns', async () => {
     const rootId = await startRoot();
     const originalCreate = dependencies.mockProxyManager.createChildView.bind(dependencies.mockProxyManager);
