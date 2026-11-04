@@ -21,7 +21,7 @@ import type { ToolContext } from '../tool-context.js';
 import type { ToolArguments } from '../tool-arguments.js';
 import { validateBreakOnExceptions } from '../tool-validation.js';
 import { debuggerOffWhy } from '../../session/debugger-off.js';
-import type { DebugResult, StopAnswerFields } from '../../session/session-manager-core.js';
+import type { DebugResult, StopAnswerFields, TreeAnswerFields } from '../../session/session-manager-core.js';
 import type { AttachRequest } from '../../session/attach/attach-controller.js';
 import type { ManagedSession } from '../../session/session-store.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
@@ -184,6 +184,28 @@ export function appendNote(response: Record<string, unknown>, note: string | und
  */
 export function hasOpenableSourcePath(file: string): boolean {
   return !file.startsWith('<') && path.isAbsolute(file);
+}
+
+/**
+ * Hoist the session tree's answer fields (issue #1081) beside `pending`:
+ * `children` (every descendant with its state), `childrenClosed` (what a
+ * relaunch or a close took with it) and `childrenReleased` (children that run
+ * undebugged this run) — copied whenever the session layer set them, so a
+ * session with no tree keeps exactly the fields it had.
+ */
+export function hoistTreeFields(response: Record<string, unknown>, data: TreeAnswerFields | undefined): void {
+  if (!data) {
+    return;
+  }
+  if (data.children) {
+    response.children = data.children;
+  }
+  if (typeof data.childrenClosed === 'number') {
+    response.childrenClosed = data.childrenClosed;
+  }
+  if (typeof data.childrenReleased === 'number') {
+    response.childrenReleased = data.childrenReleased;
+  }
 }
 
 /**

@@ -596,6 +596,95 @@ describe('SessionManager child sessions (issue #1081)', () => {
     expect(childOf(rootId)).toBeUndefined();
   });
 
+  describe('the tree answers (issue #1081, the designed flow)', () => {
+    it("a child released beyond the cap is counted on the parent's next wait answer as childrenReleased", async () => {
+      build({ DEBUG_MCP_MAX_CHILD_SESSIONS: '0' });
+      const rootId = await startRoot();
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+      await vi.runAllTimersAsync();
+
+      const answer = await sessionManager.waitForStop(rootId, 100);
+
+      expect(answer.data?.pending).toBe(true);
+      expect(answer.data?.childrenReleased).toBe(1);
+      expect(answer.data?.children).toBeUndefined();
+    });
+
+    it('a relaunch starts the released count afresh', async () => {
+      build({ DEBUG_MCP_MAX_CHILD_SESSIONS: '0' });
+      const rootId = await startRoot();
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+      await vi.runAllTimersAsync();
+      expect((await sessionManager.waitForStop(rootId, 100)).data?.childrenReleased).toBe(1);
+
+      vi.spyOn(dependencies.mockProxyManager, 'stop').mockResolvedValue();
+      const restarted = await sessionManager.restartDebugging(rootId);
+      await vi.runAllTimersAsync();
+
+      expect(restarted.success).toBe(true);
+      expect((await sessionManager.waitForStop(rootId, 100)).data?.childrenReleased).toBeUndefined();
+    });
+
+    it('a report released while its subtree is closing is not counted', async () => {
+      const rootId = await startRoot();
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+      await vi.runAllTimersAsync();
+      const view = dependencies.mockProxyManager.childViews.get(childOf(rootId)!.id)!;
+      vi.spyOn(dependencies.mockProxyManager, 'stop').mockResolvedValue();
+      let finishStop!: () => void;
+      vi.spyOn(view, 'stop').mockImplementation(() => new Promise<void>((resolve) => { finishStop = resolve; }));
+
+      const restarting = sessionManager.restartDebugging(rootId);
+      await vi.waitFor(() => expect(finishStop).toBeTypeOf('function'));
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('during-restart'));
+      finishStop();
+      await restarting;
+      await vi.runAllTimersAsync();
+
+      expect(sessionManager.getSession(rootId)!.releasedChildReports).toBeUndefined();
+    });
+
+    it('a restart answers childrenClosed with the number of descendants the relaunch closed', async () => {
+      const rootId = await startRoot();
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+      await vi.runAllTimersAsync();
+      const childView = dependencies.mockProxyManager.childViews.get(childOf(rootId)!.id)!;
+      childView.simulateEvent('child-reported', report('r2', 4343));
+      await vi.runAllTimersAsync();
+      vi.spyOn(dependencies.mockProxyManager, 'stop').mockResolvedValue();
+
+      const restarted = await sessionManager.restartDebugging(rootId);
+      await vi.runAllTimersAsync();
+
+      expect(restarted.success).toBe(true);
+      expect(restarted.data?.childrenClosed).toBe(2);
+      expect(restarted.data?.children).toBeUndefined();
+    });
+
+    it('a launch with nothing to tear down answers no childrenClosed', async () => {
+      const session = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      const started = await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+      expect(started.data?.childrenClosed).toBeUndefined();
+    });
+
+    it('a child adopted during the launch hold is listed on the launch answer', async () => {
+      const session = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      const starting = sessionManager.startDebugging(session.id, 'test.py');
+      await vi.advanceTimersByTimeAsync(100);
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+      await vi.runAllTimersAsync();
+      const started = await starting;
+
+      expect(started.success).toBe(true);
+      expect(started.data?.pending).toBe(true);
+      const child = childOf(session.id)!;
+      expect(started.data?.children).toEqual([
+        { sessionId: child.id, name: 'Subprocess 4242', state: SessionState.RUNNING, parentSessionId: session.id }
+      ]);
+    });
+  });
+
   it('releases the report and removes the row if creating its proxy view fails', async () => {
     const rootId = await startRoot();
     vi.spyOn(dependencies.mockProxyManager, 'createChildView').mockImplementation(() => {

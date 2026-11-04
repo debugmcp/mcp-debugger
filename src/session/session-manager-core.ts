@@ -278,6 +278,13 @@ export type WaitForStopResultData = DebugResultData & StopAnswerFields & TreeAns
 export type LaunchResultData = DebugResultData & StopAnswerFields & TreeAnswerFields;
 
 /**
+ * What a detach returns on top of the common fields (the session tree, issue
+ * #1081): the children a plain detach released to run undebugged, or a
+ * terminating detach closed.
+ */
+export type DetachResultData = DebugResultData & Pick<TreeAnswerFields, 'childrenReleased' | 'childrenClosed'>;
+
+/**
  * What a successful attach returns on top of the common fields: the same
  * landing an ordinary stop answer carries (issue #982 gave attach parity —
  * location/threadId/note/snapshot; before that only the `note` survived,
@@ -694,21 +701,25 @@ export abstract class SessionManagerCore extends EventEmitter {
    * even without a live proxy process, so the adapter registry slot is
    * always released (issue #238).
    */
-  protected async stopProxyPreservingSession(session: ManagedSession): Promise<void> {
+  protected async stopProxyPreservingSession(session: ManagedSession): Promise<number> {
     this.closingSubtrees.add(session.id);
     try {
-      await this.stopProxyAndDescendants(session);
+      return await this.stopProxyAndDescendants(session);
     } finally {
       this.closingSubtrees.delete(session.id);
     }
   }
 
-  private async stopProxyAndDescendants(session: ManagedSession): Promise<void> {
+  /** Returns how many descendants it closed (the relaunch answer's `childrenClosed`). */
+  private async stopProxyAndDescendants(session: ManagedSession): Promise<number> {
     clearPauseIntent(session);
     // Children belong to a run (issue #1081): a relaunch, or the teardown of
     // a launch that failed, closes the previous run's children first.
+    let childrenClosed = 0;
     for (const descendant of this.descendantsDeepestFirst(session.id)) {
-      await this.closeSingleSession(descendant.id);
+      if (await this.closeSingleSession(descendant.id)) {
+        childrenClosed += 1;
+      }
     }
     const proxyManager = session.proxyManager;
     if (proxyManager) {
@@ -738,6 +749,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       await session.pendingProxyStop;
       session.pendingProxyStop = undefined;
     }
+    return childrenClosed;
   }
 
   async closeAllSessions(): Promise<void> {
@@ -878,7 +890,12 @@ export abstract class SessionManagerCore extends EventEmitter {
     parentProxy: IProxyManager,
     reported: ChildReportedEvent
   ): Promise<void> {
-    const release = (reason: string): void => {
+    const release = (reason: string, options: { counted: boolean } = { counted: true }): void => {
+      if (options.counted) {
+        // The run's count of children that run undebugged (issue #1081): the
+        // parent's next answers carry it as `childrenReleased`.
+        parent.releasedChildReports = (parent.releasedChildReports ?? 0) + 1;
+      }
       parentProxy
         .sendDapRequest(CHILD_RELEASE_COMMAND, { reportId: reported.reportId, reason }, { timeoutMs: 5000 })
         .catch((err) => {
@@ -889,7 +906,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     };
 
     if (this.sessionStore.get(parent.id) !== parent || parent.proxyManager !== parentProxy || this.isSubtreeClosing(parent)) {
-      release('the parent session is closing or its connection has ended');
+      release('the parent session is closing or its connection has ended', { counted: false });
       return;
     }
 
@@ -969,7 +986,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       this.logger.warn(
         `[SessionManager] Adopting child ${reported.name} of session ${parent.id} failed: ${message}`
       );
-      release(`adoption failed: ${message}`);
+      release(`adoption failed: ${message}`, { counted: !this.isSubtreeClosing(parent) });
       if (child && this.sessionStore.get(child.id) === child && !this.isSubtreeClosing(child)) {
         // Use the normal subtree teardown: a grandchild may already have
         // been reported, and removing the last child must reap a root whose
@@ -1028,6 +1045,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     session.adapterCapabilities = undefined;
     session.liveUpdateState = undefined;
     session.programEndExplanation = undefined;
+    session.releasedChildReports = undefined;
     session.failureDiagnostics = undefined;
     // Adapter degradation notes are per-launch (issue #441).
     session.adapterNotices = [];

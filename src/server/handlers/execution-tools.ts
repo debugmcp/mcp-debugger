@@ -7,7 +7,7 @@ import { isTerminalSessionState } from '@debugmcp/shared';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import type { DebugResult, StepResultData } from '../../session/session-manager-core.js';
 import { requireSessionId } from '../tool-validation.js';
-import { hoistStopLanding } from './shared.js';
+import { hoistStopLanding, hoistTreeFields } from './shared.js';
 import {
   failureResult,
   jsonResult,
@@ -146,6 +146,11 @@ export const waitForStopTool: ToolHandler = async (ctx, args, _toolName, extra) 
     if (data?.message) {
       response.message = data.message;
     }
+    // The session this answer is about (issue #1081): the one asked for, or
+    // the descendant the tree-aware wait selected — inspect with this id.
+    if (data?.sessionId) {
+      response.sessionId = data.sessionId;
+    }
     if (data?.lastStop) {
       response.lastStop = data.lastStop;
     }
@@ -157,8 +162,10 @@ export const waitForStopTool: ToolHandler = async (ctx, args, _toolName, extra) 
     if (Array.isArray(data?.unhitBreakpoints) && data.unhitBreakpoints.length > 0) {
       response.unhitBreakpoints = data.unhitBreakpoints;
     }
-    // The landing (issues #904, #938), as for pause_execution and the step tools.
-    await hoistStopLanding(ctx, response, data, args.sessionId, 'wait_for_stop result');
+    // The landing (issues #904, #938), as for pause_execution and the step
+    // tools — read for the selected session, whose stop this is.
+    await hoistStopLanding(ctx, response, data, data?.sessionId ?? args.sessionId, 'wait_for_stop result');
+    hoistTreeFields(response, data);
     // What the adapter read into the program's end (issue #877: e.g. availableDevices)
     // lands beside the message under the policy's own keys, after everything the answer
     // says for itself: a key the answer already has — the landing's included — wins, the

@@ -124,7 +124,8 @@ export interface OperationsContext {
    * (issue #711).
    */
   cleanupProxyEventHandlers(session: ManagedSession, proxyManager: IProxyManager): void;
-  stopProxyPreservingSession(session: ManagedSession): Promise<void>;
+  /** Resolves with how many descendants the teardown closed (issue #1081). */
+  stopProxyPreservingSession(session: ManagedSession): Promise<number>;
   closeSession(sessionId: string): Promise<boolean>;
   getStackTrace(
     sessionId: string,
@@ -195,6 +196,7 @@ export type LaunchContext = Pick<
   | 'selectPolicy'
   | 'getStackTraceDetailed'
   | 'stopProxyPreservingSession'
+  | 'descendantsOf'
   | 'extractLocalsFromResolved'
   | 'redactionEnabled'
   | 'snapshotEnabled'

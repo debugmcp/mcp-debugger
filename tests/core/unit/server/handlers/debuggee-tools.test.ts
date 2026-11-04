@@ -113,6 +113,28 @@ describe('debuggee lifecycle tool handlers', () => {
     }
   });
 
+  describe('the tree fields (issue #1081)', () => {
+    const children = [{ sessionId: 'child-1', name: 'Subprocess 4242', state: 'running', parentSessionId: 'test-session' }];
+
+    for (const [tool, answer] of answers) {
+      it(`${tool} hoists children, childrenClosed and childrenReleased beside pending`, async () => {
+        const payload = JSON.parse(
+          (await answer({ message: 'still running', pending: true, children, childrenClosed: 2, childrenReleased: 1 }, 'running')).content[0].text
+        );
+
+        expect(payload).toMatchObject({ success: true, state: 'running', pending: true, children, childrenClosed: 2, childrenReleased: 1 });
+      });
+
+      it(`${tool} hoists none of them for a session without a tree`, async () => {
+        const payload = JSON.parse((await answer({ message: 'still running', pending: true }, 'running')).content[0].text);
+
+        expect(payload).not.toHaveProperty('children');
+        expect(payload).not.toHaveProperty('childrenClosed');
+        expect(payload).not.toHaveProperty('childrenReleased');
+      });
+    }
+  });
+
   // Issue #985: the test-runner preset rides start_debugging as two optional
   // arguments, folded into adapterLaunchConfig at intake so the seven-argument
   // facade signature and restart_debugging's replay stay as they are.

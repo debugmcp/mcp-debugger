@@ -24,7 +24,7 @@ import type { AttachLocality } from '@debugmcp/shared';
 import { attachLocalityOf, classifyAttachAddressing } from './attach-addressing.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import { DapResponseError } from '../../proxy/dap-response-error.js';
-import type { AttachResultData, CustomLaunchRequestArguments, DebugResult } from '../session-manager-core.js';
+import type { AttachResultData, CustomLaunchRequestArguments, DebugResult, DetachResultData } from '../session-manager-core.js';
 import type { AttachContext } from '../operations-context.js';
 import type { BreakpointController } from '../breakpoints/breakpoint-controller.js';
 import { failProxySetup, sessionRemovedDuringTeardown } from '../launch/proxy-failure-diagnostics.js';
@@ -589,7 +589,7 @@ export class AttachController {
   async detachFromProcess(
     sessionId: string,
     terminateProcess: boolean = false
-  ): Promise<DebugResult> {
+  ): Promise<DebugResult<DetachResultData>> {
     return this.inFlight.run(sessionId, 'detach', 'detach_from_process', this.ctx, () =>
       this.detach(sessionId, terminateProcess)
     );
@@ -599,7 +599,7 @@ export class AttachController {
   private async detach(
     sessionId: string,
     terminateProcess: boolean
-  ): Promise<DebugResult> {
+  ): Promise<DebugResult<DetachResultData>> {
     const session = this.ctx.getSession(sessionId);
     this.ctx.logger.info(
       `[SessionManager] Detaching from process for session ${sessionId}, terminateProcess: ${terminateProcess}`

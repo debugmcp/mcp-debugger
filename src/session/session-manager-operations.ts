@@ -40,6 +40,7 @@ import { AttachController, type AttachRequest } from './attach/attach-controller
 import { InFlightGuard } from './in-flight-guard.js';
 import {
   AttachResultData,
+  DetachResultData,
   CustomLaunchRequestArguments,
   DebugResult,
   LaunchResultData,
@@ -435,7 +436,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   async detachFromProcess(
     sessionId: string,
     terminateProcess: boolean = false
-  ): Promise<DebugResult> {
+  ): Promise<DebugResult<DetachResultData>> {
     return this.attach.detachFromProcess(sessionId, terminateProcess);
   }
 

@@ -4,7 +4,7 @@
  */
 import type { ToolHandler } from '../tool-context.js';
 import type { HotReloadArgs } from '@debugmcp/shared';
-import { attachRequestFromArgs, childSessionRefusal, hoistStopLanding, successWarning } from './shared.js';
+import { attachRequestFromArgs, childSessionRefusal, hoistStopLanding, hoistTreeFields, successWarning } from './shared.js';
 import {
   assertPlainObjectArg,
   foldTestRunnerPreset,
@@ -67,6 +67,9 @@ export const startDebuggingTool: ToolHandler = async (ctx, args) => {
     // than the source (issue #950). Nothing for a launch that answered
     // running or that ended: the session layer gave those no location.
     await hoistStopLanding(ctx, responsePayload, debugResult.data, sessionId, 'launch result');
+    // The session tree (issue #1081): children adopted during the hold, what
+    // a relaunch closed, what ran undebugged.
+    hoistTreeFields(responsePayload, debugResult.data);
     return jsonResult(responsePayload);
   } catch (error) {
     return sessionErrorResultOrThrow(error, { state: 'stopped' });
@@ -108,6 +111,7 @@ export const restartDebuggingTool: ToolHandler = async (ctx, args) => {
       }
       // And the same landing when it stopped (issue #951).
       await hoistStopLanding(ctx, responsePayload, debugResult.data, args.sessionId, 'restart result');
+      hoistTreeFields(responsePayload, debugResult.data);
     }
     return jsonResult(responsePayload);
   } catch (error) {
@@ -202,6 +206,8 @@ export const detachFromProcessTool: ToolHandler = async (ctx, args) => {
 
     if (detachResult.data) {
       responsePayload.data = detachResult.data;
+      // The children a detach released, or a terminating detach closed (issue #1081).
+      hoistTreeFields(responsePayload, detachResult.data);
     }
 
     return jsonResult(responsePayload);
