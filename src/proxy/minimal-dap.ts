@@ -330,6 +330,19 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
           const result = await this.dapBehavior.handleReverseRequest(request, context);
           
           if (result.handled) {
+            if (result.childReport) {
+              // A child the debuggee started (the session tree, issue #1081):
+              // the request stays unanswered while whoever listens decides to
+              // adopt or release it. With nobody listening it is released at
+              // once — an acked-but-never-attached child stays parked forever
+              // (docs/python/spike-notes-subprocess.md), a rejected one runs.
+              if (this.listenerCount('child-report') > 0) {
+                this.emit('child-report', { request, report: result.childReport });
+              } else {
+                this.sendResponse(request, {}, false, 'no child-session adopter on this connection: child released');
+              }
+              return;
+            }
             // Policy handled the request
             if (result.createChildSession && this.childSessionManager && result.childConfig) {
               // Create child session through the manager
@@ -900,6 +913,15 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
     } else {
       logger.error('[MinimalDapClient] Cannot write message, socket not connected/destroyed');
     }
+  }
+
+  /**
+   * Answer a reverse request this client handed out as a `child-report` and
+   * has held unanswered since (issue #1081): `success: true` once the child
+   * is adopted, `success: false` to release it.
+   */
+  public respondToReverseRequest(request: DebugProtocol.Request, body: unknown, success: boolean, message?: string): void {
+    this.sendResponse(request, body, success, message);
   }
 
   private sendResponse(request: DebugProtocol.Request, body: unknown = {}, success: boolean = true, errorMessage?: string): void {
