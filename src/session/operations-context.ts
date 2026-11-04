@@ -81,6 +81,19 @@ export interface OperationsContext {
    * (see `waitForSessionState`), not from within it. Returns the unsubscribe.
    */
   onStateChange(sessionId: string, listener: () => void): () => void;
+  /**
+   * The session tree (issue #1081): be told whenever the session or any of
+   * its descendants changes state, is adopted (its first transition) or is
+   * removed. Same contract as `onStateChange`: no arguments, runs inside the
+   * transition, read when the stack has unwound (see `waitForSubtreeSettle`).
+   */
+  onSubtreeChange(sessionId: string, listener: () => void): () => void;
+  /**
+   * Every descendant of a session, depth first in adoption order (a child,
+   * then its own descendants, then the next child): the order the tree-aware
+   * wait selects in and the `children` answers list in.
+   */
+  descendantsOf(sessionId: string): ManagedSession[];
 
   /**
    * The data layer's policy lookup: total, and overridable by tests.
@@ -225,7 +238,8 @@ export type BreakpointContext = Pick<
  * Stepping / continue / pause / threads / waiting for a stop. The policy and
  * the detailed stack serve the pending-stop explanation (issue #678): the raw
  * origin frame of a step, and the adapter's account of why it may never land.
- * The state subscription serves wait_for_stop (issue #849).
+ * The state subscription serves wait_for_stop (issue #849); the subtree
+ * subscription and the descendant read serve its tree-aware form (issue #1081).
  */
 export type ExecutionContext = Pick<
   OperationsContext,
@@ -233,6 +247,8 @@ export type ExecutionContext = Pick<
   | 'getSession'
   | 'updateState'
   | 'onStateChange'
+  | 'onSubtreeChange'
+  | 'descendantsOf'
   | 'getStackTraceDetailed'
   | 'selectPolicy'
   | 'tunables'

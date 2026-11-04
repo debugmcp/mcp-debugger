@@ -312,6 +312,14 @@ export abstract class SessionManagerCore extends EventEmitter {
    */
   private readonly sessionStateListeners = new Map<string, Set<() => void>>();
 
+  /**
+   * Who wants to know when a session's subtree changes (the session tree,
+   * issue #1081): told after every transition of the session or any
+   * descendant — a child's first transition is its adoption — and after any
+   * of them is removed. The tree-aware wait_for_stop subscribes here.
+   */
+  private readonly subtreeListeners = new Map<string, Set<() => void>>();
+
   /** Do not admit new descendants while an explicit close or relaunch tears down a subtree. */
   private readonly closingSubtrees = new Set<string>();
 
@@ -421,6 +429,49 @@ export abstract class SessionManagerCore extends EventEmitter {
       executionState: execution
     });
     this.notifySessionStateListeners(session.id);
+    this.notifySubtreeListeners(session);
+  }
+
+  /**
+   * Subscribe to a session's subtree (issue #1081): the session's own
+   * transitions and removal, and those of every descendant, present or
+   * adopted later. Returns the unsubscribe.
+   */
+  protected onSubtreeStateChange(sessionId: string, listener: () => void): () => void {
+    let listeners = this.subtreeListeners.get(sessionId);
+    if (!listeners) {
+      listeners = new Set();
+      this.subtreeListeners.set(sessionId, listeners);
+    }
+    listeners.add(listener);
+    return () => {
+      const current = this.subtreeListeners.get(sessionId);
+      if (current?.delete(listener) && current.size === 0) {
+        this.subtreeListeners.delete(sessionId);
+      }
+    };
+  }
+
+  /** Tell the subtree listeners of a session and of each of its ancestors. */
+  private notifySubtreeListeners(session: ManagedSession): void {
+    const seen = new Set<string>();
+    let current: ManagedSession | undefined = session;
+    while (current && !seen.has(current.id)) {
+      seen.add(current.id);
+      const listeners = this.subtreeListeners.get(current.id);
+      if (listeners) {
+        for (const listener of [...listeners]) {
+          try {
+            listener();
+          } catch (error) {
+            this.logger.warn(
+              `[SessionManager] Subtree listener threw for session ${current.id}: ${error instanceof Error ? error.message : String(error)}`
+            );
+          }
+        }
+      }
+      current = current.parentSessionId ? this.sessionStore.get(current.parentSessionId) : undefined;
+    }
   }
 
   /**
@@ -555,9 +606,12 @@ export abstract class SessionManagerCore extends EventEmitter {
 
     this.logger.info(`Session ${sessionId} marked as STOPPED/TERMINATED.`);
     this.sessionStore.remove(sessionId);
-    // Anything still waiting on this session learns it is gone (issue #849).
+    // Anything still waiting on this session learns it is gone (issue #849),
+    // and a wait on an ancestor's tree sees one descendant fewer (issue #1081).
     this.notifySessionStateListeners(sessionId);
     this.sessionStateListeners.delete(sessionId);
+    this.notifySubtreeListeners(session);
+    this.subtreeListeners.delete(sessionId);
     if (session.parentSessionId) {
       // A child's view reports the shared worker's pid, which legitimately
       // lives on (issue #1081); the leak probe is the root's. Its end may
@@ -696,6 +750,20 @@ export abstract class SessionManagerCore extends EventEmitter {
     // Defensive: test doubles of the store may be partial.
     const all = typeof this.sessionStore.getAllManaged === 'function' ? this.sessionStore.getAllManaged() : [];
     return all.filter((s) => s.parentSessionId === sessionId);
+  }
+
+  /**
+   * Every descendant of a session, depth first in adoption order (pre-order: a
+   * child, its own descendants, then the next child) — the order the
+   * tree-aware wait selects in and the `children` answers list in.
+   */
+  protected descendantsDepthFirst(sessionId: string): ManagedSession[] {
+    const result: ManagedSession[] = [];
+    for (const child of this.childrenOf(sessionId)) {
+      result.push(child);
+      result.push(...this.descendantsDepthFirst(child.id));
+    }
+    return result;
   }
 
   /** Every descendant of a session, deepest first (post-order), adoption order within a level. */

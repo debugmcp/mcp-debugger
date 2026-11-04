@@ -177,6 +177,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       updateSession: (sessionId, updates) => this.sessionStore.update(sessionId, updates),
       updateState: (session, newState) => this._updateSessionState(session, newState),
       onStateChange: (sessionId, listener) => this.onSessionStateChange(sessionId, listener),
+      onSubtreeChange: (sessionId, listener) => this.onSubtreeStateChange(sessionId, listener),
+      descendantsOf: (sessionId) => this.descendantsDepthFirst(sessionId),
       selectPolicy: (language) => this.selectPolicy(language),
       selectStorePolicy: (language) => this.sessionStore.selectPolicy(language),
       findFreePort: () => this.findFreePort(),
