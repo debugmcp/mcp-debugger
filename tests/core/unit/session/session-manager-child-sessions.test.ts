@@ -216,6 +216,104 @@ describe('SessionManager child sessions (issue #1081)', () => {
     });
   });
 
+  describe('closing cascades over the subtree', () => {
+    async function tree(): Promise<{ rootId: string; childId: string; grandchildId: string; childView: MockChildProxyView; grandchildView: MockChildProxyView }> {
+      const rootId = await startRoot();
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+      await vi.runAllTimersAsync();
+      const childId = childOf(rootId)!.id;
+      const childView = dependencies.mockProxyManager.childViews.get(childId)!;
+      childView.simulateEvent('child-reported', report('r2', 4343));
+      await vi.runAllTimersAsync();
+      const grandchildId = childOf(childId)!.id;
+      const grandchildView = dependencies.mockProxyManager.childViews.get(grandchildId)!;
+      dependencies.mockProxyManager.stopCalls = 0;
+      return { rootId, childId, grandchildId, childView, grandchildView };
+    }
+
+    const listed = (id: string) => sessionManager.getAllSessions().some((s) => s.id === id);
+
+    it('closing the root closes grandchild, child, then root, and removes every row', async () => {
+      const { rootId, childId, grandchildId, childView, grandchildView } = await tree();
+      const order: string[] = [];
+      vi.spyOn(childView, 'stop').mockImplementation(async () => { order.push('child'); });
+      vi.spyOn(grandchildView, 'stop').mockImplementation(async () => { order.push('grandchild'); });
+      vi.spyOn(dependencies.mockProxyManager, 'stop').mockImplementation(async () => { order.push('root'); });
+
+      await expect(sessionManager.closeSession(rootId)).resolves.toBe(true);
+
+      expect(order).toEqual(['grandchild', 'child', 'root']);
+      expect(listed(rootId)).toBe(false);
+      expect(listed(childId)).toBe(false);
+      expect(listed(grandchildId)).toBe(false);
+    });
+
+    it('closing a child closes its subtree and leaves the root and the worker alone', async () => {
+      const { rootId, childId, grandchildId, childView, grandchildView } = await tree();
+
+      await expect(sessionManager.closeSession(childId)).resolves.toBe(true);
+
+      expect(childView.stopCalls).toBe(1);
+      expect(grandchildView.stopCalls).toBe(1);
+      expect(dependencies.mockProxyManager.stopCalls).toBe(0);
+      expect(listed(rootId)).toBe(true);
+      expect(listed(childId)).toBe(false);
+      expect(listed(grandchildId)).toBe(false);
+      expect(sessionManager.getSession(rootId)!.state).not.toBe(SessionState.STOPPED);
+    });
+
+    it('closeAllSessions closes each session once, children before their root, with no not-found noise', async () => {
+      const { childView, grandchildView } = await tree();
+
+      await sessionManager.closeAllSessions();
+
+      expect(childView.stopCalls).toBe(1);
+      expect(grandchildView.stopCalls).toBe(1);
+      expect(dependencies.mockProxyManager.stopCalls).toBe(1);
+      expect(sessionManager.getAllSessions()).toHaveLength(0);
+      const notFound = vi.mocked(dependencies.mockLogger.warn).mock.calls.some(
+        (call) => typeof call[0] === 'string' && call[0].includes('Session not found')
+      );
+      expect(notFound).toBe(false);
+    });
+
+    it('an ended child stays listed until closed, and leaves with its parent', async () => {
+      const { rootId, childId, childView } = await tree();
+
+      childView.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+      expect(listed(childId)).toBe(true);
+      expect(sessionManager.getSession(childId)!.state).toBe(SessionState.STOPPED);
+
+      await sessionManager.closeSession(rootId);
+      expect(listed(childId)).toBe(false);
+    });
+
+    it('closing a root whose reap was deferred stops the worker then', async () => {
+      const { rootId, childId } = await tree();
+      dependencies.mockProxyManager.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+      expect(dependencies.mockProxyManager.stopCalls).toBe(0);
+
+      await sessionManager.closeSession(rootId);
+
+      expect(dependencies.mockProxyManager.stopCalls).toBe(1);
+      expect(listed(childId)).toBe(false);
+    });
+
+    it('restarting a root closes the previous run’s children first', async () => {
+      const { rootId, childId, grandchildId, childView } = await tree();
+
+      await sessionManager.restartDebugging(rootId);
+      await vi.runAllTimersAsync();
+
+      expect(childView.stopCalls).toBe(1);
+      expect(listed(childId)).toBe(false);
+      expect(listed(grandchildId)).toBe(false);
+      expect(listed(rootId)).toBe(true);
+    });
+  });
+
   it('a failed adoption releases the child, removes its row and warns', async () => {
     const rootId = await startRoot();
     const originalCreate = dependencies.mockProxyManager.createChildView.bind(dependencies.mockProxyManager);

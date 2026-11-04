@@ -477,7 +477,18 @@ export abstract class SessionManagerCore extends EventEmitter {
   }
   
   async closeSession(sessionId: string): Promise<boolean> {
-    const session = this.sessionStore.get(sessionId); 
+    // The session tree (issue #1081): closing any session closes its subtree
+    // first, deepest first, so a child never outlives its parent's row and a
+    // root's worker goes after its last child's connection.
+    for (const descendant of this.descendantsDeepestFirst(sessionId)) {
+      await this.closeSingleSession(descendant.id);
+    }
+    return this.closeSingleSession(sessionId);
+  }
+
+  /** Close one session: its own proxy (a root's worker, a child's connection), its row, its waiters. */
+  protected async closeSingleSession(sessionId: string): Promise<boolean> {
+    const session = this.sessionStore.get(sessionId);
     if (!session) {
       this.logger.warn(`[SESSION_CLOSE_FAIL] Session not found: ${sessionId}`);
       return false;
@@ -587,6 +598,11 @@ export abstract class SessionManagerCore extends EventEmitter {
    */
   protected async stopProxyPreservingSession(session: ManagedSession): Promise<void> {
     clearPauseIntent(session);
+    // Children belong to a run (issue #1081): a relaunch, or the teardown of
+    // a launch that failed, closes the previous run's children first.
+    for (const descendant of this.descendantsDeepestFirst(session.id)) {
+      await this.closeSingleSession(descendant.id);
+    }
     const proxyManager = session.proxyManager;
     if (proxyManager) {
       session.lastProxyPid = proxyManager.getProxyPid?.() ?? session.lastProxyPid;
@@ -621,6 +637,10 @@ export abstract class SessionManagerCore extends EventEmitter {
     this.logger.info(`Closing all debug sessions (${this.sessionStore.size()} active)`);
     const sessions = this.sessionStore.getAllManaged();
     for (const session of sessions) {
+      // A root's cascade may have removed its children already (issue #1081).
+      if (!this.sessionStore.get(session.id)) {
+        continue;
+      }
       await this.closeSession(session.id);
     }
     this.logger.info('All debug sessions closed');
@@ -645,7 +665,9 @@ export abstract class SessionManagerCore extends EventEmitter {
 
   /** A session's direct children, in adoption (store insertion) order. */
   protected childrenOf(sessionId: string): ManagedSession[] {
-    return this.sessionStore.getAllManaged().filter((s) => s.parentSessionId === sessionId);
+    // Defensive: test doubles of the store may be partial.
+    const all = typeof this.sessionStore.getAllManaged === 'function' ? this.sessionStore.getAllManaged() : [];
+    return all.filter((s) => s.parentSessionId === sessionId);
   }
 
   /** Every descendant of a session, deepest first (post-order), adoption order within a level. */
