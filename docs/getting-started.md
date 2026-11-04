@@ -88,7 +88,7 @@ prerequisite and failure signature is collected in the [Diagnostics guide](./dia
 
 ## Step 3: Register the server with your MCP client
 
-The server speaks three transports. You only need one.
+The server speaks two transports. You only need one.
 
 | Transport | Command | Use it for |
 |---|---|---|

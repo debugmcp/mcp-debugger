@@ -6,7 +6,7 @@
  * Usage: node tests/exploratory/test-docker.mjs
  */
 
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import {
@@ -27,7 +27,7 @@ async function main() {
 
   // Check Docker availability
   try {
-    const ver = execSync('docker --version', { encoding: 'utf8', timeout: 5000 });
+    const ver = execFileSync('docker', ['--version'], { encoding: 'utf8', timeout: 5000 });
     console.log(`  Docker: ${ver.trim()}`);
   } catch {
     console.log('  Docker not available - skipping Docker tests');
@@ -37,7 +37,7 @@ async function main() {
 
   // Check if image exists
   try {
-    const imageId = execSync('docker images -q mcp-debugger:local', { encoding: 'utf8', timeout: 5000 });
+    const imageId = execFileSync('docker', ['images', '-q', 'mcp-debugger:local'], { encoding: 'utf8', timeout: 5000 });
     if (!imageId.trim()) {
       console.log('  Docker image mcp-debugger:local not found - skipping');
       console.log('  RESULT: SKIPPED (image not built)');
@@ -59,8 +59,9 @@ async function main() {
   console.log('');
 
   try {
-    execSync(
-      `docker run -d --name ${containerName} -p ${hostPort}:3001 -v "${hostPath}:/workspace" mcp-debugger:local http -p 3001`,
+    execFileSync(
+      'docker', ['run', '-d', '--name', containerName, '-p', `${hostPort}:3001`,
+        '-v', `${hostPath}:/workspace`, 'mcp-debugger:local', 'http', '-p', '3001'],
       { stdio: 'pipe', timeout: 30000 }
     );
     console.log('  Container started');
@@ -68,7 +69,7 @@ async function main() {
     console.error(`  Failed to start container: ${error.message}`);
     // Try to get any output
     try {
-      const logs = execSync(`docker logs ${containerName} 2>&1`, { encoding: 'utf8', timeout: 5000 });
+      const logs = execFileSync('docker', ['logs', containerName], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'inherit'] });
       console.error(`  Container logs: ${logs}`);
     } catch {}
     process.exit(1);
@@ -80,7 +81,7 @@ async function main() {
     console.log('  Waiting for container health...');
     const healthy = await waitForHealth(hostPort, 30000);
     if (!healthy) {
-      const logs = execSync(`docker logs ${containerName} 2>&1`, { encoding: 'utf8', timeout: 5000 });
+      const logs = execFileSync('docker', ['logs', containerName], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'inherit'] });
       console.error(`  Container failed to become healthy. Logs:\n${logs}`);
       throw new Error('Container health check failed');
     }
@@ -249,8 +250,8 @@ async function main() {
   } finally {
     // Cleanup container
     console.log('\n  Cleaning up Docker container...');
-    try { execSync(`docker stop ${containerName}`, { stdio: 'pipe', timeout: 10000 }); } catch {}
-    try { execSync(`docker rm ${containerName}`, { stdio: 'pipe', timeout: 5000 }); } catch {}
+    try { execFileSync('docker', ['stop', containerName], { stdio: 'pipe', timeout: 10000 }); } catch {}
+    try { execFileSync('docker', ['rm', containerName], { stdio: 'pipe', timeout: 5000 }); } catch {}
     console.log('  Container removed');
   }
 
