@@ -89,9 +89,11 @@ adapter holds the child for us; discovery is the only gap, and step 5 closes it.
 
 ### `wait_for_stop` is tree-aware
 
-A `wait_for_stop` on a session returns when that session **or any of its descendants** settles
-(pauses, ends, errors). The answer carries `sessionId`: the id of the session that settled, equal
-to the id asked for when it is the session itself. Everything else in the answer is the ordinary
+A `wait_for_stop` on a session observes that session **and all its descendants**. It returns a
+pause or error from that subtree, or the requested session's end, using the priority below. An
+ended descendant alone does not complete an ancestor's wait. The answer carries `sessionId`: the
+id selected by that priority, equal to the id asked for when it is the session itself. Everything
+else in the answer is the ordinary
 stop answer for that session (`lastStop`, `location`, the stop snapshot, `exitCode` where one
 exists). The agent then uses `sessionId` for inspection, stepping and continuing.
 
@@ -168,18 +170,31 @@ Two measured effects the answers name:
   the [#993](https://github.com/debugmcp/mcp-debugger/issues/993) mechanism). While that is the
   case the parent row says `running` and its `wait_for_stop` reports the child.
 - A js-debug program's exit kills its unreported children within 300 ms (JavaScript spike, cascade
-  row 2); a fork reported and adopted before that is a session until it ends.
+  row 2). That run did not adopt the fork: whether an already adopted child survives its parent's
+  exit is unmeasured and belongs in M2's lifecycle fixture. The server retains the child session
+  until its own terminal event, without promising that the adapter keeps its process alive.
 
 ### Closing
 
-- `close_debug_session` on a parent closes the subtree: children first (deepest first), then the
-  parent. The whole tree is gone afterwards (Python spike, row 6; JavaScript spike, row 6: only the
-  root's `disconnect` ends a js-debug tree, and it never answers, so the worker's timeout-then-tree-kill
-  stays).
-- `close_debug_session` on a child closes that child only. What happens to the process is the
-  adapter's: debugpy terminates it (exit 0 reported to the parent, Python spike, row 4); js-debug
-  cannot end a child it adopted (the process keeps running undebugged, JavaScript spike, row 3).
-  The answer says which (`processEnded: true` / `released: true`).
+- `close_debug_session` on any session closes its subtree: descendants first (deepest first),
+  then the named session. This applies to a child that has children of its own as well as to a
+  root; closing a child leaves its ancestors and siblings open.
+- Closing a **launch root** ends the whole process tree (Python spike, row 6; JavaScript spike,
+  row 6: only the root's `disconnect` ends a js-debug tree, and it never answers, so the worker's
+  timeout-then-tree-kill stays).
+- Explicitly closing a **child** uses the adapter's measured child-close semantics for its selected
+  subtree: debugpy terminates it (exit 0 reported to its parent, Python spike, row 4); js-debug
+  cannot end a child it adopted and releases it to run undebugged (JavaScript spike, row 3). The
+  named child's answer says which (`processEnded: true` / `released: true`). Closing a non-root
+  subtree never shuts down the shared worker or adapter.
+- Closing or idle-reaping an **attach root** preserves the external targets: every descendant is
+  detached deepest-first with `disconnect(terminateDebuggee: false)` and the adapter's existing
+  resume-before-detach policy, then the root is detached. All selected rows are removed and the
+  answer says `released: true`. This cascade uses the initiating root operation's preserve-target
+  policy, not the termination rule for an explicit child close above. It preserves today's worker
+  auto-detach on attach-mode close (`handleTerminate` and `performShutdown` in
+  `src/proxy/dap-proxy-worker.ts`). Worker/adapter cleanup must not escalate to killing the
+  external targets.
 - A session that ended stays listed until it is closed, as today, so an agent can still read a
   child's `programEnd` and its output. Closing the parent removes its ended children with it.
 - `detach_from_process` on an attach root with children cascades as a detach: every child is
@@ -215,9 +230,10 @@ attach keeps `subProcess: false` and its warning until a follow-up measures it.
 
 Two bounds keep that sane:
 
-- A per-tree cap on live children (`DEBUG_MCP_MAX_CHILD_SESSIONS`, default 32; `0` disables
-  adoption). Beyond the cap the release lever runs (the child runs undebugged) and the parent's
-  next answer says so (`childrenReleased: n`).
+- A per-tree cap on live child sessions (`DEBUG_MCP_MAX_CHILD_SESSIONS`, default 32; `0` disables
+  child-session adoption). It excludes js-debug's mandatory first target, which implements the
+  root session and must still be adopted for launch to complete. Beyond the cap the release lever
+  runs (the child runs undebugged) and the parent's next answer says so (`childrenReleased: n`).
 - Ended children stay listed until closed, as above, and leave with their parent.
 
 ## Every adapter, surveyed
@@ -308,23 +324,30 @@ DAP event and response the worker forwards carries the session id of the connect
 The IPC envelopes already have that field (`sessionId` on `StatusMessage`, `DapResponseMessage`,
 `DapEventMessage`, `ErrorMessage` in `src/proxy/dap-proxy-interfaces.ts`); today one worker is one
 session and `ProxyManager` ignores it. The parent-process `ProxyManager` becomes the demultiplexer:
-it keeps the parent's own handlers as they are and hands each child's traffic to a **child proxy
-view** — an `IProxyManager` over the same IPC channel, filtered to that child's id, with
+it hands each child's traffic to a **child proxy view** — an `IProxyManager` over the same IPC
+channel, filtered to that child's id, with
 `sendDapRequest` tagging the request with the id so the worker routes it to the right connection.
 
 The session layer then needs nothing new per operation: a child is a `ManagedSession` whose
 `proxyManager` is its view, wired with the same event handlers (`handleStopped`, `handleOutput`,
 `handleTerminated`, …), its own `OutputRingBuffer`, its own breakpoint store and state machine. The
 `InFlightGuard`, the pause coordinator, the stop anchor and the snapshot all work per session as
-they do now. Only three things are tree-specific in the core:
+they do now. Terminal cleanup must be scoped to the connection: today's `handleTerminated`,
+`handleExited` and `handleError` call `proxyManager.stop()`, which currently tears down the worker
+and adapter. A child proxy view's `stop()` must instead close only that child's connection and
+listeners, never delegate to the worker's process-level `stop()` or release its adapter slot. A
+natural parent end likewise updates that session without reaping a worker that still serves live
+descendants. The worker's terminal-event handlers and the root's session handlers must share this
+lifetime rule; explicit root close still cascades, and final connection cleanup reaps the worker.
+The tree-specific responsibilities in the core are:
 
 - adoption: on the parent `ProxyManager`'s `child-reported` event, `SessionManager` creates the
   child session (`parentSessionId`, inherited language, the report's name), snapshots the parent's
   breakpoints into it, and tells the worker to adopt with that set (the hold before
   `configurationDone` is where they bind);
-- the tree-aware wait: `waitForStop` subscribes to the state of the session and its descendants and
-  reports the earliest settle;
-- the cascade on close, and the per-tree cap.
+- the tree-aware wait: `waitForStop` subscribes to the state of the session and its descendants,
+  including newly adopted descendants, and applies the four-rule priority above after each change;
+- connection-scoped terminal cleanup, the cascade on close, and the per-tree cap.
 
 ### The adoption contract on `AdapterPolicy`
 
@@ -346,8 +369,10 @@ the builder's; the members are the design):
   attach-then-detach of #501, and never `success: false` (that parks the child forever);
 - **output attribution**: whether the child's connection carries the child's own output (debugpy
   with `redirectOutput: true`; js-debug: never);
-- **end semantics**: what `close_debug_session` on a child does to the process (debugpy: terminates
-  it; js-debug: releases it) and whether the root's `disconnect` answers (js-debug: no);
+- **end semantics**: what an explicit `close_debug_session` on a child does to the process
+  (debugpy: terminates it; js-debug: releases it); an attach-root close/reap instead cascades its
+  preserve-target policy through every descendant; whether the launch root's `disconnect` answers
+  (js-debug: no);
 - the existing `childRoutedCommands`, `mirrorBreakpointsToChild`, `pauseAfterChildAttach`,
   `childInitTimeout` and `isChildReadyEvent` keep their roles for the program's own target.
 
@@ -370,10 +395,11 @@ One row per measured fact; the "answer" column is what this design adds on top o
 
 | event | debugpy | js-debug | answer |
 |---|---|---|---|
-| child exits while the parent is paused | child `terminated`; the parent, once continued, sees the exit and ends normally (row 1) | same (row 1) | the child row goes `stopped`; the parent's wait reports the child's end if nothing else settled first |
-| parent exits with a child live | the parent's `exited` is held until the child ends (inherited stdout pipe, #993); the child stays debuggable (row 2) | the program's exit kills unreported children within 300 ms; an adopted child is a session until it ends (row 2) | Python: the parent row stays `running` and its wait reports the child; the child row carries `parentSessionId` of a parent that is gone when it finally ends |
-| `close_debug_session` on a child | `disconnect(terminateDebuggee: true)`: the child ends, exit 0 reported to the parent (row 4) | `disconnect` with either flag leaves the child running (row 3) | `processEnded: true` / `released: true` |
-| `close_debug_session` on the parent | `disconnect(terminateDebuggee: true)` on the parent ends the tree (row 6) | only the root's `disconnect` ends the tree, and it never answers (row 6); `terminate` or `disconnect` on a program or child session leave the processes alive (rows 4–5) | children closed deepest-first, then the parent; the worker's timeout-then-tree-kill stays the backstop |
+| child exits while the parent is paused | child `terminated`; the parent, once continued, sees the exit and ends normally (row 1) | same (row 1) | the child row goes `stopped`; the parent's wait still reports the paused parent (rule 1), with the ended child in `children`; after the parent resumes, the child's end alone does not complete that wait (rule 4) |
+| parent exits with a child live | the parent's `exited` is held until the child ends (inherited stdout pipe, #993); the child stays debuggable (row 2) | the program's exit kills unreported children within 300 ms (row 2); an already adopted child's survival is unmeasured, to be checked in M2 | Python: the parent row stays `running` and its wait reports the child; the child row carries `parentSessionId` of a parent that is gone when it finally ends; every adopted child stays listed and follows its own terminal events |
+| explicit `close_debug_session` on a child | `disconnect(terminateDebuggee: true)`: the child ends, exit 0 reported to the parent (row 4) | `disconnect` with either flag leaves the child running (row 3) | its descendants closed deepest-first, then the child; `processEnded: true` / `released: true`; ancestors, siblings and the shared worker stay open |
+| `close_debug_session` on a launch root | `disconnect(terminateDebuggee: true)` on the root ends the tree (row 6) | only the root's `disconnect` ends the tree, and it never answers (row 6); `terminate` or `disconnect` on a program or child session leave the processes alive (rows 4–5) | children closed deepest-first, then the root; the worker's timeout-then-tree-kill stays the backstop |
+| close or idle expiry of an attach root | `disconnect(terminateDebuggee: false)` releases each child (row 3) | each child keeps running (row 3) | detach descendants deepest-first, then the root; preserve external targets and remove the tree's rows; `released: true`; no target-killing escalation |
 | `detach_from_process` on an attach root with children | each child's `disconnect(terminateDebuggee: false)` resumes it undebugged (row 3) | each child keeps running (row 3) | children detached deepest-first (`released: true`), then the parent; the parent-side order with several children is measured by the M1 suite |
 | `restart_debugging` on a parent | the relaunch ends the previous run's processes (row 6) | same (row 6) | the previous run's children are closed and removed; `childrenClosed: n` |
 | grandchildren | reported on the child's connection, adopted there, `terminated` cascades bottom-up (row 7) | same (row 7) | `parentSessionId` = the child; the cap counts the whole tree |
@@ -405,9 +431,15 @@ Two guardrails:
    are that era's behaviour, not a contract.
 2. Lifetime without an MCP session (today the stale reaper's trigger, `MCP_HTTP_STALE_SESSION_MS`)
    becomes a **per-debug-session idle policy**: `MCP_DEBUG_SESSION_IDLE_MS`, default thirty minutes,
-   `0` disables, where activity is any tool call naming that session, so a long `wait_for_stop`
-   counts as activity for its whole duration. A child's clock is its own; closing an idle parent
-   cascades. Explicit close and debuggee exit end a session sooner, as today.
+   `0` disables. A tool call naming a session refreshes that session and its ancestors, so
+   actively inspecting or stepping a child cannot expire its parent and cascade-close the child.
+   Activity does not refresh siblings or other descendants: each keeps its own clock. An in-flight
+   `wait_for_stop` protects the session, all descendants it observes (including ones adopted while
+   waiting), and its ancestors from idle expiry for the duration of the call; their idle intervals
+   restart when it settles, times out or is cancelled. Closing a parent that is idle under these
+   rules still cascades using the initiating operation's close policy above: idle expiry of an
+   attach root releases all of its external targets. Explicit close and debuggee exit end a
+   session sooner, as today.
 
 If real authentication ever arrives, the authenticated principal becomes the owner key with no
 schema change.
@@ -422,7 +454,12 @@ by session id and the child proxy view; `SessionStore` and `DebugSessionInfo` gr
 refusing children; the launch `subProcess` default flips to on with a `changed` entry, the attach
 default with it if the attach fixture reports the same way; `list_debug_sessions` and `wait_for_stop` reference sections; the
 `python-subprocess-inherit` fixtures become the regression suite (a child stops on a breakpoint
-set before launch; xdist workers; grandchildren; the cascade rows). Seams: `src/proxy/minimal-dap.ts`
+set before launch; xdist workers; grandchildren; the cascade rows). Include closing a child with
+grandchildren without orphaning their sessions, child termination without stopping the shared
+worker or siblings, active-child calls preventing ancestor idle expiry, and an in-flight tree wait
+protecting its descendants. The attach fixture must also show that root close and root idle expiry
+release the whole subtree without killing external targets; explicit detach retains its stopped
+rows, while close removes them. Seams: `src/proxy/minimal-dap.ts`
 (reverse requests, event tagging), `src/proxy/dap-proxy-connection-manager.ts` (`initialize`),
 `src/proxy/dap-proxy-worker.ts` (connection map, routing, shutdown), `src/proxy/proxy-manager.ts`
 (demultiplexing), `src/session/session-store.ts` and `packages/shared/src/models/index.ts`
@@ -437,7 +474,10 @@ connections are adopted instead of released; #501's throwaway attach stays the r
 the only one; `autoAttachChildProcesses` defaults on for launch and attach with a `changed` entry
 (the `attach_to_process` schema text changes with it); the attach smoke that
 today expects release ([`tests/e2e/mcp-server-smoke-javascript-attach.test.ts`](../../tests/e2e/mcp-server-smoke-javascript-attach.test.ts))
-expects adoption. Unblocks #985 M2 (jest and vitest workers as sessions).
+expects adoption. Reuse M1's subtree-close, idle, attach-target preservation and cleanup-isolation
+cases; verify that cap `0` still adopts the program's own target but releases forks, and measure
+parent exit with an already adopted, paused child. Unblocks #985 M2 (jest and vitest workers as
+sessions).
 
 **M3 — browser targets.** After the [#989](https://github.com/debugmcp/mcp-debugger/issues/989)
 spike: the same mechanism, one session per page, frame and worker; the attach-addressing form is
@@ -466,10 +506,15 @@ Taken by the author of this document, marked so they can be overturned:
 
 - The child's connection lives in the parent's worker (the constraints above).
 - The per-tree cap defaults to 32 and is named `DEBUG_MCP_MAX_CHILD_SESSIONS`; `0` disables
-  adoption.
+  child-session adoption, excluding js-debug's mandatory first target.
 - The idle policy knob is named `MCP_DEBUG_SESSION_IDLE_MS`.
+- Activity on a descendant protects its ancestors from idle expiry; a tree-aware wait protects
+  the subtree it observes for the duration of the call.
 - The ordering rule for several settles before one wait (parent first, then adoption order).
 - Ended children stay listed until closed, and leave with their parent.
+- Closing any session closes its subtree, including when that session is itself a child.
+- A close/reap cascade uses the initiating root operation's ownership policy: an attach root
+  releases every descendant; explicit detach retains stopped rows, while close removes them.
 - The answer field names: `sessionId`, `children`, `outputOn`, `processEnded`, `released`,
   `childrenReleased`.
 - The launch-shaped tools refuse a child id by name rather than operating on its parent, and so
@@ -484,8 +529,9 @@ Taken by the author of this document, marked so they can be overturned:
 
 - The IPC request routing: whether a child's requests travel in the existing `dap` command with the
   session id set, or a new command; the worker's per-connection request queue.
-- How the child proxy view implements `IProxyManager`'s process-level members (`stop`, `isRunning`,
-  pid) — they belong to the parent's worker and the view delegates or refuses.
+- How the child proxy view implements `IProxyManager`'s members: `stop` is connection-scoped as
+  required above; process-level reads such as pid may delegate, and `isRunning` must account for
+  the child's own connection as well as the shared worker's lifetime.
 - Whether the tree-aware wait is a second `waitForSessionState` over a set of ids or a subscription
   on the parent's descendants; it must keep the microtask re-check that hides auto-continued entry
   stops ([#849](https://github.com/debugmcp/mcp-debugger/issues/849)).
