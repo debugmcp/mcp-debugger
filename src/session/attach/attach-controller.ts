@@ -615,6 +615,11 @@ export class AttachController {
 
     let resumedBeforeDetach: boolean | undefined;
     let warning: string | undefined;
+    // The session tree (issue #1081): a terminating detach closes the
+    // subtree; a plain one releases the children first, deepest first, so
+    // each runs on undebugged, then detaches the parent.
+    let childrenClosed = 0;
+    let childrenReleased = 0;
 
     try {
       if (terminateProcess) {
@@ -629,9 +634,10 @@ export class AttachController {
         } catch (disconnectError) {
           this.ctx.logger.warn(`[SessionManager] Terminating disconnect failed, closing the session anyway:`, disconnectError);
         }
-        await this.ctx.closeSession(sessionId);
+        childrenClosed = (await this.ctx.closeSessionReporting(sessionId)).childrenClosed ?? 0;
       } else {
         const proxyManager = session.proxyManager;
+        childrenReleased = await this.ctx.releaseDescendants(session);
 
         // Disconnect without terminating - send DAP disconnect request. In
         // attach mode the worker resumes a stopped target ahead of it where
@@ -689,7 +695,9 @@ export class AttachController {
             ? 'Detached and terminated process'
             : 'Detached from process (process still running)',
           ...(resumedBeforeDetach !== undefined ? { resumedBeforeDetach } : {}),
-          ...(warning !== undefined ? { warning } : {})
+          ...(warning !== undefined ? { warning } : {}),
+          ...(childrenClosed > 0 ? { childrenClosed } : {}),
+          ...(childrenReleased > 0 ? { childrenReleased } : {})
         }
       };
     } catch (error) {

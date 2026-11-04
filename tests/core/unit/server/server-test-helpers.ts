@@ -105,6 +105,7 @@ export function createMockSessionManager(mockAdapterRegistry: IAdapterRegistry) 
     getAllSessions: vi.fn(),
     getSession: vi.fn(),
     closeSession: vi.fn(),
+    closeSessionReporting: vi.fn(),
     closeAllSessions: vi.fn(),
     setBreakpoint: vi.fn(),
     setFunctionBreakpoint: vi.fn(),

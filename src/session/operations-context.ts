@@ -26,7 +26,7 @@ import type {
 import type { ManagedSession } from './session-store.js';
 import type { StackTraceResult } from './inspection/frame-anchor-resolver.js';
 import type { LocalVariablesResult } from './session-manager-data.js';
-import type { CustomLaunchRequestArguments } from './session-manager-core.js';
+import type { CloseSessionOutcome, CustomLaunchRequestArguments } from './session-manager-core.js';
 import type { VariableAccessMode } from '../utils/variable-access.js';
 import type { IProxyManager } from '../proxy/proxy-manager.js';
 import type { IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
@@ -127,6 +127,10 @@ export interface OperationsContext {
   /** Resolves with how many descendants the teardown closed (issue #1081). */
   stopProxyPreservingSession(session: ManagedSession): Promise<number>;
   closeSession(sessionId: string): Promise<boolean>;
+  /** `closeSession` with its outcome (issue #1081): the rows removed, and what the close did to the processes. */
+  closeSessionReporting(sessionId: string): Promise<CloseSessionOutcome>;
+  /** The detach cascade (issue #1081): release every descendant, deepest first; resolves with how many. */
+  releaseDescendants(session: ManagedSession): Promise<number>;
   getStackTrace(
     sessionId: string,
     threadId?: number,
@@ -223,6 +227,8 @@ export type AttachContext = Pick<
   | 'stopProxyPreservingSession'
   | 'cleanupProxyEventHandlers'
   | 'closeSession'
+  | 'closeSessionReporting'
+  | 'releaseDescendants'
   | 'tunables'
   | 'extractLocalsFromResolved'
   | 'redactionEnabled'

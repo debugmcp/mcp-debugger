@@ -24,7 +24,7 @@ import type {
   Variable
 } from '@debugmcp/shared';
 import type { SessionManager } from '../session/session-manager.js';
-import type { DebugResult, LaunchResultData, StepResultData, WaitForStopResultData } from '../session/session-manager-core.js';
+import type { CloseSessionOutcome, DebugResult, LaunchResultData, StepResultData, WaitForStopResultData } from '../session/session-manager-core.js';
 import type { FrameSummary, StackTraceResult } from '../session/session-manager-data.js';
 import type { VariableTruncationSummary } from '../session/variable-caps.js';
 import type { SimpleFileChecker, FileExistenceResult } from '../utils/simple-file-checker.js';
@@ -97,7 +97,8 @@ export interface ToolContext {
     breakOnExceptions?: ExceptionBreakMode
   ): Promise<DebugResult<LaunchResultData>>;
   restartDebugging(sessionId: string): Promise<DebugResult<LaunchResultData>>;
-  closeDebugSession(sessionId: string): Promise<boolean>;
+  /** Close the session and its subtree; the outcome says what went with it (issue #1081). */
+  closeDebugSession(sessionId: string): Promise<CloseSessionOutcome>;
   setFunctionBreakpoint(
     sessionId: string,
     functionName: string,

@@ -36,6 +36,7 @@ vi.mock('../../../../src/session/session-manager.js', () => ({
   SessionManager: vi.fn(function() { return ({
     createSession: vi.fn(),
     closeSession: vi.fn(),
+    closeSessionReporting: vi.fn(),
     closeAllSessions: vi.fn(),
     getAllSessions: vi.fn().mockReturnValue([]),
     getSession: vi.fn(),

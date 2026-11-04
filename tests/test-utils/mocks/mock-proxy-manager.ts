@@ -4,7 +4,7 @@
 import { EventEmitter } from 'events';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { IProxyManager, ProxyManagerEvents, type PreDetachResume } from '../../../src/proxy/proxy-manager.js';
-import type { ChildAdoptResult, IChildProxyView } from '../../../src/proxy/child-proxy-view.js';
+import type { ChildAdoptResult, ChildStopOptions, IChildProxyView } from '../../../src/proxy/child-proxy-view.js';
 import type { ChildAdoptArgs } from '../../../src/proxy/dap-proxy-interfaces.js';
 import type { ProxyMessage } from '../../../src/dap-core/types.js';
 import { ProxyConfig } from '../../../src/proxy/proxy-config.js';
@@ -281,6 +281,8 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
  */
 export class MockChildProxyView extends MockProxyManager implements IChildProxyView {
   public adoptCalls: ChildAdoptArgs[] = [];
+  /** How each stop() asked for the connection to be closed (undefined: the default, ending the child). */
+  public stopOptions: Array<ChildStopOptions | undefined> = [];
   public shouldFailAdopt = false;
   /** When set, adopt() waits for resolveAdopt() instead of resolving on its own. */
   public holdAdopt = false;
@@ -313,8 +315,9 @@ export class MockChildProxyView extends MockProxyManager implements IChildProxyV
     this.adoptResolve = null;
   }
 
-  async stop(): Promise<void> {
+  async stop(options?: ChildStopOptions): Promise<void> {
     this.stopCalls++;
+    this.stopOptions.push(options);
     this._isRunning = false;
   }
 

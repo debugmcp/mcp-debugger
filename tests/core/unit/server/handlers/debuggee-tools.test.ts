@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { DotnetAdapterPolicy, SessionLifecycleState } from '@debugmcp/shared';
-import { startDebuggingTool, restartDebuggingTool, attachToProcessTool } from '../../../../../src/server/handlers/debuggee-tools.js';
+import { startDebuggingTool, restartDebuggingTool, attachToProcessTool, detachFromProcessTool } from '../../../../../src/server/handlers/debuggee-tools.js';
 import { createMockToolContext } from '../server-test-helpers.js';
 
 // DebugMcpServer builds its dependencies in the constructor; mock the container
@@ -133,6 +133,24 @@ describe('debuggee lifecycle tool handlers', () => {
         expect(payload).not.toHaveProperty('childrenReleased');
       });
     }
+  });
+
+  describe('the tree fields on the detach_from_process answer (issue #1081)', () => {
+    it('hoists childrenReleased (a plain detach) and childrenClosed (a terminating one) beside the message', async () => {
+      ctx.sessionManager.detachFromProcess.mockResolvedValueOnce({
+        success: true, state: 'stopped', data: { message: 'Detached from process (process still running)', childrenReleased: 2 }
+      });
+      let payload = JSON.parse((await detachFromProcessTool(ctx, { sessionId: 'test-session' }, 'detach_from_process')).content[0].text);
+      expect(payload).toMatchObject({ success: true, state: 'stopped', childrenReleased: 2 });
+      expect(payload).not.toHaveProperty('childrenClosed');
+
+      ctx.sessionManager.detachFromProcess.mockResolvedValueOnce({
+        success: true, state: 'stopped', data: { message: 'Detached and terminated process', childrenClosed: 1 }
+      });
+      payload = JSON.parse((await detachFromProcessTool(ctx, { sessionId: 'test-session', terminateProcess: true }, 'detach_from_process')).content[0].text);
+      expect(payload).toMatchObject({ success: true, state: 'stopped', childrenClosed: 1 });
+      expect(payload).not.toHaveProperty('childrenReleased');
+    });
   });
 
   // Issue #985: the test-runner preset rides start_debugging as two optional

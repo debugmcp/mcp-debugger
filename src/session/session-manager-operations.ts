@@ -189,6 +189,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         this.cleanupProxyEventHandlers(session, proxyManager),
       stopProxyPreservingSession: (session) => this.stopProxyPreservingSession(session),
       closeSession: (sessionId) => this.closeSession(sessionId),
+      closeSessionReporting: (sessionId) => this.closeSessionReporting(sessionId),
+      releaseDescendants: (session) => this.releaseDescendants(session),
       getStackTrace: (sessionId, threadId, includeInternals) =>
         this.getStackTrace(sessionId, threadId, includeInternals),
       getStackTraceDetailed: (sessionId, threadId, includeInternals, opts) =>

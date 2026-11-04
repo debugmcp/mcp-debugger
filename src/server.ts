@@ -15,7 +15,7 @@ import {
   ProxyNotRunningError
 } from './errors/debug-errors.js';
 import { SessionManager, SessionManagerConfig } from './session/session-manager.js';
-import type { DebugResult, LaunchResultData, StepResultData, WaitForStopResultData } from './session/session-manager-core.js';
+import type { CloseSessionOutcome, DebugResult, LaunchResultData, StepResultData, WaitForStopResultData } from './session/session-manager-core.js';
 import { FrameSummary, StackTraceResult } from './session/session-manager-data.js';
 import { VariableTruncationSummary } from './session/variable-caps.js';
 import { createProductionDependencies } from './container/dependencies.js';
@@ -315,8 +315,8 @@ export class DebugMcpServer implements ToolContext {
     return this.sessionManager.restartDebugging(sessionId);
   }
 
-  public async closeDebugSession(sessionId: string): Promise<boolean> {
-    return this.sessionManager.closeSession(sessionId);
+  public async closeDebugSession(sessionId: string): Promise<CloseSessionOutcome> {
+    return this.sessionManager.closeSessionReporting(sessionId);
   }
 
   /**

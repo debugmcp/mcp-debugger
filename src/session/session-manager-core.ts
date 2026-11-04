@@ -35,6 +35,7 @@ import {
 } from '@debugmcp/shared';
 import { ISessionStoreFactory } from '../factories/session-store-factory.js';
 import { IProxyManager, type ChildReportedEvent } from '../proxy/proxy-manager.js';
+import { isChildProxyView } from '../proxy/child-proxy-view.js';
 import { maxChildSessions, MAX_CHILD_SESSIONS_ENV } from './child-session-cap.js';
 import { IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
 import type { BreakpointSyncResult, FunctionBreakpointSyncResult } from '../proxy/dap-proxy-interfaces.js';
@@ -283,6 +284,24 @@ export type LaunchResultData = DebugResultData & StopAnswerFields & TreeAnswerFi
  * terminating detach closed.
  */
 export type DetachResultData = DebugResultData & Pick<TreeAnswerFields, 'childrenReleased' | 'childrenClosed'>;
+
+/**
+ * What a close did (the session tree, issue #1081): the rows it removed,
+ * descendants first; how many of those were descendants; and, for a child,
+ * whether its process was ended or released — for an attach root, that its
+ * target and its descendants' were released to run on.
+ */
+export interface CloseSessionOutcome {
+  closed: boolean;
+  /** Every id removed, deepest first then the named session — the handler forgets each output resource. */
+  closedSessionIds: string[];
+  /** Descendants closed with the named session, when any. */
+  childrenClosed?: number;
+  /** The named session is a child whose process this close ended (the policy's `closeChild: 'terminate'`). */
+  processEnded?: true;
+  /** The named session's target runs on: an attach root (its descendants' too), or a child under `closeChild: 'release'`. */
+  released?: true;
+}
 
 /**
  * What a successful attach returns on top of the common fields: the same
@@ -574,22 +593,107 @@ export abstract class SessionManagerCore extends EventEmitter {
   }
   
   async closeSession(sessionId: string): Promise<boolean> {
-    // The session tree (issue #1081): closing any session closes its subtree
-    // first, deepest first, so a child never outlives its parent's row and a
-    // root's worker goes after its last child's connection.
+    return (await this.closeSessionReporting(sessionId)).closed;
+  }
+
+  /**
+   * Close a session and its subtree, and say what the close did (issue
+   * #1081): the descendants it took with it, deepest first; for a child,
+   * whether its process was ended (the policy's `closeChild` pin: debugpy
+   * terminates it) or released; for an attach root, that every descendant was
+   * detached with its target kept running, as the root's own target is.
+   */
+  async closeSessionReporting(sessionId: string): Promise<CloseSessionOutcome> {
+    const session = this.sessionStore.get(sessionId);
+    if (!session) {
+      this.logger.warn(`[SESSION_CLOSE_FAIL] Session not found: ${sessionId}`);
+      return { closed: false, closedSessionIds: [] };
+    }
+    // An attach root's close preserves its external targets, descendants
+    // included: their connections are closed without ending them.
+    const releaseDescendants = !session.parentSessionId && session.attachMode === true;
+    const closedSessionIds: string[] = [];
     this.closingSubtrees.add(sessionId);
     try {
       for (const descendant of this.descendantsDeepestFirst(sessionId)) {
-        await this.closeSingleSession(descendant.id);
+        if (await this.closeSingleSession(descendant.id, { releaseChild: releaseDescendants })) {
+          closedSessionIds.push(descendant.id);
+        }
       }
-      return await this.closeSingleSession(sessionId);
+      const childrenClosed = closedSessionIds.length;
+      const closed = await this.closeSingleSession(sessionId);
+      if (closed) {
+        closedSessionIds.push(sessionId);
+      }
+      const childEnd = session.parentSessionId ? this.childCloseSemantics(session) : undefined;
+      return {
+        closed,
+        closedSessionIds,
+        ...(childrenClosed > 0 ? { childrenClosed } : {}),
+        ...(closed && childEnd === 'terminate' ? { processEnded: true as const } : {}),
+        ...(closed && (childEnd === 'release' || releaseDescendants) ? { released: true as const } : {})
+      };
     } finally {
       this.closingSubtrees.delete(sessionId);
     }
   }
 
-  /** Close one session: its own proxy (a root's worker, a child's connection), its row, its waiters. */
-  protected async closeSingleSession(sessionId: string): Promise<boolean> {
+  /**
+   * The detach cascade (issue #1081): release every descendant of an attach
+   * root, deepest first, ahead of the root's own detach — each child's
+   * connection is closed with `terminateDebuggee: false`, so the process
+   * runs on undebugged, and its row stays, `stopped`, with a program end
+   * that says it was released. Returns how many were released.
+   */
+  protected async releaseDescendants(session: ManagedSession): Promise<number> {
+    let released = 0;
+    for (const descendant of this.descendantsDeepestFirst(session.id)) {
+      if (isTerminalSessionState(descendant.state) && !descendant.proxyManager) {
+        continue;
+      }
+      clearPauseIntent(descendant);
+      const proxy = descendant.proxyManager;
+      if (proxy) {
+        try {
+          this.cleanupProxyEventHandlers(descendant, proxy);
+        } catch (cleanupError) {
+          this.logger.error(`[SessionManager] Error during listener cleanup for session ${descendant.id}:`, cleanupError);
+        }
+        try {
+          await (isChildProxyView(proxy) ? proxy.stop({ terminateDebuggee: false }) : proxy.stop());
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : String(error);
+          this.logger.warn(`[SessionManager] Releasing child session ${descendant.id} failed (best effort): ${message}`);
+        } finally {
+          descendant.proxyManager = undefined;
+        }
+      }
+      descendant.programEndExplanation = {
+        note: 'Released: detached with its parent; the process runs on undebugged.',
+        data: { released: true }
+      };
+      this._updateSessionState(descendant, SessionState.STOPPED);
+      this.sessionStore.update(descendant.id, { sessionLifecycle: SessionLifecycleState.TERMINATED });
+      released += 1;
+    }
+    return released;
+  }
+
+  /** What closing a child does to its process: the adapter's measured semantics, pinned on the policy. */
+  private childCloseSemantics(session: ManagedSession): 'terminate' | 'release' {
+    try {
+      return this.sessionStore.selectPolicy(session.language).childAdoption?.closeChild ?? 'terminate';
+    } catch {
+      return 'terminate';
+    }
+  }
+
+  /**
+   * Close one session: its own proxy (a root's worker, a child's connection
+   * — ended, or released to run on when `releaseChild` is set), its row, its
+   * waiters.
+   */
+  protected async closeSingleSession(sessionId: string, options: { releaseChild?: boolean } = {}): Promise<boolean> {
     const session = this.sessionStore.get(sessionId);
     if (!session) {
       this.logger.warn(`[SESSION_CLOSE_FAIL] Session not found: ${sessionId}`);
@@ -610,7 +714,8 @@ export abstract class SessionManagerCore extends EventEmitter {
 
       // Then stop the proxy
       try {
-        await session.proxyManager.stop();
+        const proxy = session.proxyManager;
+        await (options.releaseChild && isChildProxyView(proxy) ? proxy.stop({ terminateDebuggee: false }) : proxy.stop());
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         this.logger.error(`[SessionManager] Error stopping proxy for session ${sessionId}:`, message);

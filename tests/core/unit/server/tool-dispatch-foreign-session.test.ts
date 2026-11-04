@@ -37,7 +37,7 @@ function fakeContext(overrides: Partial<ToolContext> = {}): ToolContext {
     validateSession: (sessionId: string) => {
       throw new SessionNotFoundError(sessionId);
     },
-    closeDebugSession: vi.fn(async () => false),
+    closeDebugSession: vi.fn(async () => ({ closed: false, closedSessionIds: [] })),
     outputResources: { forgetSession: vi.fn(), notifyListChanged: vi.fn() },
     ...overrides
   } as unknown as ToolContext;
@@ -106,7 +106,7 @@ describe('tools/call on a session id another server owns (issue #939)', () => {
   it('a session this server holds is dispatched without consulting the other servers', async () => {
     const ctx = fakeContext({
       sessionManager: { getSession: vi.fn(() => ({ id: FOREIGN_ID })) } as unknown as ToolContext['sessionManager'],
-      closeDebugSession: vi.fn(async () => true)
+      closeDebugSession: vi.fn(async () => ({ closed: true, closedSessionIds: [FOREIGN_ID] }))
     });
     registerToolHandlers(server, ctx);
     client = await connect(server);

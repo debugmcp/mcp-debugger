@@ -46,6 +46,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       getSessionPolicy: vi.fn().mockReturnValue({}),
       createSession: vi.fn(),
       closeSession: vi.fn(),
+      closeSessionReporting: vi.fn(),
       closeAllSessions: vi.fn(),
       getAllSessions: vi.fn(),
       setBreakpoint: vi.fn(),
