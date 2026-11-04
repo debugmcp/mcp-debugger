@@ -4,6 +4,9 @@
 import { EventEmitter } from 'events';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { IProxyManager, ProxyManagerEvents, type PreDetachResume } from '../../../src/proxy/proxy-manager.js';
+import type { ChildAdoptResult, IChildProxyView } from '../../../src/proxy/child-proxy-view.js';
+import type { ChildAdoptArgs } from '../../../src/proxy/dap-proxy-interfaces.js';
+import type { ProxyMessage } from '../../../src/dap-core/types.js';
 import { ProxyConfig } from '../../../src/proxy/proxy-config.js';
 
 /** Error message thrown by start() when shouldFailStart is set; import this in
@@ -14,7 +17,9 @@ export const MOCK_START_FAILURE_MESSAGE = 'Mock start failure';
  * Mock ProxyManager for unit testing
  */
 export class MockProxyManager extends EventEmitter implements IProxyManager {
-  private _isRunning = false;
+  protected _isRunning = false;
+  /** Child views handed out by createChildView (the session tree, issue #1081), by child session id. */
+  public childViews = new Map<string, MockChildProxyView>();
   private _currentThreadId: number | null = null;
   private _config: ProxyConfig | null = null;
   private _dapRequestHandler: ((command: string, args?: any) => Promise<any>) | null = null;
@@ -193,6 +198,13 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
     return this.proxyPid;
   }
 
+  /** A child session's view over this worker (the session tree, issue #1081). */
+  createChildView(childSessionId: string): MockChildProxyView {
+    const view = new MockChildProxyView(this, childSessionId);
+    this.childViews.set(childSessionId, view);
+    return view;
+  }
+
   getCurrentThreadId(): number | null {
     return this._currentThreadId;
   }
@@ -257,6 +269,65 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
     this._dapRequestHandler = null;
     this.proxyPid = 4242;
     this.adapterStderrTail = [];
+    this.childViews.clear();
     this.removeAllListeners();
+  }
+}
+
+/**
+ * A child session's proxy view over a mock worker (the session tree, issue
+ * #1081): adopt() records its arguments and reports the view ready; stop() is
+ * connection-scoped and emits no exit; a grandchild view is created on the root.
+ */
+export class MockChildProxyView extends MockProxyManager implements IChildProxyView {
+  public adoptCalls: ChildAdoptArgs[] = [];
+  public shouldFailAdopt = false;
+  /** When set, adopt() waits for resolveAdopt() instead of resolving on its own. */
+  public holdAdopt = false;
+  private adoptResolve: (() => void) | null = null;
+
+  constructor(private readonly root: MockProxyManager, public readonly childSessionId: string) {
+    super();
+  }
+
+  async start(): Promise<void> {
+    throw new Error(`child session ${this.childSessionId} is started by its parent, not launched`);
+  }
+
+  async adopt(args: ChildAdoptArgs): Promise<ChildAdoptResult> {
+    this.adoptCalls.push(args);
+    if (this.shouldFailAdopt) {
+      throw new Error('mock adoption failure');
+    }
+    if (this.holdAdopt) {
+      await new Promise<void>((resolve) => { this.adoptResolve = resolve; });
+    }
+    this._isRunning = true;
+    this.emit('adapter-configured');
+    this.emit('initialized');
+    return { sessionId: this.childSessionId };
+  }
+
+  resolveAdopt(): void {
+    this.adoptResolve?.();
+    this.adoptResolve = null;
+  }
+
+  async stop(): Promise<void> {
+    this.stopCalls++;
+    this._isRunning = false;
+  }
+
+  dispatch(_message: ProxyMessage): void {
+    // Messages are simulated through simulateEvent in tests.
+  }
+
+  onWorkerExit(code: number | null, signal?: string, expected?: boolean): void {
+    this._isRunning = false;
+    this.emit('exit', code, signal, expected);
+  }
+
+  createChildView(childSessionId: string): MockChildProxyView {
+    return this.root.createChildView(childSessionId);
   }
 }

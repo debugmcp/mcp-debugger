@@ -34,9 +34,11 @@ import {
   IEnvironment
 } from '@debugmcp/shared';
 import { ISessionStoreFactory } from '../factories/session-store-factory.js';
-import { IProxyManager } from '../proxy/proxy-manager.js';
+import { IProxyManager, type ChildReportedEvent } from '../proxy/proxy-manager.js';
+import { maxChildSessions, MAX_CHILD_SESSIONS_ENV } from './child-session-cap.js';
 import { IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
 import type { BreakpointSyncResult, FunctionBreakpointSyncResult } from '../proxy/dap-proxy-interfaces.js';
+import { CHILD_RELEASE_COMMAND } from '../proxy/dap-proxy-interfaces.js';
 import { consumeChildOrigin } from '../utils/child-origin-events.js';
 import { isPidAlive } from '../utils/jvm-orphan-reaper.js';
 import { IAdapterRegistry } from '@debugmcp/shared';
@@ -602,6 +604,156 @@ export abstract class SessionManagerCore extends EventEmitter {
       await this.closeSession(session.id);
     }
     this.logger.info('All debug sessions closed');
+  }
+
+  // ----- the session tree (issue #1081) -----
+
+  /** The launch or attach root of a session's tree. */
+  protected rootOf(session: ManagedSession): ManagedSession {
+    let current = session;
+    const seen = new Set<string>([current.id]);
+    while (current.parentSessionId) {
+      const parent = this.sessionStore.get(current.parentSessionId);
+      if (!parent || seen.has(parent.id)) {
+        break;
+      }
+      seen.add(parent.id);
+      current = parent;
+    }
+    return current;
+  }
+
+  /** A session's direct children, in adoption (store insertion) order. */
+  protected childrenOf(sessionId: string): ManagedSession[] {
+    return this.sessionStore.getAllManaged().filter((s) => s.parentSessionId === sessionId);
+  }
+
+  /** Every descendant of a session, deepest first (post-order), adoption order within a level. */
+  protected descendantsDeepestFirst(sessionId: string): ManagedSession[] {
+    const result: ManagedSession[] = [];
+    for (const child of this.childrenOf(sessionId)) {
+      result.push(...this.descendantsDeepestFirst(child.id));
+      result.push(child);
+    }
+    return result;
+  }
+
+  /** How many of a tree's children are still live: the cap counts the whole tree. */
+  private liveDescendantCount(rootId: string): number {
+    return this.descendantsDeepestFirst(rootId).filter((s) => !isTerminalSessionState(s.state)).length;
+  }
+
+  /**
+   * A child the worker reported on `parent`'s connection. Under the per-tree
+   * cap it becomes a session of its own: the parent's language and
+   * breakpoints, a proxy view over the same worker, wired like a root. The
+   * child is `running` from the moment the adoption is sent — its first stop
+   * can land before the adoption's answer and must not be clobbered. Beyond
+   * the cap, or when the adoption fails, the child is released to run
+   * undebugged and no row remains.
+   */
+  protected async adoptReportedChild(
+    parent: ManagedSession,
+    parentProxy: IProxyManager,
+    reported: ChildReportedEvent
+  ): Promise<void> {
+    const release = (reason: string): void => {
+      parentProxy
+        .sendDapRequest(CHILD_RELEASE_COMMAND, { reportId: reported.reportId, reason }, { timeoutMs: 5000 })
+        .catch((err) => {
+          this.logger.warn(
+            `[SessionManager] Releasing reported child ${reported.name} of session ${parent.id} failed: ${err instanceof Error ? err.message : String(err)}`
+          );
+        });
+    };
+
+    const cap = maxChildSessions(this.environment);
+    const root = this.rootOf(parent);
+    const live = this.liveDescendantCount(root.id);
+    if (live >= cap) {
+      const reason = cap === 0
+        ? `child-session adoption is off (${MAX_CHILD_SESSIONS_ENV}=0)`
+        : `the tree of session ${root.id} is at its child-session cap (${cap})`;
+      this.logger.info(`[SessionManager] Releasing reported child ${reported.name} of session ${parent.id}: ${reason}`);
+      release(reason);
+      return;
+    }
+    if (!parentProxy.createChildView) {
+      release('this session cannot host child sessions');
+      return;
+    }
+
+    const info = this.sessionStore.createSession({
+      language: parent.language,
+      name: reported.name,
+      executablePath: parent.executablePath,
+      parentSessionId: parent.id
+    });
+    const child = this.sessionStore.getOrThrow(info.id);
+    child.logDir = parent.logDir;
+    child.effectiveBreakOnExceptions = parent.effectiveBreakOnExceptions;
+    child.launchExceptionFilters = parent.launchExceptionFilters;
+    // The parent's current breakpoint set, re-sent to the child before it
+    // runs (the hold before configurationDone is where they bind); from then
+    // on each session's set is its own.
+    for (const bp of parent.breakpoints.values()) {
+      const copy = { ...bp };
+      resetBinding(copy);
+      child.breakpoints.set(copy.id, copy);
+    }
+    for (const bp of parent.functionBreakpoints?.values() ?? []) {
+      const copy = { ...bp };
+      resetBinding(copy);
+      child.functionBreakpoints.set(copy.id, copy);
+    }
+
+    const view = parentProxy.createChildView(child.id);
+    child.proxyManager = view;
+    this.setupProxyEventHandlers(child, view, { stopOnEntry: false });
+    this._updateSessionState(child, SessionState.RUNNING);
+    this.logger.info(
+      `[SessionManager] Adopting child ${reported.name} (${reported.targetId}) of session ${parent.id} as session ${child.id}`
+    );
+
+    try {
+      await view.adopt(
+        {
+          reportId: reported.reportId,
+          breakpoints: Array.from(child.breakpoints.values()).map((bp) => ({
+            id: bp.id,
+            file: bp.file,
+            line: bp.line,
+            condition: bp.condition,
+            logMessage: bp.logMessage,
+            suspendPolicy: bp.suspendPolicy
+          })),
+          functionBreakpoints: Array.from(child.functionBreakpoints.values()).map((bp) => ({
+            name: bp.functionName,
+            condition: bp.condition
+          }))
+        },
+        { timeoutMs: 30000 }
+      );
+      this.logger.info(`[SessionManager] Child session ${child.id} adopted (parent ${parent.id})`);
+      this.emit('child-session-adopted', child.id, parent.id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `[SessionManager] Adopting child ${reported.name} of session ${parent.id} as session ${child.id} failed: ${message}`
+      );
+      try {
+        this.cleanupProxyEventHandlers(child, view);
+      } catch {
+        // best effort
+      }
+      await view.stop().catch(() => undefined);
+      release(`adoption failed: ${message}`);
+      if (this.sessionStore.get(child.id)) {
+        this.sessionStore.remove(child.id);
+        this.notifySessionStateListeners(child.id);
+        this.sessionStateListeners.delete(child.id);
+      }
+    }
   }
 
   /**
@@ -1669,6 +1821,14 @@ export abstract class SessionManagerCore extends EventEmitter {
     };
     proxyManager.on('adapter-notice', handleAdapterNotice);
     handlers.set('adapter-notice', handleAdapterNotice);
+
+    // The session tree (issue #1081): a child the debuggee started, reported
+    // on this session's connection, becomes a session of its own.
+    const handleChildReported = (reported: ChildReportedEvent) => {
+      void this.adoptReportedChild(session, proxyManager, reported);
+    };
+    proxyManager.on('child-reported', handleChildReported);
+    handlers.set('child-reported', handleChildReported);
 
     // Preparation precedes this generation's reset. Seed its notices only
     // after the notice array and output buffer have been initialized, using
