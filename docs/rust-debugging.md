@@ -361,6 +361,10 @@ If `&str`/`String`/`Vec` values show as raw `{data_ptr, length}` structs (often 
 - Install rustc (rustup), or
 - Set `CODELLDB_RUST_SYSROOT` to a sysroot root whose `lib/rustlib/etc` contains `lldb_lookup.py` (the Docker image vendors one at `/opt/rust-sysroot` and sets this automatically; issue #441)
 
+### Enums Render as `{...}` Even Though the Formatters Loaded
+
+With rustc 1.92 or older, enum values (`Option`, `Result`, your own enums) summarise as `{...}` while `String`/`Vec` render normally. That is the toolchain's formatter scripts, not a load failure: their `lldb_commands` registers a catch-all empty summary (`type summary add -F _ -e -x -h "^.*$"`) that applies to every type without a more specific one. The variant and its payload are still there one level down — `get_variables` on the variable's `variablesReference` (an `Option<String>` shows a `Some` child whose value is `{0:"item 0"}`). rustc 1.93 dropped the catch-all, so from there on CodeLLDB inlines the children into the value itself.
+
 ### Async Code Debugging Issues
 
 - Use `tokio::time::sleep` instead of `std::thread::sleep` in async contexts

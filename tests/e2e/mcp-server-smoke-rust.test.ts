@@ -407,17 +407,38 @@ describe('MCP Server Rust Debugging Smoke Test', () => {
 
       // The hang showed as a variables request that never answered: the tool
       // call must come back promptly, and with both locals.
+      type SmokeVariable = { name: string; value: string; variablesReference?: number };
       const startedAt = Date.now();
       const localsResponse = parseSdkToolResult(await mcpClient!.callTool({
         name: 'get_local_variables',
         arguments: { sessionId }
-      })) as { success?: boolean; variables?: Array<{ name: string; value: string }> };
+      })) as { success?: boolean; variables?: SmokeVariable[] };
       const elapsedMs = Date.now() - startedAt;
       expect(localsResponse.success, JSON.stringify(localsResponse)).toBe(true);
-      const localsByName = new Map((localsResponse.variables ?? []).map(v => [v.name, v.value]));
+      const localsByName = new Map((localsResponse.variables ?? []).map(v => [v.name, v]));
       expect(localsByName.has('missing'), `locals: ${[...localsByName.keys()].join(', ')}`).toBe(true);
-      expect(localsByName.get('present')).toContain('item 0');
       expect(elapsedMs).toBeLessThan(20000);
+
+      // Where the payload shows depends on the toolchain's formatter scripts, not
+      // on CodeLLDB or on us: rustc <= 1.92's lldb_commands registers a catch-all
+      // empty summary (`type summary add -F _ ... "^.*$"`) that blanks every enum,
+      // so `present` reads `{...}` and the payload sits in its children; rustc
+      // 1.93+ dropped that line, and CodeLLDB inlines the children into the value.
+      const present = localsByName.get('present');
+      expect(present, `locals: ${[...localsByName.keys()].join(', ')}`).toBeDefined();
+      if (!present!.value.includes('item 0')) {
+        expect(present!.variablesReference, JSON.stringify(present)).toBeGreaterThan(0);
+        const childrenResponse = parseSdkToolResult(await mcpClient!.callTool({
+          name: 'get_variables',
+          arguments: { sessionId, scope: present!.variablesReference }
+        })) as { success?: boolean; variables?: SmokeVariable[] };
+        expect(childrenResponse.success, JSON.stringify(childrenResponse)).toBe(true);
+        const children = childrenResponse.variables ?? [];
+        expect(
+          children.some(c => c.value.includes('item 0')),
+          `present=${present!.value}; children: ${children.map(c => `${c.name}=${c.value}`).join(', ')}`
+        ).toBe(true);
+      }
     },
     120000
   );
