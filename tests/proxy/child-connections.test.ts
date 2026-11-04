@@ -6,9 +6,10 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import { ChildConnections } from '../../src/proxy/child-connections.js';
-import type { StatusMessage } from '../../src/proxy/dap-proxy-interfaces.js';
+import { ChildConnections, type ChildAdoptionDeps } from '../../src/proxy/child-connections.js';
+import type { IDapClientFactory, StatusMessage } from '../../src/proxy/dap-proxy-interfaces.js';
 import { createMockDapClient } from '../test-utils/mocks/dap-client.js';
+import { PythonAdapterPolicy } from '@debugmcp/shared';
 
 const configuration = { type: 'python', name: 'Subprocess 37012', subProcessId: 37012, connect: { host: '127.0.0.1', port: 5678 } };
 const report = { targetId: '37012', name: 'Subprocess 37012', configuration };
@@ -101,5 +102,227 @@ describe('ChildConnections: holding and releasing a reported child', () => {
     expect(connections.has('py-root')).toBe(false);
     expect(connections.has('child-1')).toBe(false);
     expect(connections.liveCount()).toBe(0);
+  });
+});
+
+describe('ChildConnections: adopting a reported child', () => {
+  const sent: Array<Record<string, unknown>> = [];
+  const logger = { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() };
+  let root: ReturnType<typeof createMockDapClient>;
+  let childClient: ReturnType<typeof createMockDapClient>;
+  let calls: string[];
+  let resolveAttach: () => void;
+  let rejectAttach: (error: Error) => void;
+  let connectionManager: {
+    initializeSession: ReturnType<typeof vi.fn>;
+    sendAttachRequest: ReturnType<typeof vi.fn>;
+    setExceptionBreakpoints: ReturnType<typeof vi.fn>;
+    setBreakpoints: ReturnType<typeof vi.fn>;
+    sendConfigurationDone: ReturnType<typeof vi.fn>;
+    disconnect: ReturnType<typeof vi.fn>;
+  };
+  let dapClientFactory: { create: ReturnType<typeof vi.fn> };
+  let connections: ChildConnections;
+
+  const sentOf = (type: string, extra: (m: Record<string, unknown>) => boolean = () => true) =>
+    sent.filter((m) => m.type === type && extra(m));
+
+  beforeEach(() => {
+    sent.length = 0;
+    calls = [];
+    root = createMockDapClient();
+    childClient = createMockDapClient();
+    dapClientFactory = { create: vi.fn().mockReturnValue(childClient) };
+    connectionManager = {
+      initializeSession: vi.fn(async () => {
+        calls.push('initialize');
+        return { supportsConfigurationDoneRequest: true };
+      }),
+      sendAttachRequest: vi.fn(() => {
+        calls.push('attach');
+        return new Promise<void>((resolve, reject) => {
+          resolveAttach = resolve;
+          rejectAttach = reject;
+        });
+      }),
+      setExceptionBreakpoints: vi.fn(async () => {
+        calls.push('setExceptionBreakpoints');
+        return { body: {} };
+      }),
+      setBreakpoints: vi.fn(async (_client: unknown, file: string) => {
+        calls.push(`setBreakpoints:${file.split(/[\\/]/).pop()}`);
+        return { body: { breakpoints: [{ verified: true, id: 3, line: 7 }] } };
+      }),
+      sendConfigurationDone: vi.fn(async () => {
+        calls.push('configurationDone');
+        // debugpy answers the attach only after configurationDone.
+        resolveAttach();
+      }),
+      disconnect: vi.fn(async () => {
+        calls.push('disconnect');
+      })
+    };
+    connections = new ChildConnections({
+      messageSender: { send: (message: unknown) => { sent.push(message as Record<string, unknown>); } },
+      logger,
+      adoption: {
+        dapClientFactory: dapClientFactory as unknown as IDapClientFactory,
+        connectionManager: connectionManager as unknown as ChildAdoptionDeps['connectionManager'],
+        policy: PythonAdapterPolicy,
+        host: '127.0.0.1',
+        port: 5678,
+        adapterId: 'python',
+        breakOnExceptions: 'uncaught'
+      }
+    });
+    connections.attach(root, 'py-root');
+  });
+
+  function reportAChild(seq = 7): string {
+    root.emit('child-report', { request: startDebugging(seq), report });
+    const status = sentOf('status', (m) => m.status === 'child_reported').at(-1)!;
+    return status.reportId as string;
+  }
+
+  /** Start an adoption and let its initialize and attach go out. */
+  async function startAdoption(childId = 'child-1') {
+    const reportId = reportAChild();
+    const adopting = connections.adopt(childId, { reportId, breakpoints: [{ file: '/w/child.py', line: 7 }] });
+    await new Promise((resolve) => setImmediate(resolve));
+    return { reportId, adopting };
+  }
+
+  async function adopted(childId = 'child-1') {
+    const started = await startAdoption(childId);
+    childClient.emit('initialized');
+    const result = await started.adopting;
+    return { ...started, result };
+  }
+
+  it("opens a labelled connection and runs debugpy's order: initialize, attach, initialized, breakpoints, configurationDone", async () => {
+    const { adopting } = await startAdoption();
+
+    expect(dapClientFactory.create).toHaveBeenCalledWith('127.0.0.1', 5678, PythonAdapterPolicy, { traceLabel: 'child:child-1' });
+    expect(childClient.connect).toHaveBeenCalledTimes(1);
+    expect(connectionManager.initializeSession).toHaveBeenCalledWith(childClient, 'child-1', 'python');
+    expect(connectionManager.sendAttachRequest).toHaveBeenCalledWith(childClient, { ...configuration, redirectOutput: true });
+    // The attach is out and the handshake waits for initialized: nothing else yet.
+    expect(calls).toEqual(['initialize', 'attach']);
+
+    childClient.emit('initialized');
+    const result = await adopting;
+
+    expect(calls).toEqual(['initialize', 'attach', 'setExceptionBreakpoints', 'setBreakpoints:child.py', 'configurationDone']);
+    expect(connectionManager.setExceptionBreakpoints).toHaveBeenCalledWith(childClient, ['uncaught']);
+    expect(result).toEqual({ sessionId: 'child-1', capabilities: { supportsConfigurationDoneRequest: true } });
+    expect(root.respondToReverseRequest).toHaveBeenCalledWith(expect.objectContaining({ seq: 7 }), {}, true, undefined);
+    expect(connections.has('child-1')).toBe(true);
+    expect(connections.liveCount()).toBe(1);
+  });
+
+  it("echoes the child's breakpoint answers as breakpoints_synced on the child's session", async () => {
+    await adopted();
+
+    const synced = sentOf('status', (m) => m.status === 'breakpoints_synced');
+    expect(synced).toHaveLength(1);
+    expect(synced[0]).toMatchObject({
+      sessionId: 'child-1',
+      breakpoints: [{ file: '/w/child.py', line: 7, verified: true, adapterId: 3, boundLine: 7 }]
+    });
+  });
+
+  it("forwards the child connection's events tagged with the child's session", async () => {
+    await adopted();
+
+    childClient.emit('stopped', { threadId: 1, reason: 'breakpoint' });
+    childClient.emit('output', { category: 'stdout', output: 'child start\n' });
+
+    expect(sentOf('dapEvent')).toEqual([
+      expect.objectContaining({ sessionId: 'child-1', event: 'stopped', body: { threadId: 1, reason: 'breakpoint' } }),
+      expect.objectContaining({ sessionId: 'child-1', event: 'output', body: { category: 'stdout', output: 'child start\n' } })
+    ]);
+  });
+
+  it('a child connection that closes after terminated reports an expected close and leaves the map', async () => {
+    const onEmpty = vi.fn();
+    connections.on('empty', onEmpty);
+    await adopted();
+
+    childClient.emit('terminated', {});
+    childClient.emit('close');
+
+    expect(sentOf('dapEvent', (m) => m.event === 'terminated')).toHaveLength(1);
+    expect(sentOf('status', (m) => m.status === 'dap_connection_closed')).toEqual([
+      expect.objectContaining({ sessionId: 'child-1', expected: true })
+    ]);
+    expect(connections.has('child-1')).toBe(false);
+    expect(connections.liveCount()).toBe(0);
+    expect(onEmpty).toHaveBeenCalledTimes(1);
+  });
+
+  it('a child connection that drops before terminated reports an unexpected close', async () => {
+    await adopted();
+
+    childClient.emit('close');
+
+    expect(sentOf('status', (m) => m.status === 'dap_connection_closed')).toEqual([
+      expect.objectContaining({ sessionId: 'child-1', expected: false })
+    ]);
+  });
+
+  it('a refused attach releases the held request, shuts the connection and rejects the adoption', async () => {
+    const { adopting } = await startAdoption();
+
+    rejectAttach(new Error('attach refused'));
+    await expect(adopting).rejects.toThrow('attach refused');
+
+    expect(root.respondToReverseRequest).toHaveBeenCalledWith(expect.objectContaining({ seq: 7 }), {}, false, expect.stringContaining('attach refused'));
+    expect(childClient.shutdown).toHaveBeenCalled();
+    expect(connections.has('child-1')).toBe(false);
+  });
+
+  it('close disconnects the child with the requested terminateDebuggee and forgets it', async () => {
+    const onEmpty = vi.fn();
+    connections.on('empty', onEmpty);
+    await adopted();
+
+    await expect(connections.close('child-1', { terminateDebuggee: true })).resolves.toBe(true);
+
+    expect(connectionManager.disconnect).toHaveBeenCalledWith(childClient, true);
+    expect(childClient.shutdown).toHaveBeenCalled();
+    expect(connections.has('child-1')).toBe(false);
+    expect(onEmpty).toHaveBeenCalledTimes(1);
+    await expect(connections.close('child-1', { terminateDebuggee: true })).resolves.toBe(false);
+  });
+
+  it('closeAll disconnects every child connection without terminating them', async () => {
+    await adopted('child-1');
+    const second = createMockDapClient();
+    dapClientFactory.create.mockReturnValueOnce(second);
+    const reportId = reportAChild(8);
+    const adopting = connections.adopt('child-2', { reportId, breakpoints: [] });
+    await new Promise((resolve) => setImmediate(resolve));
+    second.emit('initialized');
+    await adopting;
+    expect(connections.liveCount()).toBe(2);
+
+    await connections.closeAll('worker shutdown');
+
+    expect(connectionManager.disconnect).toHaveBeenCalledTimes(2);
+    expect(connectionManager.disconnect).toHaveBeenCalledWith(childClient, false);
+    expect(connectionManager.disconnect).toHaveBeenCalledWith(second, false);
+    expect(connections.liveCount()).toBe(0);
+  });
+
+  it("a grandchild reported on the child's connection is stamped with the child's session", async () => {
+    await adopted();
+
+    childClient.emit('child-report', { request: startDebugging(9), report: { ...report, targetId: '37013', name: 'Subprocess 37013' } });
+
+    expect(sentOf('status', (m) => m.status === 'child_reported').at(-1)).toMatchObject({
+      sessionId: 'child-1',
+      targetId: '37013',
+      name: 'Subprocess 37013'
+    });
   });
 });

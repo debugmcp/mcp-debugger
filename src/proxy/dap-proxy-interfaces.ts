@@ -287,8 +287,14 @@ export interface IDapClient {
 /**
  * Factory for creating DAP clients
  */
+/** Per-connection options a factory passes to the client it makes. */
+export interface DapClientCreateOptions {
+  /** The DAP trace's `conn` label: `parent` by default; `child:<id>` for a child session's connection (issue #1081). */
+  traceLabel?: string;
+}
+
 export interface IDapClientFactory {
-  create(host: string, port: number, policy?: AdapterPolicy): IDapClient;
+  create(host: string, port: number, policy?: AdapterPolicy, options?: DapClientCreateOptions): IDapClient;
 }
 
 /**
@@ -418,11 +424,11 @@ export const CHILD_ADOPT_COMMAND = 'childAdopt';
 export const CHILD_RELEASE_COMMAND = 'childRelease';
 export const CHILD_CLOSE_COMMAND = 'childClose';
 
-/** `dapArgs` of CHILD_ADOPT_COMMAND: the held report and the parent's breakpoints to re-send before configurationDone. */
+/** `dapArgs` of CHILD_ADOPT_COMMAND: the held report and the parent's breakpoints to re-send before configurationDone (the shapes of ProxyInitPayload's initial sets). */
 export interface ChildAdoptArgs {
   reportId: string;
-  breakpoints?: Array<{ file: string; line: number; condition?: string; hitCondition?: string; logMessage?: string }>;
-  functionBreakpoints?: Array<{ name: string; condition?: string; hitCondition?: string }>;
+  breakpoints?: Array<{ id?: string; file: string; line: number; condition?: string; logMessage?: string; suspendPolicy?: 'all' | 'thread' }>;
+  functionBreakpoints?: Array<{ name: string; condition?: string }>;
 }
 
 /** `dapArgs` of CHILD_RELEASE_COMMAND. */

@@ -25,6 +25,8 @@ import {
   CHILD_ADOPT_COMMAND,
   CHILD_RELEASE_COMMAND,
   CHILD_CLOSE_COMMAND,
+  type ChildAdoptArgs,
+  type ChildCloseArgs,
   type ChildReleaseArgs
 } from './dap-proxy-interfaces.js';
 import type { IDapMirrorServer, MirrorEndpoint } from './dap-mirror-server.js';
@@ -154,6 +156,13 @@ export class DapProxyWorker {
    * contract; null for every other adapter.
    */
   private childConnections: ChildConnections | null = null;
+  /**
+   * The root connection ended while child connections were live: the
+   * worker's shutdown waits for the last of them (issue #1081), since the
+   * adapter lives while any client socket is open and the children are
+   * still being debugged.
+   */
+  private rootEndedWhileChildrenLive = false;
   private currentInitPayload: ProxyInitPayload | null = null;
   private state: ProxyState = ProxyState.UNINITIALIZED;
   private isAttachMode: boolean = false;
@@ -716,7 +725,17 @@ export class DapProxyWorker {
       if (this.adapterPolicy.childAdoption) {
         this.childConnections = new ChildConnections({
           messageSender: this.dependencies.messageSender,
-          logger: this.logger!
+          logger: this.logger!,
+          adoption: {
+            dapClientFactory: this.dependencies.dapClientFactory,
+            connectionManager: this.connectionManager!,
+            policy: this.adapterPolicy,
+            host: spawnConfig.host,
+            port: spawnConfig.port,
+            adapterId: this.adapterPolicy.getDapAdapterConfiguration().type,
+            breakOnExceptions: payload.breakOnExceptions,
+            launchConfig: payload.launchConfig
+          }
         });
         this.childConnections.attach(this.dapClient, payload.sessionId);
       }
@@ -1252,7 +1271,7 @@ export class DapProxyWorker {
           await this.maybeSynthesizeExitedFromOutput();
           this.terminalDapEventForwarded = true;
           this.sendDapEvent('terminated', body);
-          this.shutdown();
+          this.shutdownUnlessChildrenLive();
         });
       },
       onError: (err) => {
@@ -1276,7 +1295,7 @@ export class DapProxyWorker {
             expected: this.isTerminationExpected(),
             ...this.adapterStderrTailExtra()
           });
-          this.shutdown();
+          this.shutdownUnlessChildrenLive();
         });
       }
     });
@@ -1894,6 +1913,23 @@ export class DapProxyWorker {
         this.sendDapResponse(payload.requestId, true, { body: { released } }, undefined, payload.sessionId);
         return;
       }
+      case CHILD_ADOPT_COMMAND: {
+        const args = (payload.dapArgs ?? {}) as ChildAdoptArgs;
+        try {
+          const result = await this.childConnections.adopt(payload.sessionId, args);
+          this.sendDapResponse(payload.requestId, true, { body: result }, undefined, payload.sessionId);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          this.sendDapResponse(payload.requestId, false, undefined, message, payload.sessionId);
+        }
+        return;
+      }
+      case CHILD_CLOSE_COMMAND: {
+        const args = (payload.dapArgs ?? {}) as ChildCloseArgs;
+        const closed = await this.childConnections.close(payload.sessionId, { terminateDebuggee: args.terminateDebuggee !== false });
+        this.sendDapResponse(payload.requestId, true, { body: { closed } }, undefined, payload.sessionId);
+        return;
+      }
       default:
         this.sendDapResponse(
           payload.requestId, false, undefined,
@@ -1901,6 +1937,44 @@ export class DapProxyWorker {
           payload.sessionId
         );
     }
+  }
+
+  /** A child session's DAP request, answered on the child's envelope (issue #1081). */
+  private async forwardToChild(childClient: IDapClient, payload: DapCommandPayload): Promise<void> {
+    try {
+      const response = await childClient.sendRequest(payload.dapCommand, payload.dapArgs, payload.timeoutMs);
+      this.sendDapResponse(payload.requestId, true, response, undefined, payload.sessionId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger?.warn(`[Worker] Child session ${payload.sessionId} request ${payload.dapCommand} failed: ${message}`);
+      this.sendDapResponse(
+        payload.requestId, false,
+        error instanceof DapResponseError ? error.response : undefined,
+        message,
+        payload.sessionId
+      );
+    }
+  }
+
+  /**
+   * Ask for the worker's shutdown unless child connections are still live
+   * (issue #1081): the adapter serves them on the same port, so the root's
+   * end waits for the last of them; the explicit terminate command does not.
+   */
+  private shutdownUnlessChildrenLive(): void {
+    const live = this.childConnections?.liveCount() ?? 0;
+    if (live > 0 && this.childConnections) {
+      if (!this.rootEndedWhileChildrenLive) {
+        this.rootEndedWhileChildrenLive = true;
+        this.logger?.info(`[Worker] Root session ended with ${live} child connection(s) live; deferring shutdown until they end`);
+        this.childConnections.once('empty', () => {
+          this.logger?.info('[Worker] Last child connection ended; running the deferred shutdown');
+          void this.shutdown();
+        });
+      }
+      return;
+    }
+    void this.shutdown();
   }
 
   /**
@@ -1924,6 +1998,15 @@ export class DapProxyWorker {
       payload.dapCommand === CHILD_CLOSE_COMMAND
     ) {
       await this.handleChildCommand(payload);
+      return;
+    }
+
+    // A command on a child session's envelope goes to that child's own
+    // connection (issue #1081): no queueing, no entry-breakpoint bookkeeping,
+    // none of the root's launch-phase state.
+    const childClient = this.childConnections?.clientOf(payload.sessionId);
+    if (childClient) {
+      await this.forwardToChild(childClient, payload);
       return;
     }
 
@@ -2421,6 +2504,14 @@ export class DapProxyWorker {
       this.dapClient.shutdown('worker shutdown');
     }
     this.dapClient = null;
+
+    // Every child connection this worker opened is closed here, after the
+    // root's disconnect and before the adapter is killed (issue #1081):
+    // debugpy leaves a child's socket open after its `terminated`, and the
+    // adapter lives while any client socket does. The children are not
+    // terminated by this: a launch root's disconnect already ended the tree,
+    // an attach root's children keep running.
+    await this.childConnections?.closeAll('worker shutdown');
 
     // Give the adapter time to complete its post-disconnect cleanup before we
     // kill the adapter process. Attach mode: completes detach without

@@ -6,24 +6,67 @@
  * session's and one per adopted child. A child is reported on the connection
  * of the process that spawned it (a `child-report` from MinimalDapClient); the
  * report is held unanswered here while the parent process decides, then
- * adopted (a fresh connection to the same adapter) or released — the request
- * answered `success: false`, on which debugpy unblocks the child itself. A
- * report nobody answers is released by a safety timer, so a child is never
- * parked forever by a silent parent.
+ * adopted — a fresh connection to the same adapter, the child handshake with
+ * the parent's breakpoints re-sent before configurationDone, every event the
+ * connection produces forwarded under the child's session id — or released,
+ * the request answered `success: false`, on which debugpy unblocks the child
+ * itself. A report nobody answers is released by a safety timer, so a child is
+ * never parked forever by a silent parent. Every connection opened here is
+ * closed here: the adapter lives while any client socket is open.
  */
+import { EventEmitter } from 'events';
 import { randomUUID } from 'node:crypto';
+import path from 'path';
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { ChildReport } from '@debugmcp/shared';
-import type { IDapClient, ILogger, IMessageSender, StatusMessage } from './dap-proxy-interfaces.js';
+import { resolveExceptionFilters } from '@debugmcp/shared';
+import type { AdapterPolicy, ChildReport, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
+import type { DapConnectionManager } from './dap-proxy-connection-manager.js';
+import type {
+  BreakpointSyncResult,
+  ChildAdoptArgs,
+  DapEventMessage,
+  ErrorMessage,
+  IDapClient,
+  IDapClientFactory,
+  ILogger,
+  IMessageSender,
+  StatusMessage
+} from './dap-proxy-interfaces.js';
 
 /** The default time a held report waits for the parent process's answer. */
 export const CHILD_REPORT_RELEASE_TIMEOUT_MS = 30_000;
+/** How long the child handshake waits for `initialized` after its attach. */
+export const CHILD_INITIALIZED_TIMEOUT_MS = 15_000;
+
+/** What adopting a child needs: the adapter's address and the handshake helpers the root uses. */
+export interface ChildAdoptionDeps {
+  dapClientFactory: IDapClientFactory;
+  connectionManager: Pick<
+    DapConnectionManager,
+    'initializeSession' | 'sendAttachRequest' | 'setExceptionBreakpoints' | 'setBreakpoints' | 'sendConfigurationDone' | 'disconnect'
+  >;
+  policy: AdapterPolicy;
+  host: string;
+  port: number;
+  adapterId: string;
+  breakOnExceptions?: 'uncaught' | 'all' | 'none';
+  launchConfig?: LanguageSpecificLaunchConfig;
+  initializedTimeoutMs?: number;
+}
 
 export interface ChildConnectionsOptions {
   messageSender: IMessageSender;
   logger: ILogger;
   /** How long a held report waits for adopt/release before it is released. */
   releaseTimeoutMs?: number;
+  /** Absent for a worker whose policy reports no children: adopt() then refuses. */
+  adoption?: ChildAdoptionDeps;
+}
+
+/** The worker's answer to CHILD_ADOPT_COMMAND. */
+export interface ChildAdoptResult {
+  sessionId: string;
+  capabilities?: DebugProtocol.Capabilities;
 }
 
 interface HeldReport {
@@ -35,13 +78,26 @@ interface HeldReport {
   timer: NodeJS.Timeout;
 }
 
-export class ChildConnections {
+interface ChildConnection {
+  sessionId: string;
+  client: IDapClient;
+  /** The adapter reported the child's end on this connection. */
+  terminatedSeen: boolean;
+  /** This worker closed the connection on purpose. */
+  closed: boolean;
+}
+
+/** Forwarded as-is under the child's session id; `terminated` and `close` have their own handling. */
+const FORWARDED_CHILD_EVENTS = ['output', 'stopped', 'continued', 'thread', 'exited', 'breakpoint'] as const;
+
+export class ChildConnections extends EventEmitter {
   private readonly held = new Map<string, HeldReport>();
   /** Adopted child connections by their session id. */
-  private readonly clients = new Map<string, IDapClient>();
+  private readonly clients = new Map<string, ChildConnection>();
   private readonly releaseTimeoutMs: number;
 
   constructor(private readonly options: ChildConnectionsOptions) {
+    super();
     this.releaseTimeoutMs = options.releaseTimeoutMs ?? CHILD_REPORT_RELEASE_TIMEOUT_MS;
   }
 
@@ -62,6 +118,11 @@ export class ChildConnections {
     return this.clients.has(sessionId);
   }
 
+  /** The adopted child's client, for routing its requests. */
+  clientOf(sessionId: string): IDapClient | undefined {
+    return this.clients.get(sessionId)?.client;
+  }
+
   /** How many adopted child connections are open. */
   liveCount(): number {
     return this.clients.size;
@@ -73,12 +134,10 @@ export class ChildConnections {
    * answered.
    */
   release(reportId: string, reason: string): boolean {
-    const held = this.held.get(reportId);
+    const held = this.takeHeld(reportId);
     if (!held) {
       return false;
     }
-    this.held.delete(reportId);
-    clearTimeout(held.timer);
     this.options.logger.info(`[ChildConnections] Releasing child ${held.report.targetId} (${held.report.name}): ${reason}`);
     held.client.respondToReverseRequest?.(held.request, {}, false, reason);
     return true;
@@ -90,6 +149,123 @@ export class ChildConnections {
       this.release(reportId, reason);
     }
   }
+
+  /**
+   * Adopt a held report as the connection of `childSessionId`: connect to
+   * the adapter, run the child handshake in the adapter's order (debugpy:
+   * initialize → attach → initialized → breakpoints → configurationDone, the
+   * attach answered only after configurationDone), then answer the held
+   * request. On any failure the request is released instead and the
+   * connection torn down.
+   */
+  async adopt(childSessionId: string, args: ChildAdoptArgs): Promise<ChildAdoptResult> {
+    const deps = this.options.adoption;
+    const contract = deps?.policy.childAdoption;
+    if (!deps || !contract) {
+      throw new Error('this adapter reports no child processes');
+    }
+    if (this.clients.has(childSessionId)) {
+      throw new Error(`child session ${childSessionId} already has a connection`);
+    }
+    const held = this.takeHeld(args.reportId);
+    if (!held) {
+      throw new Error(`unknown or already answered child report ${args.reportId}`);
+    }
+
+    const { logger } = this.options;
+    const label = `child:${childSessionId.slice(0, 8)}`;
+    const client = deps.dapClientFactory.create(deps.host, deps.port, deps.policy, { traceLabel: label });
+    const connection: ChildConnection = { sessionId: childSessionId, client, terminatedSeen: false, closed: false };
+    let initializedTimer: NodeJS.Timeout | undefined;
+    try {
+      logger.info(`[ChildConnections] Adopting child ${held.report.targetId} (${held.report.name}) as session ${childSessionId}`);
+      await client.connect();
+      this.clients.set(childSessionId, connection);
+      this.wireChildEvents(connection);
+      // A grandchild is reported on this connection: it is this child's.
+      this.attach(client, childSessionId);
+
+      const initializedSeen = new Promise<void>((resolve) => {
+        client.once('initialized', () => resolve());
+      });
+      const capabilities = await deps.connectionManager.initializeSession(client, childSessionId, deps.adapterId);
+
+      const attach = deps.connectionManager.sendAttachRequest(client, contract.buildChildAttachArguments(held.report));
+      const attachFailure = new Promise<never>((_, reject) => {
+        attach.catch(reject);
+      });
+      const initializedTimeout = new Promise<never>((_, reject) => {
+        initializedTimer = setTimeout(
+          () => reject(new Error(`Timeout waiting for initialized event after the child attach (${deps.initializedTimeoutMs ?? CHILD_INITIALIZED_TIMEOUT_MS} ms)`)),
+          deps.initializedTimeoutMs ?? CHILD_INITIALIZED_TIMEOUT_MS
+        );
+      });
+      await Promise.race([initializedSeen, attachFailure, initializedTimeout]);
+      clearTimeout(initializedTimer);
+
+      await this.sendExceptionBreakpoints(deps, client, childSessionId);
+      await this.sendBreakpoints(deps, client, childSessionId, args.breakpoints ?? []);
+      await this.sendFunctionBreakpoints(client, childSessionId, args.functionBreakpoints ?? []);
+      await deps.connectionManager.sendConfigurationDone(client);
+      await attach;
+
+      held.client.respondToReverseRequest?.(held.request, {}, true, undefined);
+      logger.info(`[ChildConnections] Child ${held.report.targetId} adopted as session ${childSessionId}`);
+      return { sessionId: childSessionId, capabilities };
+    } catch (error) {
+      clearTimeout(initializedTimer);
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn(`[ChildConnections] Adoption of child ${held.report.targetId} as session ${childSessionId} failed: ${message}`);
+      connection.closed = true;
+      this.clients.delete(childSessionId);
+      held.client.respondToReverseRequest?.(held.request, {}, false, `adoption failed: ${message}`);
+      try {
+        client.shutdown(`child adoption failed: ${message}`);
+      } catch {
+        // best effort
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Close an adopted child's connection: `terminateDebuggee` true ends the
+   * child (an explicit close, debugpy's measured semantics), false lets it
+   * run on (the worker going down). Returns false for an unknown session.
+   */
+  async close(sessionId: string, options: { terminateDebuggee: boolean }): Promise<boolean> {
+    const connection = this.clients.get(sessionId);
+    if (!connection) {
+      return false;
+    }
+    connection.closed = true;
+    this.clients.delete(sessionId);
+    const deps = this.options.adoption;
+    try {
+      await deps?.connectionManager.disconnect(connection.client, options.terminateDebuggee);
+    } catch (error) {
+      this.options.logger.warn(
+        `[ChildConnections] Disconnecting child session ${sessionId} failed (best effort): ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+    try {
+      connection.client.shutdown('child session closed');
+    } catch {
+      // best effort
+    }
+    this.emitEmptyIfSo();
+    return true;
+  }
+
+  /** Close every adopted connection without ending the children (the worker is going down). */
+  async closeAll(reason: string): Promise<void> {
+    this.options.logger.info(`[ChildConnections] Closing ${this.clients.size} child connection(s): ${reason}`);
+    for (const sessionId of Array.from(this.clients.keys())) {
+      await this.close(sessionId, { terminateDebuggee: false });
+    }
+  }
+
+  // ----- internals -----
 
   private hold(client: IDapClient, connectionSessionId: string, request: DebugProtocol.Request, report: ChildReport): void {
     const reportId = randomUUID();
@@ -111,5 +287,154 @@ export class ChildConnections {
       configuration: report.configuration
     };
     this.options.messageSender.send(message);
+  }
+
+  private takeHeld(reportId: string): HeldReport | undefined {
+    const held = this.held.get(reportId);
+    if (!held) {
+      return undefined;
+    }
+    this.held.delete(reportId);
+    clearTimeout(held.timer);
+    return held;
+  }
+
+  private wireChildEvents(connection: ChildConnection): void {
+    const { client, sessionId } = connection;
+    for (const event of FORWARDED_CHILD_EVENTS) {
+      client.on(event, (body: unknown) => this.sendEvent(sessionId, event, body));
+    }
+    client.on('terminated', (body: unknown) => {
+      connection.terminatedSeen = true;
+      this.sendEvent(sessionId, 'terminated', body);
+    });
+    client.on('error', (error: unknown) => {
+      const message: ErrorMessage = {
+        type: 'error',
+        sessionId,
+        message: error instanceof Error ? error.message : String(error)
+      };
+      this.options.messageSender.send(message);
+    });
+    client.on('close', () => this.onConnectionClosed(connection));
+  }
+
+  private onConnectionClosed(connection: ChildConnection): void {
+    if (this.clients.get(connection.sessionId) !== connection) {
+      // Closed by this worker already (close()/closeAll()), reported then.
+      return;
+    }
+    this.clients.delete(connection.sessionId);
+    const message: StatusMessage = {
+      type: 'status',
+      status: 'dap_connection_closed',
+      sessionId: connection.sessionId,
+      expected: connection.terminatedSeen || connection.closed
+    };
+    this.options.messageSender.send(message);
+    this.emitEmptyIfSo();
+  }
+
+  private emitEmptyIfSo(): void {
+    if (this.clients.size === 0) {
+      this.emit('empty');
+    }
+  }
+
+  private sendEvent(sessionId: string, event: string, body: unknown): void {
+    const message: DapEventMessage = { type: 'dapEvent', sessionId, event, body };
+    this.options.messageSender.send(message);
+  }
+
+  private async sendExceptionBreakpoints(deps: ChildAdoptionDeps, client: IDapClient, sessionId: string): Promise<void> {
+    const mode = deps.breakOnExceptions;
+    if (!mode || mode === 'none') {
+      return;
+    }
+    const filters = resolveExceptionFilters(deps.policy, mode, deps.launchConfig);
+    if (filters.length === 0) {
+      return;
+    }
+    try {
+      await deps.connectionManager.setExceptionBreakpoints(client, filters);
+    } catch (error) {
+      this.options.logger.warn(
+        `[ChildConnections] setExceptionBreakpoints on child session ${sessionId} failed (continuing without): ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /** The parent's breakpoints, per file, echoed as the launch echoes its own (issue #439). */
+  private async sendBreakpoints(
+    deps: ChildAdoptionDeps,
+    client: IDapClient,
+    sessionId: string,
+    breakpoints: NonNullable<ChildAdoptArgs['breakpoints']>
+  ): Promise<void> {
+    const grouped = new Map<string, NonNullable<ChildAdoptArgs['breakpoints']>>();
+    for (const breakpoint of breakpoints) {
+      const file = path.resolve(breakpoint.file);
+      if (!grouped.has(file)) {
+        grouped.set(file, []);
+      }
+      grouped.get(file)!.push(breakpoint);
+    }
+    const syncResults: BreakpointSyncResult[] = [];
+    for (const [file, group] of grouped) {
+      const response = await deps.connectionManager.setBreakpoints(client, file, group, deps.policy);
+      const answered = response.body?.breakpoints ?? [];
+      group.forEach((breakpoint, i) => {
+        syncResults.push({
+          ...(breakpoint.id !== undefined ? { id: breakpoint.id } : {}),
+          file: breakpoint.file,
+          line: breakpoint.line,
+          verified: answered[i]?.verified === true,
+          ...(typeof answered[i]?.id === 'number' ? { adapterId: answered[i].id } : {}),
+          ...(typeof answered[i]?.line === 'number' ? { boundLine: answered[i].line } : {}),
+          ...(answered[i]?.message !== undefined ? { message: answered[i].message } : {})
+        });
+      });
+    }
+    if (syncResults.length > 0) {
+      const message: StatusMessage = { type: 'status', status: 'breakpoints_synced', sessionId, breakpoints: syncResults };
+      this.options.messageSender.send(message);
+    }
+  }
+
+  private async sendFunctionBreakpoints(
+    client: IDapClient,
+    sessionId: string,
+    functionBreakpoints: NonNullable<ChildAdoptArgs['functionBreakpoints']>
+  ): Promise<void> {
+    if (functionBreakpoints.length === 0) {
+      return;
+    }
+    try {
+      const response = await client.sendRequest<DebugProtocol.SetFunctionBreakpointsResponse>('setFunctionBreakpoints', {
+        breakpoints: functionBreakpoints.map((bp) => ({
+          name: bp.name,
+          ...(bp.condition !== undefined ? { condition: bp.condition } : {})
+        }))
+      });
+      const results = response.body?.breakpoints ?? [];
+      const message: StatusMessage = {
+        type: 'status',
+        status: 'function_breakpoints_synced',
+        sessionId,
+        functionBreakpoints: functionBreakpoints.map((bp, i) => ({
+          name: bp.name,
+          verified: results[i]?.verified === true,
+          ...(typeof results[i]?.id === 'number' ? { id: results[i].id } : {}),
+          ...(typeof results[i]?.line === 'number' ? { line: results[i].line } : {}),
+          ...(results[i]?.source?.path ? { source: results[i].source.path } : {}),
+          ...(results[i]?.message !== undefined ? { message: results[i].message } : {})
+        }))
+      };
+      this.options.messageSender.send(message);
+    } catch (error) {
+      this.options.logger.warn(
+        `[ChildConnections] setFunctionBreakpoints on child session ${sessionId} failed (continuing without): ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 }
