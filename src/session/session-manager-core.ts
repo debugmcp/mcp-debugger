@@ -218,7 +218,43 @@ export type PauseResultData = DebugResultData & StopAnswerFields & {
 /** How much of the output's tail a policy reads the program's end from (issue #877). */
 const PROGRAM_END_OUTPUT_TAIL_CHARS = 8000;
 
-export type WaitForStopResultData = DebugResultData & StopAnswerFields & {
+/**
+ * One descendant in a `children` answer (the session tree, issue #1081):
+ * the row's id, the adapter's name for the process, its state, and the
+ * session that spawned it — listed depth first in adoption order, the order
+ * the tree-aware wait selects in.
+ */
+export interface ChildSessionSummary {
+  sessionId: string;
+  name: string;
+  state: SessionState;
+  parentSessionId: string;
+}
+
+/**
+ * What an answer on a session with a tree carries
+ * (docs/architecture/session-tree.md, "wait_for_stop is tree-aware").
+ */
+export interface TreeAnswerFields {
+  /** Every descendant with its state; absent when the session has none. */
+  children?: ChildSessionSummary[];
+  /**
+   * Reports released to run undebugged on this session's connection during
+   * this run (beyond the cap, or an adoption that failed): a running total,
+   * never consumed, so concurrent waiters read the same number.
+   */
+  childrenReleased?: number;
+  /** Descendants this operation closed (a relaunch, a close) — when any. */
+  childrenClosed?: number;
+}
+
+export type WaitForStopResultData = DebugResultData & StopAnswerFields & TreeAnswerFields & {
+  /**
+   * The session this answer is about (issue #1081): the one asked for, or the
+   * descendant the tree-aware selection named — the id to inspect, step and
+   * continue with.
+   */
+  sessionId: string;
   message: string;
   lastStop?: SessionStopInfo;
   /**
@@ -239,7 +275,7 @@ export type WaitForStopResultData = DebugResultData & StopAnswerFields & {
  * so the answer names the frame the program is paused in and the handler can
  * read the line and the build behind it.
  */
-export type LaunchResultData = DebugResultData & StopAnswerFields;
+export type LaunchResultData = DebugResultData & StopAnswerFields & TreeAnswerFields;
 
 /**
  * What a successful attach returns on top of the common fields: the same

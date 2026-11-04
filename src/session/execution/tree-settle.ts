@@ -16,11 +16,38 @@
  * selected until it is closed.
  */
 import { SessionState, isTerminalSessionState } from '@debugmcp/shared';
+import type { ManagedSession } from '../session-store.js';
+import type { TreeAnswerFields } from '../session-manager-core.js';
 
 /** The slice of a session the selection reads. */
 export interface SettleCandidate {
   id: string;
   state: SessionState;
+}
+
+/**
+ * The tree fields of an answer on `session`: its descendants (given depth
+ * first in adoption order) with their states, and the run's count of
+ * children released to run undebugged. Both absent when there is nothing to
+ * say, so a session with no tree answers byte-for-byte as before.
+ */
+export function describeTreeAnswer(
+  session: Pick<ManagedSession, 'releasedChildReports'>,
+  descendants: readonly Pick<ManagedSession, 'id' | 'name' | 'state' | 'parentSessionId'>[]
+): TreeAnswerFields {
+  return {
+    ...(descendants.length > 0
+      ? {
+          children: descendants.map((d) => ({
+            sessionId: d.id,
+            name: d.name,
+            state: d.state,
+            parentSessionId: d.parentSessionId ?? ''
+          }))
+        }
+      : {}),
+    ...(session.releasedChildReports ? { childrenReleased: session.releasedChildReports } : {})
+  };
 }
 
 const isPausedOrErrored = (state: SessionState): boolean =>

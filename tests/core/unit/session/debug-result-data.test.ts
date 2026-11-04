@@ -26,9 +26,9 @@ describe('DebugResultData type contract (issue #590)', () => {
     >();
   });
 
-  it('the launch answer adds only the stop-answer fields: the landing plus the snapshot (issues #951/#982)', () => {
+  it('the launch answer adds only the stop-answer fields — the landing plus the snapshot (issues #951/#982) — and the tree fields (issue #1081)', () => {
     expectTypeOf<keyof LaunchResultData>().toEqualTypeOf<
-      keyof DebugResultData | 'location' | 'threadId' | 'note' | 'snapshot'
+      keyof DebugResultData | 'location' | 'threadId' | 'note' | 'snapshot' | 'children' | 'childrenReleased' | 'childrenClosed'
     >();
   });
 });
