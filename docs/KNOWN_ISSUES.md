@@ -93,11 +93,11 @@ undebugged: a breakpoint in code that only a child executes does not hit. With a
 `dapLaunchArgs: { subProcess: true }` on a launch, each Python child the program starts
 (`subprocess`, `multiprocessing`, pytest-xdist workers) becomes a child debug session:
 `list_debug_sessions` lists it with `parentSessionId`, it stops on the parent's breakpoints (re-sent
-to it before it runs), and it has its own `get_output`, `wait_for_stop` and `close_debug_session`;
-closing the parent closes its children first. Today a child is discovered through
-`list_debug_sessions` (its row carries `parentSessionId`) and waited on with its own id. The default
-stays `false` until the tree-aware `wait_for_stop` lands (#1081); the design is
-[the session tree](architecture/session-tree.md).
+to it before it runs), and it has its own `get_output` and `close_debug_session`; closing the parent
+closes its children first. A `wait_for_stop` on the parent reports a child's stop with `sessionId`
+naming the child and `children` listing the tree with each session's state; a child can still be
+waited on by its own id. The default stays `false` until the last step of #1081 flips it; the design
+is [the session tree](architecture/session-tree.md).
 
 ## Dart/Flutter: what the SDK debug adapter does differently
 

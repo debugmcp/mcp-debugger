@@ -10,10 +10,11 @@ in what order). It is built from the measured facts in
 below cites one of those or a source named in the survey.
 
 Status: decisions taken 2026-11-03 (listed with their owners at the end); merged in
-[#1083](https://github.com/debugmcp/mcp-debugger/pull/1083); implementation in progress: M1 PR 1
-(adoption behind an explicit `subProcess: true`) under [#1081](https://github.com/debugmcp/mcp-debugger/issues/1081),
-then the tree-aware wait, then the default flip; M2 is [#1082](https://github.com/debugmcp/mcp-debugger/issues/1082).
-Nothing here is shipped yet.
+[#1083](https://github.com/debugmcp/mcp-debugger/pull/1083). Implementation under
+[#1081](https://github.com/debugmcp/mcp-debugger/issues/1081): M1 PR 1 (adoption behind an
+explicit `subProcess: true`) merged in [#1087](https://github.com/debugmcp/mcp-debugger/pull/1087);
+PR 2 (the tree-aware wait and the cascade answers) in progress; then the default flip. M2 is
+[#1082](https://github.com/debugmcp/mcp-debugger/issues/1082). Nothing is on by default yet.
 Scope: debuggee children reported by the adapter (debugpy subprocesses, js-debug forks and, later,
 browser targets). The tree is additive to the shipped tool surface: no new tool, no changed
 parameter, new fields only.
@@ -112,7 +113,7 @@ exists). The agent then uses `sessionId` for inspection, stepping and continuing
   paused reports the child (rule 2 before rule 3), because nothing can be done on the parent. The
   microtask re-check that hides an auto-continued entry stop
   ([#849](https://github.com/debugmcp/mcp-debugger/issues/849)) is unchanged.
-- Every answer on a session that has children carries `children: [{ sessionId, name, state }]`,
+- Every answer on a session that has children carries `children: [{ sessionId, name, state, parentSessionId }]`,
   the paused and the `pending: true` answers included, so a caller always sees what else is live or
   paused and what to wait on next. The `start_debugging` answer carries the same list when a child
   was adopted during the launch hold.

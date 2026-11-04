@@ -66,7 +66,7 @@ Shorthand: `create_debug_session { "language": "python", "host": "127.0.0.1", "p
 - **evaluate_expression** runs in debugpy's `variables` (watch-style) context by default. Reads and arithmetic are reliable; whether mutations like `x = 5` take effect depends on debugpy — verify with a follow-up evaluate before relying on one. Collections are truncated at 300 items.
 - **Output capture works for Python** (`redirectOutput`): `print()` and stderr land in `get_output` entries, readable during and after the run until the session closes.
 - Logpoints work: `set_breakpoint` with `logMessage: "x={x}"` logs interpolated values to `get_output` without pausing.
-- **Child processes run undebugged by default.** debugpy's sub-process debugging is sent off until the tree-aware `wait_for_stop` lands (#1081). `dapLaunchArgs: { subProcess: true }` makes each Python child the program starts a child debug session: `list_debug_sessions` lists it with `parentSessionId`, it stops on this session's breakpoints, and it is waited on with its own id.
+- **Child processes run undebugged by default.** debugpy's sub-process debugging is sent off until the default flips in the last step of #1081. `dapLaunchArgs: { subProcess: true }` makes each Python child the program starts a child debug session: `list_debug_sessions` lists it with `parentSessionId`, it stops on this session's breakpoints, and `wait_for_stop` on this session reports the child's stop with `sessionId` naming the child (inspect and step with that id) and `children` listing the tree; a child can still be waited on by its own id.
 
 ## Troubleshooting
 
