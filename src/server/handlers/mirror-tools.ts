@@ -5,8 +5,15 @@ import { isContainerMode } from '../../utils/container-path-utils.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { requireSessionId } from '../tool-validation.js';
 import { jsonResult, rethrowAsMcpError, sessionErrorToResult, type ToolResult } from '../tool-result.js';
+import { childSessionRefusal } from './shared.js';
 
 export async function handleExposeSession(ctx: ToolContext, sessionId: string): Promise<ToolResult> {
+  // The mirror follows the root's connection, so a child session has nothing
+  // of its own to expose (issue #1081).
+  const childRefusal = childSessionRefusal(ctx, sessionId, 'expose_session');
+  if (childRefusal) {
+    return childRefusal;
+  }
   try {
     ctx.validateSession(sessionId);
     const result = await ctx.sessionManager.exposeSession(sessionId);
@@ -52,6 +59,11 @@ export const exposeSessionTool: ToolHandler = async (ctx, args) => {
 };
 
 export async function handleUnexposeSession(ctx: ToolContext, sessionId: string): Promise<ToolResult> {
+  // Nothing was exposed on a child (issue #1081): the same refusal as expose_session.
+  const childRefusal = childSessionRefusal(ctx, sessionId, 'unexpose_session');
+  if (childRefusal) {
+    return childRefusal;
+  }
   try {
     ctx.validateSession(sessionId);
     const result = await ctx.sessionManager.unexposeSession(sessionId);

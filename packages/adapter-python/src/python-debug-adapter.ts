@@ -444,17 +444,18 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
       showReturnValue: true,
       justMyCode: config.justMyCode ?? true,
       stopOnEntry: config.stopOnEntry ?? false,
-      // debugpy hooks every Python child the program starts when this is on
-      // (its default when the key is absent) and parks the child until a debug
-      // client attaches to it — which this server does not do yet (issue
-      // #1005). Off by default, so children run undebugged instead of hanging
-      // the program at the spawn; a caller's explicit value is forwarded.
+      // debugpy reports every Python child the program starts when this is on
+      // (its default when the key is absent), and the server adopts each
+      // report as a child debug session that stops on this session's
+      // breakpoints (the session tree, issue #1081). Off by default until the
+      // tree-aware wait_for_stop lands, so children run undebugged; a
+      // caller's explicit value is forwarded.
       subProcess: requestedSubProcess ?? false
     };
     if (requestedSubProcess === true) {
       this.launchDiagnostics.push({
         key: 'subProcess',
-        message: 'forwarded — debugpy will hook every Python child this program starts and hold it until a debugger attaches to it, which this server does not do yet (issue #1005), so the program hangs at that spawn; omit the key to let children run undebugged'
+        message: "forwarded — each Python child this program starts becomes a child debug session, listed by list_debug_sessions with parentSessionId and stopping on this session's breakpoints; the default stays off until the tree-aware wait_for_stop lands (issue #1081)"
       });
     }
 
@@ -644,9 +645,11 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
       // The adapter policy's spawn config reads connect.* too.
       connect: { host, port },
       justMyCode: (justMyCode as boolean | undefined) ?? true,
-      // Same default as the launch transform: a by-port attach is told about
-      // the program's Python children too, and they wait for an attach this
-      // server does not perform yet (issue #1005).
+      // Same default as the launch transform. Whether a by-port attach's
+      // children report on the same connection the way a launch's do is
+      // unmeasured (the session tree, issue #1081), so the attach keeps
+      // sub-process debugging off until that measurement lands; an explicit
+      // value is forwarded.
       subProcess: (subProcess as boolean | undefined) ?? false
     };
 

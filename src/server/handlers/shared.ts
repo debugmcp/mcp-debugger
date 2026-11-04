@@ -1,8 +1,9 @@
 /**
  * Helpers shared by more than one tool handler: the best-effort line-context
  * read, the redaction notice, the get_variables / get_local_variables payload
- * extras, the attach warning both attach paths surface, and the one
- * AttachRequest both attach entry points send.
+ * extras, the attach warning both attach paths surface, the one
+ * AttachRequest both attach entry points send, and the child-session gate
+ * the launch-shaped tools and the mirror apply first.
  */
 import * as path from 'path';
 import {
@@ -24,6 +25,34 @@ import type { DebugResult, StopAnswerFields } from '../../session/session-manage
 import type { AttachRequest } from '../../session/attach/attach-controller.js';
 import type { ManagedSession } from '../../session/session-store.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
+import { failureResult, type ToolResult } from '../tool-result.js';
+
+/**
+ * The refusal a launch-shaped tool, or the DAP mirror, answers on a child
+ * session (the session tree, issue #1081), or nothing when the gate does not
+ * apply. A child was started by its parent: it has no launch of its own to
+ * run, replay or end, and the mirror follows the root's connection. Only a
+ * session that exists AND carries `parentSessionId` is a child — an unknown
+ * id falls through to the handler's own not-found path, so the answer never
+ * names a parent it cannot vouch for. Called before any session-manager
+ * operation, the way the attach contract refuses an undeclared addressing
+ * form (issue #903): the child's state is untouched, and the answer carries
+ * it the way every failed launch-shaped answer carries a state.
+ */
+export function childSessionRefusal(
+  ctx: ToolContext,
+  sessionId: string,
+  toolName: string
+): ToolResult | undefined {
+  const session = ctx.sessionManager.getSession(sessionId);
+  if (!session?.parentSessionId) {
+    return undefined;
+  }
+  return failureResult(
+    ErrorMessages.childSessionRefused(toolName, sessionId, session.parentSessionId),
+    { state: session.state }
+  );
+}
 
 /**
  * Whether a session's recorded `lastStop` describes where it is now. The

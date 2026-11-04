@@ -609,6 +609,25 @@ export const ErrorMessages = {
       : `Drop host: '${language}' attaches to a local PID only.`),
 
   /**
+   * Error message for a launch-shaped tool, or the DAP mirror, called on a
+   * child session (the session tree, issue #1081)
+   * Occurs when: start_debugging, restart_debugging, attach_to_process,
+   * detach_from_process, expose_session or unexpose_session names a session
+   * the server created for a process the debuggee started — it was started
+   * by its parent, has no launch of its own to run, replay or end, and the
+   * mirror follows the root's connection — before any session state changes,
+   * the way attachAddressingNotAccepted refuses an undeclared form
+   * Used in: src/server/handlers/shared.ts (childSessionRefusal)
+   * @param tool - The tool the request named
+   * @param sessionId - The child session's id
+   * @param parentSessionId - The session that spawned it
+   */
+  childSessionRefused: (tool: string, sessionId: string, parentSessionId: string) =>
+    `\`${tool}\` cannot be used on session ${sessionId}: it is a child session; ` +
+    `it was started by its parent (${parentSessionId}). ` +
+    `Use the parent's id, or close_debug_session on the child.`,
+
+  /**
    * Hint appended to launch-toolchain failures on attach-capable languages
    * Occurs when: resolving the language executable for a launch fails, but the
    * adapter supports attach (which may not need the local toolchain at all)

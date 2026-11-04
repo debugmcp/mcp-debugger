@@ -443,10 +443,11 @@ describe('PythonDebugAdapter', () => {
     });
   });
 
-  // debugpy's sub-process debugging hooks every Python child the program
-  // starts and parks it until a debug client attaches, which this server does
-  // not do yet (issue #1005): the transforms turn it off unless asked.
-  describe('sub-process debugging default (issue #1005)', () => {
+  // debugpy's sub-process debugging reports every Python child the program
+  // starts, and the server adopts each report as a child debug session (the
+  // session tree, issue #1081): the transforms keep it off unless asked, until
+  // the tree-aware wait_for_stop lands.
+  describe('sub-process debugging default (issues #1005/#1081)', () => {
     it('turns subProcess off for a launch that does not name it', async () => {
       const adapter = new PythonDebugAdapter(createDependencies());
       const config = await adapter.transformLaunchConfig({ program: '/proj/a.py' } as GenericLaunchConfig);
@@ -454,7 +455,7 @@ describe('PythonDebugAdapter', () => {
       expect(adapter.consumeLaunchConfigDiagnostics?.() ?? []).toEqual([]);
     });
 
-    it('forwards an explicit subProcess: true and says what it costs', async () => {
+    it('forwards an explicit subProcess: true and says what it enables', async () => {
       const adapter = new PythonDebugAdapter(createDependencies());
       const config = await adapter.transformLaunchConfig({ program: '/proj/a.py', subProcess: true } as GenericLaunchConfig);
       expect(config.subProcess).toBe(true);
@@ -462,7 +463,8 @@ describe('PythonDebugAdapter', () => {
       expect(diagnostics).toHaveLength(1);
       expect(diagnostics[0].key).toBe('subProcess');
       expect(diagnostics[0].scope).toBeUndefined();
-      expect(diagnostics[0].message).toMatch(/#1005/);
+      expect(diagnostics[0].message).toMatch(/child debug session/);
+      expect(diagnostics[0].message).toMatch(/#1081/);
     });
 
     it('keeps an explicit subProcess: false silent', async () => {

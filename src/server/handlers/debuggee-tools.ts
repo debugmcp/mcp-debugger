@@ -4,7 +4,7 @@
  */
 import type { ToolHandler } from '../tool-context.js';
 import type { HotReloadArgs } from '@debugmcp/shared';
-import { attachRequestFromArgs, hoistStopLanding, successWarning } from './shared.js';
+import { attachRequestFromArgs, childSessionRefusal, hoistStopLanding, successWarning } from './shared.js';
 import {
   assertPlainObjectArg,
   foldTestRunnerPreset,
@@ -17,6 +17,13 @@ import { jsonResult, prettyJsonResult, sessionErrorResultOrThrow } from '../tool
 export const startDebuggingTool: ToolHandler = async (ctx, args) => {
   const sessionId = args.sessionId!;
   const scriptPath = args.scriptPath!;
+
+  // A child session has no launch of its own (issue #1081): refused by name
+  // before the file check and the launch.
+  const childRefusal = childSessionRefusal(ctx, sessionId, 'start_debugging');
+  if (childRefusal) {
+    return childRefusal;
+  }
 
   try {
     assertPlainObjectArg(args.adapterLaunchConfig, 'adapterLaunchConfig');
@@ -68,6 +75,11 @@ export const startDebuggingTool: ToolHandler = async (ctx, args) => {
 
 export const restartDebuggingTool: ToolHandler = async (ctx, args) => {
   requireSessionId(args);
+  // A child session has no launch to replay (issue #1081).
+  const childRefusal = childSessionRefusal(ctx, args.sessionId, 'restart_debugging');
+  if (childRefusal) {
+    return childRefusal;
+  }
   try {
     const debugResult = await ctx.restartDebugging(args.sessionId);
     const responsePayload: Record<string, unknown> = {
@@ -105,6 +117,11 @@ export const restartDebuggingTool: ToolHandler = async (ctx, args) => {
 
 export const attachToProcessTool: ToolHandler = async (ctx, args) => {
   requireSessionId(args);
+  // A child session is already attached, by its parent (issue #1081).
+  const childRefusal = childSessionRefusal(ctx, args.sessionId, 'attach_to_process');
+  if (childRefusal) {
+    return childRefusal;
+  }
 
   try {
     assertPlainObjectArg(args.adapterConfig, 'adapterConfig');
@@ -157,6 +174,12 @@ export const attachToProcessTool: ToolHandler = async (ctx, args) => {
 
 export const detachFromProcessTool: ToolHandler = async (ctx, args) => {
   requireSessionId(args);
+  // A child session ends through close_debug_session, not a detach of its
+  // own (issue #1081).
+  const childRefusal = childSessionRefusal(ctx, args.sessionId, 'detach_from_process');
+  if (childRefusal) {
+    return childRefusal;
+  }
 
   try {
     ctx.logger.info('Detach from process requested', {
