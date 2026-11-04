@@ -160,3 +160,78 @@ describe('PythonAdapterPolicy', () => {
     });
   });
 });
+
+describe('PythonAdapterPolicy child adoption (the session tree, issue #1081)', () => {
+  const configuration = {
+    type: 'python',
+    name: 'Subprocess 37012',
+    subProcessId: 37012,
+    program: 'C:\work\parent.py',
+    cwd: 'C:\work',
+    redirectOutput: true,
+    justMyCode: true,
+    connect: { host: '127.0.0.1', port: 5678 }
+  };
+  const startDebugging = {
+    seq: 7,
+    type: 'request' as const,
+    command: 'startDebugging',
+    arguments: { request: 'attach', configuration }
+  };
+  function context() {
+    return {
+      sendResponse: vi.fn(),
+      createChildSession: vi.fn(async () => {}),
+      activeChildren: new Map<string, unknown>(),
+      adoptedTargets: new Set<string>()
+    };
+  }
+
+  it('pins the contract: advertise, reject to release, own output, terminate on close', () => {
+    expect(PythonAdapterPolicy.childAdoption).toMatchObject({
+      advertiseStartDebugging: true,
+      releaseLever: 'reject-request',
+      childOutput: 'own-connection',
+      closeChild: 'terminate'
+    });
+  });
+
+  it('attaches with the configuration as delivered, redirecting the child output to its own connection', () => {
+    const args = PythonAdapterPolicy.childAdoption!.buildChildAttachArguments({
+      targetId: '37012',
+      name: 'Subprocess 37012',
+      configuration: { ...configuration, redirectOutput: false }
+    });
+    expect(args).toMatchObject({ ...configuration, redirectOutput: true });
+  });
+
+  it('recognises a debugpy child report and leaves it unanswered for the worker to hold', async () => {
+    const ctx = context();
+    const result = await PythonAdapterPolicy.getDapClientBehavior().handleReverseRequest!(startDebugging, ctx);
+    expect(result).toEqual({
+      handled: true,
+      childReport: { targetId: '37012', name: 'Subprocess 37012', configuration }
+    });
+    expect(ctx.sendResponse).not.toHaveBeenCalled();
+  });
+
+  it('leaves a startDebugging without a subProcessId unhandled', async () => {
+    const ctx = context();
+    const result = await PythonAdapterPolicy.getDapClientBehavior().handleReverseRequest!(
+      { ...startDebugging, arguments: { request: 'attach', configuration: { type: 'python', name: 'x' } } },
+      ctx
+    );
+    expect(result).toEqual({ handled: false });
+    expect(ctx.sendResponse).not.toHaveBeenCalled();
+  });
+
+  it('still acknowledges runInTerminal', async () => {
+    const ctx = context();
+    const result = await PythonAdapterPolicy.getDapClientBehavior().handleReverseRequest!(
+      { seq: 8, type: 'request', command: 'runInTerminal', arguments: {} },
+      ctx
+    );
+    expect(result).toEqual({ handled: true });
+    expect(ctx.sendResponse).toHaveBeenCalledWith(expect.objectContaining({ command: 'runInTerminal' }), {});
+  });
+});

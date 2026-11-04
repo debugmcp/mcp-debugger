@@ -255,6 +255,7 @@ export {
   NO_DEBUG_TARGET_MARKER,
   buildNoDebugTargetError
 } from './interfaces/dap-client-behavior.js';
+export type { ChildReport, ChildAdoptionContract } from './interfaces/child-adoption.js';
 
 // Adapter launch coordination helpers
 export type { AdapterLaunchBarrier } from './interfaces/adapter-launch-barrier.js';

@@ -14,7 +14,7 @@
  * capability flipping is a user-visible behaviour change (it gates `set_breakpoint` up front),
  * so it should require editing this table on purpose rather than passing silently.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import {
   DebugLanguage,
@@ -125,6 +125,19 @@ interface PinnedCapabilities {
   childSessionStrategy: ChildSessionStrategy;
   requiresCommandQueueing: boolean;
   /**
+   * The session-tree adoption contract (issue #1081): the adapters that can report a child the
+   * debuggee started, with the lever that releases an unadopted one, where the child's own output
+   * lands, and what an explicit close of the child does to its process. `undefined` means the
+   * adapter reports no children and keeps `attach_to_process` as the route to one.
+   */
+  childAdoption:
+    | {
+        releaseLever: 'reject-request' | 'throwaway-attach';
+        childOutput: 'own-connection' | 'launch-session';
+        closeChild: 'terminate' | 'release';
+      }
+    | undefined;
+  /**
    * Break-on-exception mode applied to LAUNCH sessions when the user named none.
    * `undefined` means the policy deliberately declines a default.
    */
@@ -163,6 +176,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     stepsByTokenPosition: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
+    childAdoption: { releaseLever: 'reject-request', childOutput: 'own-connection', closeChild: 'terminate' },
     defaultExceptionBreakMode: 'uncaught'
   },
   [DebugLanguage.RUBY]: {
@@ -181,6 +195,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     stepsByTokenPosition: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
+    childAdoption: undefined,
     defaultExceptionBreakMode: undefined
   },
   [DebugLanguage.JAVASCRIPT]: {
@@ -199,6 +214,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     stepsByTokenPosition: undefined,
     childSessionStrategy: 'launchWithPendingTarget',
     requiresCommandQueueing: true,
+    childAdoption: undefined,
     defaultExceptionBreakMode: 'uncaught'
   },
   [DebugLanguage.RUST]: {
@@ -217,6 +233,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     stepsByTokenPosition: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
+    childAdoption: undefined,
     defaultExceptionBreakMode: 'uncaught'
   },
   [DebugLanguage.GO]: {
@@ -235,6 +252,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     stepsByTokenPosition: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
+    childAdoption: undefined,
     defaultExceptionBreakMode: 'uncaught'
   },
   [DebugLanguage.JAVA]: {
@@ -253,6 +271,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     stepsByTokenPosition: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
+    childAdoption: undefined,
     defaultExceptionBreakMode: 'uncaught'
   },
   [DebugLanguage.DOTNET]: {
@@ -271,6 +290,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     stepsByTokenPosition: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
+    childAdoption: undefined,
     defaultExceptionBreakMode: 'uncaught'
   },
   [DebugLanguage.CPP]: {
@@ -289,6 +309,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     stepsByTokenPosition: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
+    childAdoption: undefined,
     defaultExceptionBreakMode: 'uncaught'
   },
   [DebugLanguage.COBOL]: {
@@ -307,6 +328,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     stepsByTokenPosition: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
+    childAdoption: undefined,
     defaultExceptionBreakMode: 'uncaught'
   },
   [DebugLanguage.DART]: {
@@ -325,6 +347,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     stepsByTokenPosition: true,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
+    childAdoption: undefined,
     defaultExceptionBreakMode: 'uncaught'
   },
   [DebugLanguage.MOCK]: {
@@ -343,6 +366,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     stepsByTokenPosition: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
+    childAdoption: undefined,
     defaultExceptionBreakMode: 'uncaught'
   }
 };
@@ -397,6 +421,54 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
   it('ties supportsReverseStartDebugging to childSessionStrategy', () => {
     expect(policy.childSessionStrategy).toBe(pinned.childSessionStrategy);
     expect(policy.supportsReverseStartDebugging).toBe(policy.childSessionStrategy !== 'none');
+  });
+
+  // ===== 2b. The session-tree adoption contract (issue #1081) =====
+
+  it('pins the child-adoption contract', () => {
+    if (pinned.childAdoption === undefined) {
+      expect(policy.childAdoption).toBeUndefined();
+      return;
+    }
+    expect(policy.childAdoption?.releaseLever).toBe(pinned.childAdoption.releaseLever);
+    expect(policy.childAdoption?.childOutput).toBe(pinned.childAdoption.childOutput);
+    expect(policy.childAdoption?.closeChild).toBe(pinned.childAdoption.closeChild);
+    // A reporting adapter must be asked for the request form: it is the only one with a release lever.
+    expect(policy.childAdoption?.advertiseStartDebugging).toBe(true);
+  });
+
+  it('never combines the tree contract with the js-shaped reverse adoption', () => {
+    // MinimalDapClient builds the single-target ChildSessionManager for a policy that
+    // `supportsReverseStartDebugging`; a tree-contract policy must not get one.
+    if (policy.childAdoption !== undefined) {
+      expect(policy.supportsReverseStartDebugging).toBe(false);
+    }
+  });
+
+  it('returns a child report only through the tree contract', async () => {
+    const report: DebugProtocol.Request = {
+      seq: 7,
+      type: 'request',
+      command: 'startDebugging',
+      arguments: {
+        request: 'attach',
+        configuration: { type: 'python', name: 'Subprocess 37012', subProcessId: 37012, connect: { host: '127.0.0.1', port: 5678 } }
+      }
+    };
+    const context = {
+      sendResponse: vi.fn(),
+      createChildSession: vi.fn(async () => {}),
+      activeChildren: new Map<string, unknown>(),
+      adoptedTargets: new Set<string>()
+    };
+    const result = await policy.getDapClientBehavior().handleReverseRequest?.(report, context);
+    if (policy.childAdoption === undefined) {
+      expect(result?.childReport).toBeUndefined();
+    } else {
+      expect(result).toMatchObject({ handled: true, childReport: { targetId: '37012', name: 'Subprocess 37012' } });
+      // The report is held by the worker, never answered by the policy.
+      expect(context.sendResponse).not.toHaveBeenCalled();
+    }
   });
 
   // ===== 3. Command queueing is all-or-nothing =====

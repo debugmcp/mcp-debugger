@@ -8,6 +8,50 @@ import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariabl
 import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-policy.js';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
+import type { ChildAdoptionContract, ChildReport } from './child-adoption.js';
+
+/**
+ * A debugpy child report (issue #1081): a `startDebugging` whose configuration
+ * names the child's pid. The configuration is the parent's launch arguments
+ * plus `name: "Subprocess <pid>"`, `subProcessId` and `connect` (the adapter's
+ * own port); `program` and `cwd` still name the parent's program
+ * (docs/python/spike-notes-subprocess.md).
+ */
+function readDebugpyChildReport(request: DebugProtocol.Request): ChildReport | undefined {
+  if (request.command !== 'startDebugging') {
+    return undefined;
+  }
+  const args = (request.arguments ?? {}) as { request?: unknown; configuration?: unknown };
+  const configuration = args.configuration;
+  if (args.request !== 'attach' || typeof configuration !== 'object' || configuration === null) {
+    return undefined;
+  }
+  const { subProcessId, name } = configuration as { subProcessId?: unknown; name?: unknown };
+  if (typeof subProcessId !== 'number') {
+    return undefined;
+  }
+  return {
+    targetId: String(subProcessId),
+    name: typeof name === 'string' && name.length > 0 ? name : `Subprocess ${subProcessId}`,
+    configuration: configuration as Record<string, unknown>
+  };
+}
+
+/** debugpy's pins for the session tree (docs/architecture/session-tree.md, the adapter survey). */
+const pythonChildAdoption: ChildAdoptionContract = {
+  // The request form carries the release lever; the event form (`debugpyAttach`) has none.
+  advertiseStartDebugging: true,
+  // Rejecting the request makes the adapter unblock the child itself (measured, 100 ms).
+  releaseLever: 'reject-request',
+  // With `redirectOutput` the child's stdout/stderr also arrive on its own connection.
+  childOutput: 'own-connection',
+  // `disconnect { terminateDebuggee: true }` on the child ends it (exit 0 reported to the parent).
+  closeChild: 'terminate',
+  buildChildAttachArguments: (report: ChildReport): Record<string, unknown> => ({
+    ...report.configuration,
+    redirectOutput: true
+  })
+};
 
 /**
  * What pydevd appends to the exception name at a user-unhandled stop
@@ -28,7 +72,10 @@ export const PythonAdapterPolicy = {
   // (`python -m pytest`) must go out without the `program` the connection
   // manager would otherwise fill from scriptPath (issue #985).
   launchTargetKeys: ['program', 'module', 'code'],
+  // The js-shaped single-target adoption stays off; debugpy's children are
+  // tree children (issue #1081), handled through `childAdoption`.
   childSessionStrategy: 'none',
+  childAdoption: pythonChildAdoption,
   buildChildStartArgs: () => {
     throw new Error('PythonAdapterPolicy does not support child sessions');
   },
@@ -295,15 +342,22 @@ export const PythonAdapterPolicy = {
   getAttachBehavior: () => ({ pauseAfterAttach: true }),
 
   /**
-   * Python DAP client behaviors - minimal since Python doesn't use child sessions
+   * Python DAP client behaviors: runInTerminal is acknowledged, a child report
+   * is handed to the worker (issue #1081), everything else passes through unhandled.
    */
   getDapClientBehavior: (): DapClientBehavior => {
     return {
-      // Python only handles runInTerminal reverse requests (ACKed below); all others are passed through unhandled
       handleReverseRequest: async (request: DebugProtocol.Request, context: DapClientContext): Promise<ReverseRequestResult> => {
         if (request.command === 'runInTerminal') {
           context.sendResponse(request, {});
           return { handled: true };
+        }
+        const childReport = readDebugpyChildReport(request);
+        if (childReport) {
+          // No response here: the worker holds the request until the server
+          // adopts the child (success) or releases it (failure, which makes
+          // debugpy unblock the child itself).
+          return { handled: true, childReport };
         }
         return { handled: false };
       },
