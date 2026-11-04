@@ -245,7 +245,11 @@ export class DapConnectionManager {
       columnsStartAt1: true,
       supportsVariableType: true,
       supportsRunInTerminalRequest: false,
-      locale: 'en-US'
+      locale: 'en-US',
+      // The session tree (issue #1081): an adapter that reports the processes
+      // its debuggee starts is asked for the request form, the only one the
+      // server can refuse (debugpy's event form parks a refused child).
+      ...(this.policy?.childAdoption?.advertiseStartDebugging ? { supportsStartDebuggingRequest: true } : {})
     };
 
     this.logger.info('[ConnectionManager] Sending DAP "initialize" request');
