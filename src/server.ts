@@ -73,7 +73,7 @@ export interface DebugMcpServerOptions {
    * in the same process does — Streamable HTTP runs one DebugMcpServer per MCP
    * client session (issue #939). Answers the sentence the tool call should
    * carry, or undefined when the id is simply unknown. Consulted by the
-   * tools/call dispatch before any handler runs; absent for stdio and SSE.
+   * tools/call dispatch before any handler runs; absent for stdio.
    */
   describeForeignSession?: (sessionId: string) => string | undefined;
 }

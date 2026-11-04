@@ -1036,7 +1036,7 @@ describe('Server Control Tools Tests', () => {
 
       const result = await callToolHandler({
         method: 'tools/call',
-        // A string: the SSE transport quirk the schema-driven coercion exists for.
+        // A string: the double-stringify quirk (anthropics/claude-code#11359) the schema-driven coercion exists for.
         params: { name: 'wait_for_stop', arguments: { sessionId: 'test-session', timeout: '45000' } }
       }, { mcpReq: { signal: controller.signal } });
 

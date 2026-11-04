@@ -1,7 +1,7 @@
 /**
  * Import-graph test for issue #400: stdio mode (and any mere import of the
- * entry point) must not evaluate the HTTP transport stacks. Express and the
- * SSE/HTTP command modules are only loaded when their subcommand actually runs.
+ * entry point) must not evaluate the HTTP transport stack. Express and the
+ * HTTP command module are only loaded when its subcommand actually runs.
  */
 import { describe, it, expect, vi } from 'vitest';
 

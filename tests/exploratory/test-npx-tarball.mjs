@@ -12,7 +12,7 @@ import fs from 'fs';
 import os from 'os';
 import {
   ROOT, findAvailablePort, waitForHealth, sleep,
-  connectSSEClient, callTool, callToolSafe,
+  connectHttpClient, callTool, callToolSafe,
   createTestRunner, assert, assertDefined
 } from './helpers.mjs';
 
@@ -119,7 +119,7 @@ async function main() {
 
     console.log(`  Binary: ${binPath}`);
 
-    // Start the server via SSE
+    // Start the server via Streamable HTTP
     const port = await findAvailablePort();
     console.log(`  Starting NPX server on port ${port}...`);
 
@@ -127,8 +127,8 @@ async function main() {
     const isNodeScript = binPath.endsWith('.js');
     const spawnCmd = isNodeScript ? process.execPath : binPath;
     const spawnArgs = isNodeScript
-      ? [binPath, 'sse', '-p', port.toString()]
-      : ['sse', '-p', port.toString()];
+      ? [binPath, 'http', '-p', port.toString()]
+      : ['http', '-p', port.toString()];
 
     serverProc = spawn(spawnCmd, spawnArgs, {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -150,7 +150,7 @@ async function main() {
     console.log(`  NPX server healthy on port ${port}\n`);
 
     // Connect MCP client
-    client = await connectSSEClient(port, 'exploratory-npx');
+    client = await connectHttpClient(port, 'exploratory-npx');
     console.log('  MCP client connected\n');
 
     // ========== Test 3.1: List Supported Languages ==========

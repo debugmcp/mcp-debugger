@@ -245,7 +245,7 @@ These environment variables control when a containerized server gives up and exi
 may reach it. All are passed through with `-e`:
 
 - **`MCP_EXIT_ON_STDIN_CLOSE=1`** (`src/cli/stdin-watchdog.ts`) -- opt-in orphan
-  self-defense for the **network transports** (`http`, `sse`), which otherwise have no
+  self-defense for the **network transport** (`http`), which otherwise has no
   reason to care about stdin. When set to `1` or `true`, the server watches its stdin for
   `end`/`close`/`error` and shuts down gracefully when it sees one, with a 5s backstop that
   force-exits if shutdown stalls. Intended for a supervisor that spawns the server with a
@@ -261,8 +261,8 @@ may reach it. All are passed through with `-e`:
 - **`MCP_HTTP_STALE_SESSION_MS`** (`src/cli/http-command.ts`) -- idle window before an HTTP
   MCP session with no open SSE stream is reaped, closing its debug sessions and releasing
   any ptrace claim on the target. Defaults to 30 minutes (1800000); `0` disables that path;
-  invalid values log a warning and fall back to the default. Read only by `http` mode
-  (the legacy `sse` command has no reaper). A short-lived diagnostic container wants a
+  invalid values log a warning and fall back to the default. Read only by `http` mode.
+  A short-lived diagnostic container wants a
   much tighter window -- see the
   [Kubernetes debugging recipe](kubernetes.md), which sets it to 5 minutes.
 - **`MCP_HTTP_STREAM_LOST_SESSION_MS`** -- the short window for a session whose SSE stream
@@ -277,7 +277,7 @@ may reach it. All are passed through with `-e`:
   list as repeating `--allowed-host`. Port-agnostic and case-insensitive; IPv6 literals in
   brackets; no wildcard. The same list governs browser requests' `Origin`. An unusable entry (a
   URL, a bare IPv6 literal, `*`, anything the parser would rewrite) stops the server at startup
-  with the entry named on stderr. Read by `http` and the deprecated `sse` mode. See
+  with the entry named on stderr. Read by `http` mode. See
   [Streamable HTTP from a container](#streamable-http-from-a-container).
 
 ## Dockerfile Details

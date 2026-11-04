@@ -10,6 +10,13 @@
 export function resolveBackendPort(raw: string | undefined): number;
 
 /**
+ * The backend transport from DEV_PROXY_BACKEND_TRANSPORT: unset or empty means
+ * `http`; anything but `http` or `stdio` throws an Error naming the variable
+ * and the value.
+ */
+export function resolveBackendTransport(raw: string | undefined): 'http' | 'stdio';
+
+/**
  * Replace backend overrides only when a tool call explicitly supplies `env`.
  * Omission returns `current` unchanged (by identity); an empty `env` clears it.
  *

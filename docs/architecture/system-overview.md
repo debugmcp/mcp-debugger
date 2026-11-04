@@ -56,7 +56,7 @@ graph TB
 - **Key Files**: 
   - `src/server.ts` - `DebugMcpServer`, the composition root: dependencies, lifecycle, session validation, breakpoint gating and the public facade methods; implements `ToolContext`
   - `src/server/` - tool schemas (`tool-schemas.ts`), argument coercion (`tool-arguments.ts`), the tools/call dispatch wrapper (`tool-dispatch.ts` over `handlers/index.ts`), argument validation (`tool-validation.ts`), result envelopes and the session-error catch helpers (`tool-result.ts`), one handler module per tool family (`handlers/*.ts`) over their shared helpers (`handlers/shared.ts`), and the resource (`output-resources.ts`) and prompt (`prompts.ts`) handlers
-  - `src/index.ts` - the `dist/index.js` entry: the prologue (`src/cli/entry-prologue.ts`, console silencing and argv cleanup, evaluated before anything else), then `main()` from `src/main.ts` — the side-effect-free module the npm bundle's `cli-entry.ts` imports directly (#732); the five subcommands are wired in `src/cli/setup.ts`: `stdio` (default), `http` (Streamable HTTP, recommended, `-p/--port`, default 3001), `sse` (DEPRECATED — use `http`), `doctor` (toolchain self-check), `check-rust-binary`
+  - `src/index.ts` - the `dist/index.js` entry: the prologue (`src/cli/entry-prologue.ts`, console silencing and argv cleanup, evaluated before anything else), then `main()` from `src/main.ts` — the side-effect-free module the npm bundle's `cli-entry.ts` imports directly (#732); the four subcommands are wired in `src/cli/setup.ts`: `stdio` (default), `http` (Streamable HTTP, recommended, `-p/--port`, default 3001), `doctor` (toolchain self-check), `check-rust-binary`
   - `src/server/output-resources.ts` - the MCP resource handlers: `debug://sessions/{id}/output` (subscribable plain-text transcript of captured debuggee output, coalesced `resources/updated` notifications) and `debug://sessions/{id}/proxy-log` (a sanitized, bounded tail of the session's proxy log — 64 KiB / 80 lines, on-demand snapshot, not subscribable, and listed only once the session has a log directory)
 - **Responsibilities**:
   - Handle MCP tool registration and routing
@@ -215,13 +215,13 @@ sequenceDiagram
 ### Core Technologies
 - **Runtime**: Node.js 22+ with ES modules
 - **Language**: TypeScript 6.x with strict mode (`typescript` `^6.0.2`)
-- **Protocol**: Model Context Protocol (MCP) over stdio or Streamable HTTP (legacy SSE deprecated)
+- **Protocol**: Model Context Protocol (MCP) over stdio or Streamable HTTP
 - **Debugging**: Debug Adapter Protocol (DAP), via the `@vscode/debugprotocol` types the packages depend on -- no single spec revision is pinned in this repo
 - **Testing**: Vitest with 90%+ coverage
 - **Bundling**: tsup with `noExternal` for self-contained distributions
 
 ### Key Dependencies
-- `@modelcontextprotocol/server` (with `node`, `core`, `client` and `server-legacy`; the v2 MCP TypeScript SDK) - MCP server implementation and transports
+- `@modelcontextprotocol/server` (with `node`, `core` and `client`; the v2 MCP TypeScript SDK) - MCP server implementation and transports
 - `@vscode/debugprotocol` - DAP type definitions
 - `MinimalDapClient (src/proxy/minimal-dap.ts)` - DAP client for adapter communication
 - `winston` - Structured logging
@@ -240,7 +240,6 @@ sequenceDiagram
 ```bash
 npx @debugmcp/mcp-debugger stdio        # stdio mode
 npx @debugmcp/mcp-debugger http -p 3001 # Streamable HTTP mode (recommended for remote)
-npx @debugmcp/mcp-debugger sse -p 3001  # SSE mode (deprecated)
 ```
 - Self-contained bundles with all dependencies
 - No installation required
@@ -252,7 +251,6 @@ npx @debugmcp/mcp-debugger sse -p 3001  # SSE mode (deprecated)
 pnpm install && npm run build
 node dist/index.js stdio                # stdio mode
 node dist/index.js http -p 3001         # Streamable HTTP mode (recommended)
-node dist/index.js sse -p 3001          # SSE mode (deprecated)
 ```
 
 ### 3. Docker Container
@@ -299,7 +297,7 @@ This architecture enables:
 - **Startup Time**: ~1-2s for session initialization
 - **Command Latency**: <100ms for most DAP commands
 - **Memory Usage**: ~50MB base + ~20MB per active session
-- **Concurrent Sessions**: Limited by system resources. In Streamable HTTP mode, each MCP session gets an isolated `DebugMcpServer` instance routed by `Mcp-Session-Id`, so multiple clients run independently without serialization. In legacy SSE mode, all connections share a single `DebugMcpServer` and tool calls from a single client are serialized. STDIO mode supports a single client connection.
+- **Concurrent Sessions**: Limited by system resources. In Streamable HTTP mode, each MCP session gets an isolated `DebugMcpServer` instance routed by `Mcp-Session-Id`, so multiple clients run independently without serialization. STDIO mode supports a single client connection.
 
 ## Error Handling Strategy
 

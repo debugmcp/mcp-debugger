@@ -22,8 +22,8 @@ This will install the launcher and ensure `debugpy` (required for Python debuggi
 
 ### Basic Usage
 
-The launcher takes a single positional `mode` argument: `stdio` (the default),
-`http` (Streamable HTTP, recommended for remote use), or `sse` (deprecated).
+The launcher takes a single positional `mode` argument: `stdio` (the default)
+or `http` (Streamable HTTP, recommended for remote use).
 
 ```bash
 # Launch in stdio mode (default, recommended)
@@ -34,12 +34,9 @@ debug-mcp-server http
 
 # HTTP mode with custom port
 debug-mcp-server http --port 8080
-
-# Launch in SSE mode (DEPRECATED - use http; prints a warning)
-debug-mcp-server sse
 ```
 
-`--port` affects `http` and `sse`; `stdio` ignores it (default port: 3001).
+`--port` affects `http`; `stdio` ignores it (default port: 3001).
 
 Any flag the launcher does not recognise is passed to the server as given, as long
 as it comes after the mode:
@@ -101,7 +98,7 @@ debug-mcp-server --help
 - The launcher will automatically pull the image if needed
 - For `stdio` the launcher runs
   `docker run -i --rm -v <cwd>:/workspace debugmcp/mcp-debugger:latest stdio`;
-  for `http`/`sse` it also inserts `-p 127.0.0.1:<port>:<port>` (or `<bind>:<port>:<port>`
+  for `http` it also inserts `-p 127.0.0.1:<port>:<port>` (or `<bind>:<port>:<port>`
   with `--bind`) before the image, forwards `MCP_HTTP_ALLOWED_HOSTS` with `-e` when it is
   set, and appends `--port <port>` after the mode (the port defaults to 3001). Any
   unrecognised flags follow after that. The current working directory is mounted at
@@ -118,8 +115,6 @@ debug-mcp-server --help
   - Default port: 3001; custom port via `--port`
   - The server only accepts loopback `Host` headers unless told otherwise; pass
     `--allowed-host <name>` (forwarded to the server) or export `MCP_HTTP_ALLOWED_HOSTS`
-- **sse**: Server-Sent Events mode
-  - > **Deprecated:** SSE transport is deprecated in the debug-mcp-server and will be removed in a future release; both the launcher and the server print a deprecation warning. Use `http` instead.
 
 ## Troubleshooting
 

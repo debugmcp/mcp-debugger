@@ -4,7 +4,7 @@ This guide covers how to debug the MCP Debug Server itself during development. Y
 
 ## Overview
 
-> **Warning**: `console.log`, `console.error`, and all other `console` methods are silenced at process startup (regardless of transport mode — STDIO, SSE, and HTTP) to protect stdio/IPC transports from being corrupted by unexpected output. Any `console.*` calls you add to server or proxy code will produce no output. Use `this.logger.debug(...)` (or another Winston logger method) for in-process logging, or write directly to a file (e.g., `fs.appendFileSync('/tmp/debug.log', ...)`) for low-level startup diagnostics.
+> **Warning**: `console.log`, `console.error`, and all other `console` methods are silenced at process startup (regardless of transport mode — STDIO and HTTP) to protect stdio/IPC transports from being corrupted by unexpected output. Any `console.*` calls you add to server or proxy code will produce no output. Use `this.logger.debug(...)` (or another Winston logger method) for in-process logging, or write directly to a file (e.g., `fs.appendFileSync('/tmp/debug.log', ...)`) for low-level startup diagnostics.
 
 Debugging a debug server presents unique challenges:
 - Multiple processes (server, proxy, debug adapter)
@@ -184,8 +184,7 @@ import fs from 'fs';
 fs.appendFileSync('/tmp/mcp-debug-startup.log',
   `[DEBUG] Starting server with args: ${process.argv.join(' ')}\n`);
 
-// Transport startup is managed in src/cli/stdio-command.ts, src/cli/http-command.ts
-// (the recommended transport), or src/cli/sse-command.ts (deprecated),
+// Transport startup is managed in src/cli/stdio-command.ts and src/cli/http-command.ts,
 // not in DebugMcpServer.start() (which only logs startup/build info).
 // To debug transport binding, add logger calls to the CLI command handlers.
 ```
@@ -382,7 +381,7 @@ takeHeapSnapshot('after-session-create');
 
 ### 5. Event Tracing
 
-> **Note:** `console.log` is silenced at startup in all transport modes (stdio, SSE, etc.) to protect the JSON-RPC protocol. Event tracing output will not appear unless you redirect logging to a file.
+> **Note:** `console.log` is silenced at startup in all transport modes (stdio and http) to protect the JSON-RPC protocol. Event tracing output will not appear unless you redirect logging to a file.
 
 ```typescript
 // Trace all events
@@ -537,7 +536,7 @@ compiler will remind you about:
 
 ### 3. Health Checks
 
-Note: SSE transport is deprecated in favor of `mcp-debugger http` (the recommended production transport); the HTTP transport exposes the same health endpoint. Both the HTTP command handler (`src/cli/http-command.ts`) and the SSE command handler (`src/cli/sse-command.ts`) expose a `GET /health` endpoint on the same port as the server. No separate server is needed:
+Note: the HTTP command handler (`src/cli/http-command.ts`) exposes a `GET /health` endpoint on the same port as the server. No separate server is needed:
 
 ```bash
 # Query the built-in health endpoint (default port 3001)

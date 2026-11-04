@@ -88,13 +88,12 @@ prerequisite and failure signature is collected in the [Diagnostics guide](./dia
 
 ## Step 3: Register the server with your MCP client
 
-The server speaks three transports. You only need one.
+The server speaks two transports. You only need one.
 
 | Transport | Command | Use it for |
 |---|---|---|
 | stdio | `mcp-debugger stdio` (the default subcommand) | Local clients that spawn the server themselves |
 | Streamable HTTP | `mcp-debugger http -p 3001` | **Recommended** for anything not spawned locally — remote or shared servers |
-| SSE | `mcp-debugger sse -p 3001` | **Deprecated** — use `http` instead |
 
 Because `stdio` is the default subcommand, bare `mcp-debugger` starts in stdio mode. Passing it
 explicitly in a config file is still worth doing: it documents the intent. Console output is

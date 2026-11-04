@@ -13,8 +13,8 @@ class DebugMCPLauncher:
     
     NPM_PACKAGE = "@debugmcp/mcp-debugger"
     DOCKER_IMAGE = "debugmcp/mcp-debugger:latest"
-    DEFAULT_SSE_PORT = 3001  # shared by http and (deprecated) sse modes
-    PORTED_MODES = ("http", "sse")
+    DEFAULT_HTTP_PORT = 3001
+    PORTED_MODES = ("http",)
     # Docker mode publishes the port on loopback unless told otherwise (issue
     # #676): the server's Host allowlist stops browsers (DNS rebinding), not a
     # direct client that sends `Host: localhost` by hand, so publishing on
@@ -79,7 +79,7 @@ class DebugMCPLauncher:
         environment = os.environ if env is None else env
         cmd = ["docker", "run", "-i", "--rm", "-v", f"{workspace}:/workspace"]
         if mode in self.PORTED_MODES:
-            actual_port = port or self.DEFAULT_SSE_PORT
+            actual_port = port or self.DEFAULT_HTTP_PORT
             cmd.extend(["-p", f"{bind or self.DEFAULT_BIND}:{actual_port}:{actual_port}"])
             # The container does not inherit the launcher's environment, so
             # the allowlist the operator exported would silently stop at the
@@ -92,7 +92,7 @@ class DebugMCPLauncher:
         if mode in self.PORTED_MODES:
             # Always forward the port the -p mapping was built with, so the
             # in-container server listens on the mapped port even when the
-            # caller relied on DEFAULT_SSE_PORT.
+            # caller relied on DEFAULT_HTTP_PORT.
             cmd.extend(["--port", str(actual_port)])
         cmd.extend(extra_args)
         return cmd

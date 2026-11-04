@@ -1,7 +1,7 @@
 /**
  * Startup janitor (issue #399): best-effort cleanup of debris from prior
  * crashed runs, invoked fire-and-forget from the server-starting CLI commands
- * (stdio/http/sse) — never from --version/--help, and never blocking the
+ * (stdio/http) — never from --version/--help, and never blocking the
  * transport from coming up.
  *
  * Covers:

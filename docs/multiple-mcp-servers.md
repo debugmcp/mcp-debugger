@@ -38,7 +38,7 @@ Both servers can be configured in the same MCP settings file. The configuration 
 `stdio` is mcp-debugger's default subcommand, so passing it explicitly is optional — but
 spell it out anyway: it is the command that silences console output, and being explicit
 keeps the config readable when someone later adds `--log-level` or `--log-file`. The other
-subcommands are `sse` (deprecated), `http`, `doctor`, and `check-rust-binary`.
+subcommands are `http`, `doctor`, and `check-rust-binary`.
 
 Substitute your preferred install for the `command`/`args` pair — `mcp-debugger stdio` after
 a global npm install, or `node C:/path/to/mcp-debugger/dist/index.js stdio` from a source

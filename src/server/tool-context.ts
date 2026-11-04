@@ -74,7 +74,7 @@ export interface ToolContext {
   /**
    * The sentence to answer with when a session id belongs to another server in
    * this process (one DebugMcpServer per Streamable HTTP client, issue #939),
-   * or undefined when the id is simply unknown. Absent for stdio and SSE.
+   * or undefined when the id is simply unknown. Absent for stdio.
    */
   describeForeignSession?(sessionId: string): string | undefined;
   fileNotFoundError(label: string, originalPath: string, fileCheck: FileExistenceResult): ProtocolError;

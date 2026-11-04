@@ -85,7 +85,6 @@ node dist/index.js
 # Run with specific transport modes
 node dist/index.js                          # STDIO mode (default)
 node dist/index.js http -p 3001             # Streamable HTTP mode, on 127.0.0.1 (add --bind 0.0.0.0 --allowed-host <name> for other machines)
-node dist/index.js sse -p 3001              # SSE mode (DEPRECATED — use http instead)
 ```
 
 ### Testing
@@ -223,7 +222,7 @@ The codebase follows a **layered architecture with dependency injection** and **
    - Entry point for MCP protocol communication
    - `src/server.ts` is the composition root (`DebugMcpServer`: dependencies, lifecycle, session validation, breakpoint gating, the public facade methods); it implements `ToolContext` and passes itself to the handlers
    - `src/server/` holds the tool schemas (`tool-schemas.ts`), argument coercion (`tool-arguments.ts`), the tools/call dispatch wrapper (`tool-dispatch.ts` over `handlers/index.ts`), argument validation (`tool-validation.ts`), result envelopes and the session-error catch helpers (`tool-result.ts`), one handler module per tool family (`handlers/*.ts`) over their shared helpers (`handlers/shared.ts`), and the resource (`output-resources.ts`) and prompt (`prompts.ts`) handlers
-   - Supports STDIO and Streamable HTTP transport modes (legacy SSE deprecated)
+   - Supports STDIO and Streamable HTTP transport modes
    - Dynamically discovers available language adapters
 
 2. **Adapter System** (NEW)
@@ -515,18 +514,18 @@ claude mcp add-json mcp-debugger \
   '{"type":"stdio","command":"node","args":["tools/dev-proxy/dev-proxy.mjs"]}'
 ```
 
-The dev proxy (`tools/dev-proxy/dev-proxy.mjs`) is a lightweight MCP proxy that sits between Claude Code and mcp-debugger. It maintains a stable stdio connection to Claude Code while managing the backend as a restartable Streamable HTTP child process (default; legacy SSE and stdio modes are also supported via `DEV_PROXY_BACKEND_TRANSPORT`). This means you can rebuild and restart mcp-debugger **without restarting Claude Code** (which would lose conversation context).
+The dev proxy (`tools/dev-proxy/dev-proxy.mjs`) is a lightweight MCP proxy that sits between Claude Code and mcp-debugger. It maintains a stable stdio connection to Claude Code while managing the backend as a restartable Streamable HTTP child process (default; a stdio backend is also supported via `DEV_PROXY_BACKEND_TRANSPORT`). This means you can rebuild and restart mcp-debugger **without restarting Claude Code** (which would lose conversation context).
 
 **When to use**: Whenever you are actively developing mcp-debugger — making code changes, adding adapters, or installing new toolchains (Go, etc.) that need to be picked up by the running server.
 
 **How it works**: After code changes, call the `dev_rebuild_and_restart` tool. The proxy kills the backend, runs `npm run build`, spawns a fresh process, and reconnects — all transparently. If the backend crashes, dev tools remain available to bring it back.
 
 **Configuration** (env vars, all optional):
-- `DEV_PROXY_PORT` — Backend HTTP port (default: 3001; used by `http` and `sse` modes)
+- `DEV_PROXY_PORT` — Backend HTTP port (default: 3001; used by `http` mode)
 - `DEV_PROXY_BUILD_CMD` — Build command (default: `npm run build`)
 - `DEV_PROXY_BUILD_TIMEOUT_MS` — Build timeout in milliseconds (default: 120000)
 - `DEV_PROXY_ROOT` — Project root (default: auto-detected)
-- `DEV_PROXY_BACKEND_TRANSPORT` — `http` (default), `sse` (legacy/deprecated), or `stdio`
+- `DEV_PROXY_BACKEND_TRANSPORT` — `http` (default) or `stdio`; any other value refuses to start, naming the variable
 - `DEV_PROXY_BACKEND_CMD` — Custom backend command override (e.g. `docker run ...`)
 - `DEV_PROXY_DISCOVERY_WAIT_MS` — How long a request waits for a backend start or restart to settle (default: 15000; keep it under the client's MCP startup timeout, `0` disables the wait)
 

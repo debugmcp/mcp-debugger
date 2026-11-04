@@ -9,8 +9,8 @@ When developing mcp-debugger, code changes require rebuilding and restarting the
 clients normally own the stdio server process, so replacing that process disconnects the active
 session. The proxy keeps the client-facing stdio process stable while it replaces the backend.
 
-The backend is a restartable Streamable HTTP child process by default. Legacy SSE and stdio
-backends are also supported through `DEV_PROXY_BACKEND_TRANSPORT`.
+The backend is a restartable Streamable HTTP child process by default. A stdio
+backend is also supported through `DEV_PROXY_BACKEND_TRANSPORT`.
 
 ## Architecture
 
@@ -18,7 +18,7 @@ backends are also supported through `DEV_PROXY_BACKEND_TRANSPORT`.
 MCP client  <--stdio--> dev-proxy.mjs (stable, never restarts)
                               |
                   Streamable HTTP (MCP protocol)
-            (or legacy SSE / stdio, per DEV_PROXY_BACKEND_TRANSPORT)
+            (or stdio, per DEV_PROXY_BACKEND_TRANSPORT)
                               |
                         mcp-debugger (http mode, restartable)
 ```
@@ -141,11 +141,11 @@ Environment variables (all optional):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DEV_PROXY_PORT` | `3001` | Port for the backend server (`http` and `sse` modes) |
+| `DEV_PROXY_PORT` | `3001` | Port for the backend server (`http` mode) |
 | `DEV_PROXY_BUILD_CMD` | `npm run build` | Build command to run |
 | `DEV_PROXY_BUILD_TIMEOUT_MS` | `120000` | Build timeout in milliseconds; must be positive (invalid values use the default; values above 2147483647, about 24.8 days, are capped there) |
 | `DEV_PROXY_ROOT` | Auto-detected | Project root directory |
-| `DEV_PROXY_BACKEND_TRANSPORT` | `http` | Backend transport: `http` (default), `sse` (legacy/deprecated), or `stdio` |
+| `DEV_PROXY_BACKEND_TRANSPORT` | `http` | Backend transport: `http` (default) or `stdio`; any other value refuses to start, naming the variable |
 | `DEV_PROXY_BACKEND_CMD` | Source CLI | Custom backend command, including `docker run ...` commands |
 | `DEV_PROXY_DISCOVERY_WAIT_MS` | `15000` | How long a request waits for a backend start or restart to settle. Keep it below the client's MCP startup timeout (30s in Claude Code); `0` disables the wait |
 | `DEBUG_MCP_NO_REDACT` | unset | Set on the stable proxy process to `1` or `true` to disable status-value redaction |
@@ -171,7 +171,7 @@ override map does not disable supervisor-side status redaction.
 
 For a custom `docker run` backend, the proxy injects a reserved ownership label and removes matching
 containers during stop and restart. This gives stdio containers, which publish no port, the same
-cleanup guarantee as HTTP and SSE backends.
+cleanup guarantee as HTTP backends.
 
 ## Workflow
 

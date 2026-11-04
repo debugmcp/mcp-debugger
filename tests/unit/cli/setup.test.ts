@@ -3,7 +3,6 @@ import { Command } from 'commander';
 import {
   createCLI,
   setupStdioCommand,
-  setupSSECommand,
   setupHttpCommand,
   setupDoctorCommand
 } from '../../../src/cli/setup.js';
@@ -80,110 +79,6 @@ describe('CLI Setup', () => {
 
       expect(mockHandler).toHaveBeenCalledWith(
         expect.objectContaining({
-          logLevel: 'info'
-        }),
-        expect.anything()
-      );
-    });
-  });
-
-  describe('setupSSECommand', () => {
-    it('should configure sse command with correct options', () => {
-      const program = new Command();
-      const mockHandler = vi.fn();
-      
-      setupSSECommand(program, mockHandler);
-
-      // Get the sse command
-      const sseCommand = program.commands.find(cmd => cmd.name() === 'sse');
-      
-      expect(sseCommand).toBeDefined();
-      expect(sseCommand?.description()).toBe('Start the server using SSE (DEPRECATED: use "http" subcommand instead)');
-      expect(sseCommand?.options).toHaveLength(5);
-      
-      // Check options
-      const options = sseCommand?.options || [];
-
-      // The bind address option (issue #680): no commander default, so the
-      // environment variable can win; the default is spelled out in the text.
-      const bindOpt = options.find(opt => opt.long === '--bind');
-      expect(bindOpt).toBeDefined();
-      expect(bindOpt?.flags).toBe('--bind <address>');
-      expect(bindOpt?.description).toContain('127.0.0.1');
-      expect(bindOpt?.description).toContain('MCP_HTTP_BIND');
-      expect(bindOpt?.defaultValue).toBeUndefined();
-      const portOption = options.find(opt => opt.long === '--port');
-      const logLevelOption = options.find(opt => opt.long === '--log-level');
-      const logFileOption = options.find(opt => opt.long === '--log-file');
-      
-      expect(portOption).toBeDefined();
-      expect(portOption?.short).toBe('-p');
-      expect(portOption?.description).toContain('Port to listen on');
-      expect(portOption?.description).toContain('65535');
-      expect(portOption?.defaultValue).toBe('3001');
-      
-      expect(logLevelOption).toBeDefined();
-      expect(logLevelOption?.short).toBe('-l');
-      expect(logLevelOption?.description).toBe('Set log level (error, warn, info, debug)');
-      expect(logLevelOption?.defaultValue).toBe('info');
-      
-      expect(logFileOption).toBeDefined();
-      expect(logFileOption?.description).toBe('Log to file instead of console');
-
-      // The same Host/Origin allowlist option the http command has (issue #671).
-      const allowedHostOption = options.find(opt => opt.long === '--allowed-host');
-      expect(allowedHostOption?.defaultValue).toEqual([]);
-      expect(allowedHostOption?.description).toContain('MCP_HTTP_ALLOWED_HOSTS');
-      expect(allowedHostOption?.defaultValueDescription).toBe('localhost, 127.0.0.1, [::1]');
-      expect(sseCommand?.helpInformation()).not.toContain('(default: [])');
-    });
-
-    it('collects every --allowed-host occurrence, in order (issue #671)', async () => {
-      const program = new Command();
-      const mockHandler = vi.fn().mockResolvedValue(undefined);
-
-      setupSSECommand(program, mockHandler);
-
-      await program.parseAsync([
-        'node', 'test', 'sse', '--allowed-host', 'mcp-debugger', '--allowed-host', 'api.internal',
-      ]);
-
-      expect(mockHandler).toHaveBeenCalledWith(
-        expect.objectContaining({ allowedHost: ['mcp-debugger', 'api.internal'] }),
-        expect.anything()
-      );
-    });
-
-    it('should call handler when sse command is executed', async () => {
-      const program = new Command();
-      const mockHandler = vi.fn().mockResolvedValue(undefined);
-      
-      setupSSECommand(program, mockHandler);
-
-      // Execute the command
-      await program.parseAsync(['node', 'test', 'sse', '--port', '4000', '--log-level', 'debug']);
-
-      expect(mockHandler).toHaveBeenCalledWith(
-        expect.objectContaining({
-          port: '4000',
-          logLevel: 'debug'
-        }),
-        expect.anything()
-      );
-    });
-
-    it('should use default values when options not specified', async () => {
-      const program = new Command();
-      const mockHandler = vi.fn().mockResolvedValue(undefined);
-      
-      setupSSECommand(program, mockHandler);
-
-      // Execute the command without options
-      await program.parseAsync(['node', 'test', 'sse']);
-
-      expect(mockHandler).toHaveBeenCalledWith(
-        expect.objectContaining({
-          port: '3001',
           logLevel: 'info'
         }),
         expect.anything()
@@ -322,16 +217,16 @@ describe('CLI Setup', () => {
     it('should set stdio as default command', async () => {
       const program = new Command();
       const stdioHandler = vi.fn().mockResolvedValue(undefined);
-      const sseHandler = vi.fn().mockResolvedValue(undefined);
+      const httpHandler = vi.fn().mockResolvedValue(undefined);
 
       setupStdioCommand(program, stdioHandler);
-      setupSSECommand(program, sseHandler);
+      setupHttpCommand(program, httpHandler);
 
       // Execute without specifying a command (should run default stdio)
       await program.parseAsync(['node', 'test']);
 
       expect(stdioHandler).toHaveBeenCalled();
-      expect(sseHandler).not.toHaveBeenCalled();
+      expect(httpHandler).not.toHaveBeenCalled();
     });
 
     it('should keep stdio as the default when doctor is registered', async () => {

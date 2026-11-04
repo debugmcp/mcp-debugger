@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as net from 'net';
 import { existsSync } from 'fs';
 import { spawn, ChildProcess } from 'child_process';
-import { Client, SSEClientTransport } from '@modelcontextprotocol/client';
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import {
   executeDebugSequence,
   waitForHealthEndpoint
@@ -13,34 +13,34 @@ import {
 const TEST_TIMEOUT = 30000; // 30 seconds for all operations
 
 let mcpSdkClient: Client | null = null;
-let sseServerProcess: ChildProcess | null = null;
+let httpServerProcess: ChildProcess | null = null;
 let serverPort: number | null = null;
 const projectRoot = process.cwd();
 let distReady = false;
 
-describe('MCP Server E2E SSE Smoke Test', () => {
+describe('MCP Server E2E HTTP Smoke Test', () => {
   // Ensure server is killed even if test fails
   afterEach(async () => {
-    console.log('[SSE Smoke Test] Cleaning up...');
+    console.log('[HTTP Smoke Test] Cleaning up...');
     
     // Close MCP client
     if (mcpSdkClient) {
       try {
         await mcpSdkClient.close();
-        console.log('[SSE Smoke Test] MCP client closed');
+        console.log('[HTTP Smoke Test] MCP client closed');
       } catch (e) {
-        console.error('[SSE Smoke Test] Error closing MCP client:', e);
+        console.error('[HTTP Smoke Test] Error closing MCP client:', e);
       }
       mcpSdkClient = null;
     }
     
-    // Kill SSE server process with graceful shutdown
-    if (sseServerProcess) {
+    // Kill HTTP server process with graceful shutdown
+    if (httpServerProcess) {
       try {
         // First try graceful shutdown with SIGTERM
-        const proc = sseServerProcess;
+        const proc = httpServerProcess;
         if (proc && !proc.killed) {
-          console.log('[SSE Smoke Test] Attempting graceful shutdown with SIGTERM...');
+          console.log('[HTTP Smoke Test] Attempting graceful shutdown with SIGTERM...');
           proc.kill('SIGTERM');
           
           // Wait up to 2 seconds for graceful shutdown
@@ -60,20 +60,20 @@ describe('MCP Server E2E SSE Smoke Test', () => {
           
           // If still not killed, use SIGKILL
           if (proc && proc.exitCode === null) {
-            console.log('[SSE Smoke Test] Graceful shutdown failed, using SIGKILL...');
+            console.log('[HTTP Smoke Test] Graceful shutdown failed, using SIGKILL...');
             proc.kill('SIGKILL');
           } else {
-            console.log('[SSE Smoke Test] Server shut down gracefully');
+            console.log('[HTTP Smoke Test] Server shut down gracefully');
           }
         }
         
         // Wait a bit for process to fully terminate and release resources
         await new Promise(resolve => setTimeout(resolve, 1000));
-        console.log('[SSE Smoke Test] SSE server process terminated');
+        console.log('[HTTP Smoke Test] HTTP server process terminated');
       } catch (e) {
-        console.error('[SSE Smoke Test] Error killing SSE server:', e);
+        console.error('[HTTP Smoke Test] Error killing HTTP server:', e);
       }
-      sseServerProcess = null;
+      httpServerProcess = null;
     }
     
     serverPort = null;
@@ -113,7 +113,7 @@ describe('MCP Server E2E SSE Smoke Test', () => {
         
         server.once('error', (err: any) => {
           if (err.code === 'EADDRINUSE' || err.code === 'EACCES') {
-            console.log(`[SSE Smoke Test] Port ${port} is unavailable (${err.code}), trying another...`);
+            console.log(`[HTTP Smoke Test] Port ${port} is unavailable (${err.code}), trying another...`);
             tryPort();
           } else {
             reject(err);
@@ -122,7 +122,7 @@ describe('MCP Server E2E SSE Smoke Test', () => {
         
         server.once('listening', () => {
           server.close(() => {
-            console.log(`[SSE Smoke Test] Found available port: ${port}`);
+            console.log(`[HTTP Smoke Test] Found available port: ${port}`);
             // Add a small delay to ensure Windows fully releases the port
             setTimeout(() => resolve(port), 200);
           });
@@ -136,9 +136,9 @@ describe('MCP Server E2E SSE Smoke Test', () => {
   }
 
   /**
-   * Start SSE server with comprehensive logging and error handling
+   * Start HTTP server with comprehensive logging and error handling
    */
-  async function startSSEServer(options: { cwd?: string, env?: NodeJS.ProcessEnv } = {}, maxRetries: number = 3): Promise<number> {
+  async function startHttpServer(options: { cwd?: string, env?: NodeJS.ProcessEnv } = {}, maxRetries: number = 3): Promise<number> {
     let lastError: Error | null = null;
     ensureDistBuild();
     
@@ -147,9 +147,9 @@ describe('MCP Server E2E SSE Smoke Test', () => {
         const port = await findAvailablePort();
         
         return await new Promise((resolve, reject) => {
-          console.log(`[SSE Smoke Test] Starting SSE server on port ${port} (attempt ${attempt}/${maxRetries})...`);
+          console.log(`[HTTP Smoke Test] Starting HTTP server on port ${port} (attempt ${attempt}/${maxRetries})...`);
           if (options.cwd) {
-            console.log(`[SSE Smoke Test] Working directory: ${options.cwd}`);
+            console.log(`[HTTP Smoke Test] Working directory: ${options.cwd}`);
           }
           
           // Collect all server output for debugging
@@ -158,9 +158,9 @@ describe('MCP Server E2E SSE Smoke Test', () => {
           let hasStarted = false;
           
           // Start server with specific port
-          sseServerProcess = spawn(process.execPath, [
+          httpServerProcess = spawn(process.execPath, [
             path.join(projectRoot, 'dist', 'index.js'),
-            'sse',
+            'http',
             '-p', port.toString(),
             '--log-level', 'debug'
           ], {
@@ -172,10 +172,10 @@ describe('MCP Server E2E SSE Smoke Test', () => {
           // Set a timeout for the entire startup process
           const timeout = setTimeout(() => {
             if (!hasStarted) {
-              console.error('[SSE Smoke Test] Server startup timeout after 30 seconds');
-              console.error('[SSE Smoke Test] Stdout:', stdout);
-              console.error('[SSE Smoke Test] Stderr:', stderr);
-              reject(new Error(`Timeout waiting for SSE server to start on port ${port}`));
+              console.error('[HTTP Smoke Test] Server startup timeout after 30 seconds');
+              console.error('[HTTP Smoke Test] Stdout:', stdout);
+              console.error('[HTTP Smoke Test] Stderr:', stderr);
+              reject(new Error(`Timeout waiting for HTTP server to start on port ${port}`));
             }
           }, TEST_TIMEOUT);
           
@@ -183,13 +183,13 @@ describe('MCP Server E2E SSE Smoke Test', () => {
           const handleStdout = (data: Buffer) => {
             const output = data.toString();
             stdout += output;
-            console.log('[SSE Server Stdout]', output.trim());
+            console.log('[HTTP Server Stdout]', output.trim());
           };
           
           const handleStderr = (data: Buffer) => {
             const output = data.toString();
             stderr += output;
-            console.error('[SSE Server Stderr]', output.trim());
+            console.error('[HTTP Server Stderr]', output.trim());
             
             // Check for EACCES error specifically
             if (output.includes('EACCES') && output.includes('permission denied')) {
@@ -199,8 +199,8 @@ describe('MCP Server E2E SSE Smoke Test', () => {
             }
           };
           
-          sseServerProcess.stdout?.on('data', handleStdout);
-          sseServerProcess.stderr?.on('data', handleStderr);
+          httpServerProcess.stdout?.on('data', handleStdout);
+          httpServerProcess.stderr?.on('data', handleStderr);
 
           // Also consider the server ready once the port is accepting connections (deterministic readiness)
           void (async () => {
@@ -209,7 +209,7 @@ describe('MCP Server E2E SSE Smoke Test', () => {
               if (ok && !hasStarted) {
                 hasStarted = true;
                 clearTimeout(timeout);
-                console.log(`[SSE Smoke Test] Port check succeeded; server ready on ${port}`);
+                console.log(`[HTTP Smoke Test] Port check succeeded; server ready on ${port}`);
                 resolve(port);
               }
             } catch {
@@ -217,37 +217,37 @@ describe('MCP Server E2E SSE Smoke Test', () => {
             }
           })();
           
-          sseServerProcess.on('error', (err) => {
+          httpServerProcess.on('error', (err) => {
             hasStarted = true; // Prevent timeout error
             clearTimeout(timeout);
-            console.error('[SSE Smoke Test] Failed to spawn server process:', err);
+            console.error('[HTTP Smoke Test] Failed to spawn server process:', err);
             reject(err);
           });
           
-          sseServerProcess.on('exit', (code, signal) => {
+          httpServerProcess.on('exit', (code, signal) => {
             if (!hasStarted) {
               clearTimeout(timeout);
-              console.error(`[SSE Smoke Test] Server exited unexpectedly with code ${code}, signal ${signal}`);
-              console.error('[SSE Smoke Test] Stdout:', stdout);
-              console.error('[SSE Smoke Test] Stderr:', stderr);
-              reject(new Error(`SSE server exited with code ${code}`));
+              console.error(`[HTTP Smoke Test] Server exited unexpectedly with code ${code}, signal ${signal}`);
+              console.error('[HTTP Smoke Test] Stdout:', stdout);
+              console.error('[HTTP Smoke Test] Stderr:', stderr);
+              reject(new Error(`HTTP server exited with code ${code}`));
             }
           });
         });
       } catch (error) {
         lastError = error as Error;
-        console.error(`[SSE Smoke Test] Attempt ${attempt} failed:`, error);
+        console.error(`[HTTP Smoke Test] Attempt ${attempt} failed:`, error);
         
         // Clean up the failed process
-        if (sseServerProcess) {
-          sseServerProcess.kill();
-          sseServerProcess = null;
+        if (httpServerProcess) {
+          httpServerProcess.kill();
+          httpServerProcess = null;
           await new Promise(resolve => setTimeout(resolve, 500)); // Give it time to clean up
         }
         
         // If it's an EACCES error and we have more retries, try again with a new port
         if ((error as any).message?.includes('EACCES') && attempt < maxRetries) {
-          console.log(`[SSE Smoke Test] Retrying with a different port...`);
+          console.log(`[HTTP Smoke Test] Retrying with a different port...`);
           continue;
         }
         
@@ -256,51 +256,51 @@ describe('MCP Server E2E SSE Smoke Test', () => {
       }
     }
     
-    throw lastError || new Error('Failed to start SSE server after all retries');
+    throw lastError || new Error('Failed to start HTTP server after all retries');
   }
 
-  it('should successfully debug fibonacci.py via SSE transport', async () => {
+  it('should successfully debug fibonacci.py via the Streamable HTTP transport', async () => {
     let debugSessionId: string | undefined;
     
     try {
-      // 1. Start SSE server
-      serverPort = await startSSEServer();
+      // 1. Start HTTP server
+      serverPort = await startHttpServer();
       
       // 2. Wait for server to be ready (health check)
-      console.log(`[SSE Smoke Test] Checking server health on port ${serverPort}...`);
+      console.log(`[HTTP Smoke Test] Checking server health on port ${serverPort}...`);
       const serverReady = await waitForHealthEndpoint(serverPort, TEST_TIMEOUT);
       if (!serverReady) {
         throw new Error(`Server health check failed on port ${serverPort}`);
       }
-      console.log('[SSE Smoke Test] Server health check passed');
+      console.log('[HTTP Smoke Test] Server health check passed');
       
-      // 3. Create MCP client and connect using SSE transport
-      console.log('[SSE Smoke Test] Connecting MCP SDK client via SSE...');
+      // 3. Create MCP client and connect using the Streamable HTTP transport
+      console.log('[HTTP Smoke Test] Connecting MCP SDK client via Streamable HTTP...');
       mcpSdkClient = new Client({ 
-        name: "e2e-sse-smoke-test-client", 
+        name: "e2e-http-smoke-test-client", 
         version: "0.1.0" 
       });
       
-      const sseUrl = new URL(`http://127.0.0.1:${serverPort}/sse`);
-      const transport = new SSEClientTransport(sseUrl);
+      const mcpUrl = new URL(`http://127.0.0.1:${serverPort}/mcp`);
+      const transport = new StreamableHTTPClientTransport(mcpUrl);
       
       await mcpSdkClient.connect(transport);
-      console.log('[SSE Smoke Test] MCP SDK Client connected via SSE.');
+      console.log('[HTTP Smoke Test] MCP SDK Client connected via Streamable HTTP.');
 
       // 4. Execute debug sequence
       const fibonacciPath = path.join(projectRoot, 'examples', 'python', 'fibonacci.py');
       const result = await executeDebugSequence(
         mcpSdkClient,
         fibonacciPath,
-        'E2E SSE Smoke Test Session'
+        'E2E HTTP Smoke Test Session'
       );
       
       expect(result.success).toBe(true);
       debugSessionId = result.sessionId;
-      console.log('[SSE Smoke Test] Debug sequence completed successfully.');
+      console.log('[HTTP Smoke Test] Debug sequence completed successfully.');
       
     } catch (error) {
-      console.error('[SSE Smoke Test] Test failed with error:', error);
+      console.error('[HTTP Smoke Test] Test failed with error:', error);
       throw error;
     } finally {
       // 5. Cleanup
@@ -310,70 +310,70 @@ describe('MCP Server E2E SSE Smoke Test', () => {
             name: 'close_debug_session', 
             arguments: { sessionId: debugSessionId } 
           });
-          console.log(`[SSE Smoke Test] Debug session ${debugSessionId} closed.`);
+          console.log(`[HTTP Smoke Test] Debug session ${debugSessionId} closed.`);
         } catch (e) {
-          console.error(`[SSE Smoke Test] Error closing debug session ${debugSessionId}:`, e);
+          console.error(`[HTTP Smoke Test] Error closing debug session ${debugSessionId}:`, e);
         }
       }
     }
   }, TEST_TIMEOUT);
 
   // Test spawning the server from a different working directory
-  it('should work when SSE server is spawned from different working directory', async () => {
+  it('should work when the HTTP server is spawned from a different working directory', async () => {
     const tempDir = os.tmpdir();
-    console.log(`[SSE Smoke Test] Testing server spawn from temp directory: ${tempDir}`);
+    console.log(`[HTTP Smoke Test] Testing server spawn from temp directory: ${tempDir}`);
     
     let debugSessionId: string | undefined;
     
     try {
-      // 1. Start SSE server from temp directory
-      serverPort = await startSSEServer({ 
+      // 1. Start HTTP server from temp directory
+      serverPort = await startHttpServer({ 
         cwd: tempDir
       });
       
       // 2. Wait for server to be ready (health check)
-      console.log(`[SSE Smoke Test] Checking server health on port ${serverPort}...`);
+      console.log(`[HTTP Smoke Test] Checking server health on port ${serverPort}...`);
       const serverReady = await waitForHealthEndpoint(serverPort, TEST_TIMEOUT);
       if (!serverReady) {
         // Additional debugging when health check fails
         // Note: proc.killed is true as soon as a signal is sent, not when the process exits.
         // Use exitCode as a more reliable indicator of actual process termination.
-        if (sseServerProcess && sseServerProcess.exitCode === null) {
-          console.error('[SSE Smoke Test] Server process is still running but health check failed');
+        if (httpServerProcess && httpServerProcess.exitCode === null) {
+          console.error('[HTTP Smoke Test] Server process is still running but health check failed');
         } else {
-          console.error('[SSE Smoke Test] Server process has exited');
+          console.error('[HTTP Smoke Test] Server process has exited');
         }
         throw new Error(`Server health check failed on port ${serverPort}`);
       }
-      console.log('[SSE Smoke Test] Server health check passed');
+      console.log('[HTTP Smoke Test] Server health check passed');
       
       // 3. Create MCP client and connect
-      console.log('[SSE Smoke Test] Connecting MCP SDK client via SSE...');
+      console.log('[HTTP Smoke Test] Connecting MCP SDK client via Streamable HTTP...');
       mcpSdkClient = new Client({ 
-        name: "e2e-sse-smoke-test-client-tempdir", 
+        name: "e2e-http-smoke-test-client-tempdir", 
         version: "0.1.0" 
       });
       
-      const sseUrl = new URL(`http://127.0.0.1:${serverPort}/sse`);
-      const transport = new SSEClientTransport(sseUrl);
+      const mcpUrl = new URL(`http://127.0.0.1:${serverPort}/mcp`);
+      const transport = new StreamableHTTPClientTransport(mcpUrl);
       
       await mcpSdkClient.connect(transport);
-      console.log('[SSE Smoke Test] MCP SDK Client connected via SSE from temp directory.');
+      console.log('[HTTP Smoke Test] MCP SDK Client connected via Streamable HTTP from temp directory.');
 
       // 4. Execute debug sequence
       const fibonacciPath = path.join(projectRoot, 'examples', 'python', 'fibonacci.py');
       const result = await executeDebugSequence(
         mcpSdkClient,
         fibonacciPath,
-        'E2E SSE Smoke Test Session (Temp Dir)'
+        'E2E HTTP Smoke Test Session (Temp Dir)'
       );
       
       expect(result.success).toBe(true);
       debugSessionId = result.sessionId;
-      console.log('[SSE Smoke Test] Debug sequence completed successfully from temp directory.');
+      console.log('[HTTP Smoke Test] Debug sequence completed successfully from temp directory.');
 
     } catch (error) {
-      console.error('[SSE Smoke Test] Test failed with error:', error);
+      console.error('[HTTP Smoke Test] Test failed with error:', error);
       throw error;
     } finally {
       // Cleanup
@@ -383,9 +383,9 @@ describe('MCP Server E2E SSE Smoke Test', () => {
             name: 'close_debug_session', 
             arguments: { sessionId: debugSessionId } 
           });
-          console.log(`[SSE Smoke Test] Debug session ${debugSessionId} closed.`);
+          console.log(`[HTTP Smoke Test] Debug session ${debugSessionId} closed.`);
         } catch (e) {
-          console.error(`[SSE Smoke Test] Error closing debug session ${debugSessionId}:`, e);
+          console.error(`[HTTP Smoke Test] Error closing debug session ${debugSessionId}:`, e);
         }
       }
     }

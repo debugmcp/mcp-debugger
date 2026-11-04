@@ -35,20 +35,6 @@ class TestBuildNpxCommand(unittest.TestCase):
             ["npx", DebugMCPLauncher.NPM_PACKAGE, "stdio"],
         )
 
-    def test_sse_without_port_omits_port_flag(self):
-        # Deliberate asymmetry with Docker: the npx-run server applies its own
-        # default port, so no --port is forwarded unless the caller gave one.
-        self.assertEqual(
-            self.launcher.build_npx_command("sse"),
-            ["npx", DebugMCPLauncher.NPM_PACKAGE, "sse"],
-        )
-
-    def test_sse_with_port(self):
-        self.assertEqual(
-            self.launcher.build_npx_command("sse", 8080),
-            ["npx", DebugMCPLauncher.NPM_PACKAGE, "sse", "--port", "8080"],
-        )
-
     def test_http_with_port(self):
         self.assertEqual(
             self.launcher.build_npx_command("http", 8080),
@@ -56,6 +42,8 @@ class TestBuildNpxCommand(unittest.TestCase):
         )
 
     def test_http_without_port_omits_port_flag(self):
+        # Deliberate asymmetry with Docker: the npx-run server applies its own
+        # default port, so no --port is forwarded unless the caller gave one.
         self.assertEqual(
             self.launcher.build_npx_command("http"),
             ["npx", DebugMCPLauncher.NPM_PACKAGE, "http"],
@@ -118,22 +106,11 @@ class TestBuildDockerCommand(unittest.TestCase):
         cmd = self.launcher.build_docker_command("stdio", env={})
         self.assertIn(f"{os.getcwd()}:/workspace", cmd)
 
-    def test_sse_defaults_port_and_publishes_it_on_loopback(self):
-        default = DebugMCPLauncher.DEFAULT_SSE_PORT
-        self.assertEqual(
-            self.build("sse"),
-            self.docker_prefix() + [
-                "-p", f"127.0.0.1:{default}:{default}",
-                DebugMCPLauncher.DOCKER_IMAGE, "sse",
-                "--port", str(default),
-            ],
-        )
-
     def test_http_defaults_port_and_publishes_it_on_loopback(self):
         # Loopback by default (issue #676): the server's Host allowlist stops
         # browsers, not a direct client that forges Host: localhost, so
         # publishing on every interface was real exposure.
-        default = DebugMCPLauncher.DEFAULT_SSE_PORT
+        default = DebugMCPLauncher.DEFAULT_HTTP_PORT
         self.assertEqual(
             self.build("http"),
             self.docker_prefix() + [
@@ -143,8 +120,8 @@ class TestBuildDockerCommand(unittest.TestCase):
             ],
         )
 
-    def test_sse_custom_port_keeps_mapping_and_flag_in_sync(self):
-        cmd = self.build("sse", 4711)
+    def test_http_custom_port_keeps_mapping_and_flag_in_sync(self):
+        cmd = self.build("http", 4711)
         self.assertIn("-p", cmd)
         self.assertIn("127.0.0.1:4711:4711", cmd)
         # The in-container server must listen on the same port the -p mapping
@@ -226,7 +203,7 @@ class TestCliPassThrough(unittest.TestCase):
             self.assertNotIn("Bind: 0.0.0.0", result.output)
             command_line = next(line for line in result.output.splitlines() if "Would execute" in line)
             self.assertNotIn("--bind", command_line)
-            self.assertIn("--bind applies to http/sse only", result.output)
+            self.assertIn("--bind applies to http only", result.output)
 
     def test_docker_forwards_allowed_hosts_env(self):
         with mock.patch.dict(os.environ, {"MCP_HTTP_ALLOWED_HOSTS": "svc.internal"}):

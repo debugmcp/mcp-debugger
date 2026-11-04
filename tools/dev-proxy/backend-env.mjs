@@ -39,6 +39,25 @@ export function resolveBackendPort(raw) {
 }
 
 /**
+ * The backend transport from DEV_PROXY_BACKEND_TRANSPORT: unset or empty
+ * means `http`; only `http` and `stdio` are accepted. Anything else throws
+ * an Error naming the variable and the value — the proxy used to fall
+ * through to the since-removed legacy transport's client for any
+ * unrecognised value, so a typo connected over the wrong transport
+ * without a word.
+ *
+ * @param {string | undefined} raw
+ * @returns {'http' | 'stdio'}
+ */
+export function resolveBackendTransport(raw) {
+  if (raw === undefined || raw === '') return 'http';
+  if (raw === 'http' || raw === 'stdio') return raw;
+  throw new Error(
+    `DEV_PROXY_BACKEND_TRANSPORT value '${raw}' is not a backend transport; give 'http' (default) or 'stdio'`
+  );
+}
+
+/**
  * Replace backend overrides only when a tool call explicitly supplies `env`.
  * Omission preserves the prior map; an empty object clears it.
  *

@@ -7,14 +7,13 @@ export interface StdioOptions {
   logFile?: string;
 }
 
-export interface SSEOptions {
+export interface HttpOptions {
   port: string;
   logLevel?: string;
   logFile?: string;
   /**
    * Repeatable `--allowed-host` values; merged with MCP_HTTP_ALLOWED_HOSTS
-   * (issue #667). Shared by the http and the deprecated sse transports — a
-   * shipped path gets the same Host/Origin control (issue #671).
+   * (issue #667).
    */
   allowedHost?: string[];
   /**
@@ -25,11 +24,9 @@ export interface SSEOptions {
   bind?: string;
 }
 
-export type HttpOptions = SSEOptions;
-
 /**
- * The `--allowed-host` option, built once for both network transports so the
- * flag, its help text and its default description cannot drift apart.
+ * The `--allowed-host` option, built here so the flag, its help text and its
+ * default description live in one place.
  */
 function allowedHostOption(): Option {
   return new Option(
@@ -51,7 +48,6 @@ export interface DoctorOptions {
 }
 
 export type StdioHandler = (options: StdioOptions, command?: Command) => Promise<void>;
-export type SSEHandler = (options: SSEOptions, command?: Command) => Promise<void>;
 export type HttpHandler = (options: HttpOptions, command?: Command) => Promise<void>;
 export type CheckRustBinaryHandler = (
   binaryPath: string,
@@ -83,22 +79,6 @@ export function setupStdioCommand(program: Command, handler: StdioHandler): void
     .option('--log-file <path>', 'Log to file instead of console')
     .action(async (options: StdioOptions, command: Command) => {
       // Explicitly mark console silencing to ensure logger avoids console output even under bundling
-      process.env.CONSOLE_OUTPUT_SILENCED = '1';
-      await handler(options, command);
-    });
-}
-
-export function setupSSECommand(program: Command, handler: SSEHandler): void {
-  program
-    .command('sse')
-    .description('Start the server using SSE (DEPRECATED: use "http" subcommand instead)')
-    .addOption(portOption())
-    .option('-l, --log-level <level>', 'Set log level (error, warn, info, debug)', 'info')
-    .option('--log-file <path>', 'Log to file instead of console')
-    .addOption(allowedHostOption())
-    .addOption(bindOption())
-    .action(async (options: SSEOptions, command: Command) => {
-      // Silencing also applies to SSE to protect transports used for JS debugging
       process.env.CONSOLE_OUTPUT_SILENCED = '1';
       await handler(options, command);
     });

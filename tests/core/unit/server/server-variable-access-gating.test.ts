@@ -99,7 +99,7 @@ describe('Variable access gating (issue #237)', () => {
       expect(content.notFound).toEqual(['missing']);
     });
 
-    it('coerces a JSON-string names argument into an array (SSE transport quirk)', async () => {
+    it('coerces a JSON-string names argument into an array (double-stringify quirk)', async () => {
       const { callToolHandler, mockSessionManager } = createServer({});
       mockSessionManager.getVariables.mockResolvedValue([]);
 

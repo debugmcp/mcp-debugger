@@ -1071,8 +1071,9 @@ describe('HTTP Command Handler', () => {
       expect(mockExitProcess).toHaveBeenCalledWith(1);
       expect(mockApp.listen).not.toHaveBeenCalled();
       // createHttpApp builds servers lazily (per initialize request), so this
-      // holds regardless of where resolvePort runs; it is the SSE twin's
-      // assertion that pins the order. Kept so the two tests stay parallel.
+      // holds regardless of where resolvePort runs; the order that matters —
+      // refused before listen() and before anything is announced — is pinned
+      // by the assertions on either side of it.
       expect(mockServerFactory).not.toHaveBeenCalled();
       expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining(`--port value '${port}'`));
       // Nothing was announced before the refusal.

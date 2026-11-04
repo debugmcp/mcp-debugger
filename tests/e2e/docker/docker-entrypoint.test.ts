@@ -3,7 +3,7 @@
  *
  * Verifies that the Docker entrypoint correctly passes CLI arguments.
  * This test catches the quoting bug where printf-generated entry.sh
- * produced literal \" characters, breaking SSE mode argument passing.
+ * produced literal \" characters, breaking subcommand argument passing.
  *
  * The test should FAIL before the fix (entry.sh has \"$@\") and PASS after
  * (entry.sh has "$@").
@@ -61,29 +61,29 @@ describe.skipIf(SKIP_DOCKER)('Docker: Entrypoint Argument Passing', () => {
     expect(report.version).toBe(EXPECTED_VERSION);
   }, 90000);
 
-  it('should pass sse --help without argument corruption', async () => {
-    // With the quoting bug: \"sse\" is passed as the command name,
-    // Commander can't match it to the 'sse' subcommand, falls through to
+  it('should pass http --help without argument corruption', async () => {
+    // With the quoting bug: \"http\" is passed as the command name,
+    // Commander can't match it to the 'http' subcommand, falls through to
     // default 'stdio', and --help gets the trailing quote: '--help"'
     const { stdout, stderr } = await execAsync(
-      `docker run --rm ${IMAGE_NAME} sse --help`,
+      `docker run --rm ${IMAGE_NAME} http --help`,
       { timeout: 30000 }
     );
     const output = (stdout + stderr).trim();
 
-    // Should show SSE subcommand help, not an error
+    // Should show http subcommand help, not an error
     expect(output).not.toContain('unknown option');
     expect(output).toContain('-p');  // --port option should be listed
-    expect(output).toContain('sse');
+    expect(output).toContain('http');
   }, 60000);
 
-  it('should start SSE mode with -p argument', async () => {
+  it('should start http mode with -p argument', async () => {
     const containerName = `mcp-entrypoint-test-${Date.now()}`;
 
     try {
-      // Start in SSE mode with a specific port
+      // Start in http mode with a specific port
       await execAsync(
-        `docker run -d --name ${containerName} -p 0:3001 ${IMAGE_NAME} sse -p 3001`,
+        `docker run -d --name ${containerName} -p 0:3001 ${IMAGE_NAME} http -p 3001`,
         { timeout: 30000 }
       );
 
