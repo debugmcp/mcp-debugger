@@ -8,6 +8,7 @@ import { EventEmitter } from 'events';
 import type { ChildProcess } from 'child_process';
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import { DapProxyWorker } from '../../src/proxy/dap-proxy-worker.js';
+import { DapResponseError } from '../../src/proxy/dap-response-error.js';
 import type {
   DapProxyDependencies,
   ILogger,
@@ -284,5 +285,74 @@ describe('DapProxyWorker child sessions (issue #1081)', () => {
     const releasedAt = rootClient.respondToReverseRequest.mock.invocationCallOrder[0];
     const disconnectedAt = connectionStub.disconnect.mock.invocationCallOrder[0];
     expect(releasedAt).toBeLessThan(disconnectedAt);
+  });
+
+  it('rejects a request for a child whose connection has ended without sending it to the root', async () => {
+    await connectUnder(PythonAdapterPolicy);
+    await adoptChild();
+    childClient.emit('close');
+    rootClient.sendRequest.mockClear();
+    childClient.sendRequest.mockClear();
+
+    await worker.handleCommand({ cmd: 'dap', sessionId: 'child-1', requestId: 'stale-continue', dapCommand: 'continue', dapArgs: { threadId: 1 } });
+
+    expect(rootClient.sendRequest).not.toHaveBeenCalled();
+    expect(childClient.sendRequest).not.toHaveBeenCalled();
+    expect(responseTo('stale-continue')).toMatchObject({ success: false, sessionId: 'child-1', error: expect.stringContaining('No child connection') });
+  });
+
+  it('returns child adapter refusals with their structured response on the child envelope', async () => {
+    await connectUnder(PythonAdapterPolicy);
+    await adoptChild();
+    const refusal = {
+      type: 'response' as const, seq: 9, request_seq: 4, success: false, command: 'evaluate',
+      body: { error: { id: 1, format: 'unknown name' } }
+    };
+    childClient.sendRequest.mockRejectedValueOnce(new DapResponseError(refusal));
+
+    await worker.handleCommand({ cmd: 'dap', sessionId: 'child-1', requestId: 'eval-1', dapCommand: 'evaluate', dapArgs: { expression: 'missing' }, timeoutMs: 1234 });
+
+    expect(childClient.sendRequest).toHaveBeenCalledWith('evaluate', { expression: 'missing' }, 1234);
+    expect(responseTo('eval-1')).toMatchObject({ success: false, sessionId: 'child-1', error: 'unknown name', body: refusal.body });
+  });
+
+  it('returns a child transport failure without inventing an adapter response', async () => {
+    await connectUnder(PythonAdapterPolicy);
+    await adoptChild();
+    childClient.sendRequest.mockRejectedValueOnce('socket unavailable');
+    await worker.handleCommand({ cmd: 'dap', sessionId: 'child-1', requestId: 'threads-failed', dapCommand: 'threads' });
+    expect(responseTo('threads-failed')).toMatchObject({ success: false, sessionId: 'child-1', error: 'socket unavailable' });
+    expect(responseTo('threads-failed')?.body).toBeUndefined();
+  });
+
+  it('answers adoption failures on the requested child envelope', async () => {
+    await connectUnder(PythonAdapterPolicy);
+    await worker.handleCommand({ cmd: 'dap', sessionId: 'child-1', requestId: 'missing-adopt', dapCommand: CHILD_ADOPT_COMMAND, dapArgs: { reportId: 'unknown' } });
+    expect(responseTo('missing-adopt')).toMatchObject({ success: false, sessionId: 'child-1', error: expect.stringContaining('unknown or already answered') });
+  });
+
+  it('refuses child commands when this adapter has no adoption contract', async () => {
+    await connectUnder(JsDebugAdapterPolicy);
+    await worker.handleCommand({ cmd: 'dap', sessionId: 'child-1', requestId: 'unsupported-adopt', dapCommand: CHILD_ADOPT_COMMAND });
+    expect(responseTo('unsupported-adopt')).toMatchObject({ success: false, sessionId: 'child-1', error: expect.stringContaining('reports no child processes') });
+  });
+
+  it('completes deferred root shutdown if the final child fails to attach', async () => {
+    await connectUnder(PythonAdapterPolicy);
+    (worker as any).state = ProxyState.CONNECTED;
+    let failAttach!: (error: Error) => void;
+    connectionStub.sendAttachRequest.mockImplementationOnce(() => new Promise<void>((_, reject) => { failAttach = reject; }));
+    rootClient.emit('child-report', { request: startDebugging, report });
+    const reportId = statuses('child_reported')[0].reportId as string;
+    const adopting = worker.handleCommand({ cmd: 'dap', sessionId: 'child-1', requestId: 'failed-adopt', dapCommand: CHILD_ADOPT_COMMAND, dapArgs: { reportId } });
+    await new Promise((resolve) => setImmediate(resolve));
+    const handlers = connectionStub.setupEventHandlers.mock.calls[0][1] as { onTerminated: (body: unknown) => void };
+    handlers.onTerminated({});
+    expect(processStub.shutdown).not.toHaveBeenCalled();
+    failAttach(new Error('child exited during attach'));
+    await adopting;
+    await vi.waitFor(() => expect(worker.getState()).toBe(ProxyState.TERMINATED), { timeout: 3000 });
+    expect(processStub.shutdown).toHaveBeenCalledTimes(1);
+    expect(responseTo('failed-adopt')).toMatchObject({ success: false, sessionId: 'child-1', error: 'child exited during attach' });
   });
 });

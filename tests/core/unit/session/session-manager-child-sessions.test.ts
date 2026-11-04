@@ -130,6 +130,50 @@ describe('SessionManager child sessions (issue #1081)', () => {
     expect(releases()).toEqual([expect.objectContaining({ command: 'childRelease', args: expect.objectContaining({ reportId: 'r1' }) })]);
   });
 
+  it('copies function breakpoints and exception settings without sharing breakpoint records', async () => {
+    const rootId = await startRoot();
+    await sessionManager.setFunctionBreakpoint(rootId, { functionName: 'compute', condition: 'i > 2' });
+    const root = sessionManager.getSession(rootId)!;
+    root.effectiveBreakOnExceptions = 'all';
+    root.launchExceptionFilters = { ids: ['raised'], beyondMode: [], noUncaughtStop: undefined };
+    const original = Array.from(root.functionBreakpoints.values())[0];
+    original.adapterId = 19;
+    original.verified = true;
+
+    dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+    await vi.runAllTimersAsync();
+
+    const child = sessionManager.getSession(childOf(rootId)!.id)!;
+    const copied = child.functionBreakpoints.get(original.id)!;
+    expect(copied).not.toBe(original);
+    expect(copied.adapterId).toBeUndefined();
+    expect(copied.verified).toBe(false);
+    expect(original.adapterId).toBe(19);
+    expect(child.effectiveBreakOnExceptions).toBe('all');
+    expect(child.launchExceptionFilters).toEqual({ ids: ['raised'], beyondMode: [], noUncaughtStop: undefined });
+    expect(dependencies.mockProxyManager.childViews.get(child.id)!.adoptCalls[0].functionBreakpoints)
+      .toEqual([{ name: 'compute', condition: 'i > 2' }]);
+  });
+
+  it('releases a report when the proxy cannot create child views', async () => {
+    const rootId = await startRoot();
+    Object.defineProperty(dependencies.mockProxyManager, 'createChildView', { value: undefined });
+    dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+    await vi.runAllTimersAsync();
+    expect(childOf(rootId)).toBeUndefined();
+    expect(releases()).toEqual([expect.objectContaining({ args: expect.objectContaining({ reason: 'this session cannot host child sessions' }) })]);
+  });
+
+  it('contains a release failure and records the adapter error', async () => {
+    build({ DEBUG_MCP_MAX_CHILD_SESSIONS: '0' });
+    const rootId = await startRoot();
+    dependencies.mockProxyManager.shouldFailDapRequests = true;
+    dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+    await vi.runAllTimersAsync();
+    expect(childOf(rootId)).toBeUndefined();
+    expect(dependencies.mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('Releasing reported child Subprocess 4242'));
+  });
+
   it('counts the whole tree against the cap: a grandchild beyond it is released', async () => {
     build({ DEBUG_MCP_MAX_CHILD_SESSIONS: '1' });
     const rootId = await startRoot();
@@ -214,6 +258,44 @@ describe('SessionManager child sessions (issue #1081)', () => {
       await vi.runAllTimersAsync();
       expect(dependencies.mockProxyManager.stopCalls).toBe(1);
     });
+
+    it('contains failure to stop a terminated child connection', async () => {
+      const { rootId, childId, view } = await rootWithChild();
+      vi.spyOn(view, 'stop').mockRejectedValue(new Error('disconnect failed'));
+      view.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+      expect(sessionManager.getSession(childId)!.state).toBe(SessionState.STOPPED);
+      expect(sessionManager.getSession(rootId)!.state).not.toBe(SessionState.STOPPED);
+      expect(dependencies.mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('disconnect failed'));
+    });
+
+    it('contains failure to reap the deferred worker after its last child ends', async () => {
+      const { rootId, view } = await rootWithChild();
+      dependencies.mockProxyManager.simulateEvent('terminated');
+      vi.spyOn(dependencies.mockProxyManager, 'stop').mockRejectedValue(new Error('worker stop failed'));
+      view.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+      expect(sessionManager.getSession(rootId)!.deferredWorkerStop).toBeUndefined();
+      expect(dependencies.mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('worker stop failed'));
+    });
+  });
+
+  it.each([undefined, new Error('deferred stop failed'), 'deferred stop failed'])('closes a retained worker even when no child row remains (failure: %s)', async (failure) => {
+    const session = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+    const root = sessionManager.getSession(session.id)!;
+    root.deferredWorkerStop = dependencies.mockProxyManager;
+    const stop = vi.spyOn(dependencies.mockProxyManager, 'stop');
+    if (failure !== undefined) stop.mockRejectedValue(failure);
+    else stop.mockResolvedValue();
+
+    await expect(sessionManager.closeSession(root.id)).resolves.toBe(true);
+
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(root.deferredWorkerStop).toBeUndefined();
+    expect(sessionManager.getSession(root.id)).toBeUndefined();
+    if (failure !== undefined) {
+      expect(dependencies.mockLogger.error).toHaveBeenCalledWith(expect.stringContaining('deferred worker'), 'deferred stop failed');
+    }
   });
 
   describe('closing cascades over the subtree', () => {
@@ -312,6 +394,26 @@ describe('SessionManager child sessions (issue #1081)', () => {
       expect(listed(grandchildId)).toBe(false);
       expect(listed(rootId)).toBe(true);
     });
+
+    it('restarting an ended root closes the children keeping its old worker alive', async () => {
+      const { rootId, childId, grandchildId, childView, grandchildView } = await tree();
+      dependencies.mockProxyManager.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+      expect(sessionManager.getSession(rootId)!.proxyManager).toBeUndefined();
+      expect(sessionManager.getSession(rootId)!.deferredWorkerStop).toBe(dependencies.mockProxyManager);
+      vi.spyOn(dependencies.mockProxyManager, 'stop').mockResolvedValue();
+
+      const restarted = await sessionManager.restartDebugging(rootId);
+      await vi.runAllTimersAsync();
+
+      expect(restarted.success).toBe(true);
+      expect(childView.stopCalls).toBe(1);
+      expect(grandchildView.stopCalls).toBe(1);
+      expect(listed(childId)).toBe(false);
+      expect(listed(grandchildId)).toBe(false);
+      expect(dependencies.mockProxyManager.stop).toHaveBeenCalledTimes(1);
+      expect(sessionManager.getSession(rootId)!.deferredWorkerStop).toBeUndefined();
+    });
   });
 
   it('a failed adoption releases the child, removes its row and warns', async () => {
@@ -332,5 +434,179 @@ describe('SessionManager child sessions (issue #1081)', () => {
       (call) => typeof call[0] === 'string' && call[0].includes('mock adoption failure')
     );
     expect(warned).toBe(true);
+  });
+
+  it('releases a report arriving while the parent is closing its existing child', async () => {
+    const rootId = await startRoot();
+    dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+    await vi.runAllTimersAsync();
+    const child = childOf(rootId)!;
+    const view = dependencies.mockProxyManager.childViews.get(child.id)!;
+    let finishStop!: () => void;
+    vi.spyOn(view, 'stop').mockImplementation(() => new Promise<void>((resolve) => { finishStop = resolve; }));
+
+    const closing = sessionManager.closeSession(rootId);
+    dependencies.mockProxyManager.simulateEvent('child-reported', report('r2'));
+    await Promise.resolve();
+    finishStop();
+    await closing;
+
+    expect(sessionManager.getAllSessions()).toHaveLength(0);
+    expect(releases()).toEqual([expect.objectContaining({ args: expect.objectContaining({ reportId: 'r2' }) })]);
+  });
+
+  it('releases a grandchild report while an ancestor is closing another branch', async () => {
+    const rootId = await startRoot();
+    dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+    dependencies.mockProxyManager.simulateEvent('child-reported', report('r2', 4343));
+    await vi.runAllTimersAsync();
+    const [first, second] = sessionManager.getAllSessions().filter((s) => s.parentSessionId === rootId);
+    const firstView = dependencies.mockProxyManager.childViews.get(first.id)!;
+    const secondView = dependencies.mockProxyManager.childViews.get(second.id)!;
+    let finishStop!: () => void;
+    vi.spyOn(firstView, 'stop').mockImplementation(() => new Promise<void>((resolve) => { finishStop = resolve; }));
+
+    const closing = sessionManager.closeSession(rootId);
+    secondView.simulateEvent('child-reported', report('grandchild', 4444));
+    await Promise.resolve();
+    finishStop();
+    await closing;
+
+    expect(sessionManager.getAllSessions()).toHaveLength(0);
+    expect(secondView.dapRequestCalls).toEqual([
+      expect.objectContaining({ command: 'childRelease', args: expect.objectContaining({ reportId: 'grandchild' }) })
+    ]);
+  });
+
+  it('releases reports during relaunch teardown and accepts children of the next run', async () => {
+    const rootId = await startRoot();
+    dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+    await vi.runAllTimersAsync();
+    const view = dependencies.mockProxyManager.childViews.get(childOf(rootId)!.id)!;
+    // The real launcher allocates a new proxy per run. Suppress the mock's
+    // deferred exit on its reused instance so it cannot terminate the new run.
+    vi.spyOn(dependencies.mockProxyManager, 'stop').mockResolvedValue();
+    let finishStop!: () => void;
+    vi.spyOn(view, 'stop').mockImplementation(() => new Promise<void>((resolve) => { finishStop = resolve; }));
+
+    const restarting = sessionManager.restartDebugging(rootId);
+    await vi.waitFor(() => expect(finishStop).toBeTypeOf('function'));
+    dependencies.mockProxyManager.simulateEvent('child-reported', report('during-restart'));
+    finishStop();
+    await restarting;
+    await vi.runAllTimersAsync();
+    expect(childOf(rootId)).toBeUndefined();
+    expect(releases()).toEqual([expect.objectContaining({ args: expect.objectContaining({ reportId: 'during-restart' }) })]);
+
+    dependencies.mockProxyManager.simulateEvent('child-reported', report('next-run'));
+    await vi.runAllTimersAsync();
+    expect(childOf(rootId)).toBeDefined();
+  });
+
+  it('reaps a deferred root worker when its last pending adoption fails', async () => {
+    const rootId = await startRoot();
+    let failAdopt!: (error: Error) => void;
+    const originalCreate = dependencies.mockProxyManager.createChildView.bind(dependencies.mockProxyManager);
+    vi.spyOn(dependencies.mockProxyManager, 'createChildView').mockImplementation((id) => {
+      const view = originalCreate(id);
+      vi.spyOn(view, 'adopt').mockImplementation(() => new Promise((_, reject) => { failAdopt = reject; }));
+      return view;
+    });
+
+    dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+    dependencies.mockProxyManager.stopCalls = 0;
+    dependencies.mockProxyManager.simulateEvent('terminated');
+    expect(dependencies.mockProxyManager.stopCalls).toBe(0);
+    failAdopt(new Error('attach failed'));
+    await vi.runAllTimersAsync();
+
+    expect(childOf(rootId)).toBeUndefined();
+    expect(dependencies.mockProxyManager.stopCalls).toBe(1);
+    expect(sessionManager.getSession(rootId)!.deferredWorkerStop).toBeUndefined();
+  });
+
+  it('does not announce an adopted row after the caller already closed it', async () => {
+    const rootId = await startRoot();
+    const originalCreate = dependencies.mockProxyManager.createChildView.bind(dependencies.mockProxyManager);
+    vi.spyOn(dependencies.mockProxyManager, 'createChildView').mockImplementation((id) => {
+      const view = originalCreate(id);
+      view.holdAdopt = true;
+      return view;
+    });
+    const adopted = vi.fn();
+    sessionManager.on('child-session-adopted', adopted);
+    dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+    const child = childOf(rootId)!;
+    const view = dependencies.mockProxyManager.childViews.get(child.id)!;
+
+    await sessionManager.closeSession(child.id);
+    view.resolveAdopt();
+    await vi.runAllTimersAsync();
+
+    expect(adopted).not.toHaveBeenCalled();
+    expect(childOf(rootId)).toBeUndefined();
+  });
+
+  it('closes descendants reported during an adoption that ultimately fails', async () => {
+    const rootId = await startRoot();
+    let failAdopt!: (error: Error) => void;
+    const originalCreate = dependencies.mockProxyManager.createChildView.bind(dependencies.mockProxyManager);
+    vi.spyOn(dependencies.mockProxyManager, 'createChildView').mockImplementationOnce((id) => {
+      const view = originalCreate(id);
+      vi.spyOn(view, 'adopt').mockImplementation(() => new Promise((_, reject) => { failAdopt = reject; }));
+      return view;
+    });
+    dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+    const child = childOf(rootId)!;
+    const view = dependencies.mockProxyManager.childViews.get(child.id)!;
+    view.simulateEvent('child-reported', report('r2', 4343));
+    await vi.runAllTimersAsync();
+    const grandchild = childOf(child.id)!;
+    const grandchildView = dependencies.mockProxyManager.childViews.get(grandchild.id)!;
+
+    failAdopt(new Error('attach failed'));
+    await vi.runAllTimersAsync();
+
+    expect(sessionManager.getAllSessions().map((s) => s.id)).toEqual([rootId]);
+    expect(grandchildView.stopCalls).toBe(1);
+    expect(view.stopCalls).toBe(1);
+  });
+
+  it('lets an in-progress explicit close own cleanup when adoption is cancelled', async () => {
+    const rootId = await startRoot();
+    let failAdopt!: (error: Error) => void;
+    const originalCreate = dependencies.mockProxyManager.createChildView.bind(dependencies.mockProxyManager);
+    vi.spyOn(dependencies.mockProxyManager, 'createChildView').mockImplementationOnce((id) => {
+      const view = originalCreate(id);
+      vi.spyOn(view, 'adopt').mockImplementation(() => new Promise((_, reject) => { failAdopt = reject; }));
+      return view;
+    });
+    dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+    const child = childOf(rootId)!;
+    const view = dependencies.mockProxyManager.childViews.get(child.id)!;
+    let finishStop!: () => void;
+    const stop = vi.spyOn(view, 'stop').mockImplementation(() => new Promise<void>((resolve) => { finishStop = resolve; }));
+
+    const closing = sessionManager.closeSession(child.id);
+    failAdopt(new Error('adoption cancelled by close'));
+    await vi.runAllTimersAsync();
+    expect(stop).toHaveBeenCalledTimes(1);
+    finishStop();
+    await expect(closing).resolves.toBe(true);
+    expect(childOf(rootId)).toBeUndefined();
+  });
+
+  it('releases the report and removes the row if creating its proxy view fails', async () => {
+    const rootId = await startRoot();
+    vi.spyOn(dependencies.mockProxyManager, 'createChildView').mockImplementation(() => {
+      throw new Error('view unavailable');
+    });
+
+    dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+    await vi.runAllTimersAsync();
+
+    expect(childOf(rootId)).toBeUndefined();
+    expect(releases()).toEqual([expect.objectContaining({ args: expect.objectContaining({ reportId: 'r1' }) })]);
+    expect(dependencies.mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('view unavailable'));
   });
 });

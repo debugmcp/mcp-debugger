@@ -939,6 +939,7 @@ describe('DapProxyWorker', () => {
       (worker as any).dapClient = { ...mockDapClient, sendRequest };
       (worker as any).adapterPolicy = cdpPolicy;
       (worker as any).adapterState = {};
+      (worker as any).currentSessionId = 'js-fnbp-session';
       (worker as any).currentInitPayload = {
         cmd: 'init',
         sessionId: 'js-fnbp-session',
@@ -972,6 +973,7 @@ describe('DapProxyWorker', () => {
       (worker as any).dapClient = { ...mockDapClient, sendRequest };
       (worker as any).adapterPolicy = cdpPolicy;
       (worker as any).adapterState = {};
+      (worker as any).currentSessionId = 'js-logpoint-session';
       (worker as any).currentInitPayload = {
         cmd: 'init',
         sessionId: 'js-logpoint-session',
@@ -990,6 +992,7 @@ describe('DapProxyWorker', () => {
 
       // plain line breakpoints alone leave the launch config untouched
       sendRequest.mockClear();
+      (worker as any).currentSessionId = 'js-plain-session';
       (worker as any).currentInitPayload = {
         cmd: 'init',
         sessionId: 'js-plain-session',
@@ -1019,6 +1022,7 @@ describe('DapProxyWorker', () => {
       (worker as any).dapClient = { ...mockDapClient, sendRequest };
       (worker as any).adapterPolicy = basePolicy;
       (worker as any).adapterState = {};
+      (worker as any).currentSessionId = 's';
       (worker as any).currentInitPayload = { cmd: 'init', sessionId: 's', initialFunctionBreakpoints: [] };
 
       await (worker as any).handleDapCommand({
@@ -3616,6 +3620,7 @@ describe('DapProxyWorker', () => {
         (worker as any).state = ProxyState.CONNECTED;
         (worker as any).isAttachMode = true;
         (worker as any).lastStop = lastStop;
+        (worker as any).currentSessionId = 's';
         return { sendRequest, processStub, connectionStub };
       }
 

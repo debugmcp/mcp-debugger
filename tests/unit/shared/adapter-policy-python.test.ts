@@ -166,8 +166,8 @@ describe('PythonAdapterPolicy child adoption (the session tree, issue #1081)', (
     type: 'python',
     name: 'Subprocess 37012',
     subProcessId: 37012,
-    program: 'C:\work\parent.py',
-    cwd: 'C:\work',
+    program: '/workspace/parent.py',
+    cwd: '/workspace',
     redirectOutput: true,
     justMyCode: true,
     connect: { host: '127.0.0.1', port: 5678 }
@@ -233,5 +233,30 @@ describe('PythonAdapterPolicy child adoption (the session tree, issue #1081)', (
     );
     expect(result).toEqual({ handled: true });
     expect(ctx.sendResponse).toHaveBeenCalledWith(expect.objectContaining({ command: 'runInTerminal' }), {});
+  });
+
+  it.each([
+    { command: 'unknown', arguments: { request: 'attach', configuration } },
+    { command: 'startDebugging', arguments: undefined },
+    { command: 'startDebugging', arguments: { request: 'launch', configuration } },
+    { command: 'startDebugging', arguments: { request: 'attach', configuration: null } },
+    { command: 'startDebugging', arguments: { request: 'attach', configuration: 'python' } },
+    { command: 'startDebugging', arguments: { request: 'attach', configuration: { subProcessId: '37012' } } }
+  ])('does not adopt an unrelated or malformed request: %j', async (request) => {
+    const ctx = context();
+    const result = await PythonAdapterPolicy.getDapClientBehavior().handleReverseRequest!(
+      { ...startDebugging, ...request }, ctx
+    );
+    expect(result).toEqual({ handled: false });
+    expect(ctx.sendResponse).not.toHaveBeenCalled();
+    expect(ctx.createChildSession).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, '', 17])('supplies a process name when debugpy sends %j', async (name) => {
+    const result = await PythonAdapterPolicy.getDapClientBehavior().handleReverseRequest!(
+      { ...startDebugging, arguments: { request: 'attach', configuration: { ...configuration, name } } },
+      context()
+    );
+    expect(result?.childReport).toMatchObject({ targetId: '37012', name: 'Subprocess 37012' });
   });
 });

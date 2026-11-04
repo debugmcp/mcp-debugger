@@ -114,6 +114,8 @@ export function childReportedOf(message: Extract<ProxyStatusMessage, { status: '
 
 export class ChildProxyView extends EventEmitter implements IChildProxyView {
   private connectionOpen = false;
+  private adoptionStarted = false;
+  private pendingAdoption: Promise<DebugProtocol.Response> | undefined;
   private stopped = false;
   private exitEmitted = false;
   private currentThreadId: number | null = null;
@@ -135,20 +137,34 @@ export class ChildProxyView extends EventEmitter implements IChildProxyView {
   }
 
   async adopt(args: ChildAdoptArgs, options: { timeoutMs?: number } = { timeoutMs: 30000 }): Promise<ChildAdoptResult> {
-    const response = await this.root.sendDapRequestAs<DebugProtocol.Response>(
+    if (this.stopped || this.exitEmitted) {
+      throw new Error(`child session ${this.childSessionId}: its connection is closed`);
+    }
+    this.adoptionStarted = true;
+    this.pendingAdoption = this.root.sendDapRequestAs<DebugProtocol.Response>(
       this.childSessionId,
       CHILD_ADOPT_COMMAND,
       args,
       options
     );
-    const body = (response?.body ?? {}) as Partial<ChildAdoptResult>;
-    this.connectionOpen = true;
-    if (body.capabilities) {
-      this.emit('adapter-capabilities', body.capabilities);
+    try {
+      const response = await this.pendingAdoption;
+      // Closing a child can race its handshake or the final IPC answer. Never
+      // reopen a detached view or announce readiness after a terminal event.
+      if (this.stopped || this.exitEmitted) {
+        throw new Error(`child session ${this.childSessionId}: its connection closed during adoption`);
+      }
+      const body = (response?.body ?? {}) as Partial<ChildAdoptResult>;
+      this.connectionOpen = true;
+      if (body.capabilities) {
+        this.emit('adapter-capabilities', body.capabilities);
+      }
+      this.emit('adapter-configured');
+      this.emit('initialized');
+      return { sessionId: body.sessionId ?? this.childSessionId, capabilities: body.capabilities };
+    } finally {
+      this.pendingAdoption = undefined;
     }
-    this.emit('adapter-configured');
-    this.emit('initialized');
-    return { sessionId: body.sessionId ?? this.childSessionId, capabilities: body.capabilities };
   }
 
   /**
@@ -161,7 +177,11 @@ export class ChildProxyView extends EventEmitter implements IChildProxyView {
       return;
     }
     this.stopped = true;
-    if (this.connectionOpen && this.root.isRunning()) {
+    const needsClose = this.connectionOpen || this.adoptionStarted;
+    this.connectionOpen = false;
+    // The worker registers an adoption before its first await, so the close
+    // also cancels a handshake still in flight on the same IPC channel.
+    if (needsClose && !this.exitEmitted && this.root.isRunning()) {
       try {
         await this.root.sendDapRequestAs(this.childSessionId, CHILD_CLOSE_COMMAND, { terminateDebuggee: true }, { timeoutMs: 5000 });
       } catch (error) {
@@ -174,19 +194,25 @@ export class ChildProxyView extends EventEmitter implements IChildProxyView {
     this.root.detachChildView(this.childSessionId);
   }
 
-  sendDapRequest<T extends DebugProtocol.Response>(
+  async sendDapRequest<T extends DebugProtocol.Response>(
     command: string,
     args?: unknown,
     options?: { timeoutMs?: number }
   ): Promise<T> {
+    // A stopped event (and the session layer's immediate inspection) may
+    // precede the adoption answer. Hold requests until the handshake settles,
+    // preserving its error if adoption fails, instead of rejecting a live child.
+    if (!this.connectionOpen && this.pendingAdoption && !this.stopped && !this.exitEmitted) {
+      await this.pendingAdoption;
+    }
     if (!this.connectionOpen || !this.root.isRunning()) {
-      return Promise.reject(new Error(`child session ${this.childSessionId}: its connection is not open`));
+      throw new Error(`child session ${this.childSessionId}: its connection is not open`);
     }
     return this.root.sendDapRequestAs<T>(this.childSessionId, command, args, options);
   }
 
   isRunning(): boolean {
-    return this.connectionOpen && this.root.isRunning();
+    return !this.stopped && !this.exitEmitted && (this.connectionOpen || this.pendingAdoption !== undefined) && this.root.isRunning();
   }
 
   getProxyPid(): number | null {

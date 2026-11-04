@@ -312,6 +312,9 @@ export abstract class SessionManagerCore extends EventEmitter {
    */
   private readonly sessionStateListeners = new Map<string, Set<() => void>>();
 
+  /** Do not admit new descendants while an explicit close or relaunch tears down a subtree. */
+  private readonly closingSubtrees = new Set<string>();
+
   /**
    * TTL cache for launch-gate toolchain probes (issue #360) — shares the
    * semantics of the list_supported_languages cache so repeated
@@ -480,10 +483,15 @@ export abstract class SessionManagerCore extends EventEmitter {
     // The session tree (issue #1081): closing any session closes its subtree
     // first, deepest first, so a child never outlives its parent's row and a
     // root's worker goes after its last child's connection.
-    for (const descendant of this.descendantsDeepestFirst(sessionId)) {
-      await this.closeSingleSession(descendant.id);
+    this.closingSubtrees.add(sessionId);
+    try {
+      for (const descendant of this.descendantsDeepestFirst(sessionId)) {
+        await this.closeSingleSession(descendant.id);
+      }
+      return await this.closeSingleSession(sessionId);
+    } finally {
+      this.closingSubtrees.delete(sessionId);
     }
-    return this.closeSingleSession(sessionId);
   }
 
   /** Close one session: its own proxy (a root's worker, a child's connection), its row, its waiters. */
@@ -597,6 +605,15 @@ export abstract class SessionManagerCore extends EventEmitter {
    * always released (issue #238).
    */
   protected async stopProxyPreservingSession(session: ManagedSession): Promise<void> {
+    this.closingSubtrees.add(session.id);
+    try {
+      await this.stopProxyAndDescendants(session);
+    } finally {
+      this.closingSubtrees.delete(session.id);
+    }
+  }
+
+  private async stopProxyAndDescendants(session: ManagedSession): Promise<void> {
     clearPauseIntent(session);
     // Children belong to a run (issue #1081): a relaunch, or the teardown of
     // a launch that failed, closes the previous run's children first.
@@ -661,6 +678,17 @@ export abstract class SessionManagerCore extends EventEmitter {
       current = parent;
     }
     return current;
+  }
+
+  private isSubtreeClosing(session: ManagedSession): boolean {
+    let current: ManagedSession | undefined = session;
+    const seen = new Set<string>();
+    while (current && !seen.has(current.id)) {
+      if (this.closingSubtrees.has(current.id)) return true;
+      seen.add(current.id);
+      current = current.parentSessionId ? this.sessionStore.get(current.parentSessionId) : undefined;
+    }
+    return false;
   }
 
   /** A session's direct children, in adoption (store insertion) order. */
@@ -756,6 +784,11 @@ export abstract class SessionManagerCore extends EventEmitter {
         });
     };
 
+    if (this.sessionStore.get(parent.id) !== parent || parent.proxyManager !== parentProxy || this.isSubtreeClosing(parent)) {
+      release('the parent session is closing or its connection has ended');
+      return;
+    }
+
     const cap = maxChildSessions(this.environment);
     const root = this.rootOf(parent);
     const live = this.liveDescendantCount(root.id);
@@ -772,39 +805,40 @@ export abstract class SessionManagerCore extends EventEmitter {
       return;
     }
 
-    const info = this.sessionStore.createSession({
-      language: parent.language,
-      name: reported.name,
-      executablePath: parent.executablePath,
-      parentSessionId: parent.id
-    });
-    const child = this.sessionStore.getOrThrow(info.id);
-    child.logDir = parent.logDir;
-    child.effectiveBreakOnExceptions = parent.effectiveBreakOnExceptions;
-    child.launchExceptionFilters = parent.launchExceptionFilters;
-    // The parent's current breakpoint set, re-sent to the child before it
-    // runs (the hold before configurationDone is where they bind); from then
-    // on each session's set is its own.
-    for (const bp of parent.breakpoints.values()) {
-      const copy = { ...bp };
-      resetBinding(copy);
-      child.breakpoints.set(copy.id, copy);
-    }
-    for (const bp of parent.functionBreakpoints?.values() ?? []) {
-      const copy = { ...bp };
-      resetBinding(copy);
-      child.functionBreakpoints.set(copy.id, copy);
-    }
-
-    const view = parentProxy.createChildView(child.id);
-    child.proxyManager = view;
-    this.setupProxyEventHandlers(child, view, { stopOnEntry: false });
-    this._updateSessionState(child, SessionState.RUNNING);
-    this.logger.info(
-      `[SessionManager] Adopting child ${reported.name} (${reported.targetId}) of session ${parent.id} as session ${child.id}`
-    );
-
+    let child: ManagedSession | undefined;
     try {
+      const info = this.sessionStore.createSession({
+        language: parent.language,
+        name: reported.name,
+        executablePath: parent.executablePath,
+        parentSessionId: parent.id
+      });
+      child = this.sessionStore.getOrThrow(info.id);
+      child.logDir = parent.logDir;
+      child.effectiveBreakOnExceptions = parent.effectiveBreakOnExceptions;
+      child.launchExceptionFilters = parent.launchExceptionFilters;
+      // The parent's current breakpoint set, re-sent to the child before it
+      // runs (the hold before configurationDone is where they bind); from then
+      // on each session's set is its own.
+      for (const bp of parent.breakpoints.values()) {
+        const copy = { ...bp };
+        resetBinding(copy);
+        child.breakpoints.set(copy.id, copy);
+      }
+      for (const bp of parent.functionBreakpoints?.values() ?? []) {
+        const copy = { ...bp };
+        resetBinding(copy);
+        child.functionBreakpoints.set(copy.id, copy);
+      }
+
+      const view = parentProxy.createChildView(child.id);
+      child.proxyManager = view;
+      this.setupProxyEventHandlers(child, view, { stopOnEntry: false });
+      this._updateSessionState(child, SessionState.RUNNING);
+      this.logger.info(
+        `[SessionManager] Adopting child ${reported.name} (${reported.targetId}) of session ${parent.id} as session ${child.id}`
+      );
+
       await view.adopt(
         {
           reportId: reported.reportId,
@@ -823,24 +857,20 @@ export abstract class SessionManagerCore extends EventEmitter {
         },
         { timeoutMs: 30000 }
       );
+      if (this.sessionStore.get(child.id) !== child) return;
       this.logger.info(`[SessionManager] Child session ${child.id} adopted (parent ${parent.id})`);
       this.emit('child-session-adopted', child.id, parent.id);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.warn(
-        `[SessionManager] Adopting child ${reported.name} of session ${parent.id} as session ${child.id} failed: ${message}`
+        `[SessionManager] Adopting child ${reported.name} of session ${parent.id} failed: ${message}`
       );
-      try {
-        this.cleanupProxyEventHandlers(child, view);
-      } catch {
-        // best effort
-      }
-      await view.stop().catch(() => undefined);
       release(`adoption failed: ${message}`);
-      if (this.sessionStore.get(child.id)) {
-        this.sessionStore.remove(child.id);
-        this.notifySessionStateListeners(child.id);
-        this.sessionStateListeners.delete(child.id);
+      if (child && this.sessionStore.get(child.id) === child && !this.isSubtreeClosing(child)) {
+        // Use the normal subtree teardown: a grandchild may already have
+        // been reported, and removing the last child must reap a root whose
+        // worker stop was deferred while this adoption was pending.
+        await this.closeSession(child.id);
       }
     }
   }

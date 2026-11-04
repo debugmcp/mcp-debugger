@@ -255,7 +255,21 @@ describe('ProxyManager child views (issue #1081)', () => {
     expect(first.isRunning()).toBe(false);
   });
 
-  it('an unknown session id still falls through, and a just-detached one is dropped quietly', async () => {
+  it('rejects events and terminal statuses for unknown children before they can affect the root', () => {
+    const stopped = vi.fn();
+    const exit = vi.fn();
+    root.on('stopped', stopped);
+    root.on('exit', exit);
+    fakeProcess.emit('message', { type: 'dapEvent', sessionId: 'nobody', event: 'stopped', body: { threadId: 99, reason: 'breakpoint' } });
+    fakeProcess.emit('message', { type: 'status', sessionId: 'nobody', status: 'terminated', expected: true });
+    expect(stopped).not.toHaveBeenCalled();
+    expect(exit).not.toHaveBeenCalled();
+    expect(root.getCurrentThreadId()).toBeNull();
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Session ID mismatch'));
+    expect(root.isRunning()).toBe(true);
+  });
+
+  it('warns for an unknown session id and drops a just-detached one quietly', async () => {
     const stray = vi.fn();
     root.on('stopped', stray);
     fakeProcess.emit('message', { type: 'status', sessionId: 'nobody', status: 'some_status' });
@@ -298,5 +312,22 @@ describe('ProxyManager child views (issue #1081)', () => {
     void unheard;
     fakeProcess.emit('message', reported('c2', 'report-h'));
     expect(sentDap().at(-1)).toMatchObject({ sessionId: 'c2', dapCommand: CHILD_RELEASE_COMMAND, dapArgs: expect.objectContaining({ reportId: 'report-h' }) });
+  });
+
+  it.each([new Error('worker unavailable'), 'worker unavailable'])('logs a failed automatic release without an unhandled rejection: %s', async (failure) => {
+    vi.spyOn(root, 'sendDapRequestAs').mockRejectedValueOnce(failure);
+    fakeProcess.emit('message', reported('root'));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Releasing reported child report-1 failed: worker unavailable'));
+  });
+
+  it('forwards an adapter process exit to all views once, including its expected flag', async () => {
+    const child = await adoptedView();
+    const exit = vi.fn();
+    child.on('exit', exit);
+    fakeProcess.emit('message', { type: 'status', sessionId: 'root', status: 'adapter_exited', code: 1, expected: false });
+    fakeProcess.emit('exit', 1, null);
+    expect(exit).toHaveBeenCalledExactlyOnceWith(1, undefined, false);
+    expect(child.isRunning()).toBe(false);
   });
 });

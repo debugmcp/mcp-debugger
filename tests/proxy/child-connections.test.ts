@@ -123,6 +123,7 @@ describe('ChildConnections: adopting a reported child', () => {
   };
   let dapClientFactory: { create: ReturnType<typeof vi.fn> };
   let connections: ChildConnections;
+  let adoptionDeps: ChildAdoptionDeps;
 
   const sentOf = (type: string, extra: (m: Record<string, unknown>) => boolean = () => true) =>
     sent.filter((m) => m.type === type && extra(m));
@@ -162,10 +163,7 @@ describe('ChildConnections: adopting a reported child', () => {
         calls.push('disconnect');
       })
     };
-    connections = new ChildConnections({
-      messageSender: { send: (message: unknown) => { sent.push(message as Record<string, unknown>); } },
-      logger,
-      adoption: {
+    adoptionDeps = {
         dapClientFactory: dapClientFactory as unknown as IDapClientFactory,
         connectionManager: connectionManager as unknown as ChildAdoptionDeps['connectionManager'],
         policy: PythonAdapterPolicy,
@@ -173,7 +171,11 @@ describe('ChildConnections: adopting a reported child', () => {
         port: 5678,
         adapterId: 'python',
         breakOnExceptions: 'uncaught'
-      }
+      };
+    connections = new ChildConnections({
+      messageSender: { send: (message: unknown) => { sent.push(message as Record<string, unknown>); } },
+      logger,
+      adoption: adoptionDeps
     });
     connections.attach(root, 'py-root');
   });
@@ -324,5 +326,226 @@ describe('ChildConnections: adopting a reported child', () => {
       targetId: '37013',
       name: 'Subprocess 37013'
     });
+  });
+
+  it('reserves a connecting child and cancels it when close races with connect', async () => {
+    let connected!: () => void;
+    childClient.connect.mockImplementation(() => new Promise<void>((resolve) => { connected = resolve; }));
+    const adopting = connections.adopt('child-1', { reportId: reportAChild() });
+    const rejected = expect(adopting).rejects.toThrow('closed during adoption');
+    expect(connections.liveCount()).toBe(1);
+    expect(connections.clientOf('child-1')).toBe(childClient);
+
+    await connections.close('child-1', { terminateDebuggee: true });
+    await rejected;
+    connected();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(connectionManager.initializeSession).not.toHaveBeenCalled();
+    expect(connections.liveCount()).toBe(0);
+    expect(root.respondToReverseRequest).toHaveBeenCalledTimes(1);
+    expect(root.respondToReverseRequest).toHaveBeenCalledWith(startDebugging(7), {}, false, expect.any(String));
+  });
+
+  it('cancels a handshake waiting for initialized without waiting for its timeout', async () => {
+    const { adopting } = await startAdoption();
+    const rejected = expect(adopting).rejects.toThrow('closed during adoption');
+    await connections.closeAll('shutdown');
+    await rejected;
+    childClient.emit('initialized');
+    expect(connectionManager.sendConfigurationDone).not.toHaveBeenCalled();
+    expect(childClient.listenerCount('initialized')).toBe(0);
+    expect(connections.liveCount()).toBe(0);
+  });
+
+  it('rejects a duplicate session while its first connection is still opening', async () => {
+    childClient.connect.mockImplementation(() => new Promise<void>(() => {}));
+    const adopting = connections.adopt('child-1', { reportId: reportAChild() });
+    const rejected = expect(adopting).rejects.toThrow('closed during adoption');
+    const secondReport = reportAChild(8);
+    await expect(connections.adopt('child-1', { reportId: secondReport })).rejects.toThrow('already has a connection');
+    expect(connections.release(secondReport, 'duplicate')).toBe(true);
+    await connections.closeAll('shutdown');
+    await rejected;
+  });
+
+  it('releases the report if the client factory throws', async () => {
+    dapClientFactory.create.mockImplementation(() => { throw new Error('factory failed'); });
+    await expect(connections.adopt('child-1', { reportId: reportAChild() })).rejects.toThrow('factory failed');
+    expect(root.respondToReverseRequest).toHaveBeenCalledWith(startDebugging(7), {}, false, expect.stringContaining('factory failed'));
+    expect(connections.liveCount()).toBe(0);
+  });
+
+  it('signals empty after the last pending adoption fails, allowing deferred worker shutdown', async () => {
+    const empty = vi.fn();
+    connections.on('empty', empty);
+    const { adopting } = await startAdoption();
+    rejectAttach(new Error('attach failed'));
+    await expect(adopting).rejects.toThrow('attach failed');
+    expect(empty).toHaveBeenCalledTimes(1);
+    expect(connections.liveCount()).toBe(0);
+  });
+
+  it('cancels adoption when its socket closes and reports an unexpected close', async () => {
+    const { adopting } = await startAdoption();
+    const rejected = expect(adopting).rejects.toThrow('connection closed during adoption');
+    childClient.emit('close');
+    await rejected;
+    expect(sentOf('status', (m) => m.status === 'dap_connection_closed')).toEqual([
+      expect.objectContaining({ sessionId: 'child-1', expected: false })
+    ]);
+    expect(connections.liveCount()).toBe(0);
+  });
+
+  it('releases a timed-out handshake and removes its initialized listener', async () => {
+    adoptionDeps.initializedTimeoutMs = 1;
+    await expect(connections.adopt('child-1', { reportId: reportAChild() })).rejects.toThrow('Timeout waiting for initialized');
+    expect(childClient.listenerCount('initialized')).toBe(0);
+    expect(childClient.shutdown).toHaveBeenCalled();
+    expect(root.respondToReverseRequest).toHaveBeenCalledWith(startDebugging(7), {}, false, expect.stringContaining('Timeout'));
+  });
+
+  it('rejects unknown reports and adapters without an adoption contract', async () => {
+    await expect(connections.adopt('child-1', { reportId: 'missing' })).rejects.toThrow('unknown or already answered');
+    const unsupported = new ChildConnections({ messageSender: { send: vi.fn() }, logger });
+    await expect(unsupported.adopt('child-1', { reportId: 'missing' })).rejects.toThrow('reports no child processes');
+  });
+
+  it('rejects new reports and adoptions after shutdown and releases held reports', async () => {
+    reportAChild();
+    await connections.closeAll('shutdown');
+    root.emit('child-report', { request: startDebugging(8), report });
+    await expect(connections.adopt('child-1', { reportId: 'missing' })).rejects.toThrow('shutting down');
+    expect(root.respondToReverseRequest).toHaveBeenCalledTimes(2);
+    expect(sentOf('status', (m) => m.status === 'child_reported')).toHaveLength(1);
+  });
+
+  it('forwards errors as child errors, preserving both Error and non-Error messages', async () => {
+    await adopted();
+    childClient.emit('error', new Error('socket failed'));
+    childClient.emit('error', 'adapter failed');
+    expect(sentOf('error')).toEqual([
+      { type: 'error', sessionId: 'child-1', message: 'socket failed' },
+      { type: 'error', sessionId: 'child-1', message: 'adapter failed' }
+    ]);
+  });
+
+  it.each(['none', undefined] as const)('does not install exception filters when mode is %s', async (mode) => {
+    adoptionDeps.breakOnExceptions = mode;
+    await adopted();
+    expect(connectionManager.setExceptionBreakpoints).not.toHaveBeenCalled();
+  });
+
+  it('continues the handshake when exception breakpoint installation fails', async () => {
+    connectionManager.setExceptionBreakpoints.mockRejectedValueOnce('unsupported filters');
+    await adopted();
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('unsupported filters'));
+    expect(connectionManager.sendConfigurationDone).toHaveBeenCalled();
+  });
+
+  it('echoes function breakpoint answers and incomplete line breakpoint answers', async () => {
+    const functionBreakpoints = [{ name: 'worker', condition: 'x > 0' }, { name: 'missing' }];
+    childClient.sendRequest.mockResolvedValueOnce({ body: { breakpoints: [
+      { verified: true, id: 12, line: 9, source: { path: '/w/child.py' }, message: 'bound' }
+    ] } });
+    connectionManager.setBreakpoints.mockResolvedValueOnce({ body: { breakpoints: [{ verified: false, message: 'not executable' }] } });
+    const adopting = connections.adopt('child-1', {
+      reportId: reportAChild(),
+      breakpoints: [{ id: 'bp-1', file: '/w/child.py', line: 7 }, { file: '/w/child.py', line: 8 }],
+      functionBreakpoints
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    childClient.emit('initialized');
+    await adopting;
+    expect(childClient.sendRequest).toHaveBeenCalledWith('setFunctionBreakpoints', { breakpoints: functionBreakpoints });
+    expect(sentOf('status', (m) => m.status === 'function_breakpoints_synced')).toEqual([
+      expect.objectContaining({ sessionId: 'child-1', functionBreakpoints: [
+        { name: 'worker', verified: true, id: 12, line: 9, source: '/w/child.py', message: 'bound' },
+        { name: 'missing', verified: false }
+      ] })
+    ]);
+    expect(sentOf('status', (m) => m.status === 'breakpoints_synced')).toEqual([
+      expect.objectContaining({ breakpoints: [
+        { id: 'bp-1', file: '/w/child.py', line: 7, verified: false, message: 'not executable' },
+        { file: '/w/child.py', line: 8, verified: false }
+      ] })
+    ]);
+  });
+
+  it('continues adoption if function breakpoints are unsupported', async () => {
+    childClient.sendRequest.mockRejectedValueOnce(new Error('unsupported functions'));
+    const adopting = connections.adopt('child-1', { reportId: reportAChild(), functionBreakpoints: [{ name: 'worker' }] });
+    await new Promise((resolve) => setImmediate(resolve));
+    childClient.emit('initialized');
+    await adopting;
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('unsupported functions'));
+    expect(connectionManager.sendConfigurationDone).toHaveBeenCalled();
+  });
+
+  it('forgets a closed child even when disconnect and shutdown throw', async () => {
+    await adopted();
+    connectionManager.disconnect.mockRejectedValueOnce('disconnect failed');
+    childClient.shutdown.mockImplementation(() => { throw new Error('shutdown failed'); });
+    await expect(connections.close('child-1', { terminateDebuggee: false })).resolves.toBe(true);
+    childClient.emit('close');
+    expect(sentOf('status', (m) => m.status === 'dap_connection_closed')).toHaveLength(0);
+    expect(connections.liveCount()).toBe(0);
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('disconnect failed'));
+  });
+
+  it('skips exception filters when the policy has none for this launch', async () => {
+    adoptionDeps.policy = { ...PythonAdapterPolicy, exceptionFiltersForLaunch: () => [] };
+    await adopted();
+    expect(connectionManager.setExceptionBreakpoints).not.toHaveBeenCalled();
+  });
+
+  it('marks every requested breakpoint unverified when the adapter omits breakpoint answers', async () => {
+    connectionManager.setBreakpoints.mockResolvedValueOnce({});
+    childClient.sendRequest.mockResolvedValueOnce({});
+    const adopting = connections.adopt('child-1', {
+      reportId: reportAChild(), breakpoints: [{ file: '/w/child.py', line: 7 }], functionBreakpoints: [{ name: 'worker' }]
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    childClient.emit('initialized');
+    await adopting;
+    expect(sentOf('status', (m) => m.status === 'breakpoints_synced')).toEqual([
+      expect.objectContaining({ breakpoints: [{ file: '/w/child.py', line: 7, verified: false }] })
+    ]);
+    expect(sentOf('status', (m) => m.status === 'function_breakpoints_synced')).toEqual([
+      expect.objectContaining({ functionBreakpoints: [{ name: 'worker', verified: false }] })
+    ]);
+  });
+
+  it('releases the report after a non-Error connection failure even if shutdown throws', async () => {
+    childClient.connect.mockRejectedValueOnce('connection refused');
+    childClient.shutdown.mockImplementationOnce(() => { throw new Error('cleanup failed'); });
+    await expect(connections.adopt('child-1', { reportId: reportAChild() })).rejects.toBe('connection refused');
+    expect(root.respondToReverseRequest).toHaveBeenCalledWith(startDebugging(7), {}, false, 'adoption failed: connection refused');
+    expect(connections.liveCount()).toBe(0);
+  });
+
+  it('preserves Error messages when exception setup and disconnect fail', async () => {
+    connectionManager.setExceptionBreakpoints.mockRejectedValueOnce(new Error('exception setup failed'));
+    await adopted();
+    connectionManager.disconnect.mockRejectedValueOnce(new Error('disconnect unavailable'));
+    await connections.close('child-1', { terminateDebuggee: false });
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('exception setup failed'));
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('disconnect unavailable'));
+  });
+
+  it('releases held grandchildren before closing their reporting socket, leaving other reports held', async () => {
+    await adopted();
+    childClient.emit('child-report', { request: startDebugging(9), report: { ...report, targetId: '37013' } });
+    const grandchildReportId = sentOf('status', (m) => m.status === 'child_reported').at(-1)!.reportId as string;
+    const siblingReportId = reportAChild(10);
+    root.respondToReverseRequest.mockClear();
+
+    await connections.close('child-1', { terminateDebuggee: true });
+
+    expect(childClient.respondToReverseRequest).toHaveBeenCalledWith(startDebugging(9), {}, false, 'reporting child session closed');
+    expect(childClient.respondToReverseRequest.mock.invocationCallOrder[0]).toBeLessThan(connectionManager.disconnect.mock.invocationCallOrder[0]);
+    expect(root.respondToReverseRequest).not.toHaveBeenCalled();
+    expect(connections.release(grandchildReportId, 'already released')).toBe(false);
+    expect(connections.release(siblingReportId, 'sibling remains available')).toBe(true);
   });
 });

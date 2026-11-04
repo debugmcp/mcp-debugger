@@ -215,6 +215,30 @@ describe('Python child processes under subProcess: true (the session tree, issue
     }
   }, 120000);
 
+  it('sets a breakpoint on an adopted child without changing the paused parent', async () => {
+    const { rootId, childId } = await startTree('subprocess-tree-child-breakpoint');
+    try {
+      const firstStop = await call('wait_for_stop', { sessionId: childId, timeout: 30000 });
+      expect(firstStop.state, JSON.stringify(firstStop)).toBe('paused');
+      const breakpoint = await call('set_breakpoint', {
+        sessionId: childId, file: childFixture, line: CHILD_BREAKPOINT_LINE + 1
+      });
+      expect(breakpoint.success, JSON.stringify(breakpoint)).toBe(true);
+
+      const resumed = await call('continue_execution', { sessionId: childId });
+      expect(resumed.success, JSON.stringify(resumed)).toBe(true);
+      const nextStop = await call('wait_for_stop', { sessionId: childId, timeout: 30000 });
+      expect(nextStop.state, JSON.stringify(nextStop)).toBe('paused');
+      expect(nextStop.location?.line ?? nextStop.lastStop?.line).toBe(CHILD_BREAKPOINT_LINE + 1);
+
+      const parentStop = await call('wait_for_stop', { sessionId: rootId, timeout: 1000 });
+      expect(parentStop.state, JSON.stringify(parentStop)).toBe('paused');
+      expect(parentStop.location?.line ?? parentStop.lastStop?.line).toBe(PARENT_BREAKPOINT_LINE);
+    } finally {
+      await call('close_debug_session', { sessionId: rootId });
+    }
+  }, 120000);
+
   it('closing the parent closes the child too and reaps the worker', async () => {
     const { rootId, childId } = await startTree('subprocess-tree-close-root');
     const childStop = await call('wait_for_stop', { sessionId: childId, timeout: 30000 });

@@ -85,6 +85,8 @@ interface ChildConnection {
   terminatedSeen: boolean;
   /** This worker closed the connection on purpose. */
   closed: boolean;
+  /** Cancel a handshake that is still opening this connection. */
+  cancelAdoption?: (reason: string) => void;
 }
 
 /** Forwarded as-is under the child's session id; `terminated` and `close` have their own handling. */
@@ -95,6 +97,7 @@ export class ChildConnections extends EventEmitter {
   /** Adopted child connections by their session id. */
   private readonly clients = new Map<string, ChildConnection>();
   private readonly releaseTimeoutMs: number;
+  private closing = false;
 
   constructor(private readonly options: ChildConnectionsOptions) {
     super();
@@ -164,6 +167,9 @@ export class ChildConnections extends EventEmitter {
     if (!deps || !contract) {
       throw new Error('this adapter reports no child processes');
     }
+    if (this.closing) {
+      throw new Error('child connections are shutting down');
+    }
     if (this.clients.has(childSessionId)) {
       throw new Error(`child session ${childSessionId} already has a connection`);
     }
@@ -174,21 +180,32 @@ export class ChildConnections extends EventEmitter {
 
     const { logger } = this.options;
     const label = `child:${childSessionId.slice(0, 8)}`;
-    const client = deps.dapClientFactory.create(deps.host, deps.port, deps.policy, { traceLabel: label });
-    const connection: ChildConnection = { sessionId: childSessionId, client, terminatedSeen: false, closed: false };
+    let client: IDapClient | undefined;
+    let connection: ChildConnection | undefined;
     let initializedTimer: NodeJS.Timeout | undefined;
+    let onInitialized: (() => void) | undefined;
     try {
-      logger.info(`[ChildConnections] Adopting child ${held.report.targetId} (${held.report.name}) as session ${childSessionId}`);
-      await client.connect();
+      client = deps.dapClientFactory.create(deps.host, deps.port, deps.policy, { traceLabel: label });
+      let cancelAdoption!: (reason: string) => void;
+      const cancelled = new Promise<never>((_, reject) => {
+        cancelAdoption = (reason) => reject(new Error(reason));
+      });
+      const wait = <T>(operation: Promise<T>): Promise<T> => Promise.race([operation, cancelled]);
+      connection = { sessionId: childSessionId, client, terminatedSeen: false, closed: false, cancelAdoption };
+      // Own the socket before connect yields: close/closeAll must also reach
+      // pending handshakes, and a root ending must wait for them.
       this.clients.set(childSessionId, connection);
       this.wireChildEvents(connection);
       // A grandchild is reported on this connection: it is this child's.
       this.attach(client, childSessionId);
+      logger.info(`[ChildConnections] Adopting child ${held.report.targetId} (${held.report.name}) as session ${childSessionId}`);
+      await wait(client.connect());
 
       const initializedSeen = new Promise<void>((resolve) => {
-        client.once('initialized', () => resolve());
+        onInitialized = resolve;
+        client!.once('initialized', onInitialized);
       });
-      const capabilities = await deps.connectionManager.initializeSession(client, childSessionId, deps.adapterId);
+      const capabilities = await wait(deps.connectionManager.initializeSession(client, childSessionId, deps.adapterId));
 
       const attach = deps.connectionManager.sendAttachRequest(client, contract.buildChildAttachArguments(held.report));
       const attachFailure = new Promise<never>((_, reject) => {
@@ -200,15 +217,16 @@ export class ChildConnections extends EventEmitter {
           deps.initializedTimeoutMs ?? CHILD_INITIALIZED_TIMEOUT_MS
         );
       });
-      await Promise.race([initializedSeen, attachFailure, initializedTimeout]);
+      await wait(Promise.race([initializedSeen, attachFailure, initializedTimeout]));
       clearTimeout(initializedTimer);
 
-      await this.sendExceptionBreakpoints(deps, client, childSessionId);
-      await this.sendBreakpoints(deps, client, childSessionId, args.breakpoints ?? []);
-      await this.sendFunctionBreakpoints(client, childSessionId, args.functionBreakpoints ?? []);
-      await deps.connectionManager.sendConfigurationDone(client);
-      await attach;
+      await wait(this.sendExceptionBreakpoints(deps, client, childSessionId));
+      await wait(this.sendBreakpoints(deps, client, childSessionId, args.breakpoints ?? []));
+      await wait(this.sendFunctionBreakpoints(client, childSessionId, args.functionBreakpoints ?? []));
+      await wait(deps.connectionManager.sendConfigurationDone(client));
+      await wait(attach);
 
+      connection.cancelAdoption = undefined;
       held.client.respondToReverseRequest?.(held.request, {}, true, undefined);
       logger.info(`[ChildConnections] Child ${held.report.targetId} adopted as session ${childSessionId}`);
       return { sessionId: childSessionId, capabilities };
@@ -216,15 +234,26 @@ export class ChildConnections extends EventEmitter {
       clearTimeout(initializedTimer);
       const message = error instanceof Error ? error.message : String(error);
       logger.warn(`[ChildConnections] Adoption of child ${held.report.targetId} as session ${childSessionId} failed: ${message}`);
-      connection.closed = true;
-      this.clients.delete(childSessionId);
+      if (connection) {
+        connection.closed = true;
+        connection.cancelAdoption = undefined;
+        if (this.clients.get(childSessionId) === connection) {
+          this.clients.delete(childSessionId);
+          this.emitEmptyIfSo();
+        }
+      }
       held.client.respondToReverseRequest?.(held.request, {}, false, `adoption failed: ${message}`);
       try {
-        client.shutdown(`child adoption failed: ${message}`);
+        client?.shutdown(`child adoption failed: ${message}`);
       } catch {
         // best effort
       }
       throw error;
+    } finally {
+      clearTimeout(initializedTimer);
+      if (onInitialized) {
+        client?.off('initialized', onInitialized);
+      }
     }
   }
 
@@ -238,8 +267,17 @@ export class ChildConnections extends EventEmitter {
     if (!connection) {
       return false;
     }
+    // A grandchild can be reported just as this child is closed. Release it
+    // while its reporting socket still exists; its safety timer cannot
+    // answer the reverse request after that socket has been destroyed.
+    for (const [reportId, held] of this.held) {
+      if (held.connectionSessionId === sessionId) {
+        this.release(reportId, 'reporting child session closed');
+      }
+    }
     connection.closed = true;
     this.clients.delete(sessionId);
+    connection.cancelAdoption?.('child session closed during adoption');
     const deps = this.options.adoption;
     try {
       await deps?.connectionManager.disconnect(connection.client, options.terminateDebuggee);
@@ -259,6 +297,8 @@ export class ChildConnections extends EventEmitter {
 
   /** Close every adopted connection without ending the children (the worker is going down). */
   async closeAll(reason: string): Promise<void> {
+    this.closing = true;
+    this.releaseAllHeld(reason);
     this.options.logger.info(`[ChildConnections] Closing ${this.clients.size} child connection(s): ${reason}`);
     for (const sessionId of Array.from(this.clients.keys())) {
       await this.close(sessionId, { terminateDebuggee: false });
@@ -268,6 +308,10 @@ export class ChildConnections extends EventEmitter {
   // ----- internals -----
 
   private hold(client: IDapClient, connectionSessionId: string, request: DebugProtocol.Request, report: ChildReport): void {
+    if (this.closing) {
+      client.respondToReverseRequest?.(request, {}, false, 'worker shutdown');
+      return;
+    }
     const reportId = randomUUID();
     const timer = setTimeout(() => {
       this.release(reportId, `no answer from the server within ${this.releaseTimeoutMs} ms`);
@@ -325,6 +369,7 @@ export class ChildConnections extends EventEmitter {
       return;
     }
     this.clients.delete(connection.sessionId);
+    connection.cancelAdoption?.('child connection closed during adoption');
     const message: StatusMessage = {
       type: 'status',
       status: 'dap_connection_closed',

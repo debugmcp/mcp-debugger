@@ -2009,6 +2009,16 @@ export class DapProxyWorker {
       await this.forwardToChild(childClient, payload);
       return;
     }
+    // A child may close between the server sending its request and this
+    // worker receiving it. Never execute that stale request on the root.
+    if (payload.sessionId !== this.currentSessionId) {
+      this.sendDapResponse(
+        payload.requestId, false, undefined,
+        `No child connection for session ${payload.sessionId}`,
+        payload.sessionId
+      );
+      return;
+    }
 
     // Check if we're connected
     if (!this.dapClient) {

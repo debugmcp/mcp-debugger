@@ -1330,8 +1330,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
     // The session tree (issue #1081): a message tagged with an adopted child's
     // id is that child's view's; a response resolves by request id whatever
-    // its tag. A tag this manager never knew falls through to the path below
-    // (which warns); one whose view was detached is dropped quietly.
+    // its tag. A tag this manager never knew is rejected before the root's
+    // event handlers; one whose view was detached is dropped quietly.
     if (this.sessionId !== null && message.sessionId !== this.sessionId) {
       if (message.type === 'dapResponse') {
         this.handleDapResponse(message as ProxyDapResponseMessage);
@@ -1346,6 +1346,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         this.logger.debug(`[ProxyManager] Ignoring message for closed child session ${message.sessionId}`);
         return;
       }
+      this.logger.warn(`Session ID mismatch. Expected ${this.sessionId}, got ${message.sessionId}`);
+      return;
     }
 
     // Fast-path: always forward DAP events to consumers to avoid missing stops/output
