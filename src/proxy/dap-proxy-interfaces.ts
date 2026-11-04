@@ -128,6 +128,20 @@ export interface StatusMessage extends ProxyMessage {
    * such as rdbg that stop synchronously with configurationDone.
    */
   lastStop?: DebugProtocol.StoppedEvent['body'];
+  /**
+   * A child the debuggee started, on 'child_reported' (the session tree,
+   * issue #1081): the worker holds the adapter's request under `reportId`
+   * until the parent process adopts (CHILD_ADOPT_COMMAND) or releases
+   * (CHILD_RELEASE_COMMAND) it. `sessionId` is the session whose connection
+   * the report arrived on, which is the child's parent.
+   */
+  reportId?: string;
+  /** The adapter's identity for the reported process (debugpy: the pid). */
+  targetId?: string;
+  /** The adapter's own label for the reported process (`Subprocess <pid>`). */
+  name?: string;
+  /** The configuration the adapter delivered with the report, verbatim. */
+  configuration?: Record<string, unknown>;
 }
 
 /** One entry of StatusMessage.breakpoints (issue #439). */
@@ -394,6 +408,33 @@ export interface DapProxyDependencies {
 
 export const MIRROR_EXPOSE_COMMAND = 'mirrorExpose';
 export const MIRROR_UNEXPOSE_COMMAND = 'mirrorUnexpose';
+
+// The session tree (issue #1081): the parent process's answers to a
+// 'child_reported' status, and the close of an adopted child's connection.
+// They ride the `dap` envelope too; the envelope's sessionId names the
+// connection: the reporting session's for a release, the child's for an
+// adopt or a close.
+export const CHILD_ADOPT_COMMAND = 'childAdopt';
+export const CHILD_RELEASE_COMMAND = 'childRelease';
+export const CHILD_CLOSE_COMMAND = 'childClose';
+
+/** `dapArgs` of CHILD_ADOPT_COMMAND: the held report and the parent's breakpoints to re-send before configurationDone. */
+export interface ChildAdoptArgs {
+  reportId: string;
+  breakpoints?: Array<{ file: string; line: number; condition?: string; hitCondition?: string; logMessage?: string }>;
+  functionBreakpoints?: Array<{ name: string; condition?: string; hitCondition?: string }>;
+}
+
+/** `dapArgs` of CHILD_RELEASE_COMMAND. */
+export interface ChildReleaseArgs {
+  reportId: string;
+  reason?: string;
+}
+
+/** `dapArgs` of CHILD_CLOSE_COMMAND. */
+export interface ChildCloseArgs {
+  terminateDebuggee: boolean;
+}
 
 // IPC watchdog message types sent by the worker (dap-proxy-core.ts) and
 // matched by ProxyManager.handleProxyMessage — shared so the coupling is
