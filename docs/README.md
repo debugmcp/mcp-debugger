@@ -56,6 +56,8 @@ Start with the [architecture overview](architecture/README.md); it indexes the r
 [System overview](architecture/system-overview.md) is the map,
 [component design](architecture/component-design.md) the per-module detail, and
 [adapter development](architecture/adapter-development-guide.md) the guide to adding a language.
+The [session tree](architecture/session-tree.md) is the design for a debuggee's child processes as
+sessions of their own (issue #1005 part B; not yet shipped).
 Cross-cutting patterns are in [`patterns/`](patterns/), and the
 [logging format](logging-format-specification.md) and
 [error handling](error-handling-guide.md) specs sit alongside.

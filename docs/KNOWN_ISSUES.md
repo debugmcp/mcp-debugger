@@ -94,7 +94,7 @@ each one until a debug client attaches to it â€” which mcp-debugger never does â
 ran and the parent hung with no stop and no exit. Children now run undebugged: a breakpoint in code
 that only a child executes does not hit. An explicit `dapLaunchArgs: { subProcess: true }` is
 forwarded with a warning naming the hang. Debugging the children themselves is the open half of
-issue #1005.
+issue #1005, designed in [the session tree](architecture/session-tree.md).
 
 ## Dart/Flutter: what the SDK debug adapter does differently
 
