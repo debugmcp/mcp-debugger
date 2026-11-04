@@ -175,7 +175,7 @@ export class AttachController {
       attachLocality = attachLocalityOf(addressing);
     }
 
-    if (session.proxyManager || session.pendingProxyStop) {
+    if (session.proxyManager || session.pendingProxyStop || session.deferredWorkerStop) {
       if (session.proxyManager) {
         this.ctx.logger.warn(
           `[SessionManager] Session ${sessionId} already has an active proxy. Terminating before attaching.`

@@ -194,6 +194,37 @@ describe('Server Session Tools Tests', () => {
       expect(content.count).toBe(2);
     });
 
+    it('carries parentSessionId on a child row only (session tree, issue #1081)', async () => {
+      const mockSessions: DebugSessionInfo[] = [
+        {
+          id: 'root-1',
+          name: 'python-debug-1',
+          language: 'python' as DebugLanguage,
+          state: 'paused' as SessionState,
+          createdAt: new Date()
+        },
+        {
+          id: 'child-1',
+          name: 'Subprocess 4242',
+          language: 'python' as DebugLanguage,
+          state: 'running' as SessionState,
+          createdAt: new Date(),
+          parentSessionId: 'root-1'
+        }
+      ];
+      mockSessionManager.getAllSessions.mockReturnValue(mockSessions);
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'list_debug_sessions', arguments: {} }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      const [rootRow, childRow] = content.sessions;
+      expect(childRow.parentSessionId).toBe('root-1');
+      expect(rootRow).not.toHaveProperty('parentSessionId');
+    });
+
     it('should handle SessionManager errors', async () => {
       mockSessionManager.getAllSessions.mockImplementation(() => {
         throw new Error('Failed to get sessions');

@@ -9,10 +9,11 @@ in what order). It is built from the measured facts in
 [the JavaScript spike notes](../javascript/spike-notes-forks.md); every claim about an adapter
 below cites one of those or a source named in the survey.
 
-Status: decisions taken 2026-11-03 (listed with their owners at the end); the document is under
-review in [#1083](https://github.com/debugmcp/mcp-debugger/pull/1083); implementation is tracked by [#1081](https://github.com/debugmcp/mcp-debugger/issues/1081) (M1, Python)
-and [#1082](https://github.com/debugmcp/mcp-debugger/issues/1082) (M2, js-debug). Nothing here is
-shipped yet.
+Status: decisions taken 2026-11-03 (listed with their owners at the end); merged in
+[#1083](https://github.com/debugmcp/mcp-debugger/pull/1083); implementation in progress: M1 PR 1
+(adoption behind an explicit `subProcess: true`) under [#1081](https://github.com/debugmcp/mcp-debugger/issues/1081),
+then the tree-aware wait, then the default flip; M2 is [#1082](https://github.com/debugmcp/mcp-debugger/issues/1082).
+Nothing here is shipped yet.
 Scope: debuggee children reported by the adapter (debugpy subprocesses, js-debug forks and, later,
 browser targets). The tree is additive to the shipped tool surface: no new tool, no changed
 parameter, new fields only.

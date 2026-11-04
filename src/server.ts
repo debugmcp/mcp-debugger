@@ -778,10 +778,19 @@ export class DebugMcpServer implements ToolContext {
     );
     registerPromptHandlers(this.server, this.environment);
     this.sessionManager.on('output-captured', this.outputResources.handleOutputCaptured);
+    // A child session adopted by the server (the session tree, issue #1081)
+    // is a new output resource: subscribed clients learn of it as they do of
+    // a session created or closed through the tools.
+    this.sessionManager.on('child-session-adopted', this.handleChildSessionAdopted);
     this.server.onerror = (error) => {
       this.logger.error('Server error', { error });
     };
   }
+
+  /** One listener instance, so stop() can remove exactly what start wired (issue #1081). */
+  private readonly handleChildSessionAdopted = (): void => {
+    this.outputResources.notifyListChanged();
+  };
 
   /**
    * Get session name for logging
@@ -821,6 +830,7 @@ export class DebugMcpServer implements ToolContext {
     // (the test suite runs with a strict leak guard).
     this.outputResources.dispose();
     this.sessionManager.removeListener('output-captured', this.outputResources.handleOutputCaptured);
+    this.sessionManager.removeListener('child-session-adopted', this.handleChildSessionAdopted);
     this.logger.info('Debug MCP Server stopped');
     // Last: detach this server's logger from the shared file transport so
     // per-session servers in HTTP mode don't accumulate on it (issue #404).

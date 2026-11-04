@@ -86,15 +86,18 @@ pause on raised exceptions in Ruby — it will also stop on caught ones.
 (Attach sessions never apply a language default; their `breakOnExceptions` default is
 `"none"` for every language.)
 
-## Python child processes run without the debugger
+## Python child processes run without the debugger by default
 
-Python launches and attaches send debugpy `subProcess: false`. With it on, pydevd hooks every
-Python child the program starts (`subprocess`, `multiprocessing`, pytest-xdist workers) and holds
-each one until a debug client attaches to it — which mcp-debugger never does — so the child never
-ran and the parent hung with no stop and no exit. Children now run undebugged: a breakpoint in code
-that only a child executes does not hit. An explicit `dapLaunchArgs: { subProcess: true }` is
-forwarded with a warning naming the hang. Debugging the children themselves is the open half of
-issue #1005, designed in [the session tree](architecture/session-tree.md).
+Python launches and attaches send debugpy `subProcess: false` by default, so children run
+undebugged: a breakpoint in code that only a child executes does not hit. With an explicit
+`dapLaunchArgs: { subProcess: true }` on a launch, each Python child the program starts
+(`subprocess`, `multiprocessing`, pytest-xdist workers) becomes a child debug session:
+`list_debug_sessions` lists it with `parentSessionId`, it stops on the parent's breakpoints (re-sent
+to it before it runs), and it has its own `get_output`, `wait_for_stop` and `close_debug_session`;
+closing the parent closes its children first. Today a child is discovered through
+`list_debug_sessions` (its row carries `parentSessionId`) and waited on with its own id. The default
+stays `false` until the tree-aware `wait_for_stop` lands (#1081); the design is
+[the session tree](architecture/session-tree.md).
 
 ## Dart/Flutter: what the SDK debug adapter does differently
 

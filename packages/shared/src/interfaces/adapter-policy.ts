@@ -16,6 +16,7 @@ import type { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
 import type { Breakpoint, ExceptionBreakMode, StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior } from './dap-client-behavior.js';
+import type { ChildAdoptionContract } from './child-adoption.js';
 import type { LanguageSpecificLaunchConfig } from './debug-adapter.js';
 import type { BreakpointFields } from '../utils/to-source-breakpoint.js';
 
@@ -493,6 +494,15 @@ export interface AdapterPolicy {
    * Strategy for how to create/attach to the child session when reverse startDebugging occurs
    */
   childSessionStrategy: ChildSessionStrategy;
+
+  /**
+   * The session-tree adoption contract (issue #1081): defined by an adapter that
+   * reports the processes its debuggee starts, so each becomes a child debug
+   * session of the reporting one. Undefined for adapters that report nothing;
+   * never combined with `supportsReverseStartDebugging` (the js-shaped
+   * single-target adoption of the program itself).
+   */
+  childAdoption?: ChildAdoptionContract;
 
   /**
    * Build the child start request (launch or attach) for a given pending target ID.

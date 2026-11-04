@@ -125,6 +125,7 @@ describe('noDebug launch completion (issue #746)', () => {
     (worker as any).connectionManager = connectionStub;
     (worker as any).adapterPolicy = policy;
     (worker as any).adapterState = policy.createInitialState();
+    (worker as any).currentSessionId = payload.sessionId;
     (worker as any).currentInitPayload = payload;
     (worker as any).state = ProxyState.INITIALIZING;
   }

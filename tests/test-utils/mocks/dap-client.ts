@@ -28,6 +28,7 @@ export type MockDapClient = IDapClient & EventEmitter & {
   // ({ success: true }, undefined) and read raw mock.calls args, which the
   // real sendRequest<T extends DebugProtocol.Response> signature would reject.
   sendRequest: Mock;
+  respondToReverseRequest: Mock<NonNullable<IDapClient['respondToReverseRequest']>>;
   on: Mock<IDapClient['on']>;
   off: Mock<IDapClient['off']>;
   once: Mock<IDapClient['once']>;
@@ -48,6 +49,7 @@ export function createMockDapClient(): MockDapClient {
     sendRequest: vi.fn().mockResolvedValue({ body: {} }),
     connect: vi.fn().mockResolvedValue(undefined),
     disconnect: vi.fn(),
+    respondToReverseRequest: vi.fn(),
     on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
       originalOn(event, handler);
       return client;

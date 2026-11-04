@@ -54,7 +54,7 @@ export function createProductionDependencies(
     },
     
     dapClientFactory: {
-      create: (host, port, policy) => new MinimalDapClient(host, port, policy)
+      create: (host, port, policy, options) => new MinimalDapClient(host, port, policy, options)
     },
     
     messageSender: {

@@ -4,6 +4,7 @@
  */
 
 import type { DebugProtocol } from '@vscode/debugprotocol';
+import type { ChildReport } from './child-adoption.js';
 
 /**
  * Result from handling a reverse request
@@ -12,6 +13,13 @@ export interface ReverseRequestResult {
   handled: boolean;
   createChildSession?: boolean;
   childConfig?: ChildSessionConfig;
+  /**
+   * A child the debuggee started, read off a `startDebugging` request by a
+   * policy with a `childAdoption` contract (issue #1081). The policy sends no
+   * response: the client holds the request until the server adopts or
+   * releases the child.
+   */
+  childReport?: ChildReport;
 }
 
 /**

@@ -42,6 +42,7 @@ describe('Server Output Resources Tests', () => {
   let mockSessionManager: MockSessionManager;
   let mockDependencies: Dependencies;
   let outputCapturedListener: ((sessionId: string, entry: unknown) => void) | undefined;
+  let childAdoptedListener: ((childId: string, parentId: string) => void) | undefined;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -61,6 +62,9 @@ describe('Server Output Resources Tests', () => {
       if (event === 'output-captured') {
         outputCapturedListener = listener;
       }
+      if (event === 'child-session-adopted') {
+        childAdoptedListener = listener;
+      }
     });
     vi.mocked(SessionManager).mockImplementation(function() { return mockSessionManager as any; });
 
@@ -72,6 +76,24 @@ describe('Server Output Resources Tests', () => {
     vi.useRealTimers();
     vi.clearAllMocks();
     outputCapturedListener = undefined;
+    childAdoptedListener = undefined;
+  });
+
+  describe('the session tree (issue #1081)', () => {
+    it('announces a newly adopted child session with resources/list_changed', () => {
+      expect(childAdoptedListener).toBeDefined();
+      vi.mocked(mockServer.sendResourceListChanged).mockClear();
+
+      childAdoptedListener!('child-1', 'root-1');
+
+      expect(mockServer.sendResourceListChanged).toHaveBeenCalledTimes(1);
+    });
+
+    it('drops the adoption subscription when the server stops', async () => {
+      await debugServer.stop();
+
+      expect(mockSessionManager.removeListener).toHaveBeenCalledWith('child-session-adopted', childAdoptedListener);
+    });
   });
 
   function mockSession(overrides: Record<string, unknown> = {}) {

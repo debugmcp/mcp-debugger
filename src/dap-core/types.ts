@@ -57,6 +57,8 @@ export type ProxyStatusMessage =
   | { type: 'status'; sessionId: string; status: 'dap_handshake_stage'; stage: 'transport_connected' | 'request_pending' | 'response_received'; command?: string; data?: unknown }
   /** The worker's pre-detach resume outcome (issue #763): a continue sent ahead of an attach-mode disconnect. */
   | { type: 'status'; sessionId: string; status: 'pre_detach_resume'; trigger: 'detach' | 'close' | 'shutdown'; threadId?: number; resumed: boolean; error?: string; data?: unknown }
+  /** A child the debuggee started (the session tree, issue #1081), held by the worker under `reportId` until adopted or released. */
+  | { type: 'status'; sessionId: string; status: 'child_reported'; reportId: string; targetId: string; name: string; configuration: Record<string, unknown>; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'adapter_exited' | 'dap_connection_closed' | 'terminated'; code?: number | null; signal?: NodeJS.Signals | null; expected?: boolean; stderrTail?: string[]; data?: unknown };
 
 export type ProxyDapEventMessage = { 

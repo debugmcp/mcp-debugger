@@ -1583,6 +1583,62 @@ describe('MinimalDapClient', () => {
       expect(responseSpy).toHaveBeenCalledWith(request, {});
     });
 
+    describe('a child report (the session tree, issue #1081)', () => {
+      const childReport = { targetId: '4242', name: 'Subprocess 4242', configuration: { subProcessId: 4242 } };
+      const request = {
+        seq: 9,
+        type: 'request',
+        command: 'startDebugging',
+        arguments: { request: 'attach', configuration: { subProcessId: 4242 } }
+      } as DebugProtocol.Request;
+
+      function reportingClient(): { client: MinimalDapClient; responseSpy: Mock } {
+        const client = new MinimalDapClient('localhost', 5678);
+        (client as any).dapBehavior = {
+          handleReverseRequest: vi.fn().mockResolvedValue({ handled: true, childReport })
+        } as DapClientBehavior;
+        (client as any).socket = { destroyed: false, write: vi.fn().mockReturnValue(true) } as unknown as net.Socket;
+        const responseSpy = vi.spyOn(client as any, 'sendResponse') as unknown as Mock;
+        return { client, responseSpy };
+      }
+
+      it('is handed to the child-report listener and left unanswered', async () => {
+        const { client, responseSpy } = reportingClient();
+        const listener = vi.fn();
+        client.on('child-report', listener);
+
+        await (client as any).handleProtocolMessage(request);
+
+        expect(listener).toHaveBeenCalledWith({ request, report: childReport });
+        expect(responseSpy).not.toHaveBeenCalled();
+      });
+
+      it('is released at once when nobody listens, so a child is never parked by default', async () => {
+        const { client, responseSpy } = reportingClient();
+
+        await (client as any).handleProtocolMessage(request);
+
+        expect(responseSpy).toHaveBeenCalledWith(request, {}, false, expect.stringContaining('no'));
+      });
+
+      it('respondToReverseRequest answers the held request on the wire', () => {
+        const { client } = reportingClient();
+        const written: DebugProtocol.ProtocolMessage[] = [];
+        (client as any).writeMessage = (message: DebugProtocol.ProtocolMessage) => { written.push(message); };
+
+        client.respondToReverseRequest(request, {}, false, 'released: over the child cap');
+
+        expect(written).toHaveLength(1);
+        expect(written[0]).toMatchObject({
+          type: 'response',
+          request_seq: 9,
+          command: 'startDebugging',
+          success: false,
+          message: 'released: over the child cap'
+        });
+      });
+    });
+
     it('delegates to policy handler and respects handled responses', async () => {
       const childSessionManager = createChildSessionManagerStub();
 

@@ -5,7 +5,7 @@ import type {
   ILogger
 } from '../../../src/proxy/dap-proxy-interfaces.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
-import { DefaultAdapterPolicy } from '@debugmcp/shared';
+import { DefaultAdapterPolicy, JsDebugAdapterPolicy, PythonAdapterPolicy } from '@debugmcp/shared';
 import { createMockDapClient } from '../../test-utils/mocks/dap-client.js';
 
 describe('DapConnectionManager', () => {
@@ -379,6 +379,28 @@ describe('DapConnectionManager', () => {
         supportsRunInTerminalRequest: false,
         locale: 'en-US'
       });
+    });
+
+    it('advertises supportsStartDebuggingRequest for a policy with the tree contract (issue #1081)', async () => {
+      mockDapClient.sendRequest.mockResolvedValue({ success: true });
+      connectionManager.setAdapterPolicy(PythonAdapterPolicy);
+
+      await connectionManager.initializeSession(mockDapClient, 'py-root', 'python');
+
+      expect(mockDapClient.sendRequest).toHaveBeenCalledWith(
+        'initialize',
+        expect.objectContaining({ supportsStartDebuggingRequest: true })
+      );
+    });
+
+    it('leaves supportsStartDebuggingRequest out for a policy without the tree contract', async () => {
+      mockDapClient.sendRequest.mockResolvedValue({ success: true });
+      connectionManager.setAdapterPolicy(JsDebugAdapterPolicy);
+
+      await connectionManager.initializeSession(mockDapClient, 'js-root', 'pwa-node');
+
+      const [, args] = mockDapClient.sendRequest.mock.calls[0];
+      expect(args).not.toHaveProperty('supportsStartDebuggingRequest');
     });
 
     it('should handle initialize request failure', async () => {
