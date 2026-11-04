@@ -1,7 +1,7 @@
 /**
  * Shared helpers for exploratory testing
  */
-import { Client, SSEClientTransport } from '@modelcontextprotocol/client';
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import net from 'net';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -81,9 +81,9 @@ export function sleep(ms) {
 
 // ========== MCP Client Helpers ==========
 
-export async function connectSSEClient(port, clientName = 'exploratory-test') {
+export async function connectHttpClient(port, clientName = 'exploratory-test') {
   const client = new Client({ name: clientName, version: '0.1.0' });
-  const transport = new SSEClientTransport(new URL(`http://127.0.0.1:${port}/sse`));
+  const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`));
   await client.connect(transport);
   return client;
 }

@@ -30,7 +30,7 @@ A simple Go program demonstrating basic debugging features:
 
 **To debug:** point at the `.go` source and let Delve compile it (mode `debug`) — no
 prior build needed. These are MCP tool calls your client invokes, not `mcp-debugger` shell
-subcommands; the CLI only has `stdio`, `sse`, `http`, `doctor`, and `check-rust-binary`.
+subcommands; the CLI only has `stdio`, `http`, `doctor`, and `check-rust-binary`.
 
 ```json
 create_debug_session {"language": "go", "name": "go-hello"}

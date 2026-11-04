@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildBackendEnvironment,
   resolveBackendPort,
+  resolveBackendTransport,
   updateBackendEnvOverrides,
 } from '../../../tools/dev-proxy/backend-env.mjs';
 
@@ -18,6 +19,23 @@ describe('dev-proxy backend port (issue #689)', () => {
     (raw) => {
       expect(() => resolveBackendPort(raw)).toThrow(/DEV_PROXY_PORT/);
       expect(() => resolveBackendPort(raw)).toThrow(raw);
+    }
+  );
+});
+
+describe('dev-proxy backend transport (issue #1078)', () => {
+  it('defaults to http when DEV_PROXY_BACKEND_TRANSPORT is unset or empty, and accepts http or stdio', () => {
+    expect(resolveBackendTransport(undefined)).toBe('http');
+    expect(resolveBackendTransport('')).toBe('http');
+    expect(resolveBackendTransport('http')).toBe('http');
+    expect(resolveBackendTransport('stdio')).toBe('stdio');
+  });
+
+  it.each(['sse', 'HTTP', 'websocket', ' http'])(
+    "refuses '%s' by name instead of silently picking a transport",
+    (raw) => {
+      expect(() => resolveBackendTransport(raw)).toThrow(/DEV_PROXY_BACKEND_TRANSPORT/);
+      expect(() => resolveBackendTransport(raw)).toThrow(raw);
     }
   );
 });

@@ -5,7 +5,6 @@ import { DebugMcpServer } from '../../src/server.js';
 import * as errorHandlers from '../../src/cli/error-handlers.js';
 import * as setup from '../../src/cli/setup.js';
 import * as stdioCommand from '../../src/cli/stdio-command.js';
-import * as sseCommand from '../../src/cli/sse-command.js';
 import * as version from '../../src/cli/version.js';
 import { runStartupJanitor } from '../../src/utils/startup-janitor.js';
 
@@ -15,7 +14,6 @@ vi.mock('../../src/server.js');
 vi.mock('../../src/cli/error-handlers.js');
 vi.mock('../../src/cli/setup.js');
 vi.mock('../../src/cli/stdio-command.js');
-vi.mock('../../src/cli/sse-command.js');
 vi.mock('../../src/cli/version.js');
 vi.mock('../../src/cli/commands/doctor/index.js', () => ({
   handleDoctorCommand: vi.fn().mockResolvedValue(1)
@@ -57,14 +55,12 @@ describe('index.ts', () => {
     // Mock CLI setup functions
     vi.mocked(setup.createCLI).mockReturnValue(mockProgram);
     vi.mocked(setup.setupStdioCommand).mockImplementation(() => {});
-    vi.mocked(setup.setupSSECommand).mockImplementation(() => {});
 
     // Mock version
     vi.mocked(version.getVersion).mockReturnValue('1.0.0');
 
     // Mock command handlers
     vi.mocked(stdioCommand.handleStdioCommand).mockResolvedValue(undefined);
-    vi.mocked(sseCommand.handleSSECommand).mockResolvedValue(undefined);
     vi.mocked(runStartupJanitor).mockResolvedValue(undefined);
   });
 
@@ -100,7 +96,7 @@ describe('index.ts', () => {
 
       // Verify commands were set up
       expect(setup.setupStdioCommand).toHaveBeenCalledWith(mockProgram, expect.any(Function));
-      expect(setup.setupSSECommand).toHaveBeenCalledWith(mockProgram, expect.any(Function));
+      expect(setup.setupHttpCommand).toHaveBeenCalledWith(mockProgram, expect.any(Function));
 
       // Verify parse was called
       expect(mockProgram.parseAsync).toHaveBeenCalled();
@@ -220,28 +216,6 @@ describe('index.ts', () => {
 
       expect(stdioCommand.handleStdioCommand).toHaveBeenCalledTimes(1);
     });
-
-    it('should pass correct handlers to setupSSECommand', async () => {
-      let capturedHandler: any;
-      vi.mocked(setup.setupSSECommand).mockImplementation((program, handler) => {
-        capturedHandler = handler;
-      });
-
-      await main();
-
-      // Call the captured handler
-      const options = { port: '4000', logLevel: 'debug' };
-      await capturedHandler(options);
-
-      // Verify handleSSECommand was called with correct dependencies
-      expect(sseCommand.handleSSECommand).toHaveBeenCalledWith(
-        options,
-        {
-          logger: mockLogger,
-          serverFactory: createDebugMcpServer
-        }
-      );
-    });
   });
 
   describe('Module execution guard', () => {
@@ -263,9 +237,8 @@ describe('index.ts', () => {
       expect(errorHandlers.setupErrorHandlers).toBeDefined();
       expect(setup.createCLI).toBeDefined();
       expect(setup.setupStdioCommand).toBeDefined();
-      expect(setup.setupSSECommand).toBeDefined();
+      expect(setup.setupHttpCommand).toBeDefined();
       expect(stdioCommand.handleStdioCommand).toBeDefined();
-      expect(sseCommand.handleSSECommand).toBeDefined();
     });
   });
 });

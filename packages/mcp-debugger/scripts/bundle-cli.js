@@ -6,7 +6,7 @@
  *  - packages/mcp-debugger/dist/**               (runtime bundle used by the CLI)
  *  - packages/mcp-debugger/package/dist/**       (mirrors the bundle for npm pack)
  *  - packages/mcp-debugger/package/debugmcp-*.tgz (fresh npm pack tarball)
- * It also regenerates dist/proxy/proxy-bundle.cjs for SSE/stdio transports.
+ * It also regenerates dist/proxy/proxy-bundle.cjs, the DAP proxy worker every transport spawns.
  */
 
 import { build } from 'tsup';

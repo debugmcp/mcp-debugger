@@ -102,9 +102,9 @@ def check_debugpy():
 # release. They must follow the mode; a leading unknown flag would be taken
 # as the mode itself.
 @click.command(context_settings=dict(help_option_names=['-h', '--help'], ignore_unknown_options=True))
-@click.argument('mode', default='stdio', type=click.Choice(['stdio', 'http', 'sse']))
+@click.argument('mode', default='stdio', type=click.Choice(['stdio', 'http']))
 @click.argument('server_args', nargs=-1, type=click.UNPROCESSED)
-@click.option('--port', '-p', type=int, help='Port for http/sse mode (default: 3001)')
+@click.option('--port', '-p', type=int, help='Port for http mode (default: 3001)')
 @click.option('--bind', type=str, default=None, metavar='ADDR',
               help='Address the server is reachable on (default: 127.0.0.1; 0.0.0.0 for every '
                    'interface). npx: forwarded as the server flag --bind; Docker: the host address '
@@ -117,7 +117,7 @@ def check_debugpy():
 def main(mode: str, server_args: tuple, port: Optional[int], bind: Optional[str],
          docker: bool, npm: bool, dry_run: bool, verbose: bool):
     """
-    Launch the debug-mcp-server in stdio (default), http, or sse mode.
+    Launch the debug-mcp-server in stdio (default) or http mode.
 
     Flags the launcher does not recognise are passed to the server as given,
     after the mode: `debug-mcp-server http --allowed-host mcp-debugger`.
@@ -129,15 +129,10 @@ def main(mode: str, server_args: tuple, port: Optional[int], bind: Optional[str]
       debug-mcp-server http -p 8080  # HTTP mode with custom port
       debug-mcp-server http --allowed-host mcp-debugger   # server flag, forwarded
       debug-mcp-server http --docker --bind 0.0.0.0 --allowed-host myhost
-      debug-mcp-server sse           # SSE mode (DEPRECATED: use http)
       debug-mcp-server --docker      # Force Docker mode
       debug-mcp-server --npm         # Force npm mode
     """
 
-    if mode == "sse":
-        print("Warning: sse mode is deprecated - use http (Streamable HTTP) instead.", file=sys.stderr)
-        print(file=sys.stderr)
-    
     # Check debugpy for backward compatibility
     debugpy_available, debugpy_version = check_debugpy()
     if not debugpy_available:
@@ -199,7 +194,7 @@ def main(mode: str, server_args: tuple, port: Optional[int], bind: Optional[str]
     # Display what we're going to do
     print(f"\n🎯 Mode: {mode.upper()}")
     if mode in DebugMCPLauncher.PORTED_MODES:
-        actual_port = port or DebugMCPLauncher.DEFAULT_SSE_PORT
+        actual_port = port or DebugMCPLauncher.DEFAULT_HTTP_PORT
         print(f"🔌 Port: {actual_port}")
         if runtime == "docker":
             print(f"🌐 Published on: {bind or DebugMCPLauncher.DEFAULT_BIND}:{actual_port}")
@@ -209,7 +204,7 @@ def main(mode: str, server_args: tuple, port: Optional[int], bind: Optional[str]
         # Neither runtime does anything with it for stdio (the npx command
         # omits it, the Docker command publishes no port): say so rather than
         # print a "Bind:" line that suggests otherwise.
-        print("⚠️  --bind applies to http/sse only; ignored for stdio", file=sys.stderr)
+        print("⚠️  --bind applies to http only; ignored for stdio", file=sys.stderr)
     print(f"🏃 Runtime: {runtime.upper()}")
     if server_args:
         print(f"➡️  Server flags: {_display_command(list(server_args))}")

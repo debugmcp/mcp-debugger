@@ -1,7 +1,7 @@
 /**
  * The `--port` option for the network transports (issue #689).
  *
- * `http` and the deprecated `sse` used to take `-p, --port <number>` with no
+ * `http` used to take `-p, --port <number>` with no
  * parser and hand `parseInt(options.port, 10)` straight to `listen()`: `-p abc`
  * failed with Node's own `options.port should be >= 0 and < 65536. Received
  * type number (NaN)` (naming an internal, not the flag, and not the value

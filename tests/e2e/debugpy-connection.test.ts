@@ -12,7 +12,7 @@ import * as net from 'net';
 import * as path from 'path';
 import { writeFile, rm } from 'node:fs/promises'; // Native promise-based fs
 import { existsSync as nativeNodeExistsSync } from 'node:fs';
-import { Client, SSEClientTransport, ServerResult } from '@modelcontextprotocol/client';
+import { Client, StreamableHTTPClientTransport, ServerResult } from '@modelcontextprotocol/client';
 import { waitUntil, delay } from '../test-utils/helpers/test-utils.js';
 // No mocking of python-utils - E2E tests should use real Python discovery
 const TEST_TIMEOUT = 60000;
@@ -182,8 +182,8 @@ async function startDebugpyServer(port = 5679): Promise<ChildProcess> {
 }
 
 async function startMcpServer(port: number): Promise<ChildProcess> {
-  console.log('Starting MCP server in SSE mode');
-  const serverProcess = spawn(process.execPath, ['dist/index.js', 'sse', '-p', port.toString(), '--log-level', 'debug'], { stdio: 'pipe' });
+  console.log('Starting MCP server in http mode');
+  const serverProcess = spawn(process.execPath, ['dist/index.js', 'http', '-p', port.toString(), '--log-level', 'debug'], { stdio: 'pipe' });
   serverProcess.stdout?.on('data', (data) => console.log(`[MCP Server] ${data.toString().trim()}`));
   serverProcess.stderr?.on('data', (data) => console.error(`[MCP Server Error] ${data.toString().trim()}`));
   // Readiness is gated by the caller polling /health (see beforeAll), so no fixed sleep here.
@@ -218,9 +218,9 @@ describe('MCP Server connecting to debugpy', () => {
       console.log('[E2E Test] MCP server /health reported OK.');
       
       mcpSdkClient = new Client({ name: "e2e-sdk-test-client", version: "0.1.0" });
-      const transport = new SSEClientTransport(new URL(`http://127.0.0.1:${serverPort}/sse`));
+      const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${serverPort}/mcp`));
       await mcpSdkClient.connect(transport);
-      console.log('[E2E Test] MCP SDK Client connected via SSE.');
+      console.log('[E2E Test] MCP SDK Client connected via Streamable HTTP.');
     } catch (error) {
       console.error('[E2E Setup] Error during setup:', error);
       // Use centralized cleanup function

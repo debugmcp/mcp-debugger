@@ -424,8 +424,6 @@ To see mcp-debugger in action:
    node dist/index.js http -p 3001
    ```
 
-   The `sse` subcommand still exists but is deprecated; use `http` instead.
-
 3. **Example debugging session**:
    - Create a debug session
    - Set a breakpoint at line 10

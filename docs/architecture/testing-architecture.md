@@ -162,8 +162,8 @@ The standard pattern: `beforeAll` spawns the real MCP server as a child process 
 
 - **`parseSdkToolResult()`** — unwraps the MCP SDK's `ServerResult` envelope (`content[0].text`) and JSON-parses it into a plain object for assertions.
 - **`callToolSafely()`** — wraps `mcpClient.callTool()` with error handling; returns `{ success: false, message }` instead of throwing on MCP errors.
-- **`executeDebugSequence()`** — reusable flow: create session → set breakpoint → start debugging → return sessionId. Used by SSE smoke tests.
-- **`waitForHealthEndpoint()`** — polls `http://localhost:{port}/health` for SSE server readiness.
+- **`executeDebugSequence()`** — reusable flow: create session → set breakpoint → start debugging → return sessionId. Used by the HTTP transport smoke test.
+- **`waitForHealthEndpoint()`** — polls `http://localhost:{port}/health` for HTTP server readiness.
 
 Cleanup: `afterAll` closes the MCP client and kills the server process. `afterEach` closes the current session as a per-test safety net (errors caught and ignored if session already closed).
 
@@ -171,7 +171,7 @@ Cleanup: `afterAll` closes the MCP client and kills the server process. `afterEa
 
 ### STDIO Smoke Test Matrix
 
-`tests/e2e/mcp-server-smoke-*.test.ts` is the per-language STDIO matrix. Rather than a count that goes stale, the shape of the set: every supported language has a launch smoke test (Python, JavaScript, Rust, Go, Java, .NET, Ruby, C++, COBOL), and some languages carry extra files next to it — `-attach` for Python, JavaScript, Java, .NET, Ruby and C++; `-function-bp` for JavaScript, Rust and Java. Read that as the smoke coverage that exists, not as the capability matrix: every adapter policy except Ruby's and COBOL's sets `supportsFunctionBreakpoints: true` (Ruby's and COBOL's pin `false`) (`packages/shared/src/interfaces/adapter-policy-*.ts`), and only three of them have a `-function-bp` file. Java carries the largest set of behavioral extras (`evaluate`, `inner-class`, `pause`, `event-race`, `redefine`). The same glob also picks up tests that are about the server rather than a language: `-restart`, `-http-stale-reap`, and the two SSE files below. `pnpm run test:e2e:smoke` runs the whole glob.
+`tests/e2e/mcp-server-smoke-*.test.ts` is the per-language STDIO matrix. Rather than a count that goes stale, the shape of the set: every supported language has a launch smoke test (Python, JavaScript, Rust, Go, Java, .NET, Ruby, C++, COBOL), and some languages carry extra files next to it — `-attach` for Python, JavaScript, Java, .NET, Ruby and C++; `-function-bp` for JavaScript, Rust and Java. Read that as the smoke coverage that exists, not as the capability matrix: every adapter policy except Ruby's and COBOL's sets `supportsFunctionBreakpoints: true` (Ruby's and COBOL's pin `false`) (`packages/shared/src/interfaces/adapter-policy-*.ts`), and only three of them have a `-function-bp` file. Java carries the largest set of behavioral extras (`evaluate`, `inner-class`, `pause`, `event-race`, `redefine`). The same glob also picks up tests that are about the server rather than a language: `-restart`, `-http-stale-reap`, and the HTTP transport file below. `pnpm run test:e2e:smoke` runs the whole glob.
 
 Each per-language test follows the standard lifecycle:
 
@@ -182,9 +182,9 @@ Each per-language test follows the standard lifecycle:
 
 Language-specific tests add specialized coverage: Java attach mode (spawn JVM with JDWP agent, use `attach_to_process`), Java expression evaluation, Java inner-class breakpoints, .NET with netcoredbg. Tests skip gracefully when toolchains are not installed.
 
-### SSE Transport Tests
+### HTTP Transport Test
 
-Two SSE test files test the SSE HTTP transport: Python over SSE (`mcp-server-smoke-sse.test.ts`) and JavaScript over SSE (`mcp-server-smoke-javascript-sse.test.ts`). Pattern: spawn server with `sse -p {port}` args, wait for health endpoint via polling, connect via `SSEClientTransport`, run the debug workflow.
+`mcp-server-smoke-http.test.ts` runs the Python debug workflow over the Streamable HTTP transport, once from the project root and once with the server spawned from a different working directory. Pattern: spawn the server with `http -p {port}` args, wait for the health endpoint via polling, connect via `StreamableHTTPClientTransport` on `/mcp`, run the debug workflow.
 
 ### Comprehensive Matrix Test
 
@@ -254,13 +254,13 @@ Pattern: `vi.useFakeTimers()` in a try/finally block with `vi.useRealTimers()` i
 
 **Location:** `tests/stress/`
 
-Gated behind `RUN_STRESS_TESTS=true` (uses `describe.skip` otherwise). `sse-stress.test.ts` exercises rapid connect/disconnect cycles, concurrent sessions, long-running connections, and resource leak detection — collecting metrics (connections attempted/succeeded/failed, average connect time, memory usage). `cross-transport-parity.test.ts` runs identical debug sequences over STDIO and SSE, comparing results for equivalence.
+Gated behind `RUN_STRESS_TESTS=true` (uses `describe.skip` otherwise). `cross-transport-parity.test.ts` runs identical debug sequences over STDIO and Streamable HTTP, comparing results for equivalence.
 
 ### Manual Tests
 
 **Location:** `tests/manual/`
 
-Interactive scripts not run by Vitest. For ad-hoc debugging of SSE connections, debugpy transport, js-debug transport, and proxy behavior. Includes `.cjs`, `.mjs`, `.ts`, `.py`, `.js`, and `.cmd` files.
+Interactive scripts not run by Vitest. For ad-hoc checks of the dev proxy's orphan handling and the debugpy launch path. Includes `.mjs` and `.ts` files.
 
 ### Validation Tests
 

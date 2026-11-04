@@ -7,7 +7,7 @@
  * kept running under a client it could not reach. The gate sits in the
  * tools/call dispatch, in front of every handler, consulting the hook the
  * HTTP layer injects (`describeForeignSession`); a server without the hook
- * (stdio, SSE) dispatches exactly as before.
+ * (stdio) dispatches exactly as before.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Server, InMemoryTransport } from '@modelcontextprotocol/server';
@@ -133,7 +133,7 @@ describe('tools/call on a session id another server owns (issue #939)', () => {
     expect(ctx.describeForeignSession).not.toHaveBeenCalled();
   });
 
-  it('a server without the hook (stdio, SSE) dispatches as before', async () => {
+  it('a server without the hook (stdio) dispatches as before', async () => {
     const ctx = fakeContext({ describeForeignSession: undefined });
     registerToolHandlers(server, ctx);
     client = await connect(server);

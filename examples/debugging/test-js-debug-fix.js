@@ -1,4 +1,4 @@
-// Simple test script for debugging (filename is historical — no SSE-specific logic; plain breakpoint target)
+// Simple test script for debugging: a plain breakpoint target
 function testFunction() {
     const x = 10;
     const y = 20;

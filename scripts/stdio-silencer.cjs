@@ -34,7 +34,6 @@
 
     const argvValues = Array.isArray(process.argv) ? process.argv : [];
     const shouldSilence = argvValues.some(arg => matchesKeyword(arg, 'stdio')) ||
-                          argvValues.some(arg => matchesKeyword(arg, 'sse')) ||
                           process.env.CONSOLE_OUTPUT_SILENCED === '1';
 
     if (!shouldSilence) {

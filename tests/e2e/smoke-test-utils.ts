@@ -145,12 +145,12 @@ export async function executeDebugSequence(
 }
 
 /**
- * Wait for SSE server to be ready by checking health endpoint
+ * Wait for the HTTP server to be ready by checking health endpoint
  */
 export async function waitForHealthEndpoint(port: number, timeout: number = 10000): Promise<boolean> {
   const startTime = Date.now();
   const healthUrl = `http://127.0.0.1:${port}/health`;
-  console.log(`[Smoke Test] Waiting for SSE server health at ${healthUrl}...`);
+  console.log(`[Smoke Test] Waiting for HTTP server health at ${healthUrl}...`);
 
   while (Date.now() - startTime < timeout) {
     try {
@@ -158,7 +158,7 @@ export async function waitForHealthEndpoint(port: number, timeout: number = 1000
       if (response.ok) {
         const healthStatus = (await response.json()) as { status?: string };
         if (healthStatus.status === 'ok') {
-          console.log('[Smoke Test] SSE server health check passed');
+          console.log('[Smoke Test] HTTP server health check passed');
           return true;
         }
       }
@@ -168,7 +168,7 @@ export async function waitForHealthEndpoint(port: number, timeout: number = 1000
     await new Promise(resolve => setTimeout(resolve, 500));
   }
 
-  console.error(`[Smoke Test] Timeout waiting for SSE server on port ${port}`);
+  console.error(`[Smoke Test] Timeout waiting for HTTP server on port ${port}`);
   return false;
 }
 

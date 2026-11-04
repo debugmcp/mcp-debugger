@@ -70,7 +70,7 @@ If your agent runs in a terminal, a pipeline, or a cloud sandbox — or needs to
 - 💥 **Crash-state debugging by default** – Launch sessions pause on uncaught exceptions with stack and locals live (`breakOnExceptions`; exception class/message surfaced via `lastStop`)
 - 🪞 **Read-only IDE mirror** – `expose_session` opens a loopback, token-gated DAP endpoint so a human's IDE can inspect the agent's live session without taking control
 - ☸️ **Kubernetes debugging** – port-forward attach for interpreted runtimes, `kubectl debug --target` + attach-by-PID for native processes ([recipe](docs/kubernetes.md), [turnkey manifests](examples/kubernetes/))
-- 🔌 **STDIO and Streamable HTTP transports** – Works with any MCP client (legacy SSE transport is deprecated)
+- 🔌 **STDIO and Streamable HTTP transports** – Works with any MCP client
 - 📦 **Zero-runtime dependencies** – Self-contained bundles via esbuild + tsup
 - ⚡ **npx ready** – Run directly with `npx @debugmcp/mcp-debugger` - no installation needed
 - 🐳 **Docker and npm packages** – Deploy anywhere
@@ -233,8 +233,7 @@ dropped (`MCP_HTTP_STREAM_LOST_SESSION_MS`), or 30 minutes idle if it never open
 The port defaults to 3001, and the server listens on `127.0.0.1` only. `--bind 0.0.0.0` (or
 `MCP_HTTP_BIND=0.0.0.0`) listens on every interface — pair it with `--allowed-host` for the names other
 machines will use; `--bind localhost` means `127.0.0.1`, and only IP addresses are accepted. `GET /health`
-on the same port answers a liveness check and reports the bound address and port under `listening`. The
-legacy `sse` subcommand still exists but is deprecated — use `http`.
+on the same port answers a liveness check and reports the bound address and port under `listening`.
 
 The server accepts only loopback `Host` headers by default — `localhost`, `127.0.0.1`, `[::1]` —
 as DNS-rebinding protection for an unauthenticated endpoint that can spawn processes and attach to
@@ -244,8 +243,7 @@ interface with `--bind`; any other `Host` gets a 403 that says so. To accept a s
 container network — start the server with `--allowed-host mcp-debugger` (repeatable) or
 `MCP_HTTP_ALLOWED_HOSTS=mcp-debugger` (comma-separated). That opt-in means another access control
 fronts the server; there is no wildcard. Browser clients are checked against the same list by
-their `Origin`, so a cross-site page cannot drive the debugger. The deprecated `sse` subcommand
-applies the same allowlist and accepts the same flag.
+their `Origin`, so a cross-site page cannot drive the debugger.
 
 ## 📚 How It Works
 

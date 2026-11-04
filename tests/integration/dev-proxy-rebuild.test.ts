@@ -218,7 +218,7 @@ async function connect(extraEnv: Record<string, string> = {}, options: ConnectOp
 }
 
 describe('dev-proxy responsive rebuilds (#748, #756, #757)', () => {
-  it.each(['http', 'sse'])('serves an actual %s backend during a build and shuts it down intentionally', async mode => {
+  it.each(['http'])('serves an actual %s backend during a build and shuts it down intentionally', async mode => {
     const port = await unusedPort();
     const h = await connect({
       DEV_PROXY_BACKEND_TRANSPORT: mode,

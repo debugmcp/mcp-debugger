@@ -110,7 +110,7 @@ describe('bind-address (issue #680)', () => {
   describe('describeEndpoint', () => {
     it('prints a connectable loopback URL for an unspecified bind and says every interface is bound', () => {
       expect(describeEndpoint('0.0.0.0', 3001, '/mcp')).toBe('http://127.0.0.1:3001/mcp (bound to all interfaces: 0.0.0.0)');
-      expect(describeEndpoint('::', 3001, '/sse')).toBe('http://127.0.0.1:3001/sse (bound to all interfaces: ::)');
+      expect(describeEndpoint('::', 3001, '/mcp')).toBe('http://127.0.0.1:3001/mcp (bound to all interfaces: ::)');
     });
 
     it('prints the bound address otherwise, bracketing IPv6', () => {
@@ -232,21 +232,21 @@ describe('bind-address (issue #680)', () => {
       expect(listening).toEqual({ address: '::1', port: 64417 });
       expect(logger.info).toHaveBeenCalledWith('Debug MCP Server (HTTP) listening on [::1]:64417');
       expect(logger.info).toHaveBeenCalledWith('MCP endpoint available at http://[::1]:64417/mcp');
-      // http/sse silence the console, so the logger alone leaves a plain
+      // http silences the console, so the logger alone leaves a plain
       // `-p 0` with nowhere to read the port; stderr is not the MCP channel there.
       expect(chunks.join('')).toContain('http://[::1]:64417/mcp');
     });
 
-    it('keeps the requested endpoint when the server reports no address, and names the SSE endpoint for sse', () => {
+    it('keeps the requested endpoint when the server reports no address', () => {
       const { logger, proc, chunks } = fakes();
       const listening: ListeningEndpoint = { address: '127.0.0.1', port: 4000 };
 
-      announceListening({ address: () => null }, listening, { logger, proc, label: 'SSE', path: '/sse' });
+      announceListening({ address: () => null }, listening, { logger, proc, label: 'HTTP', path: '/mcp' });
 
       expect(listening).toEqual({ address: '127.0.0.1', port: 4000 });
-      expect(logger.info).toHaveBeenCalledWith('Debug MCP Server (SSE) listening on 127.0.0.1:4000');
-      expect(logger.info).toHaveBeenCalledWith('SSE endpoint available at http://127.0.0.1:4000/sse');
-      expect(chunks.join('')).toContain('http://127.0.0.1:4000/sse');
+      expect(logger.info).toHaveBeenCalledWith('Debug MCP Server (HTTP) listening on 127.0.0.1:4000');
+      expect(logger.info).toHaveBeenCalledWith('MCP endpoint available at http://127.0.0.1:4000/mcp');
+      expect(chunks.join('')).toContain('http://127.0.0.1:4000/mcp');
     });
   });
 

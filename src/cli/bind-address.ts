@@ -1,7 +1,7 @@
 /**
  * Bind address for the network transports (issue #680).
  *
- * `http` and the deprecated `sse` used to call `app.listen(port)`, which binds
+ * `http` used to call `app.listen(port)`, which binds
  * every interface: the Host/Origin allowlist stops browsers (DNS rebinding,
  * cross-site pages), not a LAN client that sends `Host: localhost` itself. The
  * server now binds loopback unless told otherwise — `--bind <address>` first,
@@ -233,7 +233,7 @@ export interface ListeningAnnouncement {
   logger: Pick<WinstonLoggerType, 'info'>;
   proc: Pick<ProcessLike, 'stderr'>;
   /** The transport's name in the startup lines. */
-  label: 'HTTP' | 'SSE';
+  label: 'HTTP';
   /** The endpoint path clients dial. */
   path: string;
 }
@@ -244,10 +244,9 @@ export interface ListeningAnnouncement {
  * serves, the two startup log lines, and stderr. Call it from the server's
  * 'listening' event, where `server.address()` is readable; a `listen()`
  * callback fires before that handler and could only repeat the requested
- * port. The stderr mirror is there because http and sse silence the console,
- * so the logger alone would leave a plain `-p 0` with nowhere visible to read
- * the port — stderr is not the MCP channel on either transport, the same path
- * reportFatal takes.
+ * port. The stderr mirror is there because http silences the console, so the
+ * logger alone would leave a plain `-p 0` with nowhere visible to read the
+ * port — stderr is not the MCP channel, the same path reportFatal takes.
  */
 export function announceListening(
   server: { address(): AddressInfo | string | null },
@@ -261,7 +260,7 @@ export function announceListening(
   }
   logger.info(`Debug MCP Server (${label}) listening on ${authority(listening.address, listening.port)}`);
   const endpointLine =
-    `${label === 'SSE' ? 'SSE' : 'MCP'} endpoint available at ${describeEndpoint(listening.address, listening.port, path)}`;
+    `MCP endpoint available at ${describeEndpoint(listening.address, listening.port, path)}`;
   logger.info(endpointLine);
   proc.stderr?.write(`mcp-debugger: ${endpointLine}\n`);
 }

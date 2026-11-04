@@ -69,7 +69,7 @@ export class MessageParser {
       }
     }
 
-    // Coerce adapterPort string → number (Claude Code SSE double-stringify bug)
+    // Coerce adapterPort string → number (Claude Code double-stringify bug, anthropics/claude-code#11359)
     if (typeof obj.adapterPort === 'string') {
       const parsed = Number(obj.adapterPort);
       if (!Number.isNaN(parsed)) obj.adapterPort = parsed;
@@ -101,7 +101,7 @@ export class MessageParser {
       throw new Error(`Init payload 'scriptArgs' must be an array if provided`);
     }
 
-    // Coerce boolean strings → booleans (Claude Code SSE double-stringify bug)
+    // Coerce boolean strings → booleans (Claude Code double-stringify bug, anthropics/claude-code#11359)
     for (const boolKey of ['stopOnEntry', 'justMyCode', 'debuggerOff'] as const) {
       if (obj[boolKey] === 'true') obj[boolKey] = true;
       else if (obj[boolKey] === 'false') obj[boolKey] = false;
@@ -139,7 +139,7 @@ export class MessageParser {
           throw new Error(`Invalid breakpoint in initialBreakpoints`);
         }
         const bpObj = bp as Record<string, unknown>;
-        // Coerce line string → number (Claude Code SSE double-stringify bug)
+        // Coerce line string → number (Claude Code double-stringify bug, anthropics/claude-code#11359)
         if (typeof bpObj.line === 'string') {
           const parsed = Number(bpObj.line);
           if (!Number.isNaN(parsed)) bpObj.line = parsed;

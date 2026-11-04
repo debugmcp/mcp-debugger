@@ -53,16 +53,16 @@ def test_dry_run():
     cmd = ["npx", launcher.NPM_PACKAGE, "stdio"]
     print(f"   {' '.join(cmd)}")
     
-    print("\n2. NPX command for SSE mode with port:")
-    cmd = ["npx", launcher.NPM_PACKAGE, "sse", "--port", "8080"]
+    print("\n2. NPX command for HTTP mode with port:")
+    cmd = ["npx", launcher.NPM_PACKAGE, "http", "--port", "8080"]
     print(f"   {' '.join(cmd)}")
     
     print("\n3. Docker command for stdio mode:")
     cmd = ["docker", "run", "-it", "--rm", launcher.DOCKER_IMAGE, "stdio"]
     print(f"   {' '.join(cmd)}")
     
-    print("\n4. Docker command for SSE mode with port:")
-    cmd = ["docker", "run", "-it", "--rm", "-p", "8080:8080", launcher.DOCKER_IMAGE, "sse", "--port", "8080"]
+    print("\n4. Docker command for HTTP mode with port:")
+    cmd = ["docker", "run", "-it", "--rm", "-p", "8080:8080", launcher.DOCKER_IMAGE, "http", "--port", "8080"]
     print(f"   {' '.join(cmd)}")
 
 def test_cli_import():

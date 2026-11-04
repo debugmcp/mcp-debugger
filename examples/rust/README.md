@@ -45,7 +45,7 @@ cargo build
 ```
 
 then drive the session with MCP tool calls. These are tools your MCP client invokes — not
-`mcp-debugger` shell subcommands; the CLI only has `stdio`, `sse`, `http`, `doctor`, and
+`mcp-debugger` shell subcommands; the CLI only has `stdio`, `http`, `doctor`, and
 `check-rust-binary`.
 
 ```json
