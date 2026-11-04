@@ -31,7 +31,8 @@ import { disposeAdapterQuietly } from '../adapters/adapter-disposal.js';
 import { ErrorMessages, ProxyInitProgress } from '../utils/error-messages.js';
 import { ProxyConfig } from './proxy-config.js';
 import type { BreakpointSyncResult, FunctionBreakpointSyncResult } from './dap-proxy-interfaces.js';
-import { IPC_HEARTBEAT, IPC_HEARTBEAT_TICK } from './dap-proxy-interfaces.js';
+import { IPC_HEARTBEAT, IPC_HEARTBEAT_TICK, CHILD_RELEASE_COMMAND } from './dap-proxy-interfaces.js';
+import { ChildProxyView, childReportedOf, forwardDapEvent, type IChildProxyView } from './child-proxy-view.js';
 import {
   IDebugAdapter,
   AdapterLaunchBarrier,
@@ -41,6 +42,20 @@ import {
   LineBuffer
 } from '@debugmcp/shared';
 import type { HandshakeProxy } from '@debugmcp/shared';
+
+/**
+ * A child the debuggee started, as the worker reported it (the session tree,
+ * issue #1081): held under `reportId` until the server adopts or releases it.
+ */
+export interface ChildReportedEvent {
+  reportId: string;
+  /** The adapter's identity for the process (debugpy: the pid). */
+  targetId: string;
+  /** The adapter's own label for the process (`Subprocess <pid>`). */
+  name: string;
+  /** The configuration the adapter delivered with the report, verbatim. */
+  configuration: Record<string, unknown>;
+}
 
 /**
  * Events emitted by ProxyManager
@@ -78,6 +93,12 @@ export interface ProxyManagerEvents {
   /** An adapter answer the caller should see although the launch goes on (issue #746) */
   'adapter-notice': (note: string) => void;
   'dap-event': (event: string, body: unknown) => void;
+  /**
+   * A child the debuggee started, reported on this session's connection
+   * (issue #1081). The listener adopts it through `createChildView` or
+   * releases it; with no listener the manager releases it at once.
+   */
+  'child-reported': (report: ChildReportedEvent) => void;
 }
 
 /**
@@ -123,6 +144,13 @@ export interface IProxyManager extends EventEmitter {
    * after the teardown can still quote the adapter's last word.
    */
   getAdapterStderrTail(): readonly string[];
+  /**
+   * A proxy manager for a child session the worker behind this one serves
+   * (the session tree, issue #1081): an IProxyManager over the same channel,
+   * filtered to the child's id. Optional: only the real manager and its
+   * views provide it.
+   */
+  createChildView?(childSessionId: string): IChildProxyView;
 
   // Typed event emitter methods
   on<K extends keyof ProxyManagerEvents>(
@@ -231,9 +259,15 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     resolve: (response: DebugProtocol.Response) => void;
     reject: (error: Error) => void;
     command: string;
+    /** The session the request was sent for: the root's, or a child view's (issue #1081). */
+    sessionId: string | null;
     /** Parent-side backstop timer; must be cleared wherever the entry settles (issue #420). */
     timer?: NodeJS.Timeout;
   }>();
+  /** The child sessions this worker also serves, by session id (the session tree, issue #1081). */
+  private readonly childViews = new Map<string, IChildProxyView>();
+  /** Child ids whose view was detached: their worker's late messages are dropped quietly. */
+  private readonly detachedChildIds = new Set<string>();
   private isInitialized = false;
   // Never reset by cleanup(): stop() runs cleanup() before the process 'exit'
   // event arrives, so isInitialized alone cannot distinguish a genuine
@@ -478,6 +512,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   }
 
   async stop(): Promise<void> {
+    // The session tree (issue #1081): a child view still attached when the
+    // worker goes down deliberately learns of it as an expected exit.
+    this.fanWorkerExit(null, undefined, true);
+    this.childViews.clear();
     if (!this.proxyProcess) {
       // No proxy process, but still dispose adapter to release instance slot
       this.cleanup();
@@ -587,15 +625,31 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     args?: unknown,
     options?: { timeoutMs?: number }
   ): Promise<T> {
+    return this.sendDapRequestAs<T>(this.sessionId, command, args, options);
+  }
+
+  /**
+   * Send a DAP command on a session's envelope (the session tree, issue
+   * #1081): the root's own, or an adopted child's, whose connection lives in
+   * the same worker. The launch barrier and the functional core's pending
+   * mirror are the root's alone; the request/response correlation is shared.
+   */
+  async sendDapRequestAs<T extends DebugProtocol.Response>(
+    sessionId: string | null,
+    command: string,
+    args?: unknown,
+    options?: { timeoutMs?: number }
+  ): Promise<T> {
     if (!this.proxyProcess || !this.isInitialized) {
       throw new Error('Proxy not initialized');
     }
 
-    const barrier = this.adapter?.createLaunchBarrier?.(command, args);
+    const forRoot = sessionId === this.sessionId;
+    const barrier = forRoot ? this.adapter?.createLaunchBarrier?.(command, args) : undefined;
     const requestId = uuidv4();
     const commandToSend = {
       cmd: 'dap',
-      sessionId: this.sessionId,
+      sessionId,
       requestId,
       dapCommand: command,
       dapArgs: args,
@@ -658,11 +712,12 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         resolve: resolve as (value: DebugProtocol.Response) => void,
         reject,
         command,
+        sessionId,
         timer
       });
 
       // Mirror into functional core for observability (seq is placeholder; ProxyManager remains authoritative)
-      if (this.dapState) {
+      if (forRoot && this.dapState) {
         this.dapState = addPendingRequest(this.dapState, {
           requestId,
           command,
@@ -697,6 +752,53 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
   getProxyPid(): number | null {
     return this.lastProxyPid;
+  }
+
+  // ----- the session tree (issue #1081) -----
+
+  createChildView(childSessionId: string): IChildProxyView {
+    const view = new ChildProxyView(this, childSessionId, this.logger);
+    this.childViews.set(childSessionId, view);
+    this.detachedChildIds.delete(childSessionId);
+    return view;
+  }
+
+  /** Forget a child's view (its connection is closed or gone); its late messages are then dropped quietly. */
+  detachChildView(childSessionId: string): void {
+    if (this.childViews.delete(childSessionId)) {
+      this.detachedChildIds.add(childSessionId);
+    }
+  }
+
+  /**
+   * Release a reported child the server will not adopt: the worker answers
+   * the adapter's request `success: false` and the child runs undebugged.
+   */
+  releaseReportedChild(connectionSessionId: string, reportId: string, reason: string): void {
+    this.sendDapRequestAs(connectionSessionId, CHILD_RELEASE_COMMAND, { reportId, reason }, { timeoutMs: 5000 }).catch((error) => {
+      this.logger.warn(
+        `[ProxyManager] Releasing reported child ${reportId} failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    });
+  }
+
+  private handleChildReported(message: Extract<ProxyStatusMessage, { status: 'child_reported' }>): void {
+    const report = childReportedOf(message);
+    this.logger.info(`[ProxyManager] Child reported on session ${message.sessionId}: ${report.name} (${report.targetId})`);
+    if (this.listenerCount('child-reported') > 0) {
+      this.emit('child-reported', report);
+    } else {
+      // A report nobody adopts is released at once: an acked-but-never-attached
+      // child stays parked forever (docs/python/spike-notes-subprocess.md).
+      this.releaseReportedChild(message.sessionId, report.reportId, 'no child-session adopter on the server');
+    }
+  }
+
+  /** The worker is gone or going: every child view learns of it once. */
+  private fanWorkerExit(code: number | null, signal?: string, expected?: boolean): void {
+    for (const view of this.childViews.values()) {
+      view.onWorkerExit(code, signal, expected);
+    }
   }
 
   getCurrentThreadId(): number | null {
@@ -1226,6 +1328,26 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       }
     }
 
+    // The session tree (issue #1081): a message tagged with an adopted child's
+    // id is that child's view's; a response resolves by request id whatever
+    // its tag. A tag this manager never knew falls through to the path below
+    // (which warns); one whose view was detached is dropped quietly.
+    if (this.sessionId !== null && message.sessionId !== this.sessionId) {
+      if (message.type === 'dapResponse') {
+        this.handleDapResponse(message as ProxyDapResponseMessage);
+        return;
+      }
+      const view = this.childViews.get(message.sessionId);
+      if (view) {
+        view.dispatch(message);
+        return;
+      }
+      if (this.detachedChildIds.has(message.sessionId)) {
+        this.logger.debug(`[ProxyManager] Ignoring message for closed child session ${message.sessionId}`);
+        return;
+      }
+    }
+
     // Fast-path: always forward DAP events to consumers to avoid missing stops/output
     if (message.type === 'dapEvent') {
       this.handleDapEvent(message as ProxyDapEventMessage);
@@ -1328,13 +1450,16 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       // (or internal threads poll) while paused on a non-first thread must not
       // retarget stackTrace/scopes/evaluate to threads[0] (issue #396).
       try {
-        if (pending.command === 'threads' && this.currentThreadId == null) {
+        // The anchor belongs to the session the request was sent for: a
+        // child's thread list never anchors the root (issue #1081).
+        const target = pending.sessionId === this.sessionId ? this : this.childViews.get(pending.sessionId ?? '');
+        if (pending.command === 'threads' && target && target.getCurrentThreadId() == null) {
           const resp = (message.response || message.body) as DebugProtocol.ThreadsResponse | undefined;
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const threads = (resp && (resp as any).body && Array.isArray((resp as any).body.threads)) ? (resp as any).body.threads : [];
           const first = threads.length ? threads[0]?.id : undefined;
           if (typeof first === 'number') {
-            this.currentThreadId = first;
+            target.setCurrentThreadId(first);
           }
         }
       } catch {
@@ -1362,47 +1487,20 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     // Debuggee output is logged by shape only (issue #852); see describeDapEventBodyForLog.
     this.logger.info(`[ProxyManager] DAP event: ${message.event}`, describeDapEventBodyForLog(message.event, message.body));
 
-    switch (message.event) {
-      case 'stopped':
-        const stoppedBody = message.body as { threadId?: number; reason?: string } | undefined;
-        const threadIdMaybe = (typeof stoppedBody?.threadId === 'number') ? stoppedBody!.threadId! : undefined;
-        const reason = stoppedBody?.reason || 'unknown';
-        if (typeof threadIdMaybe === 'number') {
-          this.currentThreadId = threadIdMaybe;
-        }
-        this.initializationStopSeen = true;
-        // Do not fabricate a threadId; emit undefined if adapter omitted it
-        this.emit('stopped', threadIdMaybe, reason, stoppedBody as DebugProtocol.StoppedEvent['body']);
-        break;
-      
-      case 'continued':
-        this.emit('continued');
-        break;
-      
-      case 'terminated':
-        this.emit('terminated');
-        break;
-      
-      case 'exited': {
-        // Forward the debuggee exit code so it can be surfaced on the session
-        const exitedBody = message.body as { exitCode?: number } | undefined;
-        const exitCode = typeof exitedBody?.exitCode === 'number' ? exitedBody.exitCode : undefined;
-        this.emit('exited', exitCode);
-        break;
-      }
-
-      case 'output':
-        this.emit('output', message.body as DebugProtocol.OutputEvent['body']);
-        break;
-
-      case 'breakpoint':
-        this.emit('breakpoint', message.body as DebugProtocol.BreakpointEvent['body']);
-        break;
-
-      // Forward other events as generic DAP events
-      default:
-        this.emit('dap-event', message.event, message.body);
+    if (message.event === 'stopped') {
+      this.initializationStopSeen = true;
     }
+    // One mapping for the root and every child view (issue #1081).
+    forwardDapEvent(
+      {
+        emit: (event, ...args) => this.emit(event, ...args),
+        onStopped: (threadId) => {
+          this.currentThreadId = threadId;
+        }
+      },
+      message.event,
+      message.body
+    );
   }
 
   private handleStatusMessage(message: ProxyStatusMessage): void {
@@ -1504,10 +1602,21 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         }
         break;
       
+      case 'child_reported':
+        this.handleChildReported(message);
+        break;
+
       case 'adapter_exited':
       case 'dap_connection_closed':
       case 'terminated':
         this.logger.info(`[ProxyManager] Status: ${message.status}`);
+        if (message.status === 'adapter_exited') {
+          // The adapter is gone, and every child connection with it (issue
+          // #1081). The root's own connection close or terminated is not
+          // fanned: with a worker deferring its shutdown for live children,
+          // it means the root's socket only.
+          this.fanWorkerExit(message.code ?? null, message.signal || undefined, message.expected);
+        }
         if (!this.exitEmitted) {
           this.exitEmitted = true;
           // No fabricated code (issue #258): the closure statuses are
@@ -1528,6 +1637,9 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       pending.reject(new Error('Proxy exited'));
     });
     this.pendingDapRequests.clear();
+
+    // Every child session the worker served ends with it (issue #1081).
+    this.fanWorkerExit(code, signal || undefined);
 
     // Emit exit event
     if (!this.exitEmitted) {
