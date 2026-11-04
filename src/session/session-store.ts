@@ -29,6 +29,8 @@ export interface CreateSessionParams {
   language: DebugLanguage;
   name?: string;
   executablePath?: string;  // Language-agnostic executable path
+  /** The session that spawned this one (the session tree, issue #1081); child sessions only. */
+  parentSessionId?: string;
 }
 
 import type { DebugProtocol } from '@vscode/debugprotocol';
@@ -247,7 +249,7 @@ export class SessionStore {
    * Creates a new debug session
    */
   createSession(params: CreateSessionParams): DebugSessionInfo {
-    const { language, name, executablePath } = params;
+    const { language, name, executablePath, parentSessionId } = params;
     const sessionId = uuidv4();
     const sessionName = name || `session-${sessionId.substring(0, 8)}`;
     
@@ -274,17 +276,19 @@ export class SessionStore {
       // Initialize new state model
       sessionLifecycle: SessionLifecycleState.CREATED,
       executionState: undefined,
+      ...(parentSessionId ? { parentSessionId } : {}),
     };
-    
+
     this.sessions.set(sessionId, session);
-    
-    return { 
-      id: sessionId, 
-      name: sessionName, 
-      language: session.language, 
-      state: session.state, 
-      createdAt: session.createdAt, 
-      updatedAt: session.updatedAt 
+
+    return {
+      id: sessionId,
+      name: sessionName,
+      language: session.language,
+      state: session.state,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      ...(parentSessionId ? { parentSessionId } : {}),
     };
   }
 
@@ -374,7 +378,9 @@ export class SessionStore {
       // keeps the projection honest on teardown paths that skip cleanup.
       ...(s.exposure && s.proxyManager?.isRunning()
         ? { exposure: { host: s.exposure.host, port: s.exposure.port } }
-        : {})
+        : {}),
+      // The session tree (issue #1081): child rows name the session that spawned them.
+      ...(s.parentSessionId ? { parentSessionId: s.parentSessionId } : {})
     }));
   }
 

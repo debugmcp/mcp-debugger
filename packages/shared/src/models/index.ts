@@ -493,6 +493,14 @@ export interface DebugSessionInfo {
    * only — the attach token is returned solely by the expose_session tool.
    */
   exposure?: { host: string; port: number };
+  /**
+   * The session that spawned this one (the session tree, issue #1081):
+   * present on child rows only. A child is created by the server when the
+   * adapter reports a process the debuggee started (debugpy's
+   * `startDebugging`), never by `create_debug_session`; it inherits the
+   * parent's `language` and carries the adapter's own name for the process.
+   */
+  parentSessionId?: string;
 }
 
 

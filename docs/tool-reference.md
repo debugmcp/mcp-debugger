@@ -131,6 +131,8 @@ Lists all active debugging sessions — in Streamable HTTP mode, the ones this M
 
 Errored sessions include optional `diagnostics` with the current launch attempt's server-host `proxyLogPath` and remote-safe `proxyLogResource`. The record is retained for proxy initialization failures and for proxy/adapter deaths after initialization, and is cleared when a new launch or attach attempt begins.
 
+**`parentSessionId`:** present on child rows only. A child session is created by the server, never by `create_debug_session`, when the adapter reports a process the debuggee started: today a Python launch with `dapLaunchArgs.subProcess: true`, where debugpy reports each child (see [the session tree](./architecture/session-tree.md)). The child inherits the parent's `language`, its `name` is the adapter's own label for the process (debugpy: `Subprocess <pid>`), it has its own breakpoints, `wait_for_stop`, `get_output` and `close_debug_session`, and it carries no `exitCode` (it ends with the adapter's `terminated` event). `start_debugging`, `restart_debugging`, `attach_to_process`, `detach_from_process`, `expose_session` and `unexpose_session` refuse a child id by name. Closing the parent closes its children first.
+
 ---
 
 ### close_debug_session

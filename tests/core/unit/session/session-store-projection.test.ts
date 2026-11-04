@@ -102,3 +102,24 @@ describe('SessionStore.getAll() debuggerDisabled projection (issue #749)', () =>
     expect(store.getAll().find((s) => s.id === id)!).not.toHaveProperty('debuggerDisabled');
   });
 });
+
+describe('SessionStore.getAll() parentSessionId projection (session tree, issue #1081)', () => {
+  it('projects parentSessionId on a child row and omits it on a root', () => {
+    const store = new SessionStore();
+    const root = store.createSession({ language: DebugLanguage.MOCK });
+    const child = store.createSession({
+      language: DebugLanguage.MOCK,
+      name: 'Subprocess 4242',
+      parentSessionId: root.id
+    });
+
+    const rows = store.getAll();
+    const rootRow = rows.find((s) => s.id === root.id)!;
+    const childRow = rows.find((s) => s.id === child.id)!;
+
+    expect(childRow.parentSessionId).toBe(root.id);
+    expect(childRow.name).toBe('Subprocess 4242');
+    expect(rootRow).not.toHaveProperty('parentSessionId');
+    expect(child.parentSessionId).toBe(root.id);
+  });
+});

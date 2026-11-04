@@ -200,6 +200,10 @@ export async function handleListDebugSessions(ctx: ToolContext): Promise<ToolRes
           // Mirror endpoint host/port; the token never leaves expose_session.
           mappedSession.exposure = session.exposure;
       }
+      if (session.parentSessionId) {
+          // A child session (the session tree, issue #1081): the row names its parent.
+          mappedSession.parentSessionId = session.parentSessionId;
+      }
       return mappedSession;
     });
     return jsonResult({ success: true, sessions: sessionData, count: sessionData.length });
