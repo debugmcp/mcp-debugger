@@ -65,7 +65,7 @@ Usage notes:
 | dart | Dart SDK 3.x (`dart`), or Flutter (bundles its own Dart) | `dart debug_adapter` / `flutter debug-adapter` — the SDK's own DAP servers, behind a TCP-to-stdio bridge; nothing vendored | [dart.dev/get-dart](https://dart.dev/get-dart) (Windows `winget install Google.DartSDK`, macOS `brew install dart`, Linux the `dart` apt package) or Flutter; run `flutter --version` once so the Flutter tool cache is built | `DART_SDK` (alias `DART_PATH`), `FLUTTER_ROOT` (alias `FLUTTER_PATH`); a project's fvm pin (`.fvmrc`) is honoured |
 | mock | — | — | nothing (testing adapter) | — |
 
-CodeLLDB resolution order (rust, cpp and cobol): **vendored copy → `CODELLDB_PATH` → `@debugmcp/codelldb-<platform>` package** (npm installs exactly the one matching your platform as an optional dependency). Doctor's backend column shows which source won. If you installed with `--omit=optional`, set `CODELLDB_PATH` to a [CodeLLDB release](https://github.com/vadimcn/codelldb/releases) binary.
+CodeLLDB resolution order (rust, cpp and cobol): **vendored copy → `CODELLDB_PATH` → `@debugmcp/codelldb-<platform>` package** (npm installs exactly the one matching your platform as an optional dependency). Doctor's backend column shows which source won, and the engine version read from that copy's own root: its `version.json` (vendored copies, the platform packages), else a raw VSIX extraction's `package.json`; a bare binary with neither shows no version. If you installed with `--omit=optional`, set `CODELLDB_PATH` to a [CodeLLDB release](https://github.com/vadimcn/codelldb/releases) binary (extract the `.vsix` and point at `extension/adapter/codelldb`).
 
 ## Failure signatures
 

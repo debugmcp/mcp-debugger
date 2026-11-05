@@ -10,10 +10,12 @@ import { readFileSync } from 'node:fs';
 
 const accessMock: Mock = vi.fn();
 const readFileMock: Mock = vi.fn();
+const realpathMock: Mock = vi.fn();
 
 vi.mock('fs/promises', () => ({
   access: (...args: unknown[]) => accessMock(...args),
-  readFile: (...args: unknown[]) => readFileMock(...args)
+  readFile: (...args: unknown[]) => readFileMock(...args),
+  realpath: (...args: unknown[]) => realpathMock(...args)
 }));
 
 import {
@@ -48,6 +50,9 @@ describe('codelldb-resolver', () => {
   beforeEach(() => {
     accessMock.mockReset();
     readFileMock.mockReset();
+    // No symlinks unless a test says so
+    realpathMock.mockReset();
+    realpathMock.mockImplementation(async (p: string) => p);
     // Hermetic: never let the host machine's CODELLDB_PATH leak into tests
     vi.stubEnv('CODELLDB_PATH', '');
   });
@@ -213,6 +218,23 @@ describe('codelldb-resolver', () => {
   });
 
   describe('getCodeLLDBVersion', () => {
+    // The version comes from the resolved binary's own root (<root>/adapter/codelldb):
+    // <root>/version.json (the vendor script's, the platform package's), then the
+    // upstream VSIX manifest <root>/package.json when it is CodeLLDB's own
+    // (issue #1066). Another install's metadata is never read: a vendored copy with
+    // no readable metadata keeps the pin, any other source reports no version.
+    const vsixManifest = (version: string): string =>
+      JSON.stringify({ name: 'vscode-lldb', publisher: 'vadimcn', version });
+
+    /** Serve `files` (path -> content; undefined = ENOENT) and ENOENT for any other path. */
+    function serveFiles(files: ReadonlyMap<string, string | undefined>): void {
+      readFileMock.mockImplementation(async (candidate: string) => {
+        const content = files.get(candidate);
+        if (content === undefined) throw new Error('ENOENT');
+        return content;
+      });
+    }
+
     it('returns null when the executable cannot be resolved', async () => {
       stubPlatform('win32');
       accessMock.mockRejectedValue(new Error('ENOENT'));
@@ -228,106 +250,37 @@ describe('codelldb-resolver', () => {
 
       await expect(getCodeLLDBVersion()).resolves.toBe('1.12.3');
 
+      expect(readFileMock).toHaveBeenCalledTimes(1);
       const versionFile = readFileMock.mock.calls[0][0] as string;
       expect(versionFile.endsWith(path.join('linux-x64', 'version.json'))).toBe(true);
     });
 
-    it('skips a malformed version.json and reads the next candidate', async () => {
+    it('a vendored copy with a malformed version.json and no manifest reports the pin, reading nothing of another install', async () => {
       stubPlatform('linux', 'x64');
       accessMock.mockResolvedValue(undefined);
-      readFileMock
-        .mockResolvedValueOnce('not-json{')
-        .mockResolvedValueOnce(JSON.stringify({ version: '9.9.9' }));
+      readFileMock.mockResolvedValueOnce('not-json{').mockRejectedValue(new Error('ENOENT'));
 
-      await expect(getCodeLLDBVersion()).resolves.toBe('9.9.9');
+      await expect(getCodeLLDBVersion()).resolves.toBe(DEFAULT_CODELLDB_VERSION);
+
+      // version.json, then package.json, both beside the resolved binary — not the
+      // other vendor candidates, not the platform package
+      const vendorDir = path.dirname(path.dirname(accessMock.mock.calls[0][0] as string));
+      expect(readFileMock.mock.calls.map((call) => call[0])).toEqual([
+        path.join(vendorDir, 'version.json'),
+        path.join(vendorDir, 'package.json')
+      ]);
+    });
+
+    it('a vendored version.json without a version field falls through to the VSIX manifest beside it', async () => {
+      stubPlatform('darwin', 'arm64');
+      accessMock.mockResolvedValue(undefined);
+      readFileMock.mockResolvedValueOnce('{}').mockResolvedValueOnce(vsixManifest('1.12.3'));
+
+      await expect(getCodeLLDBVersion()).resolves.toBe('1.12.3');
       expect(readFileMock).toHaveBeenCalledTimes(2);
     });
 
-    it.each([
-      {
-        name: 'reads the raw VSIX manifest before unrelated metadata',
-        versionJson: undefined,
-        packageJson: '{"version":"1.11.8"}',
-        otherVersion: '9.9.9',
-        expected: '1.11.8'
-      },
-      {
-        name: 'keeps version.json ahead of the VSIX manifest',
-        versionJson: '{"version":"1.11.7"}',
-        packageJson: '{"version":"1.11.8"}',
-        otherVersion: '9.9.9',
-        expected: '1.11.7'
-      },
-      {
-        name: 'preserves the empty version.json fallback',
-        versionJson: '{}',
-        packageJson: '{"version":"1.11.8"}',
-        otherVersion: '9.9.9',
-        expected: DEFAULT_CODELLDB_VERSION
-      },
-      {
-        name: 'tries the manifest after malformed version.json',
-        versionJson: '{invalid',
-        packageJson: '{"version":"1.11.8"}',
-        otherVersion: '9.9.9',
-        expected: '1.11.8'
-      },
-      {
-        name: 'continues after a malformed manifest',
-        versionJson: undefined,
-        packageJson: '{invalid',
-        otherVersion: '9.9.9',
-        expected: '9.9.9'
-      },
-      {
-        name: 'continues when the manifest is absent',
-        versionJson: undefined,
-        packageJson: undefined,
-        otherVersion: '9.9.9',
-        expected: '9.9.9'
-      },
-      {
-        name: 'uses the default when all metadata is absent',
-        versionJson: undefined,
-        packageJson: undefined,
-        otherVersion: undefined,
-        expected: DEFAULT_CODELLDB_VERSION
-      },
-      {
-        name: 'uses the default when the manifest has no version',
-        versionJson: undefined,
-        packageJson: '{}',
-        otherVersion: undefined,
-        expected: DEFAULT_CODELLDB_VERSION
-      }
-    ])('$name', async ({ versionJson, packageJson, otherVersion, expected }) => {
-      stubPlatform('linux', 'x64');
-      const extensionRoot = path.resolve('/raw-vsix/extension');
-      const executable = path.join(extensionRoot, 'adapter', 'codelldb');
-      vi.stubEnv('CODELLDB_PATH', executable);
-      accessMock.mockImplementation(async (candidate: string) => {
-        if (candidate !== executable) throw new Error('ENOENT');
-      });
-      const adjacentMetadata = new Map([
-        [path.join(extensionRoot, 'version.json'), versionJson],
-        [path.join(extensionRoot, 'package.json'), packageJson]
-      ]);
-      readFileMock.mockImplementation(async (candidate: string) => {
-        if (adjacentMetadata.has(candidate)) {
-          const content = adjacentMetadata.get(candidate);
-          if (content === undefined) throw new Error('ENOENT');
-          return content;
-        }
-        if (otherVersion !== undefined) return JSON.stringify({ version: otherVersion });
-        throw new Error('ENOENT');
-      });
-
-      await expect(
-        getCodeLLDBVersion({ resolvePlatformPackageRoot: () => null })
-      ).resolves.toBe(expected);
-    });
-
-    it('falls back to DEFAULT_CODELLDB_VERSION when no version metadata is readable', async () => {
+    it('falls back to DEFAULT_CODELLDB_VERSION for a vendored copy with no readable metadata', async () => {
       stubPlatform('win32');
       accessMock.mockResolvedValue(undefined);
       readFileMock.mockRejectedValue(new Error('ENOENT'));
@@ -335,16 +288,150 @@ describe('codelldb-resolver', () => {
       await expect(
         getCodeLLDBVersion({ resolvePlatformPackageRoot: () => null })
       ).resolves.toBe(DEFAULT_CODELLDB_VERSION);
-      // Both sibling metadata files + the 4 vendor candidates
-      expect(readFileMock).toHaveBeenCalledTimes(6);
+      // The two files beside the binary and nothing else
+      expect(readFileMock).toHaveBeenCalledTimes(2);
     });
 
-    it('falls back to DEFAULT_CODELLDB_VERSION when version.json lacks a version field', async () => {
-      stubPlatform('darwin', 'arm64');
-      accessMock.mockResolvedValue(undefined);
-      readFileMock.mockResolvedValue('{}');
+    describe('under CODELLDB_PATH (a raw VSIX extraction, issue #1066)', () => {
+      const extensionRoot = path.resolve('/raw-vsix/extension');
+      const executable = path.join(extensionRoot, 'adapter', 'codelldb');
 
-      await expect(getCodeLLDBVersion()).resolves.toBe(DEFAULT_CODELLDB_VERSION);
+      /** CODELLDB_PATH names the extraction's binary; the vendor candidates do not exist. */
+      function stubExtraction(versionJson: string | undefined, packageJson: string | undefined): void {
+        stubPlatform('linux', 'x64');
+        vi.stubEnv('CODELLDB_PATH', executable);
+        accessMock.mockImplementation(async (candidate: string) => {
+          if (candidate !== executable) throw new Error('ENOENT');
+        });
+        serveFiles(new Map([
+          [path.join(extensionRoot, 'version.json'), versionJson],
+          [path.join(extensionRoot, 'package.json'), packageJson]
+        ]));
+      }
+
+      it.each([
+        {
+          name: 'reads the VSIX manifest when there is no version.json',
+          versionJson: undefined,
+          packageJson: vsixManifest('1.11.8'),
+          expected: '1.11.8'
+        },
+        {
+          name: 'keeps version.json ahead of the manifest',
+          versionJson: '{"version":"1.11.7"}',
+          packageJson: vsixManifest('1.11.8'),
+          expected: '1.11.7'
+        },
+        {
+          name: 'falls through to the manifest when version.json has no version field',
+          versionJson: '{}',
+          packageJson: vsixManifest('1.11.8'),
+          expected: '1.11.8'
+        },
+        {
+          name: 'falls through to the manifest when version.json is malformed',
+          versionJson: '{invalid',
+          packageJson: vsixManifest('1.11.8'),
+          expected: '1.11.8'
+        },
+        {
+          name: 'reports no version when the manifest is malformed',
+          versionJson: undefined,
+          packageJson: '{invalid',
+          expected: null
+        },
+        {
+          name: 'reports no version when there is no metadata at all',
+          versionJson: undefined,
+          packageJson: undefined,
+          expected: null
+        },
+        {
+          name: 'reports no version when the manifest has no version',
+          versionJson: undefined,
+          packageJson: vsixManifest(''),
+          expected: null
+        },
+        {
+          name: "reports no version when the package.json beside the binary is not CodeLLDB's",
+          versionJson: undefined,
+          packageJson: '{"name":"my-app","version":"0.4.2"}',
+          expected: null
+        }
+      ])('$name', async ({ versionJson, packageJson, expected }) => {
+        stubExtraction(versionJson, packageJson);
+
+        await expect(
+          getCodeLLDBVersion({ resolvePlatformPackageRoot: () => null })
+        ).resolves.toBe(expected);
+
+        // Never the compiled default, never another install's metadata: every read
+        // is beside the resolved binary.
+        expect(readFileMock.mock.calls.length).toBeGreaterThan(0);
+        for (const call of readFileMock.mock.calls) {
+          expect(path.dirname(call[0] as string)).toBe(extensionRoot);
+        }
+      });
+
+      it('follows a symlinked CODELLDB_PATH to the extraction it points into', async () => {
+        const link = path.resolve('/usr/local/bin/codelldb');
+        stubExtraction(undefined, vsixManifest('1.11.8'));
+        vi.stubEnv('CODELLDB_PATH', link);
+        accessMock.mockImplementation(async (candidate: string) => {
+          if (candidate !== link) throw new Error('ENOENT');
+        });
+        realpathMock.mockImplementation(async (candidate: string) => (candidate === link ? executable : candidate));
+
+        await expect(
+          getCodeLLDBVersion({ resolvePlatformPackageRoot: () => null })
+        ).resolves.toBe('1.11.8');
+        expect(readFileMock.mock.calls.map((call) => call[0])).toEqual([
+          path.join(extensionRoot, 'version.json'),
+          path.join(extensionRoot, 'package.json')
+        ]);
+      });
+
+      it('reads beside the path as given when it cannot be resolved', async () => {
+        stubExtraction(undefined, vsixManifest('1.11.8'));
+        realpathMock.mockRejectedValue(new Error('EACCES'));
+
+        await expect(
+          getCodeLLDBVersion({ resolvePlatformPackageRoot: () => null })
+        ).resolves.toBe('1.11.8');
+      });
+    });
+
+    describe('under the @debugmcp/codelldb-<platform> package', () => {
+      const packageRoot = path.resolve('/pkg/node_modules/@debugmcp/codelldb-linux-x64');
+      const executable = path.join(packageRoot, 'adapter', 'codelldb');
+
+      /** Only the platform package's binary exists; its npm manifest is not CodeLLDB's. */
+      function stubPlatformPackage(versionJson: string | undefined): void {
+        stubPlatform('linux', 'x64');
+        accessMock.mockImplementation(async (candidate: string) => {
+          if (candidate !== executable) throw new Error('ENOENT');
+        });
+        serveFiles(new Map([
+          [path.join(packageRoot, 'version.json'), versionJson],
+          [path.join(packageRoot, 'package.json'), '{"name":"@debugmcp/codelldb-linux-x64","version":"1.12.4"}']
+        ]));
+      }
+
+      it('reads the version.json the package ships', async () => {
+        stubPlatformPackage('{"version":"1.12.3"}');
+
+        await expect(
+          getCodeLLDBVersion({ resolvePlatformPackageRoot: () => packageRoot })
+        ).resolves.toBe('1.12.3');
+      });
+
+      it("reports no version without it — the npm manifest's version is the package's, not the engine's", async () => {
+        stubPlatformPackage(undefined);
+
+        await expect(
+          getCodeLLDBVersion({ resolvePlatformPackageRoot: () => packageRoot })
+        ).resolves.toBeNull();
+      });
     });
   });
 

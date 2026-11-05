@@ -277,51 +277,65 @@ export async function resolveCodeLLDBExecutable(options?: {
   return resolved?.path ?? null;
 }
 
+/** The `name` of the upstream VSIX manifest (vadimcn/codelldb's package.json). */
+const CODELLDB_VSIX_MANIFEST_NAME = 'vscode-lldb';
+
+/** A parsed JSON object file, or null when it is unreadable, not JSON, or not an object. */
+async function readJsonObject(file: string): Promise<Record<string, unknown> | null> {
+  try {
+    const parsed: unknown = JSON.parse(await fs.readFile(file, 'utf-8'));
+    return parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The object's `version` when it is a non-empty string. */
+function versionField(data: Record<string, unknown> | null): string | undefined {
+  const version = data?.version;
+  return typeof version === 'string' && version.length > 0 ? version : undefined;
+}
+
 /**
- * Check if CodeLLDB is installed and get version
+ * The version of the CodeLLDB that resolves, read from that binary's own root
+ * and nowhere else (<root>/adapter/codelldb → <root>): `version.json` — the
+ * vendor script writes it, the platform packages ship it — then the upstream
+ * VSIX manifest `package.json` when it is CodeLLDB's own, which is what a raw
+ * extraction under CODELLDB_PATH carries (issue #1066). Another install's
+ * metadata is never consulted, so the reported version cannot be
+ * misattributed: not a stale vendor tree under the cwd fallback, not the
+ * platform package's version.json when CODELLDB_PATH won, not a project's
+ * package.json above a hand-placed binary. A vendored copy with no readable metadata keeps the
+ * pin the vendor script fetched; any other source reports no version (null)
+ * rather than the compiled default.
  */
 export async function getCodeLLDBVersion(options?: {
   resolvePlatformPackageRoot?: (platformDir: string) => string | null;
 }): Promise<string | null> {
-  const resolvePlatformPackageRoot =
-    options?.resolvePlatformPackageRoot ?? resolveCodeLLDBPlatformPackageRoot;
-  const codelldbPath = await resolveCodeLLDBExecutable({ resolvePlatformPackageRoot });
-
-  if (!codelldbPath) {
+  const resolved = await resolveCodeLLDBExecutableWithSource(options);
+  if (!resolved) {
     return null;
   }
 
-  const platformDir = getCodeLLDBPlatformDir(process.platform, process.arch);
-  if (!platformDir) {
-    return DEFAULT_CODELLDB_VERSION;
+  // A symlinked CODELLDB_PATH (~/.local/bin/codelldb → the extraction) keeps
+  // its metadata where it points.
+  let binary = resolved.path;
+  try {
+    binary = await fs.realpath(resolved.path);
+  } catch {
+    // Read beside the path as given
+  }
+  const root = path.resolve(path.dirname(binary), '..');
+
+  const fromVersionJson = versionField(await readJsonObject(path.join(root, 'version.json')));
+  if (fromVersionJson) {
+    return fromVersionJson;
+  }
+  const manifest = await readJsonObject(path.join(root, 'package.json'));
+  const fromManifest = manifest?.name === CODELLDB_VSIX_MANIFEST_NAME ? versionField(manifest) : undefined;
+  if (fromManifest) {
+    return fromManifest;
   }
 
-  // The version.json that describes the binary we actually resolved sits
-  // beside it (<root>/adapter/codelldb -> <root>/version.json) — probe that
-  // first so the reported version cannot be misattributed to a different
-  // install (e.g. a stale vendor tree under the cwd fallback).
-  // Raw VSIX extractions store their version in package.json at the same
-  // root. Read that before metadata from another install.
-  const versionFileCandidates = [
-    path.resolve(path.dirname(codelldbPath), '..', 'version.json'),
-    path.resolve(path.dirname(codelldbPath), '..', 'package.json'),
-    ...buildVendorCandidatePaths(defaultPackageRoot(), platformDir, 'version.json')
-  ];
-
-  const platformPackageRoot = resolvePlatformPackageRoot(platformDir);
-  if (platformPackageRoot) {
-    versionFileCandidates.push(path.join(platformPackageRoot, 'version.json'));
-  }
-
-  for (const versionFile of versionFileCandidates) {
-    try {
-      const versionData = await fs.readFile(versionFile, 'utf-8');
-      const parsed = JSON.parse(versionData);
-      return parsed.version || DEFAULT_CODELLDB_VERSION;
-    } catch {
-      // Continue to next candidate
-    }
-  }
-
-  return DEFAULT_CODELLDB_VERSION; // Default version fallback
+  return resolved.source === 'vendored' ? DEFAULT_CODELLDB_VERSION : null;
 }
