@@ -210,6 +210,23 @@ jobs:
           SOURCE="$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).languages.find(l=>l.language==='rust').backend.source" "$TRANSCRIPTS/doctor.json")"
           echo "backend.source=$SOURCE (expected $EXPECT)"
           [ "$SOURCE" = "$EXPECT" ]
+          if [ "$LEG" = "omit-optional" ] && [ "$SLIM" = "true" ]; then
+            # The engine on this leg is the VSIX provisioned above at the
+            # checkout's pin, and doctor reads the version from that
+            # extraction's own package.json (#1066) — so it must name the pin.
+            # Releases up to 0.26.0 reported the CLI's compiled default instead;
+            # the assertion applies to everything published after.
+            CLI_VERSION="$(node -p "require(process.argv[1]).version" "$(npm root -g)/@debugmcp/mcp-debugger/package.json")"
+            FIXED="$(node -e 'const core=v=>v.split("-")[0].split(".").map(Number);const [a,b]=[core(process.argv[1]),core("0.26.0")];console.log(a[0]>b[0]||(a[0]===b[0]&&(a[1]>b[1]||(a[1]===b[1]&&a[2]>b[2]))))' "$CLI_VERSION")"
+            if [ "$FIXED" = "true" ]; then
+              PIN="$(node -p "require('./packages/codelldb-common/vendor-manifest.json').codelldb.version")"
+              ENGINE="$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).languages.find(l=>l.language==='rust').backend.version" "$TRANSCRIPTS/doctor.json")"
+              echo "backend.version=$ENGINE (expected $PIN)"
+              [ "$ENGINE" = "$PIN" ]
+            else
+              echo "::notice::$CLI_VERSION predates the engine-version fix (#1066) — backend.version assertion skipped"
+            fi
+          fi
 
       - name: Smoke cycle (mock)
         run: |
