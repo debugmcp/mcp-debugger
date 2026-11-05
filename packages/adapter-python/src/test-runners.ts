@@ -54,14 +54,16 @@ const CONFIG_CANDIDATES: ReadonlyArray<{ name: string; section?: RegExp; label: 
 ];
 
 /**
- * pytest-xdist moves the test into a worker subprocess the debugger never
- * sees (and the spawn fails under the Windows debuggee, issue #993), and
- * pytest-cov's tracer competes with pydevd's on Pythons before 3.12. Each is
- * turned off: with `-p no:<plugin>` when nothing asks for it (silent when the
- * plugin is absent), or — when the project's own `addopts` turns it on, so
- * `-p no:` would make pytest reject those options as unrecognized (exit 4) —
- * with the plugin's own inert switch appended after them. The caller's args
- * asking for a plugin leave it alone.
+ * pytest-xdist moves the test into a worker subprocess — a child debug
+ * session since the session tree (issue #1081), but a child's stop is
+ * reported only by wait_for_stop, never by the launch answer the preset's
+ * one-call autopsy promises (and the spawn used to fail under the Windows
+ * debuggee, issue #993) — and pytest-cov's tracer competes with pydevd's on
+ * Pythons before 3.12. Each is turned off: with `-p no:<plugin>` when nothing
+ * asks for it (silent when the plugin is absent), or — when the project's own
+ * `addopts` turns it on, so `-p no:` would make pytest reject those options as
+ * unrecognized (exit 4) — with the plugin's own inert switch appended after
+ * them. The caller's args asking for a plugin leave it alone.
  */
 const isXdistArg = (arg: string): boolean =>
   /^-n\S*$/.test(arg) || arg.startsWith('--numprocesses') || arg.startsWith('--dist') || arg.startsWith('--tx') || arg === '--looponfail' || arg === '-f';

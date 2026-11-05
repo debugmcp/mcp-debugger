@@ -1,7 +1,7 @@
 /**
  * The session tree over a by-port attach with real debugpy (issue #1081): a
  * target started with `python -m debugpy --listen` that spawns a Python
- * child. Measured here (2026-11-05, debugpy 1.8.20): the child's report
+ * child. Measured here (2026-11-04, debugpy 1.8.20): the child's report
  * arrives on the attach connection with `connect.port` equal to the port
  * attached to, whatever the attach request says about `subProcess` — the
  * target decides at listen time (`--configure-subProcess`). The cascades on

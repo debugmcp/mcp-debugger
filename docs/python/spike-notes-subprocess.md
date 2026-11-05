@@ -1,6 +1,6 @@
 # Python subprocess debugging — spike notes (issue #1005, part B)
 
-The measured facts behind the session-tree design for Python: how debugpy reports a child process, what a second DAP client needs to debug it, and what each level's exit, `disconnect` and `terminate` do to the rest of the tree. Read [docs/python/README.md](README.md) for how subprocess debugging behaves today (children run undebugged unless `subProcess: true` is passed, #1008); this file is what the design in `docs/architecture/` will be built from.
+The measured facts behind the session-tree design for Python: how debugpy reports a child process, what a second DAP client needs to debug it, and what each level's exit, `disconnect` and `terminate` do to the rest of the tree. Read [docs/python/README.md](README.md) for how subprocess debugging behaves today (child sessions are on by default since the last step of #1081; `subProcess: false` opts a launch out); this file is what the design in `docs/architecture/` is built from.
 
 Measured 2026-11-03 on Windows 11, Python 3.13.12, debugpy 1.8.20, mcp-debugger at `06b5a15f`, with a **throwaway DAP driver** (not the proxy worker): a Node script speaking DAP over TCP to one `python -m debugpy.adapter --host 127.0.0.1 --port <free port>`, opening a second (and third) client connection to the same port for each child, logging every frame per connection and keeping the adapter's own log (`DEBUGPY_LOG_DIR`). The launch request is the one `transformLaunchConfig` sends (`console: internalConsole`, `redirectOutput: true`, `justMyCode: true`, `stopOnEntry: false`) with `subProcess: true` explicit. Fixtures: `parent.py` starts `child.py` with `subprocess.Popen([sys.executable, …])` and either waits for it or exits at once; `child.py` loops five times over one statement (the breakpoint line) and optionally runs `grandchild.py` the same way; `mp_parent.py` uses `multiprocessing.Process` (spawn start method). Times are wall-clock milliseconds from the driver's start on a loaded box (another worktree's test suite ran alongside); read them as orders of magnitude.
 
@@ -68,3 +68,20 @@ Two adapter facts that bound the worker's connection handling:
 5. Output: decide per-process (`redirectOutput` on, dedupe the parent copy) or per-tree (`redirectOutput: false` on the child); both are one key in the child's `attach`.
 6. Lifetime: a child is an attach session — `terminated` without `exited`; a child that inherits the parent's stdout delays the parent's `exited` until the child ends; `disconnect(terminateDebuggee: true)` on the parent ends the tree, on a child ends only that child (exit code 0).
 7. Close every connection the worker opens: the adapter lives while any client socket is open and exits when a session-less client disconnects.
+
+## By-port attach (measured 2026-11-04, M1's third PR)
+
+Setup: `tests/fixtures/python/subprocess-tree/attach_parent.py`, started as `python -m debugpy --listen 127.0.0.1:<port> attach_parent.py` — it prints a READY line, calls `debugpy.wait_for_client()`, then starts `child.py` with `subprocess.Popen([sys.executable, …])` and waits for it. The server attaches through `attach_to_process { host, port }` (the proxy worker this time, not the spike's driver) with a breakpoint on `child.py:12` set on the session before the attach and `DAP_TRACE=1` on. Windows 11, Python 3.13.12, debugpy 1.8.20; the test is `tests/adapters/python/integration/python-subprocess-attach.test.ts`.
+
+| attach request `subProcess` | target flag | report | result |
+|---|---|---|---|
+| `true` | none | `startDebugging` on the attach connection (`conn: "parent"`) | child adopted, stopped at `child.py:12`; the tree ran to its end |
+| `false` | none | the same | the same |
+| absent | none | the same | the same |
+| `true` | `--configure-subProcess false` | none | the child ran undebugged; the root's wait went straight to the target's end |
+
+The report's configuration, measured: `{ type: "python", name: "Subprocess <pid>", connect: { host: "127.0.0.1", port: <the port attached to> }, justMyCode: true, subProcess: <the request's value>, subProcessId: <pid> }` — `connect.port` is the listener the attach went to, so the child is a second connection to the same port, as for a launch.
+
+Cascade on the attach root (child adopted and paused): `close_debug_session` answered `released: true`, `childrenClosed: 1`, both rows removed; `detach_from_process` answered `childrenReleased: 1`, both rows kept as `stopped`, and the child's `wait_for_stop` then answered `released: true`. Both times the target ran to its end — the released child finished its loop, the parent exited 0; nothing was killed.
+
+Conclusion: the target decides sub-process debugging at listen time (`--configure-subProcess false` on the command line, or `debugpy.configure(subProcess=False)` in code); the attach request's `subProcess` is inert, and the transform sends `true` for the record.

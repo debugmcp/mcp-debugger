@@ -86,19 +86,6 @@ pause on raised exceptions in Ruby — it will also stop on caught ones.
 (Attach sessions never apply a language default; their `breakOnExceptions` default is
 `"none"` for every language.)
 
-## Python child processes run without the debugger by default
-
-Python launches and attaches send debugpy `subProcess: false` by default, so children run
-undebugged: a breakpoint in code that only a child executes does not hit. With an explicit
-`dapLaunchArgs: { subProcess: true }` on a launch, each Python child the program starts
-(`subprocess`, `multiprocessing`, pytest-xdist workers) becomes a child debug session:
-`list_debug_sessions` lists it with `parentSessionId`, it stops on the parent's breakpoints (re-sent
-to it before it runs), and it has its own `get_output` and `close_debug_session`; closing the parent
-closes its children first. A `wait_for_stop` on the parent reports a child's stop with `sessionId`
-naming the child and `children` listing the tree with each session's state; a child can still be
-waited on by its own id. The default stays `false` until the last step of #1081 flips it; the design
-is [the session tree](architecture/session-tree.md).
-
 ## Dart/Flutter: what the SDK debug adapter does differently
 
 The Dart adapter drives the SDK's own `dart debug_adapter` / `flutter debug-adapter`, so
