@@ -104,6 +104,7 @@ async function startTarget(extraArgs: string[] = []): Promise<Target> {
   const port = await getFreePort();
   const proc = spawn(PYTHON, ['-m', 'debugpy', '--listen', `127.0.0.1:${port}`, ...extraArgs, attachParent], {
     cwd: treeDir,
+    windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe']
   });
   let buffer = '';

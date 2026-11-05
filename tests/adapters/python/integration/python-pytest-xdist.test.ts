@@ -28,7 +28,7 @@ const PYTHON = process.env.PYTHON_PATH ?? process.env.PYTHON_EXECUTABLE ?? (proc
 
 function xdistAvailable(): boolean {
   try {
-    const probe = spawnSync(PYTHON, ['-c', 'import xdist, pytest, debugpy'], { encoding: 'utf8', timeout: 20000 });
+    const probe = spawnSync(PYTHON, ['-c', 'import xdist, pytest, debugpy'], { encoding: 'utf8', timeout: 20000, windowsHide: true });
     return probe.status === 0;
   } catch {
     return false;
