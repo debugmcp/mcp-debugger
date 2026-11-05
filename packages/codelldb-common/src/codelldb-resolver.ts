@@ -300,8 +300,11 @@ export async function getCodeLLDBVersion(options?: {
   // beside it (<root>/adapter/codelldb -> <root>/version.json) — probe that
   // first so the reported version cannot be misattributed to a different
   // install (e.g. a stale vendor tree under the cwd fallback).
+  // Raw VSIX extractions store their version in package.json at the same
+  // root. Read that before metadata from another install.
   const versionFileCandidates = [
     path.resolve(path.dirname(codelldbPath), '..', 'version.json'),
+    path.resolve(path.dirname(codelldbPath), '..', 'package.json'),
     ...buildVendorCandidatePaths(defaultPackageRoot(), platformDir, 'version.json')
   ];
 

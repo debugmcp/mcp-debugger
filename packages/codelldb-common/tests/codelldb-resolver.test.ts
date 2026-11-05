@@ -243,7 +243,91 @@ describe('codelldb-resolver', () => {
       expect(readFileMock).toHaveBeenCalledTimes(2);
     });
 
-    it('falls back to DEFAULT_CODELLDB_VERSION when no version.json is readable', async () => {
+    it.each([
+      {
+        name: 'reads the raw VSIX manifest before unrelated metadata',
+        versionJson: undefined,
+        packageJson: '{"version":"1.11.8"}',
+        otherVersion: '9.9.9',
+        expected: '1.11.8'
+      },
+      {
+        name: 'keeps version.json ahead of the VSIX manifest',
+        versionJson: '{"version":"1.11.7"}',
+        packageJson: '{"version":"1.11.8"}',
+        otherVersion: '9.9.9',
+        expected: '1.11.7'
+      },
+      {
+        name: 'preserves the empty version.json fallback',
+        versionJson: '{}',
+        packageJson: '{"version":"1.11.8"}',
+        otherVersion: '9.9.9',
+        expected: DEFAULT_CODELLDB_VERSION
+      },
+      {
+        name: 'tries the manifest after malformed version.json',
+        versionJson: '{invalid',
+        packageJson: '{"version":"1.11.8"}',
+        otherVersion: '9.9.9',
+        expected: '1.11.8'
+      },
+      {
+        name: 'continues after a malformed manifest',
+        versionJson: undefined,
+        packageJson: '{invalid',
+        otherVersion: '9.9.9',
+        expected: '9.9.9'
+      },
+      {
+        name: 'continues when the manifest is absent',
+        versionJson: undefined,
+        packageJson: undefined,
+        otherVersion: '9.9.9',
+        expected: '9.9.9'
+      },
+      {
+        name: 'uses the default when all metadata is absent',
+        versionJson: undefined,
+        packageJson: undefined,
+        otherVersion: undefined,
+        expected: DEFAULT_CODELLDB_VERSION
+      },
+      {
+        name: 'uses the default when the manifest has no version',
+        versionJson: undefined,
+        packageJson: '{}',
+        otherVersion: undefined,
+        expected: DEFAULT_CODELLDB_VERSION
+      }
+    ])('$name', async ({ versionJson, packageJson, otherVersion, expected }) => {
+      stubPlatform('linux', 'x64');
+      const extensionRoot = path.resolve('/raw-vsix/extension');
+      const executable = path.join(extensionRoot, 'adapter', 'codelldb');
+      vi.stubEnv('CODELLDB_PATH', executable);
+      accessMock.mockImplementation(async (candidate: string) => {
+        if (candidate !== executable) throw new Error('ENOENT');
+      });
+      const adjacentMetadata = new Map([
+        [path.join(extensionRoot, 'version.json'), versionJson],
+        [path.join(extensionRoot, 'package.json'), packageJson]
+      ]);
+      readFileMock.mockImplementation(async (candidate: string) => {
+        if (adjacentMetadata.has(candidate)) {
+          const content = adjacentMetadata.get(candidate);
+          if (content === undefined) throw new Error('ENOENT');
+          return content;
+        }
+        if (otherVersion !== undefined) return JSON.stringify({ version: otherVersion });
+        throw new Error('ENOENT');
+      });
+
+      await expect(
+        getCodeLLDBVersion({ resolvePlatformPackageRoot: () => null })
+      ).resolves.toBe(expected);
+    });
+
+    it('falls back to DEFAULT_CODELLDB_VERSION when no version metadata is readable', async () => {
       stubPlatform('win32');
       accessMock.mockResolvedValue(undefined);
       readFileMock.mockRejectedValue(new Error('ENOENT'));
@@ -251,8 +335,8 @@ describe('codelldb-resolver', () => {
       await expect(
         getCodeLLDBVersion({ resolvePlatformPackageRoot: () => null })
       ).resolves.toBe(DEFAULT_CODELLDB_VERSION);
-      // Sibling-of-resolved-binary candidate + the 4 vendor candidates
-      expect(readFileMock).toHaveBeenCalledTimes(5);
+      // Both sibling metadata files + the 4 vendor candidates
+      expect(readFileMock).toHaveBeenCalledTimes(6);
     });
 
     it('falls back to DEFAULT_CODELLDB_VERSION when version.json lacks a version field', async () => {
