@@ -856,7 +856,12 @@ export class ExecutionController {
         // deadline: never return a removed id, or a pending root answer with
         // the child's state. A still-present child that naturally ended keeps
         // the ordinary ended-at-settle contract, including its recorded stop.
-        settled = await wait();
+        // waitForSubtreeSettle intentionally checks current state even with
+        // a zero timeout. That is useful for an initial read, but retries
+        // must not keep selecting alternating children past this deadline.
+        settled = Date.now() >= deadline
+          ? { outcome: signal?.aborted ? 'aborted' : 'timeout' }
+          : await wait();
         continue;
       }
       break;

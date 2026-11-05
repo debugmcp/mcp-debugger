@@ -308,6 +308,38 @@ describe('SessionManager - the tree-aware waitForStop (issue #1081)', () => {
     });
   });
 
+  it('does not select another paused child after alternating children exhaust the original deadline', async () => {
+    const rootId = await startRoot();
+    const first = await adopt(dependencies.mockProxyManager, rootId, 4242);
+    const second = await adopt(dependencies.mockProxyManager, rootId, 4343);
+    first.view.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1, allThreadsStopped: true });
+    second.view.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1, allThreadsStopped: true });
+    const wait = track(sessionManager.waitForStop(rootId, 15));
+
+    // The first landing finishes at 10 ms and reselects the second child.
+    await vi.advanceTimersByTimeAsync(5);
+    await sessionManager.continue(first.id);
+    await vi.advanceTimersByTimeAsync(10);
+    // The second landing finishes at 20 ms. The first child is paused again,
+    // but another selection now would restart work beyond the 15 ms budget.
+    first.view.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1, allThreadsStopped: true });
+    await sessionManager.continue(second.id);
+    await vi.advanceTimersByTimeAsync(5);
+
+    expect(wait.result()).toMatchObject({
+      success: true,
+      state: SessionState.RUNNING,
+      data: {
+        sessionId: rootId,
+        pending: true,
+        children: [
+          expect.objectContaining({ sessionId: first.id, state: SessionState.PAUSED }),
+          expect.objectContaining({ sessionId: second.id, state: SessionState.RUNNING })
+        ]
+      }
+    });
+  });
+
   it('preserves ended-at-settle for a selected child that naturally ends during the landing read', async () => {
     const rootId = await startRoot();
     const child = await adopt(dependencies.mockProxyManager, rootId, 4242);
