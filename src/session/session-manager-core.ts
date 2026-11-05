@@ -293,7 +293,7 @@ export type DetachResultData = DebugResultData & Pick<TreeAnswerFields, 'childre
  */
 export interface CloseSessionOutcome {
   closed: boolean;
-  /** Every id removed, deepest first then the named session — the handler forgets each output resource. */
+  /** Every id removed, deepest first then the named session. */
   closedSessionIds: string[];
   /** Descendants closed with the named session, when any. */
   childrenClosed?: number;
@@ -383,7 +383,7 @@ export abstract class SessionManagerCore extends EventEmitter {
   private readonly subtreeListeners = new Map<string, Set<() => void>>();
 
   /** Do not admit new descendants while an explicit close or relaunch tears down a subtree. */
-  private readonly closingSubtrees = new Set<string>();
+  private readonly closingSubtrees = new Map<string, number>();
 
   /**
    * TTL cache for launch-gate toolchain probes (issue #360) — shares the
@@ -603,7 +603,7 @@ export abstract class SessionManagerCore extends EventEmitter {
    * terminates it) or released; for an attach root, that every descendant was
    * detached with its target kept running, as the root's own target is.
    */
-  async closeSessionReporting(sessionId: string): Promise<CloseSessionOutcome> {
+  async closeSessionReporting(sessionId: string, options: { terminateDebuggee?: boolean } = {}): Promise<CloseSessionOutcome> {
     const session = this.sessionStore.get(sessionId);
     if (!session) {
       this.logger.warn(`[SESSION_CLOSE_FAIL] Session not found: ${sessionId}`);
@@ -611,9 +611,14 @@ export abstract class SessionManagerCore extends EventEmitter {
     }
     // An attach root's close preserves its external targets, descendants
     // included: their connections are closed without ending them.
-    const releaseDescendants = !session.parentSessionId && session.attachMode === true;
+    const releaseDescendants = !options.terminateDebuggee && !session.parentSessionId && session.attachMode === true;
+    // Closing a retained row after its connection ended cannot terminate
+    // its process. In particular, released children keep running after a
+    // plain detach, even if their rows are explicitly closed later.
+    const childEnd = session.parentSessionId && session.proxyManager ? this.childCloseSemantics(session) : undefined;
+    const alreadyReleased = session.parentSessionId && session.programEndExplanation?.data?.released === true;
     const closedSessionIds: string[] = [];
-    this.closingSubtrees.add(sessionId);
+    const finishClose = this.beginSubtreeClose(sessionId);
     try {
       for (const descendant of this.descendantsDeepestFirst(sessionId)) {
         if (await this.closeSingleSession(descendant.id, { releaseChild: releaseDescendants })) {
@@ -621,20 +626,28 @@ export abstract class SessionManagerCore extends EventEmitter {
         }
       }
       const childrenClosed = closedSessionIds.length;
+      // An explicit terminating detach ends every child before the root's
+      // disconnect can tear down their shared adapter/worker connection.
+      if (options.terminateDebuggee && session.proxyManager) {
+        try {
+          await session.proxyManager.sendDapRequest('disconnect', { terminateDebuggee: true });
+        } catch (disconnectError) {
+          this.logger.warn('[SessionManager] Terminating disconnect failed, closing the session anyway:', disconnectError);
+        }
+      }
       const closed = await this.closeSingleSession(sessionId);
       if (closed) {
         closedSessionIds.push(sessionId);
       }
-      const childEnd = session.parentSessionId ? this.childCloseSemantics(session) : undefined;
       return {
         closed,
         closedSessionIds,
         ...(childrenClosed > 0 ? { childrenClosed } : {}),
         ...(closed && childEnd === 'terminate' ? { processEnded: true as const } : {}),
-        ...(closed && (childEnd === 'release' || releaseDescendants) ? { released: true as const } : {})
+        ...(closed && (childEnd === 'release' || releaseDescendants || alreadyReleased) ? { released: true as const } : {})
       };
     } finally {
-      this.closingSubtrees.delete(sessionId);
+      finishClose();
     }
   }
 
@@ -754,6 +767,7 @@ export abstract class SessionManagerCore extends EventEmitter {
 
     this.logger.info(`Session ${sessionId} marked as STOPPED/TERMINATED.`);
     this.sessionStore.remove(sessionId);
+    this.emit('session-removed', sessionId);
     // Anything still waiting on this session learns it is gone (issue #849),
     // and a wait on an ancestor's tree sees one descendant fewer (issue #1081).
     this.notifySessionStateListeners(sessionId);
@@ -807,11 +821,11 @@ export abstract class SessionManagerCore extends EventEmitter {
    * always released (issue #238).
    */
   protected async stopProxyPreservingSession(session: ManagedSession): Promise<number> {
-    this.closingSubtrees.add(session.id);
+    const finishClose = this.beginSubtreeClose(session.id);
     try {
       return await this.stopProxyAndDescendants(session);
     } finally {
-      this.closingSubtrees.delete(session.id);
+      finishClose();
     }
   }
 
@@ -885,6 +899,22 @@ export abstract class SessionManagerCore extends EventEmitter {
       current = parent;
     }
     return current;
+  }
+
+  /** Block new adoptions until this teardown and any overlapping teardown finish. */
+  protected beginSubtreeClose(sessionId: string): () => void {
+    this.closingSubtrees.set(sessionId, (this.closingSubtrees.get(sessionId) ?? 0) + 1);
+    let finished = false;
+    return () => {
+      if (finished) return;
+      finished = true;
+      const remaining = (this.closingSubtrees.get(sessionId) ?? 1) - 1;
+      if (remaining > 0) {
+        this.closingSubtrees.set(sessionId, remaining);
+      } else {
+        this.closingSubtrees.delete(sessionId);
+      }
+    };
   }
 
   private isSubtreeClosing(session: ManagedSession): boolean {

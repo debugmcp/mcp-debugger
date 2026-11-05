@@ -43,6 +43,7 @@ describe('Server Output Resources Tests', () => {
   let mockDependencies: Dependencies;
   let outputCapturedListener: ((sessionId: string, entry: unknown) => void) | undefined;
   let childAdoptedListener: ((childId: string, parentId: string) => void) | undefined;
+  let sessionRemovedListener: ((sessionId: string) => void) | undefined;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -65,6 +66,9 @@ describe('Server Output Resources Tests', () => {
       if (event === 'child-session-adopted') {
         childAdoptedListener = listener;
       }
+      if (event === 'session-removed') {
+        sessionRemovedListener = listener;
+      }
     });
     vi.mocked(SessionManager).mockImplementation(function() { return mockSessionManager as any; });
 
@@ -77,6 +81,7 @@ describe('Server Output Resources Tests', () => {
     vi.clearAllMocks();
     outputCapturedListener = undefined;
     childAdoptedListener = undefined;
+    sessionRemovedListener = undefined;
   });
 
   describe('the session tree (issue #1081)', () => {
@@ -93,6 +98,33 @@ describe('Server Output Resources Tests', () => {
       await debugServer.stop();
 
       expect(mockSessionManager.removeListener).toHaveBeenCalledWith('child-session-adopted', childAdoptedListener);
+    });
+
+    it('forgets a removed child resource outside close_debug_session and cancels its pending update', async () => {
+      mockSessionManager.getSession.mockReturnValue(mockSession({ id: 'child-1' }));
+      await subscribe('debug://sessions/child-1/output');
+      expect(sessionRemovedListener).toBeDefined();
+      outputCapturedListener!('child-1', { output: 'before removal' });
+      vi.mocked(mockServer.sendResourceListChanged).mockClear();
+
+      // Relaunch and terminating detach remove rows directly in the core;
+      // neither runs the close_debug_session handler.
+      sessionRemovedListener!('child-1');
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(mockServer.sendResourceListChanged).toHaveBeenCalledTimes(1);
+      expect(mockServer.sendResourceUpdated).not.toHaveBeenCalled();
+      // The subscription itself is gone, as well as the pending timer.
+      outputCapturedListener!('child-1', { output: 'late output' });
+      await vi.advanceTimersByTimeAsync(200);
+      expect(mockServer.sendResourceUpdated).not.toHaveBeenCalled();
+    });
+
+    it('drops the removal subscription when the server stops', async () => {
+      expect(sessionRemovedListener).toBeDefined();
+      await debugServer.stop();
+
+      expect(mockSessionManager.removeListener).toHaveBeenCalledWith('session-removed', sessionRemovedListener);
     });
   });
 

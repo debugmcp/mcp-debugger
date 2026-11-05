@@ -128,7 +128,9 @@ export interface OperationsContext {
   stopProxyPreservingSession(session: ManagedSession): Promise<number>;
   closeSession(sessionId: string): Promise<boolean>;
   /** `closeSession` with its outcome (issue #1081): the rows removed, and what the close did to the processes. */
-  closeSessionReporting(sessionId: string): Promise<CloseSessionOutcome>;
+  closeSessionReporting(sessionId: string, options?: { terminateDebuggee?: boolean }): Promise<CloseSessionOutcome>;
+  /** Block new child adoptions during a complete teardown; returns the release function. */
+  beginSubtreeClose(sessionId: string): () => void;
   /** The detach cascade (issue #1081): release every descendant, deepest first; resolves with how many. */
   releaseDescendants(session: ManagedSession): Promise<number>;
   getStackTrace(
@@ -229,6 +231,7 @@ export type AttachContext = Pick<
   | 'closeSession'
   | 'closeSessionReporting'
   | 'releaseDescendants'
+  | 'beginSubtreeClose'
   | 'tunables'
   | 'extractLocalsFromResolved'
   | 'redactionEnabled'

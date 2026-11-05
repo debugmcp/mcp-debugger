@@ -32,6 +32,7 @@ describe('Server Session Tools Tests', () => {
   let mockDependencies: Dependencies;
   let callToolHandler: CallToolHandler;
   let server: DebugMcpServer;
+  let sessionRemovedListener: (sessionId: string) => void;
 
   beforeEach(() => {
     mockDependencies = createMockDependencies();
@@ -44,6 +45,11 @@ describe('Server Session Tools Tests', () => {
     vi.mocked(StdioServerTransport).mockImplementation(function() { return mockStdioTransport as any; });
 
     mockSessionManager = createMockSessionManager(mockDependencies.adapterRegistry);
+    mockSessionManager.on.mockImplementation((event: string, listener: (...args: any[]) => void) => {
+      if (event === 'session-removed') {
+        sessionRemovedListener = listener;
+      }
+    });
     vi.mocked(SessionManager).mockImplementation(function() { return mockSessionManager as any; });
     
     server = new DebugMcpServer();
@@ -261,11 +267,10 @@ describe('Server Session Tools Tests', () => {
     });
 
     it('answers the tree fields of a close and forgets every closed output resource (issue #1081)', async () => {
-      mockSessionManager.closeSessionReporting.mockResolvedValue({
-        closed: true,
-        closedSessionIds: ['grandchild', 'child', 'test-session'],
-        childrenClosed: 2,
-        released: true
+      mockSessionManager.closeSessionReporting.mockImplementation(async () => {
+        const closedSessionIds = ['grandchild', 'child', 'test-session'];
+        closedSessionIds.forEach(sessionRemovedListener);
+        return { closed: true, closedSessionIds, childrenClosed: 2, released: true };
       });
       const forget = vi.spyOn(outputResources(), 'forgetSession');
       const announce = vi.spyOn(outputResources(), 'notifyListChanged');
@@ -278,7 +283,8 @@ describe('Server Session Tools Tests', () => {
       const content = JSON.parse(result.content[0].text);
       expect(content).toEqual({ success: true, message: 'Closed debug session: test-session', childrenClosed: 2, released: true });
       expect(forget.mock.calls.map(([id]) => id)).toEqual(['grandchild', 'child', 'test-session']);
-      expect(announce).toHaveBeenCalledTimes(1);
+      // Once per removal, with no duplicate notification from the handler.
+      expect(announce).toHaveBeenCalledTimes(3);
     });
 
     it('says processEnded when the close ended a child process', async () => {

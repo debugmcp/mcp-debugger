@@ -235,6 +235,99 @@ describe('SessionManager - the tree-aware waitForStop (issue #1081)', () => {
     ]);
   });
 
+  it('reselects the ended parent if the selected child resumes during its landing read', async () => {
+    const rootId = await startRoot();
+    const child = await adopt(dependencies.mockProxyManager, rootId, 4242);
+    dependencies.mockProxyManager.simulateEvent('terminated');
+    child.view.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1, allThreadsStopped: true });
+    const wait = track(sessionManager.waitForStop(rootId, 10_000));
+    await vi.advanceTimersByTimeAsync(0);
+
+    await sessionManager.continue(child.id);
+    await afterStop();
+
+    expect(wait.result()).toMatchObject({
+      success: true,
+      state: SessionState.STOPPED,
+      data: { sessionId: rootId }
+    });
+    expect(wait.result()?.data?.pending).toBeUndefined();
+  });
+
+  it('keeps waiting if the selected child is closed during its landing read', async () => {
+    const rootId = await startRoot();
+    const child = await adopt(dependencies.mockProxyManager, rootId, 4242);
+    child.view.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1, allThreadsStopped: true });
+    const wait = track(sessionManager.waitForStop(rootId, 10_000));
+    await vi.advanceTimersByTimeAsync(0);
+
+    await sessionManager.closeSession(child.id);
+    await afterStop();
+    expect(wait.result()).toBeUndefined();
+
+    dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+    await afterStop();
+    expect(wait.result()).toMatchObject({ success: true, state: SessionState.PAUSED, data: { sessionId: rootId } });
+  });
+
+  it('keeps the original deadline when a selected child resumes during the landing read', async () => {
+    const rootId = await startRoot();
+    const child = await adopt(dependencies.mockProxyManager, rootId, 4242);
+    child.view.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1, allThreadsStopped: true });
+    const wait = track(sessionManager.waitForStop(rootId, 100));
+    await vi.advanceTimersByTimeAsync(5);
+    await sessionManager.continue(child.id);
+
+    await vi.advanceTimersByTimeAsync(94);
+    expect(wait.result()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(wait.result()).toMatchObject({
+      success: true,
+      state: SessionState.RUNNING,
+      data: { sessionId: rootId, pending: true }
+    });
+  });
+
+  it('still honors cancellation after a selected child resumes during the landing read', async () => {
+    const rootId = await startRoot();
+    const child = await adopt(dependencies.mockProxyManager, rootId, 4242);
+    child.view.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1, allThreadsStopped: true });
+    const controller = new AbortController();
+    const wait = track(sessionManager.waitForStop(rootId, 10_000, controller.signal));
+    await vi.advanceTimersByTimeAsync(0);
+    await sessionManager.continue(child.id);
+    await afterStop();
+    expect(wait.result()).toBeUndefined();
+
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(wait.result()).toMatchObject({
+      success: true,
+      state: SessionState.RUNNING,
+      data: { sessionId: rootId, pending: true }
+    });
+  });
+
+  it('preserves ended-at-settle for a selected child that naturally ends during the landing read', async () => {
+    const rootId = await startRoot();
+    const child = await adopt(dependencies.mockProxyManager, rootId, 4242);
+    const wait = track(sessionManager.waitForStop(rootId, 10_000));
+    child.view.simulateStopped(1, 'exception', { reason: 'exception', threadId: 1, allThreadsStopped: true });
+    await vi.advanceTimersByTimeAsync(0);
+
+    child.view.simulateEvent('terminated');
+    await afterStop();
+
+    expect(wait.result()).toMatchObject({
+      success: true,
+      state: SessionState.STOPPED,
+      data: { sessionId: child.id, lastStop: { reason: 'exception' } }
+    });
+    expect(wait.result()?.data?.location).toBeUndefined();
+    expect(sessionManager.getSession(child.id)).toBeDefined();
+    expect(sessionManager.getSession(rootId)?.state).toBe(SessionState.RUNNING);
+  });
+
   it('the pending answer carries the children and names the session asked for', async () => {
     const rootId = await startRoot();
     const child = await adopt(dependencies.mockProxyManager, rootId, 4242);

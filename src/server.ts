@@ -782,6 +782,9 @@ export class DebugMcpServer implements ToolContext {
     // is a new output resource: subscribed clients learn of it as they do of
     // a session created or closed through the tools.
     this.sessionManager.on('child-session-adopted', this.handleChildSessionAdopted);
+    // Removals also happen during relaunch and terminating detach, outside
+    // close_debug_session. Clean up each resource at the removal itself.
+    this.sessionManager.on('session-removed', this.handleSessionRemoved);
     this.server.onerror = (error) => {
       this.logger.error('Server error', { error });
     };
@@ -789,6 +792,11 @@ export class DebugMcpServer implements ToolContext {
 
   /** One listener instance, so stop() can remove exactly what start wired (issue #1081). */
   private readonly handleChildSessionAdopted = (): void => {
+    this.outputResources.notifyListChanged();
+  };
+
+  private readonly handleSessionRemoved = (sessionId: string): void => {
+    this.outputResources.forgetSession(sessionId);
     this.outputResources.notifyListChanged();
   };
 
@@ -831,6 +839,7 @@ export class DebugMcpServer implements ToolContext {
     this.outputResources.dispose();
     this.sessionManager.removeListener('output-captured', this.outputResources.handleOutputCaptured);
     this.sessionManager.removeListener('child-session-adopted', this.handleChildSessionAdopted);
+    this.sessionManager.removeListener('session-removed', this.handleSessionRemoved);
     this.logger.info('Debug MCP Server stopped');
     // Last: detach this server's logger from the shared file transport so
     // per-session servers in HTTP mode don't accumulate on it (issue #404).

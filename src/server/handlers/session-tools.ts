@@ -230,13 +230,6 @@ export const closeDebugSessionTool: ToolHandler = async (ctx, args) => {
       sessionName: sessionName,
       timestamp: Date.now()
     });
-
-    // The output resources are gone (issue #218) — the session's, and those
-    // of the descendants the close took with it (issue #1081).
-    for (const closedId of outcome.closedSessionIds) {
-      ctx.outputResources.forgetSession(closedId);
-    }
-    ctx.outputResources.notifyListChanged();
   }
 
   // The session tree (issue #1081): what the close took with it, and what

@@ -32,16 +32,8 @@ export interface ChildStopOptions {
   terminateDebuggee?: boolean;
 }
 
-/** How a child's connection is closed: ending the child (the default) or letting it run on. */
-export interface ChildStopOptions {
-  /** `false` releases the child to run undebugged (a detach cascade, issue #1081); default `true`. */
-  terminateDebuggee?: boolean;
-}
-
 export interface IChildProxyView extends IProxyManager {
   readonly childSessionId: string;
-  /** Connection-scoped: close this child's connection, ending the child unless told to release it. */
-  stop(options?: ChildStopOptions): Promise<void>;
   /** Connection-scoped: close this child's connection, ending the child unless told to release it. */
   stop(options?: ChildStopOptions): Promise<void>;
   /**

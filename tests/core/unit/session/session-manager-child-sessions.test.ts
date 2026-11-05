@@ -655,6 +655,18 @@ describe('SessionManager child sessions (issue #1081)', () => {
       expect(await sessionManager.closeSessionReporting(rootId)).toEqual({ closed: true, closedSessionIds: [rootId] });
       expect(await sessionManager.closeSessionReporting('no-such-session')).toEqual({ closed: false, closedSessionIds: [] });
     });
+
+    it('closing an already ended child only removes its row, without claiming the close ended its process', async () => {
+      const { childId, grandchildId, childView, grandchildView } = await tree();
+      grandchildView.simulateEvent('terminated');
+      childView.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+      expect(sessionManager.getSession(childId)!.proxyManager).toBeUndefined();
+
+      const outcome = await sessionManager.closeSessionReporting(childId);
+
+      expect(outcome).toEqual({ closed: true, closedSessionIds: [grandchildId, childId], childrenClosed: 1 });
+    });
   });
 
   describe('the detach cascade (issue #1081): an attach root with children', () => {
@@ -705,7 +717,19 @@ describe('SessionManager child sessions (issue #1081)', () => {
     });
 
     it('a terminating detach closes the subtree and counts what it closed', async () => {
-      const { rootId, childId, grandchildId } = await attachTree();
+      const { rootId, childId, grandchildId, childView, grandchildView } = await attachTree();
+      const order: string[] = [];
+      vi.spyOn(childView, 'stop').mockImplementation(async (options) => { order.push(`child:${options?.terminateDebuggee ?? true}`); });
+      vi.spyOn(grandchildView, 'stop').mockImplementation(async (options) => { order.push(`grandchild:${options?.terminateDebuggee ?? true}`); });
+      const rootSend = dependencies.mockProxyManager.sendDapRequest.bind(dependencies.mockProxyManager);
+      vi.spyOn(dependencies.mockProxyManager, 'sendDapRequest').mockImplementation(async (command, args, options) => {
+        if (command === 'disconnect') {
+          order.push(`root:${(args as { terminateDebuggee: boolean }).terminateDebuggee}`);
+        }
+        return rootSend(command, args, options);
+      });
+      const removed = vi.fn();
+      sessionManager.on('session-removed', removed);
 
       const detached = await sessionManager.detachFromProcess(rootId, true);
       await vi.runAllTimersAsync();
@@ -713,9 +737,44 @@ describe('SessionManager child sessions (issue #1081)', () => {
       expect(detached.success).toBe(true);
       expect(detached.data?.childrenClosed).toBe(2);
       expect(detached.data?.childrenReleased).toBeUndefined();
+      expect(order).toEqual(['grandchild:true', 'child:true', 'root:true']);
+      expect(removed.mock.calls).toEqual([[grandchildId], [childId], [rootId]]);
       expect(sessionManager.getSession(childId)).toBeUndefined();
       expect(sessionManager.getSession(grandchildId)).toBeUndefined();
       expect(sessionManager.getSession(rootId)).toBeUndefined();
+    });
+
+    it('releases reports arriving during child release or the root disconnect without adopting new rows', async () => {
+      const { rootId, grandchildView } = await attachTree();
+      let finishChildStop!: () => void;
+      vi.spyOn(grandchildView, 'stop').mockImplementation(() => new Promise<void>((resolve) => { finishChildStop = resolve; }));
+      let finishRootDisconnect!: () => void;
+      const rootSend = dependencies.mockProxyManager.sendDapRequest.bind(dependencies.mockProxyManager);
+      vi.spyOn(dependencies.mockProxyManager, 'sendDapRequest').mockImplementation(async (command, args, options) => {
+        if (command === 'disconnect') {
+          await new Promise<void>((resolve) => { finishRootDisconnect = resolve; });
+        }
+        return rootSend(command, args, options);
+      });
+
+      const detaching = sessionManager.detachFromProcess(rootId);
+      await vi.waitFor(() => expect(finishChildStop).toBeTypeOf('function'));
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('during-child-release', 4444));
+      finishChildStop();
+      await vi.waitFor(() => expect(finishRootDisconnect).toBeTypeOf('function'));
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('during-root-disconnect', 4545));
+      finishRootDisconnect();
+      const detached = await detaching;
+      await vi.runAllTimersAsync();
+
+      expect(detached.success).toBe(true);
+      expect(detached.data?.childrenReleased).toBe(2);
+      expect(sessionManager.getAllSessions()).toHaveLength(3);
+      expect(sessionManager.getAllSessions().every((session) => session.state === SessionState.STOPPED)).toBe(true);
+      expect(releases().map((call) => (call.args as { reportId: string }).reportId)).toEqual([
+        'during-child-release', 'during-root-disconnect'
+      ]);
+      expect(sessionManager.getSession(rootId)!.releasedChildReports).toBeUndefined();
     });
 
     it('a detach with no children answers as before', async () => {
@@ -726,6 +785,16 @@ describe('SessionManager child sessions (issue #1081)', () => {
 
       expect(detached.success).toBe(true);
       expect(detached.data).toEqual({ message: 'Detached from process (process still running)' });
+    });
+
+    it('closing a released child preserves the release outcome and does not claim process termination', async () => {
+      const { rootId, childId, grandchildId } = await attachTree();
+      await sessionManager.detachFromProcess(rootId);
+
+      const outcome = await sessionManager.closeSessionReporting(childId);
+
+      expect(outcome).toEqual({ closed: true, closedSessionIds: [grandchildId, childId], childrenClosed: 1, released: true });
+      expect(outcome.processEnded).toBeUndefined();
     });
   });
 
@@ -785,6 +854,8 @@ describe('SessionManager child sessions (issue #1081)', () => {
       childView.simulateEvent('child-reported', report('r2', 4343));
       await vi.runAllTimersAsync();
       vi.spyOn(dependencies.mockProxyManager, 'stop').mockResolvedValue();
+      const removed = vi.fn();
+      sessionManager.on('session-removed', removed);
 
       const restarted = await sessionManager.restartDebugging(rootId);
       await vi.runAllTimersAsync();
@@ -792,6 +863,8 @@ describe('SessionManager child sessions (issue #1081)', () => {
       expect(restarted.success).toBe(true);
       expect(restarted.data?.childrenClosed).toBe(2);
       expect(restarted.data?.children).toBeUndefined();
+      expect(removed).toHaveBeenCalledTimes(2);
+      expect(removed).not.toHaveBeenCalledWith(rootId);
     });
 
     it('a launch with nothing to tear down answers no childrenClosed', async () => {

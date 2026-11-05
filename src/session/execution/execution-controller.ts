@@ -806,37 +806,63 @@ export class ExecutionController {
       ...this.ctx.descendantsOf(sessionId).map((d): [string, SessionStopInfo | undefined] => [d.id, d.lastStop])
     ]);
 
-    const settled = await waitForSubtreeSettle(this.ctx, sessionId, { timeoutMs: waitMs, signal });
-    if (settled.outcome === 'gone') {
-      return {
-        success: false,
-        error: ErrorMessages.sessionClosedWhileWaiting(sessionId),
-        state: SessionState.STOPPED
-      };
-    }
-    // The session this answer is about: the selection's, or — pending — the
-    // one asked for.
-    const target = settled.outcome === 'matched' ? settled.value : session;
-    const tree = () => describeTreeAnswer(session, this.ctx.descendantsOf(sessionId));
+    const deadline = Date.now() + waitMs;
+    const wait = () => waitForSubtreeSettle(this.ctx, sessionId, {
+      timeoutMs: Math.max(0, deadline - Date.now()), signal
+    });
+    let settled = await wait();
+    let target = session;
+    let landing: StopLanding;
+    let stopAtLanding: SessionStopInfo | undefined;
+    let snapshot: Awaited<ReturnType<typeof composeStopSnapshot>>;
+    for (;;) {
+      if (settled.outcome === 'gone') {
+        return {
+          success: false,
+          error: ErrorMessages.sessionClosedWhileWaiting(sessionId),
+          state: SessionState.STOPPED
+        };
+      }
+      // The session this answer is about: the selection's, or — pending —
+      // the one asked for.
+      target = settled.outcome === 'matched' ? settled.value : session;
 
-    // Where it stopped, best effort: the same short settle and stack read a
-    // step or a pause does. It is a DAP round trip, so the state is read
-    // again afterwards rather than trusted across it.
-    const landing: StopLanding = target.state === SessionState.PAUSED
-      ? await describeStopLocation(this.ctx, target.id, 'waitForStop')
-      : {};
+      // Where it stopped, best effort: the same short settle and stack read
+      // a step or a pause does. Re-read state after the DAP round trip.
+      landing = target.state === SessionState.PAUSED
+        ? await describeStopLocation(this.ctx, target.id, 'waitForStop')
+        : {};
+      // Pin this answer's stop before the snapshot's locals read: a new stop
+      // under that read belongs to the next answer, never a mixed snapshot.
+      stopAtLanding = target.lastStop;
+      // lastStop already carries the exception, so do not repeat it in the
+      // snapshot. Its own identity gate rejects a changed stop's locals.
+      snapshot = await composeStopSnapshot(
+        this.ctx, target.id, landing.stackResult, 'waitForStop', { omitException: true }
+      );
+
+      try {
+        this.ctx.getSession(sessionId);
+      } catch {
+        settled = { outcome: 'gone' };
+        continue;
+      }
+      if (target !== session && (
+        !this.ctx.descendantsOf(sessionId).includes(target) ||
+        (target.state !== SessionState.PAUSED && !isTerminalSessionState(target.state))
+      )) {
+        // A selected child may be closed or resumed by another caller while
+        // the answer is assembled. Re-select the tree under the ORIGINAL
+        // deadline: never return a removed id, or a pending root answer with
+        // the child's state. A still-present child that naturally ended keeps
+        // the ordinary ended-at-settle contract, including its recorded stop.
+        settled = await wait();
+        continue;
+      }
+      break;
+    }
     const location = landing.location;
-    // The stop this wait settled on, pinned at the landing read: the compose
-    // below is a real wait, and a NEW stop landing under it belongs to the
-    // next wait_for_stop, not to this answer — one answer, one stop.
-    const stopAtLanding = target.lastStop;
-    // The snapshot behind the landing (issue #982). The exception section is
-    // omitted on purpose: this answer carries the full (redacted) lastStop,
-    // and the same message must never ship twice. The composer's own
-    // stop-identity gate answers no snapshot if the stop changed under it.
-    const snapshot = await composeStopSnapshot(
-      this.ctx, target.id, landing.stackResult, 'waitForStop', { omitException: true }
-    );
+    const tree = () => describeTreeAnswer(session, this.ctx.descendantsOf(sessionId));
     // Emit a redacted copy of the stop record (issue #982); the stored record
     // keeps its identity — the exceptionInfo merge and `lastStop !== before`
     // guards depend on it.
@@ -876,8 +902,9 @@ export class ExecutionController {
       };
     }
     if (state === SessionState.STOPPED) {
-      // Only the session itself is ever selected ended (rule 3): a descendant
-      // is selected paused or in error. No stop was recorded in this launch:
+      // Only the session itself can be selected already ended (rule 3); a
+      // selected descendant can also end while its answer is assembled.
+      // No stop was recorded in this launch:
       // the program ran past every breakpoint, and the answer says which —
       // the same run-to-completion summary the launch gives when the program
       // ends inside its hold (issues #701, #1033); it already joins the
