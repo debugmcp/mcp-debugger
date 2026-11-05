@@ -34,35 +34,55 @@ export interface BridgeOptions extends BridgeArgs {
   env?: NodeJS.ProcessEnv;
   /** Injected for tests; defaults to `process.platform`. */
   platform?: NodeJS.Platform;
-  /** Ends a process with everything below it (Windows only); defaults to `taskkill /T /F`. Injected for tests. */
-  killTree?: (pid: number) => void;
+  /**
+   * Ends a process tree (Windows only). A promise settles when the bounded
+   * killer exits; void keeps the legacy grace.
+   */
+  killTree?: (pid: number) => void | Promise<void>;
 }
 
-/** How long the Windows tree kill gets before the plain kill follows it up. */
+/** Legacy injected killers cannot report completion, so retain their fallback grace. */
 const TREE_KILL_GRACE_MS = 300;
+/** Bound a wedged taskkill, then wait for its exit before touching the adapter. */
+const TREE_KILL_TIMEOUT_MS = 5000;
 
-/** The default Windows tree kill: fire-and-forget `taskkill`, the proxy worker's own idiom. */
-function taskkillTree(pid: number): void {
-  const killer = nodeSpawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
-  killer.on('error', () => { /* no taskkill: the plain kill follows after the grace */ });
+/** Never kill the adapter before taskkill has finished enumerating its descendants (#1089). */
+function taskkillTree(pid: number): Promise<void> {
+  return new Promise((resolve) => {
+    const killer = nodeSpawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+      stdio: 'ignore', windowsHide: true, timeout: TREE_KILL_TIMEOUT_MS
+    });
+    // spawn's timeout terminates a hung helper. Wait for exit even on that path,
+    // so a late taskkill cannot inspect a pid after the plain fallback frees it.
+    killer.once('exit', () => resolve());
+    killer.once('error', () => resolve());
+  });
 }
 
 /** Children a tree kill has already been issued for, so the socket-gone and close() paths do not repeat it. */
 const treeKillIssued = new WeakSet<ChildProcess>();
+const treeKillCompletion = new WeakMap<ChildProcess, Promise<void>>();
 
 /**
  * End the child. On Windows `cp.kill()` is TerminateProcess on the direct child alone, and the
  * Dart/Flutter SDK adapter is never alone (`dart.exe` → `dartvm.exe` → flutter.bat → … → the app):
  * everything below it was re-parented and left running (issue #937). So the tree goes first —
- * `taskkill /T /F`, the proxy worker's own idiom — and the plain kill follows only if the child is
- * still here after a short grace (a missing taskkill fails asynchronously and takes this route too),
- * or at once if taskkill cannot even be spawned. POSIX keeps `cp.kill()`: the proxy's process-group
+ * `taskkill /T /F`, the proxy worker's own idiom — and the plain kill follows only after taskkill
+ * exits or fails (its own timeout bounds a hung helper). A 300 ms grace applies only to legacy
+ * injected killers that cannot report completion. A synchronous spawn failure falls back at once.
+ * POSIX keeps `cp.kill()`: the proxy's process-group
  * kill covers the tree there. A child that has already exited is never touched: Node holds the
  * process handle until the tick that records its exit, so while `exitCode` is still null the pid
  * cannot have been recycled, and once it is set it may be someone else's. (Mirrored in the
  * netcoredbg bridge, which is dependency-free by the same rule.)
  */
-function endChild(cp: ChildProcess, platform: NodeJS.Platform, killTree: (pid: number) => void): void {
+function endChild(
+  cp: ChildProcess,
+  platform: NodeJS.Platform,
+  killTree: (pid: number) => void | Promise<void>
+): void | Promise<void> {
+  const pending = treeKillCompletion.get(cp);
+  if (pending) return pending;
   if ((cp.exitCode ?? null) !== null || cp.killed) return;
   const plainKill = (): void => {
     if ((cp.exitCode ?? null) === null && !cp.killed) {
@@ -75,15 +95,34 @@ function endChild(cp: ChildProcess, platform: NodeJS.Platform, killTree: (pid: n
   }
   if (treeKillIssued.has(cp)) return;
   treeKillIssued.add(cp);
+  let completed: void | Promise<void>;
   try {
-    killTree(cp.pid);
+    completed = killTree(cp.pid);
   } catch {
     plainKill();
     return;
   }
-  const fallback = setTimeout(plainKill, TREE_KILL_GRACE_MS);
-  fallback.unref?.();
-  cp.once('exit', () => clearTimeout(fallback));
+  let fallback: ReturnType<typeof setTimeout> | undefined;
+  let finished = false;
+  const cancel = (): void => {
+    finished = true;
+    if (fallback !== undefined) clearTimeout(fallback);
+    cp.off('exit', cancel);
+  };
+  const finish = (): void => {
+    if (finished) return;
+    cancel();
+    plainKill();
+  };
+  cp.once('exit', cancel);
+  if (completed) {
+    const pending = completed.then(finish, finish);
+    treeKillCompletion.set(cp, pending);
+    return pending;
+  } else {
+    fallback = setTimeout(finish, TREE_KILL_GRACE_MS);
+    fallback.unref?.();
+  }
 }
 
 export interface BridgeHandle {
@@ -91,7 +130,7 @@ export interface BridgeHandle {
   readonly listening: boolean;
   /** Set once the child has exited (its exit code) or could not be spawned (1). */
   readonly exitCode: number | undefined;
-  /** Resolves when the server has closed and the child (if any) was asked to stop. */
+  /** Resolves when the server has closed and any Windows tree-kill helper has exited. */
   close(): Promise<void>;
   /** Resolves with the exit code when the session is over (child closed or spawn failed). */
   readonly done: Promise<number>;
@@ -204,7 +243,10 @@ export function createBridge(options: BridgeOptions): Promise<BridgeHandle> {
 
     const onSocketGone = (): void => {
       socket = undefined;
-      try { cp.stdin?.end(); } catch { /* already closed */ }
+      // EOF can make the adapter exit before taskkill enumerates its tree.
+      if (platform !== 'win32') {
+        try { cp.stdin?.end(); } catch { /* already closed */ }
+      }
       endChild(cp, platform, killTree);
       server.close();
     };
@@ -221,12 +263,17 @@ export function createBridge(options: BridgeOptions): Promise<BridgeHandle> {
         get listening() { return server.listening; },
         get exitCode() { return exitCode; },
         done,
-        close: () => new Promise<void>((res) => {
+        close: async () => {
           try { socket?.destroy(); } catch { /* ignore */ }
-          if (child) endChild(child, platform, killTree);
-          if (!server.listening) { res(); return; }
-          server.close(() => res());
-        }),
+          const ending = child ? endChild(child, platform, killTree) : undefined;
+          await new Promise<void>((res) => {
+            if (!server.listening) { res(); return; }
+            server.close(() => res());
+          });
+          // The entry point exits after close(): keep the helper alive until it
+          // has finished, including when the adapter itself exited first.
+          await ending;
+        },
       });
     });
   });

@@ -445,40 +445,49 @@ describe('PythonDebugAdapter', () => {
 
   // debugpy's sub-process debugging reports every Python child the program
   // starts, and the server adopts each report as a child debug session (the
-  // session tree, issue #1081): the transforms keep it off unless asked, until
-  // the last step of #1081 flips the default.
+  // session tree, issue #1081): on by default; an explicit false opts a
+  // launch out. A by-port attach target decides for itself at listen time
+  // (measured in the attach suite: the request's value is inert), so an
+  // explicit false on an attach is forwarded with a note saying so.
   describe('sub-process debugging default (issues #1005/#1081)', () => {
-    it('turns subProcess off for a launch that does not name it', async () => {
+    it('turns subProcess on for a launch that does not name it, silently', async () => {
       const adapter = new PythonDebugAdapter(createDependencies());
       const config = await adapter.transformLaunchConfig({ program: '/proj/a.py' } as GenericLaunchConfig);
-      expect(config.subProcess).toBe(false);
+      expect(config.subProcess).toBe(true);
       expect(adapter.consumeLaunchConfigDiagnostics?.() ?? []).toEqual([]);
     });
 
-    it('forwards an explicit subProcess: true and says what it enables', async () => {
+    it('keeps an explicit subProcess: true silent (it is the default)', async () => {
       const adapter = new PythonDebugAdapter(createDependencies());
       const config = await adapter.transformLaunchConfig({ program: '/proj/a.py', subProcess: true } as GenericLaunchConfig);
       expect(config.subProcess).toBe(true);
+      expect(adapter.consumeLaunchConfigDiagnostics?.() ?? []).toEqual([]);
+    });
+
+    it('forwards an explicit subProcess: false and says the children run undebugged', async () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+      const config = await adapter.transformLaunchConfig({ program: '/proj/a.py', subProcess: false } as GenericLaunchConfig);
+      expect(config.subProcess).toBe(false);
       const diagnostics = adapter.consumeLaunchConfigDiagnostics?.() ?? [];
       expect(diagnostics).toHaveLength(1);
       expect(diagnostics[0].key).toBe('subProcess');
       expect(diagnostics[0].scope).toBeUndefined();
-      expect(diagnostics[0].message).toMatch(/child debug session/);
-      expect(diagnostics[0].message).toMatch(/wait_for_stop on this session reports the child/);
+      expect(diagnostics[0].message).toMatch(/run undebugged/);
       expect(diagnostics[0].message).toMatch(/#1081/);
     });
 
-    it('keeps an explicit subProcess: false silent', async () => {
+    it('sends subProcess: true on an attach too, and says an explicit false is the target\'s call', () => {
       const adapter = new PythonDebugAdapter(createDependencies());
-      const config = await adapter.transformLaunchConfig({ program: '/proj/a.py', subProcess: false } as GenericLaunchConfig);
-      expect(config.subProcess).toBe(false);
+      expect(adapter.transformAttachConfig!({ request: 'attach', port: 5678 }).subProcess).toBe(true);
       expect(adapter.consumeLaunchConfigDiagnostics?.() ?? []).toEqual([]);
-    });
 
-    it('turns subProcess off for an attach too, unless asked', () => {
-      const adapter = new PythonDebugAdapter(createDependencies());
-      expect(adapter.transformAttachConfig!({ request: 'attach', port: 5678 }).subProcess).toBe(false);
-      expect(adapter.transformAttachConfig!({ request: 'attach', port: 5678, subProcess: true }).subProcess).toBe(true);
+      expect(adapter.transformAttachConfig!({ request: 'attach', port: 5678, subProcess: false }).subProcess).toBe(false);
+      const diagnostics = adapter.consumeLaunchConfigDiagnostics?.() ?? [];
+      expect(diagnostics).toHaveLength(1);
+      expect(diagnostics[0].key).toBe('subProcess');
+      expect(diagnostics[0].scope).toBeUndefined();
+      expect(diagnostics[0].message).toMatch(/--configure-subProcess false/);
+      expect(diagnostics[0].message).toMatch(/#1081/);
     });
   });
 

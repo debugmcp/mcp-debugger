@@ -19,35 +19,54 @@ export interface BridgeOptions {
   stderr?: NodeJS.WritableStream;
   /** Injected for tests; defaults to `process.platform`. */
   platform?: NodeJS.Platform;
-  /** Ends a process with everything below it (Windows only); defaults to `taskkill /T /F`. Injected for tests. */
-  killTree?: (pid: number) => void;
+  /**
+   * Ends a process tree (Windows only). A promise settles when the bounded
+   * killer exits; void keeps the legacy grace.
+   */
+  killTree?: (pid: number) => void | Promise<void>;
 }
 
-/** How long the Windows tree kill gets before the plain kill follows it up. */
+/** Legacy injected killers cannot report completion, so retain their fallback grace. */
 const TREE_KILL_GRACE_MS = 300;
+/** Bound a wedged taskkill, then wait for its exit before touching the adapter. */
+const TREE_KILL_TIMEOUT_MS = 5000;
 
-/** The default Windows tree kill: fire-and-forget `taskkill`, the proxy worker's own idiom. */
-function taskkillTree(pid: number): void {
-  const killer = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
-  killer.on('error', () => { /* no taskkill: the plain kill follows after the grace */ });
+/** Never kill the adapter before taskkill has finished enumerating its descendants (#1089). */
+function taskkillTree(pid: number): Promise<void> {
+  return new Promise((resolve) => {
+    const killer = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+      stdio: 'ignore', windowsHide: true, timeout: TREE_KILL_TIMEOUT_MS
+    });
+    // spawn's timeout terminates a hung helper. Wait for exit even on that path,
+    // so a late taskkill cannot inspect a pid after the plain fallback frees it.
+    killer.once('exit', () => resolve());
+    killer.once('error', () => resolve());
+  });
 }
 
 /** Children a tree kill has already been issued for, so the socket paths and cleanup() do not repeat it. */
 const treeKillIssued = new WeakSet<ChildProcess>();
+const treeKillCompletion = new WeakMap<ChildProcess, Promise<void>>();
 
 /**
  * End the child. On Windows `cp.kill()` is TerminateProcess on netcoredbg alone, and the debuggee
  * it launched sits below it, re-parented and left running by a single-process kill (issue #937).
  * So the tree goes first — `taskkill /T /F`, the proxy worker's own idiom — and the plain kill
- * follows only if the child is still here after a short grace (a missing taskkill fails
- * asynchronously and takes this route too), or at once if taskkill cannot even be spawned. POSIX
- * keeps `cp.kill()`: the proxy's process-group kill covers the tree there. A child that has already
+ * follows only after taskkill exits or fails (its own timeout bounds a hung helper). A 300 ms
+ * grace applies only to legacy injected killers that cannot report completion. A synchronous
+ * spawn failure falls back at once. POSIX keeps `cp.kill()`: the proxy's process-group kill covers the tree there. A child that has already
  * exited is never touched: Node holds the process handle until the tick that records its exit, so
  * while `exitCode` is still null the pid cannot have been recycled, and once it is set it may be
  * someone else's. (Mirrored in the Dart bridge; both are dependency-free by design, so no shared
  * helper.)
  */
-function endChild(cp: ChildProcess, platform: NodeJS.Platform, killTree: (pid: number) => void): void {
+function endChild(
+  cp: ChildProcess,
+  platform: NodeJS.Platform,
+  killTree: (pid: number) => void | Promise<void>
+): void | Promise<void> {
+  const pending = treeKillCompletion.get(cp);
+  if (pending) return pending;
   if ((cp.exitCode ?? null) !== null || cp.killed) return;
   const plainKill = (): void => {
     if ((cp.exitCode ?? null) === null && !cp.killed) {
@@ -60,15 +79,34 @@ function endChild(cp: ChildProcess, platform: NodeJS.Platform, killTree: (pid: n
   }
   if (treeKillIssued.has(cp)) return;
   treeKillIssued.add(cp);
+  let completed: void | Promise<void>;
   try {
-    killTree(cp.pid);
+    completed = killTree(cp.pid);
   } catch {
     plainKill();
     return;
   }
-  const fallback = setTimeout(plainKill, TREE_KILL_GRACE_MS);
-  fallback.unref?.();
-  cp.once('exit', () => clearTimeout(fallback));
+  let fallback: ReturnType<typeof setTimeout> | undefined;
+  let finished = false;
+  const cancel = (): void => {
+    finished = true;
+    if (fallback !== undefined) clearTimeout(fallback);
+    cp.off('exit', cancel);
+  };
+  const finish = (): void => {
+    if (finished) return;
+    cancel();
+    plainKill();
+  };
+  cp.once('exit', cancel);
+  if (completed) {
+    const pending = completed.then(finish, finish);
+    treeKillCompletion.set(cp, pending);
+    return pending;
+  } else {
+    fallback = setTimeout(finish, TREE_KILL_GRACE_MS);
+    fallback.unref?.();
+  }
 }
 
 export interface BridgeHandle {
@@ -176,7 +214,8 @@ export function createBridge(
     // Handle client disconnect
     socket.on('close', () => {
       if (netcoredbg) {
-        netcoredbg.stdin?.end();
+        // Keep the Windows parent alive until taskkill enumerates its tree.
+        if (platform !== 'win32') netcoredbg.stdin?.end();
         endChild(netcoredbg, platform, killTree);
       }
       server.close();
@@ -185,7 +224,8 @@ export function createBridge(
     socket.on('error', (err) => {
       stderrStream.write(`bridge socket error: ${err.message}\n`);
       if (netcoredbg) {
-        netcoredbg.stdin?.end();
+        // Keep the Windows parent alive until taskkill enumerates its tree.
+        if (platform !== 'win32') netcoredbg.stdin?.end();
         endChild(netcoredbg, platform, killTree);
       }
       server.close();

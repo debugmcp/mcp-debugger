@@ -5,7 +5,9 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import net from 'net';
-import type { ChildProcess } from 'node:child_process';
+import { spawn as spawnProcess, type ChildProcess } from 'child_process';
+
+vi.mock('child_process', () => ({ spawn: vi.fn() }));
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import { createBridge, type BridgeHandle, type BridgeOptions } from '../../src/utils/netcoredbg-bridge-core.js';
@@ -322,6 +324,43 @@ describe('netcoredbg-bridge-core', () => {
       client.destroy();
       await vi.waitFor(() => expect(mockCp.kill).toHaveBeenCalled(), { timeout: 2000 });
       expect(killTree).toHaveBeenCalledWith(12345);
+    });
+
+    it.each(['exit', 'error'] as const)('waits for the default taskkill %s before falling back (issue #1089)', async (event) => {
+      const killer = new EventEmitter();
+      vi.mocked(spawnProcess).mockClear().mockReturnValueOnce(killer as ChildProcess);
+      bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream, platform: 'win32' });
+      const client = await connectClient(await waitForListening(bridge.server));
+      await tick();
+      client.destroy();
+      await vi.waitFor(() => expect(spawnProcess).toHaveBeenCalledWith('taskkill', ['/PID', '12345', '/T', '/F'], {
+        stdio: 'ignore', windowsHide: true, timeout: 5000
+      }));
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 450));
+        expect(mockCp.kill).not.toHaveBeenCalled();
+        expect(mockCp.stdin.writableEnded).toBe(false);
+        killer.emit(event, event === 'error' ? new Error('spawn taskkill ENOENT') : 1);
+        await vi.waitFor(() => expect(mockCp.kill).toHaveBeenCalledOnce());
+        expect(mockCp.listenerCount('exit')).toBe(1);
+      } finally {
+        killer.emit('exit', 1);
+      }
+    });
+
+    it('does not kill an adapter that exits while taskkill is still running', async () => {
+      const killer = new EventEmitter();
+      vi.mocked(spawnProcess).mockClear().mockReturnValueOnce(killer as ChildProcess);
+      bridge = createBridge('/usr/bin/netcoredbg', 0, { spawnFn, stderr: stderrStream, platform: 'win32' });
+      await connectClient(await waitForListening(bridge.server));
+      await tick();
+      bridge.cleanup();
+      (mockCp as unknown as { exitCode: number | null }).exitCode = 0;
+      mockCp.emit('exit', 0, null);
+      killer.emit('exit', 0);
+      await tick();
+      expect(mockCp.kill).not.toHaveBeenCalled();
+      expect(mockCp.listenerCount('exit')).toBe(1);
     });
 
     it('skips a child that has already exited (the pid may be someone else\'s by now)', async () => {

@@ -13,8 +13,9 @@ Status: decisions taken 2026-11-03 (listed with their owners at the end); merged
 [#1083](https://github.com/debugmcp/mcp-debugger/pull/1083). Implementation under
 [#1081](https://github.com/debugmcp/mcp-debugger/issues/1081): M1 PR 1 (adoption behind an
 explicit `subProcess: true`) merged in [#1087](https://github.com/debugmcp/mcp-debugger/pull/1087);
-PR 2 (the tree-aware wait and the cascade answers) in progress; then the default flip. M2 is
-[#1082](https://github.com/debugmcp/mcp-debugger/issues/1082). Nothing is on by default yet.
+PR 2 (the tree-aware wait and the cascade answers) in [#1090](https://github.com/debugmcp/mcp-debugger/pull/1090);
+the third PR (on by default, the attach measurement, the lifecycle suites) completes M1. M2 is
+[#1082](https://github.com/debugmcp/mcp-debugger/issues/1082).
 Scope: debuggee children reported by the adapter (debugpy subprocesses, js-debug forks and, later,
 browser targets). The tree is additive to the shipped tool surface: no new tool, no changed
 parameter, new fields only.
@@ -218,8 +219,9 @@ Adoption is on by default. The Python launch transform stops defaulting `subProc
 names the hang goes with it) and the JavaScript launch and attach transforms default
 `autoAttachChildProcesses` to `true` (the attach path's `false` was #501's wedge guard, which
 adoption replaces; the `attach_to_process` schema text that states it changes with it). An
-explicit `false` in `dapLaunchArgs` (or in `adapterConfig` for an attach) turns adoption off for
-that session and children run undebugged, as they do today. Each flip ships in the milestone that
+explicit `false` in `dapLaunchArgs` turns adoption off for that launch and children run
+undebugged, as they did before the tree (an attach's opt-out is the target's own flag, measured
+below). Each flip ships in the milestone that
 makes it safe (M1 for Python, M2 for js-debug), as a documented behaviour change with a `changed`
 changelog entry, because it changes what a launch that spawns Python or Node processes shows:
 child rows for every xdist worker, autoreloader child or script that shells out.
@@ -229,6 +231,15 @@ topology is a launch served by `python -m debugpy.adapter`, and whether a by-por
 report on the same connection with the same `connect` body is unmeasured. M1 includes that
 fixture; if it reports the same way, the attach default flips with the launch default, otherwise
 attach keeps `subProcess: false` and its warning until a follow-up measures it.
+
+Measured in M1's third PR (2026-11-04, `python-subprocess-attach.test.ts`): a by-port attach's
+child is reported on the attach connection as a `startDebugging` request whose `connect.port` is
+the port attached to, whatever the attach request's `subProcess` says (`true`, `false` and no key
+alike: reported, adopted, stopped on the breakpoint); with the target started
+`python -m debugpy --listen … --configure-subProcess false` there is no report at all. The target
+decides at listen time, so the attach transform sends `subProcess: true` for the record, and an
+attach's opt-out is the target's own flag (an explicit `false` in `adapterConfig` is forwarded with
+a note saying so).
 
 Two bounds keep that sane:
 
@@ -537,7 +548,11 @@ Taken by the author of this document, marked so they can be overturned:
 - Whether the tree-aware wait is a second `waitForSessionState` over a set of ids or a subscription
   on the parent's descendants; it must keep the microtask re-check that hides auto-continued entry
   stops ([#849](https://github.com/debugmcp/mcp-debugger/issues/849)).
-- The regression suite's exact fixtures beyond `python-subprocess-inherit`.
+- The regression suite's fixtures (settled in M1's third PR): `tests/fixtures/python/subprocess-tree/`
+  — `parent.py`/`child.py`, `child_grand.py`/`grandchild.py`, `parent_exits.py`, `parent_two.py`,
+  `mp_parent.py`, `attach_parent.py` — under
+  `tests/adapters/python/integration/python-subprocess-{tree,cascade,attach}.test.ts` and
+  `python-pytest-xdist.test.ts`.
 - The reference-doc wording for the new fields.
 
 ## Sources
