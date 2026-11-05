@@ -71,7 +71,7 @@ interface PythonLaunchConfig extends LanguageSpecificLaunchConfig {
   jinja?: boolean;             // Jinja template debugging
   redirectOutput?: boolean;     // Redirect output to debug console
   showReturnValue?: boolean;    // Show function return values
-  subProcess?: boolean;         // debugpy's sub-process debugging: off unless asked for (issue #1005)
+  subProcess?: boolean;         // debugpy's sub-process debugging: on by default, each Python child a child session (issue #1081)
   [key: string]: unknown;       // Required by LanguageSpecificLaunchConfig
 }
 
@@ -445,18 +445,18 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
       justMyCode: config.justMyCode ?? true,
       stopOnEntry: config.stopOnEntry ?? false,
       // debugpy reports every Python child the program starts when this is on
-      // (its default when the key is absent), and the server adopts each
-      // report as a child debug session that stops on this session's
-      // breakpoints, reported by this session's wait_for_stop (the session
-      // tree, issue #1081). Off by default until the last step of #1081
-      // flips it, so children run undebugged; a caller's explicit value is
-      // forwarded.
-      subProcess: requestedSubProcess ?? false
+      // (its own default too), and the server adopts each report as a child
+      // debug session that stops on this session's breakpoints, reported by
+      // this session's wait_for_stop (the session tree, issue #1081). On by
+      // default, sent explicitly so the delivered child configuration and the
+      // logs show it; an explicit false opts this launch out and its children
+      // run undebugged, as they did before the tree.
+      subProcess: requestedSubProcess ?? true
     };
-    if (requestedSubProcess === true) {
+    if (requestedSubProcess === false) {
       this.launchDiagnostics.push({
         key: 'subProcess',
-        message: "forwarded — each Python child this program starts becomes a child debug session, listed by list_debug_sessions with parentSessionId and stopping on this session's breakpoints; wait_for_stop on this session reports the child's stop with sessionId naming it; the default stays off until the last step of issue #1081 flips it"
+        message: 'forwarded — the Python children this program starts run undebugged: a breakpoint only a child reaches will not hit; omit the key to debug them as child sessions (issue #1081)'
       });
     }
 
@@ -646,13 +646,22 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
       // The adapter policy's spawn config reads connect.* too.
       connect: { host, port },
       justMyCode: (justMyCode as boolean | undefined) ?? true,
-      // Same default as the launch transform. Whether a by-port attach's
-      // children report on the same connection the way a launch's do is
-      // unmeasured (the session tree, issue #1081), so the attach keeps
-      // sub-process debugging off until that measurement lands; an explicit
-      // value is forwarded.
-      subProcess: (subProcess as boolean | undefined) ?? false
+      // Same default as the launch transform, for the record only: a target
+      // started with `python -m debugpy --listen` decides sub-process
+      // debugging itself at listen time (on unless `--configure-subProcess
+      // false` / `debugpy.configure(subProcess=False)`), and its children
+      // report on this connection whatever this request says — measured in
+      // tests/adapters/python/integration/python-subprocess-attach.test.ts
+      // (the session tree, issue #1081). An explicit false is forwarded with
+      // a note, since it changes nothing.
+      subProcess: (subProcess as boolean | undefined) ?? true
     };
+    if (subProcess === false) {
+      this.launchDiagnostics.push({
+        key: 'subProcess',
+        message: 'forwarded, but a target started with python -m debugpy --listen decides sub-process debugging itself: its Python children are reported and become child sessions unless the target was started with --configure-subProcess false (or called debugpy.configure(subProcess=False)) (issue #1081)'
+      });
+    }
 
     if (stopOnEntry !== undefined) {
       attachConfig.stopOnEntry = stopOnEntry as boolean;
