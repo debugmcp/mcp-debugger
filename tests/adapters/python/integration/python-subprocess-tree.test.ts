@@ -1,9 +1,9 @@
 /**
- * The session tree with real debugpy (issue #1081): a Python launch with
- * `dapLaunchArgs.subProcess: true` used to park every child the program
- * spawned until a debug client attached, which this server never did
- * (#1005). The worker now holds debugpy's report and the server adopts or
- * releases it, so the program runs to its end either way.
+ * The session tree with real debugpy (issue #1081): a Python launch used to
+ * park every child the program spawned until a debug client attached, which
+ * this server never did (#1005). The worker now holds debugpy's report and
+ * the server adopts it as a child debug session — on by default since the
+ * last step of #1081, so no case here names `subProcess`.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import path from 'path';
@@ -14,7 +14,6 @@ import { Client } from '@modelcontextprotocol/client';
 import { ensurePythonOnPath } from './env-utils.js';
 
 const currentDirName = path.dirname(fileURLToPath(import.meta.url));
-const inheritFixture = path.resolve(currentDirName, '../../../fixtures/python/subprocess-inherit/spawn_child.py');
 const treeDir = path.resolve(currentDirName, '../../../fixtures/python/subprocess-tree');
 const parentFixture = path.join(treeDir, 'parent.py');
 const childFixture = path.join(treeDir, 'child.py');
@@ -77,7 +76,7 @@ async function call(name: string, args: Record<string, unknown>) {
   return parseToolResult(await client.callTool({ name, arguments: args }));
 }
 
-describe('Python child processes under subProcess: true (the session tree, issue #1081) @requires-python', () => {
+describe('Python child processes as child sessions (the session tree, issue #1081) @requires-python', () => {
   beforeAll(async () => {
     await startTestServer();
   }, 30000);
@@ -85,35 +84,6 @@ describe('Python child processes under subProcess: true (the session tree, issue
   afterAll(async () => {
     await stopTestServer();
   });
-
-  it('a launch that spawns a child with sub-process debugging on runs to its end instead of parking', async () => {
-    const created = await call('create_debug_session', { language: 'python', name: 'subprocess-tree-release' });
-    expect(created.success).toBe(true);
-    const sessionId = created.sessionId as string;
-
-    try {
-      const started = await call('start_debugging', {
-        sessionId,
-        scriptPath: inheritFixture,
-        breakOnExceptions: 'none',
-        dapLaunchArgs: { stopOnEntry: false, subProcess: true }
-      });
-      expect(started.success, JSON.stringify(started)).toBe(true);
-
-      let ended = started;
-      if (started.state === 'running') {
-        ended = await call('wait_for_stop', { sessionId, timeout: 30000 });
-      }
-      const output = await call('get_output', { sessionId });
-      const transcript = JSON.stringify(output);
-
-      expect(['stopped', 'terminated'], JSON.stringify(ended)).toContain(ended.state);
-      expect(transcript).toContain('child exit 0 child ok');
-      expect(ended.exitCode ?? ended.data?.exitCode, transcript).toBe(0);
-    } finally {
-      await call('close_debug_session', { sessionId });
-    }
-  }, 60000);
 
   /**
    * Set the breakpoints, start the parent, and wait for it to pause right
@@ -133,7 +103,7 @@ describe('Python child processes under subProcess: true (the session tree, issue
       sessionId: rootId,
       scriptPath: parentFixture,
       breakOnExceptions: 'none',
-      dapLaunchArgs: { stopOnEntry: false, subProcess: true }
+      dapLaunchArgs: { stopOnEntry: false }
     });
     expect(started.success, JSON.stringify(started)).toBe(true);
     let paused = started;
@@ -263,7 +233,7 @@ describe('Python child processes under subProcess: true (the session tree, issue
         sessionId: rootId,
         scriptPath: parentFixture,
         breakOnExceptions: 'none',
-        dapLaunchArgs: { stopOnEntry: false, subProcess: true }
+        dapLaunchArgs: { stopOnEntry: false }
       });
       expect(started.success, JSON.stringify(started)).toBe(true);
       expect(started.state, JSON.stringify(started)).toBe('running');
