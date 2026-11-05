@@ -6,3 +6,7 @@ pytest==9.2.0
 # marker drops it, and the windows-latest --require-hashes install then refuses it as an
 # unpinned transitive. It installs anywhere.
 colorama==0.4.6
+# pytest-xdist for the session tree's xdist suite (issue #1081):
+# tests/adapters/python/integration/python-pytest-xdist.test.ts runs `pytest -n 2` under debugpy
+# and expects each worker to become a child debug session. Brings execnet.
+pytest-xdist==3.8.0

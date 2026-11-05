@@ -11,10 +11,11 @@
  * the session's interpreter on the hidden console the proxy's `windowsHide`
  * spawn gives it (#931), which the launcher and the debuggee inherit.
  *
- * On every platform the case also proves the sub-process default (issue
- * #1005): with debugpy's sub-process debugging on, the child is hooked by
- * pydevd and waits for a debug client this server does not attach, and the
- * launch never ends; the transform turns it off unless the caller asks.
+ * On every platform the cases also prove the sub-process default (issues
+ * #1005/#1081): with debugpy's sub-process debugging on — the default since
+ * the session tree's last step — the child is reported, adopted as a child
+ * debug session and runs to its end; `dapLaunchArgs: { subProcess: false }`
+ * opts the launch out and the child runs undebugged, as it did before.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import path from 'path';
@@ -89,9 +90,9 @@ describe('Python debuggee spawning a child with an inherited stderr (issue #993)
     try {
       // No exception filter: a spawn failure must show up as the debuggee's own
       // traceback and non-zero exit, not as a pause this case would have to read.
-      // No subProcess key either: the transform's default (off, issue #1005) is
-      // what lets the child run instead of parking for a debug client this
-      // server never attaches — before that default this launch never ended.
+      // No subProcess key: sub-process debugging is on by default (issue
+      // #1081), so the child is reported, adopted as a child session and runs
+      // to its end — before the tree this launch never ended (#1005).
       const started = await call('start_debugging', {
         sessionId,
         scriptPath: fixturePath,
@@ -99,6 +100,7 @@ describe('Python debuggee spawning a child with an inherited stderr (issue #993)
         dapLaunchArgs: { stopOnEntry: false }
       });
       expect(started.success, JSON.stringify(started)).toBe(true);
+      expect(started.warning ?? '').not.toContain('subProcess');
 
       let ended = started;
       if (started.state === 'running') {
@@ -113,12 +115,49 @@ describe('Python debuggee spawning a child with an inherited stderr (issue #993)
       // A launch that ends inside the hold answers with the exit code under
       // data; wait_for_stop carries it at the top level.
       expect(ended.exitCode ?? ended.data?.exitCode, transcript).toBe(0);
+      // The child was a session of its own, ended by now.
+      const children = (ended.children ?? ended.data?.children) as Array<{ state: string; parentSessionId: string }> | undefined;
+      expect(children, JSON.stringify(ended)).toHaveLength(1);
+      expect(children![0].state).toBe('stopped');
+      expect(children![0].parentSessionId).toBe(sessionId);
 
       if (process.platform === 'win32') {
         // The fixture prints the basename of sys.executable: python.exe, never pythonw.exe.
         expect(transcript).toMatch(/interpreter=python(\d+(\.\d+)*)?\.exe/);
         expect(transcript).not.toContain('interpreter=pythonw');
       }
+    } finally {
+      await call('close_debug_session', { sessionId });
+    }
+  }, 60000);
+
+  it('runs the child undebugged under an explicit subProcess: false, and says so', async () => {
+    const created = await call('create_debug_session', { language: 'python', name: 'subprocess-inherit-opt-out' });
+    expect(created.success).toBe(true);
+    const sessionId = created.sessionId as string;
+
+    try {
+      const started = await call('start_debugging', {
+        sessionId,
+        scriptPath: fixturePath,
+        breakOnExceptions: 'none',
+        dapLaunchArgs: { stopOnEntry: false, subProcess: false }
+      });
+      expect(started.success, JSON.stringify(started)).toBe(true);
+      expect(started.warning, JSON.stringify(started)).toMatch(/dapLaunchArgs\.subProcess: forwarded — the Python children this program starts run undebugged/);
+
+      let ended = started;
+      if (started.state === 'running') {
+        ended = await call('wait_for_stop', { sessionId, timeout: 30000 });
+      }
+      const transcript = JSON.stringify(await call('get_output', { sessionId }));
+      expect(['stopped', 'terminated'], JSON.stringify(ended)).toContain(ended.state);
+      expect(transcript).toContain('child exit 0 child ok');
+      expect(ended.exitCode ?? ended.data?.exitCode, transcript).toBe(0);
+      // No child session was ever made.
+      expect(ended.children ?? ended.data?.children).toBeUndefined();
+      const listing = await call('list_debug_sessions', {});
+      expect((listing.sessions as Array<{ parentSessionId?: string }>).some((s) => s.parentSessionId === sessionId)).toBe(false);
     } finally {
       await call('close_debug_session', { sessionId });
     }

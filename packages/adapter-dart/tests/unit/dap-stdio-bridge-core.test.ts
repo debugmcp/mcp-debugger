@@ -10,7 +10,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter, once } from 'node:events';
 import net from 'node:net';
 import { PassThrough } from 'node:stream';
-import type { ChildProcess } from 'node:child_process';
+import { spawn as spawnProcess, type ChildProcess } from 'node:child_process';
+
+vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
 import { createBridge, parseBridgeArgs, type BridgeHandle, type BridgeOptions } from '../../src/bridge/dap-stdio-bridge-core.js';
 
 type SpawnFn = NonNullable<BridgeOptions['spawnFn']>;
@@ -196,6 +198,51 @@ describe('createBridge', () => {
       const socket = await connect(bridge, child);
       socket.destroy();
       await vi.waitFor(() => expect(child.kill).toHaveBeenCalled());
+    });
+
+    it.each(['exit', 'error'] as const)('waits for the default taskkill %s before falling back (issue #1089)', async (event) => {
+      const child = fakeChild();
+      const killer = new EventEmitter();
+      vi.mocked(spawnProcess).mockClear().mockReturnValueOnce(killer as ChildProcess);
+      bridge = await createBridge({ port: 0, host: '127.0.0.1', platform: 'win32', command: 'dart', args: [], spawnFn: child.spawnFn, stderr: new PassThrough() });
+      const socket = await connect(bridge, child);
+      socket.destroy();
+      await vi.waitFor(() => expect(spawnProcess).toHaveBeenCalledWith('taskkill', ['/PID', '4242', '/T', '/F'], {
+        stdio: 'ignore', windowsHide: true, timeout: 5000
+      }));
+      try {
+        // Slow enumeration must retain the parent beyond the old 300 ms race.
+        await new Promise((resolve) => setTimeout(resolve, 450));
+        expect(child.kill).not.toHaveBeenCalled();
+        expect(child.stdin.writableEnded).toBe(false);
+        killer.emit(event, event === 'error' ? new Error('spawn taskkill ENOENT') : 1);
+        await vi.waitFor(() => expect(child.kill).toHaveBeenCalledOnce());
+        expect(child.listenerCount('exit')).toBe(1); // only the bridge's lifecycle listener
+      } finally {
+        killer.emit('exit', 1);
+      }
+    });
+
+    it('close waits for taskkill even if the adapter exits first, without killing it again', async () => {
+      const child = fakeChild();
+      const killer = new EventEmitter();
+      vi.mocked(spawnProcess).mockClear().mockReturnValueOnce(killer as ChildProcess);
+      bridge = await createBridge({ port: 0, host: '127.0.0.1', platform: 'win32', command: 'dart', args: [], spawnFn: child.spawnFn, stderr: new PassThrough() });
+      await connect(bridge, child);
+      let closed = false;
+      const closing = bridge.close().then(() => { closed = true; });
+      try {
+        child.exitCode = 0;
+        child.emit('exit', 0, null);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(closed).toBe(false);
+        expect(child.listenerCount('exit')).toBe(1);
+        killer.emit('exit', 0);
+        await closing;
+        expect(child.kill).not.toHaveBeenCalled();
+      } finally {
+        killer.emit('exit', 0);
+      }
     });
 
     it('never kills a child that has already exited (the pid may be someone else\'s by now)', async () => {
