@@ -350,9 +350,12 @@ describe('Python session-tree lifecycle rows (issue #1081) @requires-python', ()
       const childId = stop.sessionId as string;
       expect(locationOf(stop)).toMatch(/mp_parent\.py/);
       expect(lineOf(stop)).toBe(MP_BREAKPOINT_LINE);
-      expect(stop.children).toEqual([
+      // POSIX spawn also starts a resource-tracker process, which debugpy
+      // can adopt as a sibling. Identify the worker by its stop above; the
+      // tree need not contain only that worker.
+      expect(stop.children).toEqual(expect.arrayContaining([
         { sessionId: childId, name: expect.stringMatching(/^Subprocess \d+$/), state: 'paused', parentSessionId: rootId }
-      ]);
+      ]));
       const locals = await call('get_local_variables', { sessionId: childId });
       expect(locals.success, JSON.stringify(locals)).toBe(true);
       expect(JSON.stringify(locals)).toMatch(/"n"/);

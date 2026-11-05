@@ -22,6 +22,8 @@ const currentDirName = path.dirname(fileURLToPath(import.meta.url));
 const treeDir = path.resolve(currentDirName, '../../../fixtures/python/subprocess-tree');
 const attachParent = path.join(treeDir, 'attach_parent.py');
 const childFixture = path.join(treeDir, 'child.py');
+/** The first line after wait_for_client, before the target can spawn or exit. */
+const PARENT_BREAKPOINT_LINE = 17;
 /** `total += i  # BREAKPOINT` in child.py. */
 const CHILD_BREAKPOINT_LINE = 12;
 const PYTHON = process.env.PYTHON_PATH ?? process.env.PYTHON_EXECUTABLE ?? (process.platform === 'win32' ? 'python' : 'python3');
@@ -108,7 +110,11 @@ async function startTarget(extraArgs: string[] = []): Promise<Target> {
     stdio: ['ignore', 'pipe', 'pipe']
   });
   let buffer = '';
-  const exited = new Promise<number | null>((resolve) => proc.on('exit', (code) => resolve(code)));
+  // close also waits for the output pipes, so the exit assertions see the final lines.
+  const exited = new Promise<number | null>((resolve) => proc.on('close', (code) => resolve(code)));
+  const target = { proc, port, output: () => buffer, exited };
+  // Register before readiness so afterEach also cleans up a failed startup.
+  targets.push(target);
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`debugpy target not ready: ${buffer}`)), 20000);
     const onData = (chunk: Buffer) => {
@@ -117,19 +123,25 @@ async function startTarget(extraArgs: string[] = []): Promise<Target> {
     };
     proc.stdout!.on('data', onData);
     proc.stderr!.on('data', onData);
+    proc.on('error', (error) => { clearTimeout(timer); reject(error); });
     proc.on('exit', (code) => { clearTimeout(timer); reject(new Error(`debugpy target exited ${code} before ready: ${buffer}`)); });
   });
-  const target = { proc, port, output: () => buffer, exited };
-  targets.push(target);
   return target;
 }
 
 /** The target's exit, with its own pipe's last lines: the proof that nothing killed it. */
 async function targetRanToItsEnd(target: Target): Promise<void> {
-  const exit = await Promise.race([target.exited, new Promise<string>((resolve) => setTimeout(() => resolve('still running'), 20000))]);
-  expect(exit, target.output()).toBe(0);
-  expect(target.output()).toContain('child done 3');
-  expect(target.output()).toContain('parent child exit 0');
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const exit = await Promise.race([target.exited, new Promise<string>((resolve) => {
+      timer = setTimeout(() => resolve('still running'), 20000);
+    })]);
+    expect(exit, target.output()).toBe(0);
+    expect(target.output()).toContain('child done 3');
+    expect(target.output()).toContain('parent child exit 0');
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 describe('Python session tree over a by-port attach (issue #1081) @requires-python', () => {
@@ -149,13 +161,25 @@ describe('Python session tree over a by-port attach (issue #1081) @requires-pyth
   });
 
   /**
-   * Create the session, set the child's breakpoint, attach to the target
-   * (paused), resume it, and wait on the root until the child's first stop.
+   * Set both breakpoints before attaching. The parent must stop before it
+   * spawns: attach alone need not pause it, and a tree wait may name a child.
+   * This also keeps the opt-out target alive through attach verification.
    */
   async function attachTree(name: string, target: Target, adapterConfig?: Record<string, unknown>) {
     const created = await call('create_debug_session', { language: 'python', name });
     expect(created.success).toBe(true);
     const rootId = created.sessionId as string;
+    try {
+      return await attachRoot(rootId, target, adapterConfig);
+    } catch (error) {
+      await call('close_debug_session', { sessionId: rootId });
+      throw error;
+    }
+  }
+
+  async function attachRoot(rootId: string, target: Target, adapterConfig?: Record<string, unknown>) {
+    const parentBp = await call('set_breakpoint', { sessionId: rootId, file: attachParent, line: PARENT_BREAKPOINT_LINE });
+    expect(parentBp.success, JSON.stringify(parentBp)).toBe(true);
     const bp = await call('set_breakpoint', { sessionId: rootId, file: childFixture, line: CHILD_BREAKPOINT_LINE });
     expect(bp.success, JSON.stringify(bp)).toBe(true);
 
@@ -163,9 +187,11 @@ describe('Python session tree over a by-port attach (issue #1081) @requires-pyth
     if (adapterConfig) attachArgs.adapterConfig = adapterConfig;
     const attached = await call('attach_to_process', attachArgs);
     expect(attached.success, JSON.stringify(attached)).toBe(true);
-    let landed = attached;
-    if (attached.state !== 'paused') landed = await call('wait_for_stop', { sessionId: rootId, timeout: 15000 });
+    const landed = await call('wait_for_stop', { sessionId: rootId, timeout: 15000 });
     expect(landed.state, JSON.stringify(landed)).toBe('paused');
+    expect(landed.sessionId, JSON.stringify(landed)).toBe(rootId);
+    expect(JSON.stringify(landed.location ?? landed.lastStop)).toMatch(/attach_parent\.py/);
+    expect(landed.location?.line ?? landed.lastStop?.line).toBe(PARENT_BREAKPOINT_LINE);
     const resumed = await call('continue_execution', { sessionId: rootId });
     expect(resumed.success, JSON.stringify(resumed)).toBe(true);
     return { rootId, attached };
