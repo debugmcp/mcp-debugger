@@ -174,6 +174,14 @@ describe('ChildProxyView connection lifecycle and event contract', () => {
     expect(send).toHaveBeenCalledTimes(2);
   });
 
+  it('closes its connection without ending the child when asked to release it (a detach cascade, issue #1081)', async () => {
+    await view.adopt({ reportId: 'report' });
+    await view.stop({ terminateDebuggee: false });
+    expect(send).toHaveBeenLastCalledWith('child', CHILD_CLOSE_COMMAND, { terminateDebuggee: false }, { timeoutMs: 5000 });
+    expect(root.detachChildView).toHaveBeenCalledWith('child');
+    expect(view.isRunning()).toBe(false);
+  });
+
   it('detaches an unused view without sending a close request', async () => {
     await view.stop();
     expect(send).not.toHaveBeenCalled();

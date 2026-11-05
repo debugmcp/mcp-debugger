@@ -13,7 +13,7 @@
  *
  * `waitForStop` (issue #849) is the explicit continuation of that `pending`
  * answer, and the one operation here that sends nothing: it waits on the
- * session's state through `waitForSessionState` for as long as its caller
+ * state of the session and its descendants through `waitForSubtreeSettle` for as long as its caller
  * says. It registers no event listeners, so rule 1 below has nothing to
  * arbitrate for it; it does obey rule 2.
  *
@@ -42,7 +42,6 @@
 import { getErrorMessage } from '../../errors/debug-errors.js';
 import {
   isSessionTerminated,
-  isSettledSessionState,
   isTerminalSessionState,
   NO_DEBUG_TARGET_MARKER,
   redactStopInfo,
@@ -68,7 +67,8 @@ import type { ExecutionContext } from '../operations-context.js';
 import { describeStopLocation, landingFields, type StopLanding } from '../inspection/stop-location.js';
 import { composeStopSnapshot } from '../inspection/stop-snapshot.js';
 import type { PauseCoordinator } from './pause-coordinator.js';
-import { waitForSessionState } from './session-state-wait.js';
+import { waitForSubtreeSettle } from './session-state-wait.js';
+import { describeTreeAnswer } from './tree-settle.js';
 import { resolveDapTimeoutOverride } from '../dap-request-helpers.js';
 import { buildRunToCompletionSummary, describeProgramEnd } from '../breakpoints/launch-warnings.js';
 import { describeLaunchArming } from '../launch/launch-arming.js';
@@ -771,6 +771,14 @@ export class ExecutionController {
    * pause, once the stack has been read): a session that is already paused or
    * already over answers at once; a wait that ran out, or whose caller went
    * away, answers `pending: true` with the session still live.
+   *
+   * Tree-aware (the session tree, issue #1081): the wait observes the session
+   * and all its descendants, present or adopted meanwhile, and answers for
+   * the one `selectSettledInTree` names — the session itself when paused or
+   * in error, else the first paused or errored descendant, else the session
+   * itself when ended; only descendants ending never completes it. The
+   * answer's `sessionId` names that session, and everything else in it is
+   * that session's ordinary stop answer; `children` lists the descendants.
    */
   async waitForStop(
     sessionId: string,
@@ -788,102 +796,144 @@ export class ExecutionController {
     }
     const waitMs = timeoutCheck.timeoutMs ?? this.ctx.tunables.waitForStopDefaultMs;
 
-    // The stop on record before this wait began. A different record afterwards
-    // is a stop that landed during it — the discipline step and pause use to
-    // tell their own stop from an earlier one.
-    const lastStopBefore = session.lastStop;
+    // The stop on record before this wait began, per session of the tree. A
+    // different record afterwards is a stop that landed during it — the
+    // discipline step and pause use to tell their own stop from an earlier
+    // one. A descendant adopted during the wait has no entry: whatever it
+    // recorded is this wait's.
+    const lastStopBefore = new Map<string, SessionStopInfo | undefined>([
+      [session.id, session.lastStop],
+      ...this.ctx.descendantsOf(sessionId).map((d): [string, SessionStopInfo | undefined] => [d.id, d.lastStop])
+    ]);
 
-    const outcome = await waitForSessionState(
-      this.ctx,
-      sessionId,
-      isSettledSessionState,
-      { timeoutMs: waitMs, signal }
-    );
-    if (outcome === 'gone') {
-      return {
-        success: false,
-        error: ErrorMessages.sessionClosedWhileWaiting(sessionId),
-        state: SessionState.STOPPED
-      };
+    const deadline = Date.now() + waitMs;
+    const wait = () => waitForSubtreeSettle(this.ctx, sessionId, {
+      timeoutMs: Math.max(0, deadline - Date.now()), signal
+    });
+    let settled = await wait();
+    let target = session;
+    let landing: StopLanding;
+    let stopAtLanding: SessionStopInfo | undefined;
+    let snapshot: Awaited<ReturnType<typeof composeStopSnapshot>>;
+    for (;;) {
+      if (settled.outcome === 'gone') {
+        return {
+          success: false,
+          error: ErrorMessages.sessionClosedWhileWaiting(sessionId),
+          state: SessionState.STOPPED
+        };
+      }
+      // The session this answer is about: the selection's, or — pending —
+      // the one asked for.
+      target = settled.outcome === 'matched' ? settled.value : session;
+
+      // Where it stopped, best effort: the same short settle and stack read
+      // a step or a pause does. Re-read state after the DAP round trip.
+      landing = target.state === SessionState.PAUSED
+        ? await describeStopLocation(this.ctx, target.id, 'waitForStop')
+        : {};
+      // Pin this answer's stop before the snapshot's locals read: a new stop
+      // under that read belongs to the next answer, never a mixed snapshot.
+      stopAtLanding = target.lastStop;
+      // lastStop already carries the exception, so do not repeat it in the
+      // snapshot. Its own identity gate rejects a changed stop's locals.
+      snapshot = await composeStopSnapshot(
+        this.ctx, target.id, landing.stackResult, 'waitForStop', { omitException: true }
+      );
+
+      try {
+        this.ctx.getSession(sessionId);
+      } catch {
+        settled = { outcome: 'gone' };
+        continue;
+      }
+      if (target !== session && (
+        !this.ctx.descendantsOf(sessionId).includes(target) ||
+        (target.state !== SessionState.PAUSED && !isTerminalSessionState(target.state))
+      )) {
+        // A selected child may be closed or resumed by another caller while
+        // the answer is assembled. Re-select the tree under the ORIGINAL
+        // deadline: never return a removed id, or a pending root answer with
+        // the child's state. A still-present child that naturally ended keeps
+        // the ordinary ended-at-settle contract, including its recorded stop.
+        // waitForSubtreeSettle intentionally checks current state even with
+        // a zero timeout. That is useful for an initial read, but retries
+        // must not keep selecting alternating children past this deadline.
+        settled = Date.now() >= deadline
+          ? { outcome: signal?.aborted ? 'aborted' : 'timeout' }
+          : await wait();
+        continue;
+      }
+      break;
     }
-
-    // Where it stopped, best effort: the same short settle and stack read a
-    // step or a pause does. It is a DAP round trip, so the state is read
-    // again afterwards rather than trusted across it.
-    const landing: StopLanding = session.state === SessionState.PAUSED
-      ? await describeStopLocation(this.ctx, sessionId, 'waitForStop')
-      : {};
     const location = landing.location;
-    // The stop this wait settled on, pinned at the landing read: the compose
-    // below is a real wait, and a NEW stop landing under it belongs to the
-    // next wait_for_stop, not to this answer — one answer, one stop.
-    const stopAtLanding = session.lastStop;
-    // The snapshot behind the landing (issue #982). The exception section is
-    // omitted on purpose: this answer carries the full (redacted) lastStop,
-    // and the same message must never ship twice. The composer's own
-    // stop-identity gate answers no snapshot if the stop changed under it.
-    const snapshot = await composeStopSnapshot(
-      this.ctx, sessionId, landing.stackResult, 'waitForStop', { omitException: true }
-    );
+    const tree = () => describeTreeAnswer(session, this.ctx.descendantsOf(sessionId));
     // Emit a redacted copy of the stop record (issue #982); the stored record
     // keeps its identity — the exceptionInfo merge and `lastStop !== before`
     // guards depend on it.
     const emitStop = (stop: SessionStopInfo): SessionStopInfo =>
       this.ctx.redactionEnabled() ? redactStopInfo(stop) : stop;
 
-    const state = session.state;
+    const state = target.state;
     // Rule 2 of the settle contract: a session that is over by now is
     // reported as ended, with the stop that landed during this wait if there
     // was one — an exception stop and the exit can arrive in one tick. A stop
     // from before the wait is not this wait's to report: the program was
     // resumed past it.
     const stopDuringWait =
-      session.lastStop && session.lastStop !== lastStopBefore ? { lastStop: emitStop(session.lastStop) } : {};
+      target.lastStop && target.lastStop !== lastStopBefore.get(target.id) ? { lastStop: emitStop(target.lastStop) } : {};
     if (state === SessionState.PAUSED && stopAtLanding) {
       const where = location ? ` at ${location.file}:${location.line}` : '';
       return {
         success: true,
         state,
         data: {
+          sessionId: target.id,
           message: `Paused (${stopAtLanding.reason})${where}`,
           lastStop: emitStop(stopAtLanding),
           ...landingFields(landing),
-          ...(snapshot ? { snapshot } : {})
+          ...(snapshot ? { snapshot } : {}),
+          ...tree()
         }
       };
     }
     if (state === SessionState.ERROR) {
-      const detail = session.lastProxyError ? `: ${session.lastProxyError}` : '';
+      const detail = target.lastProxyError ? `: ${target.lastProxyError}` : '';
+      const which = target === session ? 'The debug session' : `Child session ${target.id}`;
       return {
         success: true,
         state,
-        data: { message: `The debug session ended in an error state${detail}`, ...stopDuringWait }
+        data: { sessionId: target.id, message: `${which} ended in an error state${detail}`, ...stopDuringWait, ...tree() }
       };
     }
     if (state === SessionState.STOPPED) {
-      // No stop was recorded in this launch: the program ran past every
-      // breakpoint, and the answer says which — the same run-to-completion
-      // summary the launch gives when the program ends inside its hold
-      // (issues #701, #1033); it already joins the adapter's reading of the
-      // end (issue #877). A program resumed past a stop keeps the plain
-      // message: its breakpoints were not all missed.
-      const ranPast = session.lastStop ? undefined : buildRunToCompletionSummary(session);
+      // Only the session itself can be selected already ended (rule 3); a
+      // selected descendant can also end while its answer is assembled.
+      // No stop was recorded in this launch:
+      // the program ran past every breakpoint, and the answer says which —
+      // the same run-to-completion summary the launch gives when the program
+      // ends inside its hold (issues #701, #1033); it already joins the
+      // adapter's reading of the end (issue #877). A program resumed past a
+      // stop keeps the plain message: its breakpoints were not all missed.
+      const ranPast = target.lastStop ? undefined : buildRunToCompletionSummary(target);
       return {
         success: true,
         state,
         data: {
+          sessionId: target.id,
           message: ranPast
             ? ranPast.summary
-            : `${describeProgramEnd(session.exitCode)}.${session.programEndExplanation?.note ? ` ${session.programEndExplanation.note}` : ''}`,
-          ...(typeof session.exitCode === 'number' ? { exitCode: session.exitCode } : {}),
+            : `${describeProgramEnd(target.exitCode)}.${target.programEndExplanation?.note ? ` ${target.programEndExplanation.note}` : ''}`,
+          ...(typeof target.exitCode === 'number' ? { exitCode: target.exitCode } : {}),
           ...(ranPast?.data ?? {}),
-          ...(session.programEndExplanation ? { programEnd: session.programEndExplanation } : {}),
-          ...stopDuringWait
+          ...(target.programEndExplanation ? { programEnd: target.programEndExplanation } : {}),
+          ...stopDuringWait,
+          ...tree()
         }
       };
     }
     this.ctx.logger.info(
-      `[SessionManager waitForStop] Session ${sessionId} still ${state} after ${waitMs}ms (${outcome}); answering with pending`
+      `[SessionManager waitForStop] Session ${sessionId} still ${state} after ${waitMs}ms (${settled.outcome}); answering with pending`
     );
     // What is armed now words the answer: with something armed, that it stays
     // armed; with nothing, no pause is promised. An entry stop is not part of
@@ -893,6 +943,7 @@ export class ExecutionController {
       success: true,
       state,
       data: {
+        sessionId: session.id,
         message: ErrorMessages.waitForStopPending(
           waitMs / 1000,
           state === SessionState.INITIALIZING ? 'initializing' : 'running',
@@ -903,7 +954,8 @@ export class ExecutionController {
             noUncaughtStop: arming.noUncaughtStop
           }
         ),
-        pending: true
+        pending: true,
+        ...tree()
       }
     };
   }

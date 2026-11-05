@@ -381,6 +381,43 @@ describe('execution tool handlers', () => {
     });
   });
 
+  describe('the tree fields on the wait_for_stop answer (issue #1081)', () => {
+    const liveSession = { id: 'test-session', sessionLifecycle: SessionLifecycleState.ACTIVE };
+    const children = [{ sessionId: 'child-1', name: 'Subprocess 4242', state: 'paused', parentSessionId: 'test-session' }];
+
+    it('names the selected session, lists the children, and reads the landing on the selected session', async () => {
+      ctx.sessionManager.getSession.mockReturnValue(liveSession);
+      ctx.buildStaleness = { check: vi.fn().mockResolvedValue(undefined) };
+      const lastStop = { reason: 'breakpoint', threadId: 1, timestamp: 1_700_000_000_000 };
+      const location = { file: '/app/child.py', line: 7, column: 1 };
+      ctx.sessionManager.waitForStop.mockResolvedValue({
+        success: true,
+        state: 'paused',
+        data: { sessionId: 'child-1', message: 'Paused (breakpoint) at /app/child.py:7', lastStop, location, children, childrenReleased: 1 }
+      });
+
+      const payload = JSON.parse((await waitForStopTool(ctx, { sessionId: 'test-session' }, 'wait_for_stop')).content[0].text);
+
+      expect(payload).toMatchObject({ success: true, state: 'paused', sessionId: 'child-1', lastStop, location, children, childrenReleased: 1 });
+      // The stale-build read (and the line context) are keyed by the selected session, not the one asked for.
+      expect(ctx.sessionManager.getSessionPolicy).toHaveBeenCalledWith('child-1');
+    });
+
+    it('carries sessionId and the children on the pending answer too', async () => {
+      ctx.sessionManager.getSession.mockReturnValue(liveSession);
+      const running = [{ ...children[0], state: 'running' }];
+      ctx.sessionManager.waitForStop.mockResolvedValue({
+        success: true,
+        state: 'running',
+        data: { sessionId: 'test-session', message: 'still running', pending: true, children: running }
+      });
+
+      const payload = JSON.parse((await waitForStopTool(ctx, { sessionId: 'test-session' }, 'wait_for_stop')).content[0].text);
+
+      expect(payload).toEqual({ success: true, state: 'running', pending: true, message: 'still running', sessionId: 'test-session', children: running });
+    });
+  });
+
   describe('stepTool failure envelopes (issue #638)', () => {
     it.each([
       ['step_over', 'stepOver'],

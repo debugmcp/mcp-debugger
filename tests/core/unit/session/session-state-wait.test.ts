@@ -8,6 +8,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SessionState, isTerminalSessionState } from '@debugmcp/shared';
 import {
   waitForSessionState,
+  waitForSubtreeSettle,
+  type SettleWaitResult,
   type SessionStateWaitOutcome
 } from '../../../../src/session/execution/session-state-wait.js';
 
@@ -152,5 +154,101 @@ describe('waitForSessionState', () => {
     h.wait(30_000);
     await settleMicrotasks();
     expect(h.outcome()).toBe('gone');
+  });
+});
+
+/**
+ * waitForSubtreeSettle: the same wait over a session and its descendants (the
+ * session tree, issue #1081). It re-reads the tree's selection after every
+ * change to the session or any descendant, with the same microtask deferral,
+ * and resolves with the session the selection names.
+ */
+function treeHarness() {
+  type Node = { id: string; state: SessionState; parentSessionId?: string };
+  const nodes = new Map<string, Node>([['root', { id: 'root', state: SessionState.RUNNING }]]);
+  const listeners = new Set<() => void>();
+  const notify = () => {
+    for (const listener of [...listeners]) listener();
+  };
+  const ctx = {
+    getSession: (sessionId: string) => {
+      const found = nodes.get(sessionId);
+      if (!found) throw new Error(`Managed session not found: ${sessionId}`);
+      return found;
+    },
+    onSubtreeChange: (_sessionId: string, listener: () => void) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+    descendantsOf: (sessionId: string) => [...nodes.values()].filter((n) => n.parentSessionId === sessionId)
+  };
+  let result: SettleWaitResult<Node> | undefined;
+  return {
+    wait: (timeoutMs: number) => {
+      void waitForSubtreeSettle(ctx as never, 'root', { timeoutMs })
+        .then((settled) => { result = settled as SettleWaitResult<Node>; });
+    },
+    result: () => result,
+    adopt: (id: string, state: SessionState) => { nodes.set(id, { id, state, parentSessionId: 'root' }); notify(); },
+    setState: (id: string, state: SessionState) => { nodes.get(id)!.state = state; notify(); },
+    remove: (id: string) => { nodes.delete(id); notify(); },
+    listenerCount: () => listeners.size
+  };
+}
+
+describe('waitForSubtreeSettle', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('resolves with the descendant that paused after the wait began, and unsubscribes', async () => {
+    const h = treeHarness();
+    h.wait(30_000);
+    h.adopt('child', SessionState.RUNNING);
+    await settleMicrotasks();
+    expect(h.result()).toBeUndefined();
+    h.setState('child', SessionState.PAUSED);
+    await settleMicrotasks();
+    expect(h.result()).toEqual({ outcome: 'matched', value: expect.objectContaining({ id: 'child' }) });
+    expect(h.listenerCount()).toBe(0);
+  });
+
+  it('does not report a descendant state entered and left within one call stack', async () => {
+    const h = treeHarness();
+    h.adopt('child', SessionState.RUNNING);
+    h.wait(30_000);
+    h.setState('child', SessionState.PAUSED);
+    h.setState('child', SessionState.RUNNING);
+    await settleMicrotasks();
+    expect(h.result()).toBeUndefined();
+    expect(h.listenerCount()).toBe(1);
+  });
+
+  it('treats a descendant that is removed as a change, not as the wait being gone', async () => {
+    const h = treeHarness();
+    h.adopt('child', SessionState.RUNNING);
+    h.wait(30_000);
+    h.remove('child');
+    await settleMicrotasks();
+    expect(h.result()).toBeUndefined();
+    h.setState('root', SessionState.PAUSED);
+    await settleMicrotasks();
+    expect(h.result()).toEqual({ outcome: 'matched', value: expect.objectContaining({ id: 'root' }) });
+  });
+
+  it('reports the asked session being removed as gone', async () => {
+    const h = treeHarness();
+    h.wait(30_000);
+    h.remove('root');
+    await settleMicrotasks();
+    expect(h.result()).toEqual({ outcome: 'gone' });
+    expect(h.listenerCount()).toBe(0);
+  });
+
+  it('times out like the single-session wait', async () => {
+    const h = treeHarness();
+    h.wait(1_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(h.result()).toEqual({ outcome: 'timeout' });
+    expect(h.listenerCount()).toBe(0);
   });
 });

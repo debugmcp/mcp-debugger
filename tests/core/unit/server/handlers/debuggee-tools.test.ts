@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { DotnetAdapterPolicy, SessionLifecycleState } from '@debugmcp/shared';
-import { startDebuggingTool, restartDebuggingTool, attachToProcessTool } from '../../../../../src/server/handlers/debuggee-tools.js';
+import { startDebuggingTool, restartDebuggingTool, attachToProcessTool, detachFromProcessTool } from '../../../../../src/server/handlers/debuggee-tools.js';
 import { createMockToolContext } from '../server-test-helpers.js';
 
 // DebugMcpServer builds its dependencies in the constructor; mock the container
@@ -111,6 +111,46 @@ describe('debuggee lifecycle tool handlers', () => {
         expect(ctx.buildStaleness.check).not.toHaveBeenCalled();
       });
     }
+  });
+
+  describe('the tree fields (issue #1081)', () => {
+    const children = [{ sessionId: 'child-1', name: 'Subprocess 4242', state: 'running', parentSessionId: 'test-session' }];
+
+    for (const [tool, answer] of answers) {
+      it(`${tool} hoists children, childrenClosed and childrenReleased beside pending`, async () => {
+        const payload = JSON.parse(
+          (await answer({ message: 'still running', pending: true, children, childrenClosed: 2, childrenReleased: 1 }, 'running')).content[0].text
+        );
+
+        expect(payload).toMatchObject({ success: true, state: 'running', pending: true, children, childrenClosed: 2, childrenReleased: 1 });
+      });
+
+      it(`${tool} hoists none of them for a session without a tree`, async () => {
+        const payload = JSON.parse((await answer({ message: 'still running', pending: true }, 'running')).content[0].text);
+
+        expect(payload).not.toHaveProperty('children');
+        expect(payload).not.toHaveProperty('childrenClosed');
+        expect(payload).not.toHaveProperty('childrenReleased');
+      });
+    }
+  });
+
+  describe('the tree fields on the detach_from_process answer (issue #1081)', () => {
+    it('hoists childrenReleased (a plain detach) and childrenClosed (a terminating one) beside the message', async () => {
+      ctx.sessionManager.detachFromProcess.mockResolvedValueOnce({
+        success: true, state: 'stopped', data: { message: 'Detached from process (process still running)', childrenReleased: 2 }
+      });
+      let payload = JSON.parse((await detachFromProcessTool(ctx, { sessionId: 'test-session' }, 'detach_from_process')).content[0].text);
+      expect(payload).toMatchObject({ success: true, state: 'stopped', childrenReleased: 2 });
+      expect(payload).not.toHaveProperty('childrenClosed');
+
+      ctx.sessionManager.detachFromProcess.mockResolvedValueOnce({
+        success: true, state: 'stopped', data: { message: 'Detached and terminated process', childrenClosed: 1 }
+      });
+      payload = JSON.parse((await detachFromProcessTool(ctx, { sessionId: 'test-session', terminateProcess: true }, 'detach_from_process')).content[0].text);
+      expect(payload).toMatchObject({ success: true, state: 'stopped', childrenClosed: 1 });
+      expect(payload).not.toHaveProperty('childrenReleased');
+    });
   });
 
   // Issue #985: the test-runner preset rides start_debugging as two optional

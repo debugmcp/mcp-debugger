@@ -50,7 +50,7 @@ export interface OperationsInternals {
   /** The late-bound view the collaborators get; a test subscribes to state changes through it. */
   opsContext: OperationsContext;
   /** Protected on SessionManagerCore; spied on to model a concurrent close during teardown. */
-  stopProxyPreservingSession(session: ManagedSession): Promise<void>;
+  stopProxyPreservingSession(session: ManagedSession): Promise<number>;
 }
 
 /** The protected collaborators of an operations facade, for a test to drive. */

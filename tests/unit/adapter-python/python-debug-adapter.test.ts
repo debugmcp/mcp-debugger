@@ -446,7 +446,7 @@ describe('PythonDebugAdapter', () => {
   // debugpy's sub-process debugging reports every Python child the program
   // starts, and the server adopts each report as a child debug session (the
   // session tree, issue #1081): the transforms keep it off unless asked, until
-  // the tree-aware wait_for_stop lands.
+  // the last step of #1081 flips the default.
   describe('sub-process debugging default (issues #1005/#1081)', () => {
     it('turns subProcess off for a launch that does not name it', async () => {
       const adapter = new PythonDebugAdapter(createDependencies());
@@ -464,6 +464,7 @@ describe('PythonDebugAdapter', () => {
       expect(diagnostics[0].key).toBe('subProcess');
       expect(diagnostics[0].scope).toBeUndefined();
       expect(diagnostics[0].message).toMatch(/child debug session/);
+      expect(diagnostics[0].message).toMatch(/wait_for_stop on this session reports the child/);
       expect(diagnostics[0].message).toMatch(/#1081/);
     });
 

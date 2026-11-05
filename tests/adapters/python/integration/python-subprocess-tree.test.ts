@@ -142,9 +142,14 @@ describe('Python child processes under subProcess: true (the session tree, issue
     }
     expect(paused.state, JSON.stringify(paused)).toBe('paused');
     expect(JSON.stringify(paused.location ?? paused.data?.location ?? paused)).toMatch(/parent\.py/);
+    // A paused parent is reported before its children (rule 1); the launch
+    // answer itself names no session — it is about the launched one.
+    if (paused !== started) {
+      expect(paused.sessionId, JSON.stringify(paused)).toBe(rootId);
+    }
 
-    // The child is discovered through the listing in this milestone (the
-    // tree-aware wait_for_stop lands next).
+    // The parent paused the moment it spawned, before the child was reported:
+    // the listing is where the child's row turns up.
     const listing = await pollUntil(
       () => call('list_debug_sessions', {}),
       (l) => Array.isArray(l.sessions) && l.sessions.some((s: { parentSessionId?: string }) => s.parentSessionId === rootId),
@@ -195,6 +200,8 @@ describe('Python child processes under subProcess: true (the session tree, issue
       // Closing the child leaves the parent paused and its worker alive.
       const closedChild = await call('close_debug_session', { sessionId: childId });
       expect(closedChild.success, JSON.stringify(closedChild)).toBe(true);
+      expect(closedChild.processEnded, JSON.stringify(closedChild)).toBe(true);
+      expect(closedChild.childrenClosed).toBeUndefined();
       const listing = await call('list_debug_sessions', {});
       expect((listing.sessions as Array<{ id: string }>).some((s) => s.id === childId)).toBe(false);
       const rootRow = (listing.sessions as Array<{ id: string; state: string }>).find((s) => s.id === rootId);
@@ -239,6 +246,93 @@ describe('Python child processes under subProcess: true (the session tree, issue
     }
   }, 120000);
 
+  /**
+   * The designed flow (docs/architecture/session-tree.md): a breakpoint in
+   * the child's code only, start the parent, wait on the parent. The wait
+   * answers the child's stop with the child's id (rule 2), again after each
+   * continue, and the parent's own end once the child has ended (rule 3).
+   */
+  it("the parent's wait_for_stop reports the child's stops with its sessionId, then the parent's end", async () => {
+    const created = await call('create_debug_session', { language: 'python', name: 'subprocess-tree-designed-flow' });
+    expect(created.success).toBe(true);
+    const rootId = created.sessionId as string;
+    try {
+      const childBp = await call('set_breakpoint', { sessionId: rootId, file: childFixture, line: CHILD_BREAKPOINT_LINE });
+      expect(childBp.success, JSON.stringify(childBp)).toBe(true);
+      const started = await call('start_debugging', {
+        sessionId: rootId,
+        scriptPath: parentFixture,
+        breakOnExceptions: 'none',
+        dapLaunchArgs: { stopOnEntry: false, subProcess: true }
+      });
+      expect(started.success, JSON.stringify(started)).toBe(true);
+      expect(started.state, JSON.stringify(started)).toBe('running');
+
+      let childId: string | undefined;
+      for (let iteration = 0; iteration < 3; iteration += 1) {
+        const stop = await call('wait_for_stop', { sessionId: rootId, timeout: 30000 });
+        expect(stop.state, JSON.stringify(stop)).toBe('paused');
+        expect(stop.sessionId, JSON.stringify(stop)).toBeDefined();
+        expect(stop.sessionId).not.toBe(rootId);
+        childId ??= stop.sessionId as string;
+        expect(stop.sessionId).toBe(childId);
+        expect(JSON.stringify(stop.location ?? stop)).toMatch(/child\.py/);
+        expect(stop.location?.line ?? stop.lastStop?.line).toBe(CHILD_BREAKPOINT_LINE);
+        expect(stop.children, JSON.stringify(stop)).toEqual([
+          { sessionId: childId, name: expect.stringMatching(/^Subprocess \d+$/), state: 'paused', parentSessionId: rootId }
+        ]);
+        // The answer's own stop is the child's: inspect it with that id.
+        const locals = await call('get_local_variables', { sessionId: childId });
+        expect(locals.success, JSON.stringify(locals)).toBe(true);
+        expect(JSON.stringify(locals)).toMatch(/"i"/);
+        const resumed = await call('continue_execution', { sessionId: childId });
+        expect(resumed.success, JSON.stringify(resumed)).toBe(true);
+      }
+
+      // The child runs to its end; the parent then sees the exit code and ends.
+      const ended = await call('wait_for_stop', { sessionId: rootId, timeout: 30000 });
+      expect(ended.state, JSON.stringify(ended)).toBe('stopped');
+      expect(ended.sessionId, JSON.stringify(ended)).toBe(rootId);
+      expect(ended.exitCode, JSON.stringify(ended)).toBe(0);
+      expect(ended.children, JSON.stringify(ended)).toEqual([
+        expect.objectContaining({ sessionId: childId, state: 'stopped', parentSessionId: rootId })
+      ]);
+      const output = await call('get_output', { sessionId: rootId });
+      expect(JSON.stringify(output)).toContain('child done 3');
+      expect(JSON.stringify(output)).toContain('parent child exit 0');
+    } finally {
+      await call('close_debug_session', { sessionId: rootId });
+    }
+  }, 120000);
+
+  it("restarting the parent closes the previous run's child and says so", async () => {
+    const { rootId, childId } = await startTree('subprocess-tree-restart');
+    try {
+      const childStop = await call('wait_for_stop', { sessionId: childId, timeout: 30000 });
+      expect(childStop.state, JSON.stringify(childStop)).toBe('paused');
+
+      const restarted = await call('restart_debugging', { sessionId: rootId });
+      expect(restarted.success, JSON.stringify(restarted)).toBe(true);
+      expect(restarted.childrenClosed, JSON.stringify(restarted)).toBe(1);
+
+      let paused = restarted;
+      if (restarted.state !== 'paused') {
+        paused = await call('wait_for_stop', { sessionId: rootId, timeout: 30000 });
+      }
+      expect(paused.state, JSON.stringify(paused)).toBe('paused');
+      if (paused !== restarted) {
+        expect(paused.sessionId, JSON.stringify(paused)).toBe(rootId);
+      }
+      expect(JSON.stringify(paused.location ?? paused)).toMatch(/parent\.py/);
+
+      const listing = await call('list_debug_sessions', {});
+      const ids = (listing.sessions as Array<{ id: string }>).map((s) => s.id);
+      expect(ids).not.toContain(childId);
+    } finally {
+      await call('close_debug_session', { sessionId: rootId });
+    }
+  }, 120000);
+
   it('closing the parent closes the child too and reaps the worker', async () => {
     const { rootId, childId } = await startTree('subprocess-tree-close-root');
     const childStop = await call('wait_for_stop', { sessionId: childId, timeout: 30000 });
@@ -246,6 +340,8 @@ describe('Python child processes under subProcess: true (the session tree, issue
 
     const closed = await call('close_debug_session', { sessionId: rootId });
     expect(closed.success, JSON.stringify(closed)).toBe(true);
+    expect(closed.childrenClosed, JSON.stringify(closed)).toBe(1);
+    expect(closed.processEnded).toBeUndefined();
 
     const listing = await call('list_debug_sessions', {});
     const ids = (listing.sessions as Array<{ id: string }>).map((s) => s.id);

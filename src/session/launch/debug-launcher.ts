@@ -34,6 +34,7 @@ import type { CustomLaunchRequestArguments, DebugResult, LaunchResultData } from
 import type { ManagedSession, ToolchainValidationState } from '../session-store.js';
 import type { LaunchContext } from '../operations-context.js';
 import { describeStopLocation, landingFields, type StopLanding } from '../inspection/stop-location.js';
+import { describeTreeAnswer } from '../execution/tree-settle.js';
 import { composeStopSnapshot } from '../inspection/stop-snapshot.js';
 import type { BreakpointController, ResyncOutcome } from '../breakpoints/breakpoint-controller.js';
 import { reresolveAnchors, type AnchorResolution } from '../breakpoints/anchor-resolution.js';
@@ -481,6 +482,9 @@ export class DebugLauncher {
       return this.dryRun(session, { scriptPath, scriptArgs, dapLaunchArgs, adapterLaunchConfig, breakOnExceptions });
     }
 
+    // Children belong to a run (issue #1081): a relaunch closes the previous
+    // run's, and the answer says how many.
+    let childrenClosed = 0;
     if (session.proxyManager || session.pendingProxyStop || session.deferredWorkerStop) {
       if (session.proxyManager) {
         this.ctx.logger.warn(
@@ -494,7 +498,7 @@ export class DebugLauncher {
       // proxyManager and leaves its stop() in flight as pendingProxyStop,
       // which this awaits too (#502) — otherwise the relaunch races the old
       // worker's exit (a debuggee port still bound, lastProxyPid overwritten).
-      await this.ctx.stopProxyPreservingSession(session);
+      childrenClosed = (await this.ctx.stopProxyPreservingSession(session)) ?? 0;
     }
 
     // Update to INITIALIZING state and set lifecycle to ACTIVE
@@ -874,6 +878,10 @@ export class DebugLauncher {
           stopOnEntrySuccessful: !!effectiveLaunchArgs?.stopOnEntry && finalState === SessionState.PAUSED,
           ...landingFields(landing),
           ...(snapshot ? { snapshot } : {}),
+          // The session tree (issue #1081): the children adopted during the
+          // hold, the run's released count, and what the relaunch closed.
+          ...describeTreeAnswer(finalSession, this.ctx.descendantsOf(sessionId)),
+          ...(childrenClosed > 0 ? { childrenClosed } : {}),
         },
       };
     } catch (error) {
@@ -1161,6 +1169,8 @@ export class DebugLauncher {
         reason: finalState === SessionState.PAUSED ? finalSession.lastStop?.reason ?? 'unknown' : undefined,
         ...landingFields(landing),
         ...(snapshot ? { snapshot } : {}),
+        // A hot restart keeps the process and its children (issue #1081).
+        ...describeTreeAnswer(finalSession, this.ctx.descendantsOf(sessionId)),
       },
     };
   }

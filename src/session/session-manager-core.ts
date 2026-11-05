@@ -35,6 +35,7 @@ import {
 } from '@debugmcp/shared';
 import { ISessionStoreFactory } from '../factories/session-store-factory.js';
 import { IProxyManager, type ChildReportedEvent } from '../proxy/proxy-manager.js';
+import { isChildProxyView } from '../proxy/child-proxy-view.js';
 import { maxChildSessions, MAX_CHILD_SESSIONS_ENV } from './child-session-cap.js';
 import { IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
 import type { BreakpointSyncResult, FunctionBreakpointSyncResult } from '../proxy/dap-proxy-interfaces.js';
@@ -218,7 +219,43 @@ export type PauseResultData = DebugResultData & StopAnswerFields & {
 /** How much of the output's tail a policy reads the program's end from (issue #877). */
 const PROGRAM_END_OUTPUT_TAIL_CHARS = 8000;
 
-export type WaitForStopResultData = DebugResultData & StopAnswerFields & {
+/**
+ * One descendant in a `children` answer (the session tree, issue #1081):
+ * the row's id, the adapter's name for the process, its state, and the
+ * session that spawned it — listed depth first in adoption order, the order
+ * the tree-aware wait selects in.
+ */
+export interface ChildSessionSummary {
+  sessionId: string;
+  name: string;
+  state: SessionState;
+  parentSessionId: string;
+}
+
+/**
+ * What an answer on a session with a tree carries
+ * (docs/architecture/session-tree.md, "wait_for_stop is tree-aware").
+ */
+export interface TreeAnswerFields {
+  /** Every descendant with its state; absent when the session has none. */
+  children?: ChildSessionSummary[];
+  /**
+   * Reports released to run undebugged on this session's connection during
+   * this run (beyond the cap, or an adoption that failed): a running total,
+   * never consumed, so concurrent waiters read the same number.
+   */
+  childrenReleased?: number;
+  /** Descendants this operation closed (a relaunch, a close) — when any. */
+  childrenClosed?: number;
+}
+
+export type WaitForStopResultData = DebugResultData & StopAnswerFields & TreeAnswerFields & {
+  /**
+   * The session this answer is about (issue #1081): the one asked for, or the
+   * descendant the tree-aware selection named — the id to inspect, step and
+   * continue with.
+   */
+  sessionId: string;
   message: string;
   lastStop?: SessionStopInfo;
   /**
@@ -239,7 +276,32 @@ export type WaitForStopResultData = DebugResultData & StopAnswerFields & {
  * so the answer names the frame the program is paused in and the handler can
  * read the line and the build behind it.
  */
-export type LaunchResultData = DebugResultData & StopAnswerFields;
+export type LaunchResultData = DebugResultData & StopAnswerFields & TreeAnswerFields;
+
+/**
+ * What a detach returns on top of the common fields (the session tree, issue
+ * #1081): the children a plain detach released to run undebugged, or a
+ * terminating detach closed.
+ */
+export type DetachResultData = DebugResultData & Pick<TreeAnswerFields, 'childrenReleased' | 'childrenClosed'>;
+
+/**
+ * What a close did (the session tree, issue #1081): the rows it removed,
+ * descendants first; how many of those were descendants; and, for a child,
+ * whether its process was ended or released — for an attach root, that its
+ * target and its descendants' were released to run on.
+ */
+export interface CloseSessionOutcome {
+  closed: boolean;
+  /** Every id removed, deepest first then the named session. */
+  closedSessionIds: string[];
+  /** Descendants closed with the named session, when any. */
+  childrenClosed?: number;
+  /** The named session is a child whose process this close ended (the policy's `closeChild: 'terminate'`). */
+  processEnded?: true;
+  /** The named session's target runs on: an attach root (its descendants' too), or a child under `closeChild: 'release'`. */
+  released?: true;
+}
 
 /**
  * What a successful attach returns on top of the common fields: the same
@@ -312,8 +374,16 @@ export abstract class SessionManagerCore extends EventEmitter {
    */
   private readonly sessionStateListeners = new Map<string, Set<() => void>>();
 
+  /**
+   * Who wants to know when a session's subtree changes (the session tree,
+   * issue #1081): told after every transition of the session or any
+   * descendant — a child's first transition is its adoption — and after any
+   * of them is removed. The tree-aware wait_for_stop subscribes here.
+   */
+  private readonly subtreeListeners = new Map<string, Set<() => void>>();
+
   /** Do not admit new descendants while an explicit close or relaunch tears down a subtree. */
-  private readonly closingSubtrees = new Set<string>();
+  private readonly closingSubtrees = new Map<string, number>();
 
   /**
    * TTL cache for launch-gate toolchain probes (issue #360) — shares the
@@ -421,6 +491,49 @@ export abstract class SessionManagerCore extends EventEmitter {
       executionState: execution
     });
     this.notifySessionStateListeners(session.id);
+    this.notifySubtreeListeners(session);
+  }
+
+  /**
+   * Subscribe to a session's subtree (issue #1081): the session's own
+   * transitions and removal, and those of every descendant, present or
+   * adopted later. Returns the unsubscribe.
+   */
+  protected onSubtreeStateChange(sessionId: string, listener: () => void): () => void {
+    let listeners = this.subtreeListeners.get(sessionId);
+    if (!listeners) {
+      listeners = new Set();
+      this.subtreeListeners.set(sessionId, listeners);
+    }
+    listeners.add(listener);
+    return () => {
+      const current = this.subtreeListeners.get(sessionId);
+      if (current?.delete(listener) && current.size === 0) {
+        this.subtreeListeners.delete(sessionId);
+      }
+    };
+  }
+
+  /** Tell the subtree listeners of a session and of each of its ancestors. */
+  private notifySubtreeListeners(session: ManagedSession): void {
+    const seen = new Set<string>();
+    let current: ManagedSession | undefined = session;
+    while (current && !seen.has(current.id)) {
+      seen.add(current.id);
+      const listeners = this.subtreeListeners.get(current.id);
+      if (listeners) {
+        for (const listener of [...listeners]) {
+          try {
+            listener();
+          } catch (error) {
+            this.logger.warn(
+              `[SessionManager] Subtree listener threw for session ${current.id}: ${error instanceof Error ? error.message : String(error)}`
+            );
+          }
+        }
+      }
+      current = current.parentSessionId ? this.sessionStore.get(current.parentSessionId) : undefined;
+    }
   }
 
   /**
@@ -480,22 +593,120 @@ export abstract class SessionManagerCore extends EventEmitter {
   }
   
   async closeSession(sessionId: string): Promise<boolean> {
-    // The session tree (issue #1081): closing any session closes its subtree
-    // first, deepest first, so a child never outlives its parent's row and a
-    // root's worker goes after its last child's connection.
-    this.closingSubtrees.add(sessionId);
+    return (await this.closeSessionReporting(sessionId)).closed;
+  }
+
+  /**
+   * Close a session and its subtree, and say what the close did (issue
+   * #1081): the descendants it took with it, deepest first; for a child,
+   * whether its process was ended (the policy's `closeChild` pin: debugpy
+   * terminates it) or released; for an attach root, that every descendant was
+   * detached with its target kept running, as the root's own target is.
+   */
+  async closeSessionReporting(sessionId: string, options: { terminateDebuggee?: boolean } = {}): Promise<CloseSessionOutcome> {
+    const session = this.sessionStore.get(sessionId);
+    if (!session) {
+      this.logger.warn(`[SESSION_CLOSE_FAIL] Session not found: ${sessionId}`);
+      return { closed: false, closedSessionIds: [] };
+    }
+    // An attach root's close preserves its external targets, descendants
+    // included: their connections are closed without ending them.
+    const releaseDescendants = !options.terminateDebuggee && !session.parentSessionId && session.attachMode === true;
+    // Closing a retained row after its connection ended cannot terminate
+    // its process. In particular, released children keep running after a
+    // plain detach, even if their rows are explicitly closed later.
+    const childEnd = session.parentSessionId && session.proxyManager ? this.childCloseSemantics(session) : undefined;
+    const alreadyReleased = session.parentSessionId && session.programEndExplanation?.data?.released === true;
+    const closedSessionIds: string[] = [];
+    const finishClose = this.beginSubtreeClose(sessionId);
     try {
       for (const descendant of this.descendantsDeepestFirst(sessionId)) {
-        await this.closeSingleSession(descendant.id);
+        if (await this.closeSingleSession(descendant.id, { releaseChild: releaseDescendants })) {
+          closedSessionIds.push(descendant.id);
+        }
       }
-      return await this.closeSingleSession(sessionId);
+      const childrenClosed = closedSessionIds.length;
+      // An explicit terminating detach ends every child before the root's
+      // disconnect can tear down their shared adapter/worker connection.
+      if (options.terminateDebuggee && session.proxyManager) {
+        try {
+          await session.proxyManager.sendDapRequest('disconnect', { terminateDebuggee: true });
+        } catch (disconnectError) {
+          this.logger.warn('[SessionManager] Terminating disconnect failed, closing the session anyway:', disconnectError);
+        }
+      }
+      const closed = await this.closeSingleSession(sessionId);
+      if (closed) {
+        closedSessionIds.push(sessionId);
+      }
+      return {
+        closed,
+        closedSessionIds,
+        ...(childrenClosed > 0 ? { childrenClosed } : {}),
+        ...(closed && childEnd === 'terminate' ? { processEnded: true as const } : {}),
+        ...(closed && (childEnd === 'release' || releaseDescendants || alreadyReleased) ? { released: true as const } : {})
+      };
     } finally {
-      this.closingSubtrees.delete(sessionId);
+      finishClose();
     }
   }
 
-  /** Close one session: its own proxy (a root's worker, a child's connection), its row, its waiters. */
-  protected async closeSingleSession(sessionId: string): Promise<boolean> {
+  /**
+   * The detach cascade (issue #1081): release every descendant of an attach
+   * root, deepest first, ahead of the root's own detach — each child's
+   * connection is closed with `terminateDebuggee: false`, so the process
+   * runs on undebugged, and its row stays, `stopped`, with a program end
+   * that says it was released. Returns how many were released.
+   */
+  protected async releaseDescendants(session: ManagedSession): Promise<number> {
+    let released = 0;
+    for (const descendant of this.descendantsDeepestFirst(session.id)) {
+      if (isTerminalSessionState(descendant.state) && !descendant.proxyManager) {
+        continue;
+      }
+      clearPauseIntent(descendant);
+      const proxy = descendant.proxyManager;
+      if (proxy) {
+        try {
+          this.cleanupProxyEventHandlers(descendant, proxy);
+        } catch (cleanupError) {
+          this.logger.error(`[SessionManager] Error during listener cleanup for session ${descendant.id}:`, cleanupError);
+        }
+        try {
+          await (isChildProxyView(proxy) ? proxy.stop({ terminateDebuggee: false }) : proxy.stop());
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : String(error);
+          this.logger.warn(`[SessionManager] Releasing child session ${descendant.id} failed (best effort): ${message}`);
+        } finally {
+          descendant.proxyManager = undefined;
+        }
+      }
+      descendant.programEndExplanation = {
+        note: 'Released: detached with its parent; the process runs on undebugged.',
+        data: { released: true }
+      };
+      this._updateSessionState(descendant, SessionState.STOPPED);
+      this.sessionStore.update(descendant.id, { sessionLifecycle: SessionLifecycleState.TERMINATED });
+      released += 1;
+    }
+    return released;
+  }
+
+  /** What closing a child does to its process: the adapter's measured semantics, pinned on the policy. */
+  private childCloseSemantics(session: ManagedSession): 'terminate' | 'release' {
+    try {
+      return this.sessionStore.selectPolicy(session.language).childAdoption?.closeChild ?? 'terminate';
+    } catch {
+      return 'terminate';
+    }
+  }
+
+  /**
+   * Close one session: its own proxy (a root's worker, a child's connection
+   * — ended, or released to run on when `releaseChild` is set), its row, its
+   * waiters.
+   */
+  protected async closeSingleSession(sessionId: string, options: { releaseChild?: boolean } = {}): Promise<boolean> {
     const session = this.sessionStore.get(sessionId);
     if (!session) {
       this.logger.warn(`[SESSION_CLOSE_FAIL] Session not found: ${sessionId}`);
@@ -516,7 +727,8 @@ export abstract class SessionManagerCore extends EventEmitter {
 
       // Then stop the proxy
       try {
-        await session.proxyManager.stop();
+        const proxy = session.proxyManager;
+        await (options.releaseChild && isChildProxyView(proxy) ? proxy.stop({ terminateDebuggee: false }) : proxy.stop());
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         this.logger.error(`[SessionManager] Error stopping proxy for session ${sessionId}:`, message);
@@ -555,9 +767,13 @@ export abstract class SessionManagerCore extends EventEmitter {
 
     this.logger.info(`Session ${sessionId} marked as STOPPED/TERMINATED.`);
     this.sessionStore.remove(sessionId);
-    // Anything still waiting on this session learns it is gone (issue #849).
+    this.emit('session-removed', sessionId);
+    // Anything still waiting on this session learns it is gone (issue #849),
+    // and a wait on an ancestor's tree sees one descendant fewer (issue #1081).
     this.notifySessionStateListeners(sessionId);
     this.sessionStateListeners.delete(sessionId);
+    this.notifySubtreeListeners(session);
+    this.subtreeListeners.delete(sessionId);
     if (session.parentSessionId) {
       // A child's view reports the shared worker's pid, which legitimately
       // lives on (issue #1081); the leak probe is the root's. Its end may
@@ -604,21 +820,25 @@ export abstract class SessionManagerCore extends EventEmitter {
    * even without a live proxy process, so the adapter registry slot is
    * always released (issue #238).
    */
-  protected async stopProxyPreservingSession(session: ManagedSession): Promise<void> {
-    this.closingSubtrees.add(session.id);
+  protected async stopProxyPreservingSession(session: ManagedSession): Promise<number> {
+    const finishClose = this.beginSubtreeClose(session.id);
     try {
-      await this.stopProxyAndDescendants(session);
+      return await this.stopProxyAndDescendants(session);
     } finally {
-      this.closingSubtrees.delete(session.id);
+      finishClose();
     }
   }
 
-  private async stopProxyAndDescendants(session: ManagedSession): Promise<void> {
+  /** Returns how many descendants it closed (the relaunch answer's `childrenClosed`). */
+  private async stopProxyAndDescendants(session: ManagedSession): Promise<number> {
     clearPauseIntent(session);
     // Children belong to a run (issue #1081): a relaunch, or the teardown of
     // a launch that failed, closes the previous run's children first.
+    let childrenClosed = 0;
     for (const descendant of this.descendantsDeepestFirst(session.id)) {
-      await this.closeSingleSession(descendant.id);
+      if (await this.closeSingleSession(descendant.id)) {
+        childrenClosed += 1;
+      }
     }
     const proxyManager = session.proxyManager;
     if (proxyManager) {
@@ -648,6 +868,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       await session.pendingProxyStop;
       session.pendingProxyStop = undefined;
     }
+    return childrenClosed;
   }
 
   async closeAllSessions(): Promise<void> {
@@ -680,6 +901,22 @@ export abstract class SessionManagerCore extends EventEmitter {
     return current;
   }
 
+  /** Block new adoptions until this teardown and any overlapping teardown finish. */
+  protected beginSubtreeClose(sessionId: string): () => void {
+    this.closingSubtrees.set(sessionId, (this.closingSubtrees.get(sessionId) ?? 0) + 1);
+    let finished = false;
+    return () => {
+      if (finished) return;
+      finished = true;
+      const remaining = (this.closingSubtrees.get(sessionId) ?? 1) - 1;
+      if (remaining > 0) {
+        this.closingSubtrees.set(sessionId, remaining);
+      } else {
+        this.closingSubtrees.delete(sessionId);
+      }
+    };
+  }
+
   private isSubtreeClosing(session: ManagedSession): boolean {
     let current: ManagedSession | undefined = session;
     const seen = new Set<string>();
@@ -696,6 +933,20 @@ export abstract class SessionManagerCore extends EventEmitter {
     // Defensive: test doubles of the store may be partial.
     const all = typeof this.sessionStore.getAllManaged === 'function' ? this.sessionStore.getAllManaged() : [];
     return all.filter((s) => s.parentSessionId === sessionId);
+  }
+
+  /**
+   * Every descendant of a session, depth first in adoption order (pre-order: a
+   * child, its own descendants, then the next child) — the order the
+   * tree-aware wait selects in and the `children` answers list in.
+   */
+  protected descendantsDepthFirst(sessionId: string): ManagedSession[] {
+    const result: ManagedSession[] = [];
+    for (const child of this.childrenOf(sessionId)) {
+      result.push(child);
+      result.push(...this.descendantsDepthFirst(child.id));
+    }
+    return result;
   }
 
   /** Every descendant of a session, deepest first (post-order), adoption order within a level. */
@@ -774,7 +1025,12 @@ export abstract class SessionManagerCore extends EventEmitter {
     parentProxy: IProxyManager,
     reported: ChildReportedEvent
   ): Promise<void> {
-    const release = (reason: string): void => {
+    const release = (reason: string, options: { counted: boolean } = { counted: true }): void => {
+      if (options.counted) {
+        // The run's count of children that run undebugged (issue #1081): the
+        // parent's next answers carry it as `childrenReleased`.
+        parent.releasedChildReports = (parent.releasedChildReports ?? 0) + 1;
+      }
       parentProxy
         .sendDapRequest(CHILD_RELEASE_COMMAND, { reportId: reported.reportId, reason }, { timeoutMs: 5000 })
         .catch((err) => {
@@ -785,7 +1041,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     };
 
     if (this.sessionStore.get(parent.id) !== parent || parent.proxyManager !== parentProxy || this.isSubtreeClosing(parent)) {
-      release('the parent session is closing or its connection has ended');
+      release('the parent session is closing or its connection has ended', { counted: false });
       return;
     }
 
@@ -865,7 +1121,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       this.logger.warn(
         `[SessionManager] Adopting child ${reported.name} of session ${parent.id} failed: ${message}`
       );
-      release(`adoption failed: ${message}`);
+      release(`adoption failed: ${message}`, { counted: !this.isSubtreeClosing(parent) });
       if (child && this.sessionStore.get(child.id) === child && !this.isSubtreeClosing(child)) {
         // Use the normal subtree teardown: a grandchild may already have
         // been reported, and removing the last child must reap a root whose
@@ -924,6 +1180,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     session.adapterCapabilities = undefined;
     session.liveUpdateState = undefined;
     session.programEndExplanation = undefined;
+    session.releasedChildReports = undefined;
     session.failureDiagnostics = undefined;
     // Adapter degradation notes are per-launch (issue #441).
     session.adapterNotices = [];

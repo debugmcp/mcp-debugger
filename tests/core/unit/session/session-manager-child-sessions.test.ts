@@ -596,6 +596,301 @@ describe('SessionManager child sessions (issue #1081)', () => {
     expect(childOf(rootId)).toBeUndefined();
   });
 
+  describe('the close outcome (issue #1081, the cascade answers)', () => {
+    async function tree(): Promise<{ rootId: string; childId: string; grandchildId: string; childView: MockChildProxyView; grandchildView: MockChildProxyView }> {
+      const rootId = await startRoot();
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+      await vi.runAllTimersAsync();
+      const childId = childOf(rootId)!.id;
+      const childView = dependencies.mockProxyManager.childViews.get(childId)!;
+      childView.simulateEvent('child-reported', report('r2', 4343));
+      await vi.runAllTimersAsync();
+      const grandchildId = childOf(childId)!.id;
+      const grandchildView = dependencies.mockProxyManager.childViews.get(grandchildId)!;
+      return { rootId, childId, grandchildId, childView, grandchildView };
+    }
+
+    it("closing a child ends its process (debugpy's close) and says so", async () => {
+      const { rootId, childId, childView } = await tree();
+
+      const outcome = await sessionManager.closeSessionReporting(childId);
+
+      expect(outcome).toEqual({ closed: true, closedSessionIds: expect.any(Array), childrenClosed: 1, processEnded: true });
+      expect(outcome.closedSessionIds).toHaveLength(2);
+      expect(outcome.closedSessionIds[1]).toBe(childId);
+      expect(outcome.released).toBeUndefined();
+      expect(childView.stopOptions[0]?.terminateDebuggee ?? true).toBe(true);
+      expect(sessionManager.getSession(rootId)).toBeDefined();
+    });
+
+    it('closing a launch root counts the descendants it took with it, deepest first', async () => {
+      const { rootId, childId, grandchildId } = await tree();
+
+      const outcome = await sessionManager.closeSessionReporting(rootId);
+
+      expect(outcome.closed).toBe(true);
+      expect(outcome.childrenClosed).toBe(2);
+      expect(outcome.closedSessionIds).toEqual([grandchildId, childId, rootId]);
+      expect(outcome.processEnded).toBeUndefined();
+      expect(outcome.released).toBeUndefined();
+      expect(sessionManager.getAllSessions()).toHaveLength(0);
+    });
+
+    it('closing an attach root releases every descendant (targets kept) and says released', async () => {
+      const { rootId, childView, grandchildView } = await tree();
+      sessionManager.getSession(rootId)!.attachMode = true;
+
+      const outcome = await sessionManager.closeSessionReporting(rootId);
+
+      expect(outcome.closed).toBe(true);
+      expect(outcome.released).toBe(true);
+      expect(outcome.childrenClosed).toBe(2);
+      expect(grandchildView.stopOptions[0]).toEqual({ terminateDebuggee: false });
+      expect(childView.stopOptions[0]).toEqual({ terminateDebuggee: false });
+      expect(sessionManager.getAllSessions()).toHaveLength(0);
+    });
+
+    it('a session with no tree answers the bare outcome, and a missing one closed: false', async () => {
+      const rootId = await startRoot();
+      expect(await sessionManager.closeSessionReporting(rootId)).toEqual({ closed: true, closedSessionIds: [rootId] });
+      expect(await sessionManager.closeSessionReporting('no-such-session')).toEqual({ closed: false, closedSessionIds: [] });
+    });
+
+    it('closing an already ended child only removes its row, without claiming the close ended its process', async () => {
+      const { childId, grandchildId, childView, grandchildView } = await tree();
+      grandchildView.simulateEvent('terminated');
+      childView.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+      expect(sessionManager.getSession(childId)!.proxyManager).toBeUndefined();
+
+      const outcome = await sessionManager.closeSessionReporting(childId);
+
+      expect(outcome).toEqual({ closed: true, closedSessionIds: [grandchildId, childId], childrenClosed: 1 });
+    });
+  });
+
+  describe('the detach cascade (issue #1081): an attach root with children', () => {
+    async function attachTree() {
+      const rootId = await startRoot();
+      sessionManager.getSession(rootId)!.attachMode = true;
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+      await vi.runAllTimersAsync();
+      const childId = childOf(rootId)!.id;
+      const childView = dependencies.mockProxyManager.childViews.get(childId)!;
+      childView.simulateEvent('child-reported', report('r2', 4343));
+      await vi.runAllTimersAsync();
+      const grandchildId = childOf(childId)!.id;
+      const grandchildView = dependencies.mockProxyManager.childViews.get(grandchildId)!;
+      return { rootId, childId, grandchildId, childView, grandchildView };
+    }
+
+    it('releases every descendant deepest first before the root detaches, keeps their rows as stopped, and counts them', async () => {
+      const { rootId, childId, grandchildId, childView, grandchildView } = await attachTree();
+      const order: string[] = [];
+      vi.spyOn(childView, 'stop').mockImplementation(async (options) => { order.push(`child:${options?.terminateDebuggee}`); });
+      vi.spyOn(grandchildView, 'stop').mockImplementation(async (options) => { order.push(`grandchild:${options?.terminateDebuggee}`); });
+      const rootSend = dependencies.mockProxyManager.sendDapRequest.bind(dependencies.mockProxyManager);
+      vi.spyOn(dependencies.mockProxyManager, 'sendDapRequest').mockImplementation(async (command, args, options) => {
+        if (command === 'disconnect') order.push('root:disconnect');
+        return rootSend(command, args, options);
+      });
+
+      const detached = await sessionManager.detachFromProcess(rootId);
+      await vi.runAllTimersAsync();
+
+      expect(detached.success).toBe(true);
+      expect(detached.state).toBe(SessionState.STOPPED);
+      expect(detached.data?.childrenReleased).toBe(2);
+      expect(order).toEqual(['grandchild:false', 'child:false', 'root:disconnect']);
+      for (const id of [childId, grandchildId]) {
+        const row = sessionManager.getSession(id)!;
+        expect(row).toBeDefined();
+        expect(row.state).toBe(SessionState.STOPPED);
+        expect(row.proxyManager).toBeUndefined();
+        expect(row.programEndExplanation).toEqual({
+          note: 'Released: detached with its parent; the process runs on undebugged.',
+          data: { released: true }
+        });
+      }
+      expect(sessionManager.getAllSessions().find((s) => s.id === childId)?.programEnd?.data).toEqual({ released: true });
+      expect(sessionManager.getSession(rootId)!.state).toBe(SessionState.STOPPED);
+    });
+
+    it('a terminating detach closes the subtree and counts what it closed', async () => {
+      const { rootId, childId, grandchildId, childView, grandchildView } = await attachTree();
+      const order: string[] = [];
+      vi.spyOn(childView, 'stop').mockImplementation(async (options) => { order.push(`child:${options?.terminateDebuggee ?? true}`); });
+      vi.spyOn(grandchildView, 'stop').mockImplementation(async (options) => { order.push(`grandchild:${options?.terminateDebuggee ?? true}`); });
+      const rootSend = dependencies.mockProxyManager.sendDapRequest.bind(dependencies.mockProxyManager);
+      vi.spyOn(dependencies.mockProxyManager, 'sendDapRequest').mockImplementation(async (command, args, options) => {
+        if (command === 'disconnect') {
+          order.push(`root:${(args as { terminateDebuggee: boolean }).terminateDebuggee}`);
+        }
+        return rootSend(command, args, options);
+      });
+      const removed = vi.fn();
+      sessionManager.on('session-removed', removed);
+
+      const detached = await sessionManager.detachFromProcess(rootId, true);
+      await vi.runAllTimersAsync();
+
+      expect(detached.success).toBe(true);
+      expect(detached.data?.childrenClosed).toBe(2);
+      expect(detached.data?.childrenReleased).toBeUndefined();
+      expect(order).toEqual(['grandchild:true', 'child:true', 'root:true']);
+      expect(removed.mock.calls).toEqual([[grandchildId], [childId], [rootId]]);
+      expect(sessionManager.getSession(childId)).toBeUndefined();
+      expect(sessionManager.getSession(grandchildId)).toBeUndefined();
+      expect(sessionManager.getSession(rootId)).toBeUndefined();
+    });
+
+    it('releases reports arriving during child release or the root disconnect without adopting new rows', async () => {
+      const { rootId, grandchildView } = await attachTree();
+      let finishChildStop!: () => void;
+      vi.spyOn(grandchildView, 'stop').mockImplementation(() => new Promise<void>((resolve) => { finishChildStop = resolve; }));
+      let finishRootDisconnect!: () => void;
+      const rootSend = dependencies.mockProxyManager.sendDapRequest.bind(dependencies.mockProxyManager);
+      vi.spyOn(dependencies.mockProxyManager, 'sendDapRequest').mockImplementation(async (command, args, options) => {
+        if (command === 'disconnect') {
+          await new Promise<void>((resolve) => { finishRootDisconnect = resolve; });
+        }
+        return rootSend(command, args, options);
+      });
+
+      const detaching = sessionManager.detachFromProcess(rootId);
+      await vi.waitFor(() => expect(finishChildStop).toBeTypeOf('function'));
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('during-child-release', 4444));
+      finishChildStop();
+      await vi.waitFor(() => expect(finishRootDisconnect).toBeTypeOf('function'));
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('during-root-disconnect', 4545));
+      finishRootDisconnect();
+      const detached = await detaching;
+      await vi.runAllTimersAsync();
+
+      expect(detached.success).toBe(true);
+      expect(detached.data?.childrenReleased).toBe(2);
+      expect(sessionManager.getAllSessions()).toHaveLength(3);
+      expect(sessionManager.getAllSessions().every((session) => session.state === SessionState.STOPPED)).toBe(true);
+      expect(releases().map((call) => (call.args as { reportId: string }).reportId)).toEqual([
+        'during-child-release', 'during-root-disconnect'
+      ]);
+      expect(sessionManager.getSession(rootId)!.releasedChildReports).toBeUndefined();
+    });
+
+    it('a detach with no children answers as before', async () => {
+      const rootId = await startRoot();
+      sessionManager.getSession(rootId)!.attachMode = true;
+
+      const detached = await sessionManager.detachFromProcess(rootId);
+
+      expect(detached.success).toBe(true);
+      expect(detached.data).toEqual({ message: 'Detached from process (process still running)' });
+    });
+
+    it('closing a released child preserves the release outcome and does not claim process termination', async () => {
+      const { rootId, childId, grandchildId } = await attachTree();
+      await sessionManager.detachFromProcess(rootId);
+
+      const outcome = await sessionManager.closeSessionReporting(childId);
+
+      expect(outcome).toEqual({ closed: true, closedSessionIds: [grandchildId, childId], childrenClosed: 1, released: true });
+      expect(outcome.processEnded).toBeUndefined();
+    });
+  });
+
+  describe('the tree answers (issue #1081, the designed flow)', () => {
+    it("a child released beyond the cap is counted on the parent's next wait answer as childrenReleased", async () => {
+      build({ DEBUG_MCP_MAX_CHILD_SESSIONS: '0' });
+      const rootId = await startRoot();
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+      await vi.runAllTimersAsync();
+
+      const answer = await sessionManager.waitForStop(rootId, 100);
+
+      expect(answer.data?.pending).toBe(true);
+      expect(answer.data?.childrenReleased).toBe(1);
+      expect(answer.data?.children).toBeUndefined();
+    });
+
+    it('a relaunch starts the released count afresh', async () => {
+      build({ DEBUG_MCP_MAX_CHILD_SESSIONS: '0' });
+      const rootId = await startRoot();
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+      await vi.runAllTimersAsync();
+      expect((await sessionManager.waitForStop(rootId, 100)).data?.childrenReleased).toBe(1);
+
+      vi.spyOn(dependencies.mockProxyManager, 'stop').mockResolvedValue();
+      const restarted = await sessionManager.restartDebugging(rootId);
+      await vi.runAllTimersAsync();
+
+      expect(restarted.success).toBe(true);
+      expect((await sessionManager.waitForStop(rootId, 100)).data?.childrenReleased).toBeUndefined();
+    });
+
+    it('a report released while its subtree is closing is not counted', async () => {
+      const rootId = await startRoot();
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+      await vi.runAllTimersAsync();
+      const view = dependencies.mockProxyManager.childViews.get(childOf(rootId)!.id)!;
+      vi.spyOn(dependencies.mockProxyManager, 'stop').mockResolvedValue();
+      let finishStop!: () => void;
+      vi.spyOn(view, 'stop').mockImplementation(() => new Promise<void>((resolve) => { finishStop = resolve; }));
+
+      const restarting = sessionManager.restartDebugging(rootId);
+      await vi.waitFor(() => expect(finishStop).toBeTypeOf('function'));
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('during-restart'));
+      finishStop();
+      await restarting;
+      await vi.runAllTimersAsync();
+
+      expect(sessionManager.getSession(rootId)!.releasedChildReports).toBeUndefined();
+    });
+
+    it('a restart answers childrenClosed with the number of descendants the relaunch closed', async () => {
+      const rootId = await startRoot();
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+      await vi.runAllTimersAsync();
+      const childView = dependencies.mockProxyManager.childViews.get(childOf(rootId)!.id)!;
+      childView.simulateEvent('child-reported', report('r2', 4343));
+      await vi.runAllTimersAsync();
+      vi.spyOn(dependencies.mockProxyManager, 'stop').mockResolvedValue();
+      const removed = vi.fn();
+      sessionManager.on('session-removed', removed);
+
+      const restarted = await sessionManager.restartDebugging(rootId);
+      await vi.runAllTimersAsync();
+
+      expect(restarted.success).toBe(true);
+      expect(restarted.data?.childrenClosed).toBe(2);
+      expect(restarted.data?.children).toBeUndefined();
+      expect(removed).toHaveBeenCalledTimes(2);
+      expect(removed).not.toHaveBeenCalledWith(rootId);
+    });
+
+    it('a launch with nothing to tear down answers no childrenClosed', async () => {
+      const session = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      const started = await sessionManager.startDebugging(session.id, 'test.py');
+      await vi.runAllTimersAsync();
+      expect(started.data?.childrenClosed).toBeUndefined();
+    });
+
+    it('a child adopted during the launch hold is listed on the launch answer', async () => {
+      const session = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      const starting = sessionManager.startDebugging(session.id, 'test.py');
+      await vi.advanceTimersByTimeAsync(100);
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+      await vi.runAllTimersAsync();
+      const started = await starting;
+
+      expect(started.success).toBe(true);
+      expect(started.data?.pending).toBe(true);
+      const child = childOf(session.id)!;
+      expect(started.data?.children).toEqual([
+        { sessionId: child.id, name: 'Subprocess 4242', state: SessionState.RUNNING, parentSessionId: session.id }
+      ]);
+    });
+  });
+
   it('releases the report and removes the row if creating its proxy view fails', async () => {
     const rootId = await startRoot();
     vi.spyOn(dependencies.mockProxyManager, 'createChildView').mockImplementation(() => {

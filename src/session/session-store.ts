@@ -179,6 +179,13 @@ export interface ManagedSession extends DebugSessionInfo {
   liveUpdateState?: unknown;
   /** The policy's reading of the program's end (issue #877), recorded at the end event; reset per launch. */
   programEndExplanation?: ProgramEndExplanation;
+  /**
+   * Children reported on this session's connection and released to run
+   * undebugged during this run (the session tree, issue #1081): beyond the
+   * cap, or an adoption that failed. A running total the answers carry as
+   * `childrenReleased`; reset per launch.
+   */
+  releasedChildReports?: number;
   // The breakOnExceptions mode actually in effect for the current launch or
   // attach — the user's value, or the policy's launch default when unset
   // (issue #244). Previously write-only pass-through; recorded for read-back.

@@ -93,7 +93,7 @@ export type ProxyFailureOperation = 'startDebugging' | 'attachToProcess' | 'prox
  * session-preserving proxy teardown.
  */
 export interface ProxySetupFailureDeps extends ProxyFailureLogDeps {
-  stopProxyPreservingSession(session: ManagedSession): Promise<void>;
+  stopProxyPreservingSession(session: ManagedSession): Promise<number>;
 }
 
 /**

@@ -26,8 +26,16 @@ export interface ChildAdoptResult {
   capabilities?: DebugProtocol.Capabilities;
 }
 
+/** How a child's connection is closed: ending the child (the default) or letting it run on. */
+export interface ChildStopOptions {
+  /** `false` releases the child to run undebugged (a detach cascade, issue #1081); default `true`. */
+  terminateDebuggee?: boolean;
+}
+
 export interface IChildProxyView extends IProxyManager {
   readonly childSessionId: string;
+  /** Connection-scoped: close this child's connection, ending the child unless told to release it. */
+  stop(options?: ChildStopOptions): Promise<void>;
   /**
    * Adopt the held report as this view's connection: the worker opens a
    * connection to the adapter, runs the child handshake with the given
@@ -169,13 +177,15 @@ export class ChildProxyView extends EventEmitter implements IChildProxyView {
 
   /**
    * Connection-scoped: close this child's connection (debugpy ends the child,
-   * the measured semantics of a child's close) and forget the view. The
-   * worker, the adapter and the root's own state are untouched.
+   * the measured semantics of a child's close — or releases it to run on when
+   * `terminateDebuggee` is false, the detach cascade) and forget the view.
+   * The worker, the adapter and the root's own state are untouched.
    */
-  async stop(): Promise<void> {
+  async stop(options: ChildStopOptions = {}): Promise<void> {
     if (this.stopped) {
       return;
     }
+    const terminateDebuggee = options.terminateDebuggee ?? true;
     this.stopped = true;
     const needsClose = this.connectionOpen || this.adoptionStarted;
     this.connectionOpen = false;
@@ -183,7 +193,7 @@ export class ChildProxyView extends EventEmitter implements IChildProxyView {
     // also cancels a handshake still in flight on the same IPC channel.
     if (needsClose && !this.exitEmitted && this.root.isRunning()) {
       try {
-        await this.root.sendDapRequestAs(this.childSessionId, CHILD_CLOSE_COMMAND, { terminateDebuggee: true }, { timeoutMs: 5000 });
+        await this.root.sendDapRequestAs(this.childSessionId, CHILD_CLOSE_COMMAND, { terminateDebuggee }, { timeoutMs: 5000 });
       } catch (error) {
         this.logger.warn(
           `[ChildProxyView ${this.childSessionId}] close failed (best effort): ${error instanceof Error ? error.message : String(error)}`
@@ -323,6 +333,11 @@ export class ChildProxyView extends EventEmitter implements IChildProxyView {
 
   // The typed `on`/`emit` of IProxyManager are satisfied by EventEmitter's
   // own methods, structurally, exactly as on the root manager.
+}
+
+/** Whether a session's proxy is a child's view over its root's worker (issue #1081). */
+export function isChildProxyView(proxyManager: IProxyManager): proxyManager is IChildProxyView {
+  return typeof (proxyManager as Partial<IChildProxyView>).childSessionId === 'string';
 }
 
 /** Fails to compile unless T is assignable to U. */

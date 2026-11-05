@@ -24,7 +24,7 @@ import type { AttachLocality } from '@debugmcp/shared';
 import { attachLocalityOf, classifyAttachAddressing } from './attach-addressing.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import { DapResponseError } from '../../proxy/dap-response-error.js';
-import type { AttachResultData, CustomLaunchRequestArguments, DebugResult } from '../session-manager-core.js';
+import type { AttachResultData, CustomLaunchRequestArguments, DebugResult, DetachResultData } from '../session-manager-core.js';
 import type { AttachContext } from '../operations-context.js';
 import type { BreakpointController } from '../breakpoints/breakpoint-controller.js';
 import { failProxySetup, sessionRemovedDuringTeardown } from '../launch/proxy-failure-diagnostics.js';
@@ -589,7 +589,7 @@ export class AttachController {
   async detachFromProcess(
     sessionId: string,
     terminateProcess: boolean = false
-  ): Promise<DebugResult> {
+  ): Promise<DebugResult<DetachResultData>> {
     return this.inFlight.run(sessionId, 'detach', 'detach_from_process', this.ctx, () =>
       this.detach(sessionId, terminateProcess)
     );
@@ -599,7 +599,7 @@ export class AttachController {
   private async detach(
     sessionId: string,
     terminateProcess: boolean
-  ): Promise<DebugResult> {
+  ): Promise<DebugResult<DetachResultData>> {
     const session = this.ctx.getSession(sessionId);
     this.ctx.logger.info(
       `[SessionManager] Detaching from process for session ${sessionId}, terminateProcess: ${terminateProcess}`
@@ -615,23 +615,21 @@ export class AttachController {
 
     let resumedBeforeDetach: boolean | undefined;
     let warning: string | undefined;
+    // The session tree (issue #1081): a terminating detach closes the
+    // subtree; a plain one releases the children first, deepest first, so
+    // each runs on undebugged, then detaches the parent.
+    let childrenClosed = 0;
+    let childrenReleased = 0;
+    const finishClose = this.ctx.beginSubtreeClose(sessionId);
 
     try {
       if (terminateProcess) {
-        // Terminate the process: say so to the adapter first. closeSession's
-        // own teardown detaches an attach target with terminateDebuggee=false
-        // (and, since issue #763, resumes it first), which would leave running
-        // the process this result reports as terminated.
-        try {
-          await session.proxyManager.sendDapRequest('disconnect', {
-            terminateDebuggee: true
-          });
-        } catch (disconnectError) {
-          this.ctx.logger.warn(`[SessionManager] Terminating disconnect failed, closing the session anyway:`, disconnectError);
-        }
-        await this.ctx.closeSession(sessionId);
+        // End children before disconnecting the root, and override an
+        // attach root's usual keep-the-target-running close semantics.
+        childrenClosed = (await this.ctx.closeSessionReporting(sessionId, { terminateDebuggee: true })).childrenClosed ?? 0;
       } else {
         const proxyManager = session.proxyManager;
+        childrenReleased = await this.ctx.releaseDescendants(session);
 
         // Disconnect without terminating - send DAP disconnect request. In
         // attach mode the worker resumes a stopped target ahead of it where
@@ -689,7 +687,9 @@ export class AttachController {
             ? 'Detached and terminated process'
             : 'Detached from process (process still running)',
           ...(resumedBeforeDetach !== undefined ? { resumedBeforeDetach } : {}),
-          ...(warning !== undefined ? { warning } : {})
+          ...(warning !== undefined ? { warning } : {}),
+          ...(childrenClosed > 0 ? { childrenClosed } : {}),
+          ...(childrenReleased > 0 ? { childrenReleased } : {})
         }
       };
     } catch (error) {
@@ -701,6 +701,8 @@ export class AttachController {
         state: session.state,
         error: `Failed to detach: ${message}`
       };
+    } finally {
+      finishClose();
     }
   }
 }

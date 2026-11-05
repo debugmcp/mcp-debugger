@@ -26,7 +26,7 @@ import type {
 import type { ManagedSession } from './session-store.js';
 import type { StackTraceResult } from './inspection/frame-anchor-resolver.js';
 import type { LocalVariablesResult } from './session-manager-data.js';
-import type { CustomLaunchRequestArguments } from './session-manager-core.js';
+import type { CloseSessionOutcome, CustomLaunchRequestArguments } from './session-manager-core.js';
 import type { VariableAccessMode } from '../utils/variable-access.js';
 import type { IProxyManager } from '../proxy/proxy-manager.js';
 import type { IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
@@ -81,6 +81,19 @@ export interface OperationsContext {
    * (see `waitForSessionState`), not from within it. Returns the unsubscribe.
    */
   onStateChange(sessionId: string, listener: () => void): () => void;
+  /**
+   * The session tree (issue #1081): be told whenever the session or any of
+   * its descendants changes state, is adopted (its first transition) or is
+   * removed. Same contract as `onStateChange`: no arguments, runs inside the
+   * transition, read when the stack has unwound (see `waitForSubtreeSettle`).
+   */
+  onSubtreeChange(sessionId: string, listener: () => void): () => void;
+  /**
+   * Every descendant of a session, depth first in adoption order (a child,
+   * then its own descendants, then the next child): the order the tree-aware
+   * wait selects in and the `children` answers list in.
+   */
+  descendantsOf(sessionId: string): ManagedSession[];
 
   /**
    * The data layer's policy lookup: total, and overridable by tests.
@@ -111,8 +124,15 @@ export interface OperationsContext {
    * (issue #711).
    */
   cleanupProxyEventHandlers(session: ManagedSession, proxyManager: IProxyManager): void;
-  stopProxyPreservingSession(session: ManagedSession): Promise<void>;
+  /** Resolves with how many descendants the teardown closed (issue #1081). */
+  stopProxyPreservingSession(session: ManagedSession): Promise<number>;
   closeSession(sessionId: string): Promise<boolean>;
+  /** `closeSession` with its outcome (issue #1081): the rows removed, and what the close did to the processes. */
+  closeSessionReporting(sessionId: string, options?: { terminateDebuggee?: boolean }): Promise<CloseSessionOutcome>;
+  /** Block new child adoptions during a complete teardown; returns the release function. */
+  beginSubtreeClose(sessionId: string): () => void;
+  /** The detach cascade (issue #1081): release every descendant, deepest first; resolves with how many. */
+  releaseDescendants(session: ManagedSession): Promise<number>;
   getStackTrace(
     sessionId: string,
     threadId?: number,
@@ -182,6 +202,7 @@ export type LaunchContext = Pick<
   | 'selectPolicy'
   | 'getStackTraceDetailed'
   | 'stopProxyPreservingSession'
+  | 'descendantsOf'
   | 'extractLocalsFromResolved'
   | 'redactionEnabled'
   | 'snapshotEnabled'
@@ -208,6 +229,9 @@ export type AttachContext = Pick<
   | 'stopProxyPreservingSession'
   | 'cleanupProxyEventHandlers'
   | 'closeSession'
+  | 'closeSessionReporting'
+  | 'releaseDescendants'
+  | 'beginSubtreeClose'
   | 'tunables'
   | 'extractLocalsFromResolved'
   | 'redactionEnabled'
@@ -225,7 +249,8 @@ export type BreakpointContext = Pick<
  * Stepping / continue / pause / threads / waiting for a stop. The policy and
  * the detailed stack serve the pending-stop explanation (issue #678): the raw
  * origin frame of a step, and the adapter's account of why it may never land.
- * The state subscription serves wait_for_stop (issue #849).
+ * The state subscription serves wait_for_stop (issue #849); the subtree
+ * subscription and the descendant read serve its tree-aware form (issue #1081).
  */
 export type ExecutionContext = Pick<
   OperationsContext,
@@ -233,6 +258,8 @@ export type ExecutionContext = Pick<
   | 'getSession'
   | 'updateState'
   | 'onStateChange'
+  | 'onSubtreeChange'
+  | 'descendantsOf'
   | 'getStackTraceDetailed'
   | 'selectPolicy'
   | 'tunables'

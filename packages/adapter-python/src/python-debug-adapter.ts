@@ -447,15 +447,16 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
       // debugpy reports every Python child the program starts when this is on
       // (its default when the key is absent), and the server adopts each
       // report as a child debug session that stops on this session's
-      // breakpoints (the session tree, issue #1081). Off by default until the
-      // tree-aware wait_for_stop lands, so children run undebugged; a
-      // caller's explicit value is forwarded.
+      // breakpoints, reported by this session's wait_for_stop (the session
+      // tree, issue #1081). Off by default until the last step of #1081
+      // flips it, so children run undebugged; a caller's explicit value is
+      // forwarded.
       subProcess: requestedSubProcess ?? false
     };
     if (requestedSubProcess === true) {
       this.launchDiagnostics.push({
         key: 'subProcess',
-        message: "forwarded — each Python child this program starts becomes a child debug session, listed by list_debug_sessions with parentSessionId and stopping on this session's breakpoints; the default stays off until the tree-aware wait_for_stop lands (issue #1081)"
+        message: "forwarded — each Python child this program starts becomes a child debug session, listed by list_debug_sessions with parentSessionId and stopping on this session's breakpoints; wait_for_stop on this session reports the child's stop with sessionId naming it; the default stays off until the last step of issue #1081 flips it"
       });
     }
 

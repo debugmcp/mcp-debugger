@@ -1248,11 +1248,12 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       // concurrent close_debug_session lands in: model it by removing the
       // session from the store while stopProxyPreservingSession is in flight.
       vi.spyOn(internals(operations), 'stopProxyPreservingSession')
-        .mockImplementation(async (session: ManagedSession) => {
+        .mockImplementation(async (session: ManagedSession): Promise<number> => {
           session.proxyManager = undefined;
           mockSessionStore.getOrThrow.mockImplementation((sessionId: string) => {
             throw new SessionNotFoundError(sessionId);
           });
+          return 0;
         });
 
       const result = await operations.startDebugging('test-session', 'test.py');
@@ -2149,11 +2150,12 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         throw new Error('Timeout waiting for proxy initialization');
       });
       vi.spyOn(internals(operations), 'stopProxyPreservingSession')
-        .mockImplementation(async (session: ManagedSession) => {
+        .mockImplementation(async (session: ManagedSession): Promise<number> => {
           session.proxyManager = undefined;
           mockSessionStore.getOrThrow.mockImplementation((sessionId: string) => {
             throw new SessionNotFoundError(sessionId);
           });
+          return 0;
         });
 
       const result = await operations.attachToProcess('test-session', {
@@ -2212,8 +2214,9 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       // Teardown (which only clears the proxy handle) must still run on the
       // failure path; the diagnostics come from the error and logDir.
       const stopSpy = vi.spyOn(internals(operations), 'stopProxyPreservingSession')
-        .mockImplementation(async (session: ManagedSession) => {
+        .mockImplementation(async (session: ManagedSession): Promise<number> => {
           session.proxyManager = undefined;
+          return 0;
         });
 
       const result = await operations.attachToProcess('test-session', {

@@ -221,20 +221,25 @@ export const closeDebugSessionTool: ToolHandler = async (ctx, args) => {
   requireSessionId(args);
 
   const sessionName = ctx.getSessionName(args.sessionId);
-  const closed = await ctx.closeDebugSession(args.sessionId);
+  const outcome = await ctx.closeDebugSession(args.sessionId);
 
-  if (closed) {
+  if (outcome.closed) {
     // Log session closure
     ctx.logger.info('session:closed', {
       sessionId: args.sessionId,
       sessionName: sessionName,
       timestamp: Date.now()
     });
-
-    // The session's output resource is gone (issue #218)
-    ctx.outputResources.forgetSession(args.sessionId);
-    ctx.outputResources.notifyListChanged();
   }
 
-  return jsonResult({ success: closed, message: closed ? `Closed debug session: ${args.sessionId}` : `Failed to close debug session: ${args.sessionId}` });
+  // The session tree (issue #1081): what the close took with it, and what
+  // it did to the processes — a child's ended (debugpy) or released; an
+  // attach root's descendants released with their targets, like its own.
+  return jsonResult({
+    success: outcome.closed,
+    message: outcome.closed ? `Closed debug session: ${args.sessionId}` : `Failed to close debug session: ${args.sessionId}`,
+    ...(outcome.childrenClosed ? { childrenClosed: outcome.childrenClosed } : {}),
+    ...(outcome.processEnded ? { processEnded: true } : {}),
+    ...(outcome.released ? { released: true } : {})
+  });
 };

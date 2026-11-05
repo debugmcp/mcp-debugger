@@ -131,7 +131,7 @@ Lists all active debugging sessions — in Streamable HTTP mode, the ones this M
 
 Errored sessions include optional `diagnostics` with the current launch attempt's server-host `proxyLogPath` and remote-safe `proxyLogResource`. The record is retained for proxy initialization failures and for proxy/adapter deaths after initialization, and is cleared when a new launch or attach attempt begins.
 
-**`parentSessionId`:** present on child rows only. A child session is created by the server, never by `create_debug_session`, when the adapter reports a process the debuggee started: today a Python launch with `dapLaunchArgs.subProcess: true`, where debugpy reports each child (see [the session tree](./architecture/session-tree.md)). The child inherits the parent's `language`, its `name` is the adapter's own label for the process (debugpy: `Subprocess <pid>`), it has its own breakpoints, `wait_for_stop`, `get_output` and `close_debug_session`, and it carries no `exitCode` (it ends with the adapter's `terminated` event). `start_debugging`, `restart_debugging`, `attach_to_process`, `detach_from_process`, `expose_session` and `unexpose_session` refuse a child id by name. Closing the parent closes its children first. `DEBUG_MCP_MAX_CHILD_SESSIONS` caps the live children of one tree (default 32; `0` turns adoption off): a child reported beyond the cap is released and runs undebugged.
+**`parentSessionId`:** present on child rows only. A child session is created by the server, never by `create_debug_session`, when the adapter reports a process the debuggee started: today a Python launch with `dapLaunchArgs.subProcess: true`, where debugpy reports each child (see [the session tree](./architecture/session-tree.md)). The child inherits the parent's `language`, its `name` is the adapter's own label for the process (debugpy: `Subprocess <pid>`), it has its own breakpoints, `get_output` and `close_debug_session`, and it carries no `exitCode` (it ends with the adapter's `terminated` event). The parent's [`wait_for_stop`](#wait_for_stop) reports the child's stop with `sessionId` naming the child and `children` listing the tree; a child can still be waited on by its own id (that wait answers for the child and its own descendants only). `start_debugging`, `restart_debugging`, `attach_to_process`, `detach_from_process`, `expose_session` and `unexpose_session` refuse a child id by name. Closing the parent closes its children first (`childrenClosed` in the answer). `DEBUG_MCP_MAX_CHILD_SESSIONS` caps the live children of one tree (default 32; `0` turns adoption off): a child reported beyond the cap is released and runs undebugged, and the parent's next `wait_for_stop`, `start_debugging` or `restart_debugging` answer counts the run's released children in `childrenReleased`.
 
 ---
 
@@ -149,6 +149,21 @@ Closes an active debugging session.
   "message": "Closed debug session: a4d1acc8-84a8-44fe-a13e-28628c5b33c7"
 }
 ```
+
+A session with child sessions, a child session or an attach root says what the close took with it
+(the session tree, issue #1081):
+```json
+{ "success": true, "message": "Closed debug session: c7e2a9b4-5d1f-4e8a-9b3c-2f6d8a1e0b47", "processEnded": true }
+```
+
+- `childrenClosed: n` when the close took descendants with it: descendants are closed first,
+  deepest first, then the named session. Closing a child leaves its ancestors, its siblings and the
+  debug adapter they share alone.
+- `processEnded: true` when the named session is a child whose process the close ended (debugpy: a
+  child's close terminates it, exit 0 reported to its parent).
+- `released: true` when the named session is an attach root: its descendants are detached with
+  their targets kept running, deepest first, their rows removed, then the root is detached. (Later
+  also a child of an adapter that can only release the child it adopted.)
 
 **Notes:**
 - Sessions may close automatically on errors
@@ -497,6 +512,8 @@ Two things are outside the hold. A `stopOnEntry` launch is answered at its entry
 
 A breakpoint set, removed or cleared while a launch is still starting is delivered to the adapter as soon as the program is launched (issue #851).
 
+**Sessions with children** (the session tree, issue #1081): when a child session was adopted during the hold (a Python launch with `dapLaunchArgs.subProcess: true`, where debugpy reports each process the program starts), the answer carries `children: [{ sessionId, name, state, parentSessionId }]` — every descendant, depth first in adoption order, each with its state and the session that spawned it. `childrenReleased: n` says how many children reported this run were released to run undebugged (beyond `DEBUG_MCP_MAX_CHILD_SESSIONS`, or an adoption that failed), and `childrenClosed: n` that the start tore down a previous live run and closed its children with it. All three sit at the top level beside `pending` and in `data`, and are absent when there is nothing to say, so a session with no children answers as before. The launch answer is about the launched session itself; a child's stop is collected by [`wait_for_stop`](#wait_for_stop), which answers with `sessionId` naming the child.
+
 **JavaScript launch configuration:** Both launch option objects accept js-debug settings;
 `adapterLaunchConfig` wins when a key appears in both. The effective `stopOnEntry` value controls
 the entry pause and is replayed by `restart_debugging`. An honoured `noDebug` disables that pause.
@@ -574,6 +591,7 @@ Restarts the debuggee in one call. When the adapter offers a native restart (DAP
 - The launch configuration is replayed verbatim (script, args, `dapLaunchArgs`, `adapterLaunchConfig` — the `testRunner` preset rides in it — `breakOnExceptions`); there are no per-restart overrides — call `start_debugging` for a different configuration.
 - **The output buffer starts fresh on a relaunch**: `outputReset: true` signals that `get_output` cursors from the previous launch are stale — read from `since: 0`. A hot restart keeps the buffer (same process): cursors stay valid.
 - The hold and its `pending: true` answer are the same as `start_debugging`'s ("When the launch answers" above): a relaunch that has not stopped when the hold elapses answers `running`, and `wait_for_stop` collects its stop. A relaunch that stopped carries the same [stop snapshot](#the-stop-snapshot) (issue #982).
+- **Children belong to a run** (the session tree, issue #1081): a relaunch closes and removes the previous run's child sessions before it starts and says so with `childrenClosed: n`; a child adopted during the new run's hold is listed in `children`, and children released to run undebugged this run are counted in `childrenReleased`, as for `start_debugging` (top level beside `pending`, and in `data`). A hot restart keeps the process and its children: no `childrenClosed`, the children listed.
 - Not available for **attach sessions** unless the adapter offers a native restart (a Flutter attach session hot-restarts like a launched one; any other attach session has no launch configuration to replay — detach and re-attach instead), nor for sessions that were never launched, including dry-run-only sessions — call `start_debugging` on the same session instead.
 
 ---
@@ -736,6 +754,7 @@ Blocks until the session next pauses or ends, then says why and where. This is t
 {
   "success": true,
   "state": "paused",
+  "sessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7",
   "message": "Paused (breakpoint) at /abs/path/app.py:42",
   "lastStop": { "reason": "breakpoint", "threadId": 1, "timestamp": 1791213582583 },
   "location": { "file": "/abs/path/app.py", "line": 42, "column": 1 },
@@ -759,6 +778,7 @@ Blocks until the session next pauses or ends, then says why and where. This is t
 {
   "success": true,
   "state": "stopped",
+  "sessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7",
   "message": "The program exited with code 3.",
   "exitCode": 3
 }
@@ -776,6 +796,7 @@ message adds "without hitting any breakpoint. Verified but never hit: app.py:3."
   "success": true,
   "state": "running",
   "pending": true,
+  "sessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7",
   "message": "The program is still running after 30s without reaching 1 breakpoint(s). Nothing was cancelled: what is armed stays armed, and the session becomes 'paused' when the program gets there. Call wait_for_stop again to keep waiting, or pause_execution to interrupt it."
 }
 ```
@@ -788,6 +809,68 @@ message adds "without hitting any breakpoint. Verified but never hit: app.py:3."
 - `pending: true` sits at the top level, as for the step tools. The message says what the wait is still for: with breakpoints (or `breakOnExceptions: "all"`) armed it names them and says they stay armed; with nothing armed it promises no pause — the program will stop only for an uncaught exception the debugger catches, or report its exit — so a caller is not sent round a loop that cannot end in a stop. When the launch runs with the debugger off (`dapLaunchArgs.noDebug`, honoured), the message says so and that the wait is for the program's exit; when the launch or attach itself has not completed, it says the session is still starting.
 - A session that was never started answers `success: false` (`Nothing to wait for: this session has not been started…`). So does a session closed while the call was waiting, and a `timeout` that is not a positive number.
 - Several calls may wait on one session at once. A call whose request is cancelled, or whose client disconnects, releases its wait.
+
+**Sessions with children** (the session tree, issue #1081): a wait on a session observes it and
+every descendant — present, or adopted while the wait runs — and answers for the one session a
+fixed priority names:
+
+1. the session itself, if it is paused or in error;
+2. else the first paused or errored descendant, depth first in adoption order (a child, then its
+   own descendants, then the next child);
+3. else the session itself, if it has ended;
+4. else it keeps waiting — an ended descendant alone never completes an ancestor's wait.
+
+The wait stays level-triggered: nothing is consumed, asking twice answers the same stop twice, two
+concurrent waiters agree, and the entry stop the server auto-continues is still never reported. One
+consequence: an errored descendant keeps being selected on every later wait until it is closed —
+close it to wait past it.
+
+- `sessionId` is on every answer: the selected session's id, equal to the id asked for when the
+  session itself is selected and on the pending answer. Everything else in the answer (`lastStop`,
+  `location`, `context`, `snapshot`, `threadId`, `note`, `exitCode`, the `programEnd` data) is the
+  ordinary stop answer **for that session**; use `sessionId` for inspection, stepping and
+  continuing. An errored descendant answers `state: "error"` with its id and the reason in
+  `message` (`Child session <id> ended in an error state…`).
+- `children: [{ sessionId, name, state, parentSessionId }]` whenever the asked session has
+  descendants: every descendant, depth first in adoption order, each with its state and the session
+  that spawned it — the pending answer included.
+- `childrenReleased: n` when children reported on that session's connection during this run were
+  released to run undebugged (beyond `DEBUG_MCP_MAX_CHILD_SESSIONS`, or an adoption that failed): a
+  running total for the run, reset by a relaunch, never consumed.
+- A session with no children answers byte-for-byte as before plus `sessionId`. A wait on a child
+  answers for the child and its own descendants only.
+
+A wait on the parent answering a child's stop (`sessionId` is the child's):
+```json
+{
+  "success": true,
+  "state": "paused",
+  "sessionId": "c7e2a9b4-5d1f-4e8a-9b3c-2f6d8a1e0b47",
+  "message": "Paused (breakpoint) at /abs/path/child.py:12",
+  "lastStop": { "reason": "breakpoint", "threadId": 1, "timestamp": 1791213590211 },
+  "location": { "file": "/abs/path/child.py", "line": 12, "column": 1 },
+  "context": {
+    "lineContent": "    result = work(item)",
+    "surrounding": [
+      { "line": 11, "content": "def run(item):" },
+      { "line": 12, "content": "    result = work(item)" },
+      { "line": 13, "content": "    return result" }
+    ]
+  },
+  "snapshot": {
+    "frames": [ { "name": "run", "file": "/abs/path/child.py", "line": 12 } ],
+    "locals": { "item": "3" }
+  },
+  "children": [
+    { "sessionId": "c7e2a9b4-5d1f-4e8a-9b3c-2f6d8a1e0b47", "name": "Subprocess 48213", "state": "paused", "parentSessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7" }
+  ]
+}
+```
+
+The pending answer lists the tree too, with `sessionId` naming the session asked for:
+```json
+{ "success": true, "state": "running", "pending": true, "sessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7", "message": "The program is still running after 30s …", "children": [ { "sessionId": "c7e2a9b4-5d1f-4e8a-9b3c-2f6d8a1e0b47", "name": "Subprocess 48213", "state": "running", "parentSessionId": "a4d1acc8-84a8-44fe-a13e-28628c5b33c7" } ] }
+```
 
 ---
 
@@ -1510,6 +1593,7 @@ Detaches the debugger from an attached process, leaving the process running.
 - Detaching sends DAP `disconnect` with `terminateDebuggee: false`, then stops the proxy; the session ends in `"stopped"` either way, so a later re-attach needs a new session.
 - CodeLLDB sessions on Windows (C/C++ and COBOL attach sessions, and any C/C++, Rust or COBOL launch detached this way): while the target is stopped, a DAP `continue` goes out ahead of the detaching `disconnect` — on this path, on `close_debug_session` and on shutdown alike — and `data.resumedBeforeDetach` is `true`; if the debugger refuses the continue, the detach still proceeds with `resumedBeforeDetach: false` and `data.warning` names the risk. Why: CodeLLDB's Windows detach otherwise kills a target whose last resume was a step (issue #763; the mechanism is in the C/C++ guide's attach section).
 - Detaching a session with no active debug process reports `success: false` with `No active debug session to detach from` in `message`.
+- **An attach root with child sessions** (the session tree, issue #1081): the children are detached first, deepest first, each with `disconnect` and `terminateDebuggee: false` so it runs on undebugged, then the parent. The child rows stay listed as `stopped` with `programEnd: { note: "Released: detached with its parent; the process runs on undebugged.", data: { released: true } }`, and the answer carries `childrenReleased: n` — n children now run undebugged (top level and in `data`). With `terminateProcess: true` the whole subtree is closed and the answer carries `childrenClosed: n` instead.
 
 ---
 

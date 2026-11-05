@@ -40,6 +40,7 @@ import { AttachController, type AttachRequest } from './attach/attach-controller
 import { InFlightGuard } from './in-flight-guard.js';
 import {
   AttachResultData,
+  DetachResultData,
   CustomLaunchRequestArguments,
   DebugResult,
   LaunchResultData,
@@ -177,6 +178,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       updateSession: (sessionId, updates) => this.sessionStore.update(sessionId, updates),
       updateState: (session, newState) => this._updateSessionState(session, newState),
       onStateChange: (sessionId, listener) => this.onSessionStateChange(sessionId, listener),
+      onSubtreeChange: (sessionId, listener) => this.onSubtreeStateChange(sessionId, listener),
+      descendantsOf: (sessionId) => this.descendantsDepthFirst(sessionId),
       selectPolicy: (language) => this.selectPolicy(language),
       selectStorePolicy: (language) => this.sessionStore.selectPolicy(language),
       findFreePort: () => this.findFreePort(),
@@ -186,6 +189,9 @@ export abstract class SessionManagerOperations extends SessionManagerData {
         this.cleanupProxyEventHandlers(session, proxyManager),
       stopProxyPreservingSession: (session) => this.stopProxyPreservingSession(session),
       closeSession: (sessionId) => this.closeSession(sessionId),
+      closeSessionReporting: (sessionId, options) => this.closeSessionReporting(sessionId, options),
+      releaseDescendants: (session) => this.releaseDescendants(session),
+      beginSubtreeClose: (sessionId) => this.beginSubtreeClose(sessionId),
       getStackTrace: (sessionId, threadId, includeInternals) =>
         this.getStackTrace(sessionId, threadId, includeInternals),
       getStackTraceDetailed: (sessionId, threadId, includeInternals, opts) =>
@@ -433,7 +439,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
   async detachFromProcess(
     sessionId: string,
     terminateProcess: boolean = false
-  ): Promise<DebugResult> {
+  ): Promise<DebugResult<DetachResultData>> {
     return this.attach.detachFromProcess(sessionId, terminateProcess);
   }
 
