@@ -141,15 +141,29 @@ async function attachRoot(name: string, target: Target, extra: Record<string, un
   return { rootId, attached };
 }
 
-/** Wait on `sessionId` for a stop that must be a paused child of the tree, and hand back its id. */
+/**
+ * Wait on `sessionId` for a stop that must be a paused child of the tree at
+ * `line`, and hand back its id. Under load js-debug can surface an adopted
+ * child's first statement as a `pause` stop before its breakpoint (measured
+ * once in the pre-push hook with four cluster workers starting at once:
+ * reason 'pause', "Paused on debugger statement", at the module's first
+ * line, which the js policy reports as a breakpoint); that stop is js-debug's
+ * entry pause, not the tree's doing, so it is resumed and the wait repeated.
+ */
 async function waitForChildStop(sessionId: string, file: RegExp, line: number): Promise<Stop & { sessionId: string }> {
-  const stop = await call<Stop>('wait_for_stop', { sessionId, timeout: 30000 });
-  expect(stop.state, JSON.stringify(stop)).toBe('paused');
-  expect(stop.sessionId, JSON.stringify(stop)).toBeDefined();
-  expect(stop.sessionId).not.toBe(sessionId);
-  expect(fileOf(stop), JSON.stringify(stop)).toMatch(file);
-  expect(lineOf(stop)).toBe(line);
-  return stop as Stop & { sessionId: string };
+  for (let entryPauses = 0; ; entryPauses += 1) {
+    const stop = await call<Stop>('wait_for_stop', { sessionId, timeout: 30000 });
+    expect(stop.state, JSON.stringify(stop)).toBe('paused');
+    expect(stop.sessionId, JSON.stringify(stop)).toBeDefined();
+    expect(stop.sessionId).not.toBe(sessionId);
+    expect(fileOf(stop), JSON.stringify(stop)).toMatch(file);
+    if (lineOf(stop) === line || entryPauses >= 2) {
+      expect(lineOf(stop), JSON.stringify(stop)).toBe(line);
+      return stop as Stop & { sessionId: string };
+    }
+    const resumed = await call('continue_execution', { sessionId: stop.sessionId });
+    expect(resumed.success, JSON.stringify(resumed)).toBe(true);
+  }
 }
 
 beforeEach(async () => {
