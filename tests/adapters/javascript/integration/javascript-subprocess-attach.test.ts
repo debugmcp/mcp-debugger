@@ -52,8 +52,13 @@ interface Target {
   port: number;
   output: () => string;
   exited: Promise<number | null>;
-  /** Tell attach_parent.js to fork its child (one line on stdin). */
-  go: () => void;
+  /**
+   * Tell attach_parent.js to fork its child (one line on stdin): `go` once
+   * js-debug's bootloader is in the target's environment, which happens a
+   * moment after the attach answers (measured; a fork inside that window
+   * runs unreported), `now` at once (an attach that opted out injects nothing).
+   */
+  go: (mode?: 'go' | 'now') => void;
 }
 
 let server: StdioClientHandle;
@@ -98,7 +103,7 @@ async function startTarget(script: string): Promise<Target> {
   let buffer = '';
   // close also waits for the output pipes, so the exit assertions see the final lines.
   const exited = new Promise<number | null>((resolve) => proc.on('close', (code) => resolve(code)));
-  const target: Target = { proc, port, output: () => buffer, exited, go: () => proc.stdin!.write('go\n') };
+  const target: Target = { proc, port, output: () => buffer, exited, go: (mode = 'go') => { proc.stdin!.write(`${mode}\n`); } };
   // Register before readiness so afterEach also cleans up a failed startup.
   targets.push(target);
   await new Promise<void>((resolve, reject) => {
@@ -215,6 +220,7 @@ describe('JavaScript session tree over a by-port attach (issue #1082)', () => {
     expect(ended.sessionId).toBe(rootId);
     expect(ended.exitCode).toBeUndefined();
     expect(ended.children).toEqual([expect.objectContaining({ sessionId: childId, state: 'stopped', parentSessionId: rootId })]);
+    expect(target.output(), 'the fixture forked once the bootloader was in its environment').toContain('parent go (bootloader injected)');
     await targetRanToItsEnd(target);
   }, 120_000);
 
@@ -265,13 +271,14 @@ describe('JavaScript session tree over a by-port attach (issue #1082)', () => {
     const { rootId, attached } = await attachRoot('js-attach-tree-opt-out', target, { adapterConfig: { autoAttachChildProcesses: false } });
     // The key is a supported attach key: opting out must not trip the unknown-key warning.
     expect(String(attached.warning ?? '')).not.toContain('autoAttachChildProcesses');
-    target.go();
+    target.go('now');
 
     const ended = await call<Stop>('wait_for_stop', { sessionId: rootId, timeout: 30000 });
     expect(ended.state, JSON.stringify(ended)).toBe('stopped');
     expect(ended.sessionId).toBe(rootId);
     expect(ended.children).toBeUndefined();
     expect((await rows()).some((row) => row.parentSessionId === rootId)).toBe(false);
+    expect(target.output(), 'an opted-out attach injects no bootloader').toContain('parent go (no bootloader)');
     await targetRanToItsEnd(target);
   }, 120_000);
 

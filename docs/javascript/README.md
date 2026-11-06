@@ -216,7 +216,12 @@ alongside the pointer to the launch output. One hazard of an attached target sta
 the parent for the inspector port, and js-debug's process-tree scan then attaches it as a
 nameless `Child Process [<pid>]` target whose breakpoints never bind, racing the bootloader's own
 report (seen on a slow CI runner). Fork with `execArgv: []` in a program that is attached to this
-way; the bootloader reaches the child through `NODE_OPTIONS` regardless.
+way; the bootloader reaches the child through `NODE_OPTIONS` regardless. And the bootloader is in
+the attached process only a moment *after* the attach answers: js-debug sets `NODE_OPTIONS` and
+`VSCODE_INSPECTOR_OPTIONS` in its environment over the inspector, with retries, so a child forked
+inside that window runs unreported (measured on a slow CI runner). A program that forks on a
+trigger right after being attached to should wait for `process.env.VSCODE_INSPECTOR_OPTIONS` to
+appear, as the attach fixture does.
 
 Fork logpoints use a `console.log` fallback because each fork does not have its own CDP logpoint
 bridge. A child that replaces `console.log` can suppress those messages; the program target's
