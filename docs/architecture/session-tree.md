@@ -17,11 +17,12 @@ Status: decisions taken 2026-11-03 (listed with their owners at the end); merged
 cascade answers) in [#1090](https://github.com/debugmcp/mcp-debugger/pull/1090), PR 3 (on by
 default, the attach measurement, the lifecycle suites) in
 [#1091](https://github.com/debugmcp/mcp-debugger/pull/1091). M2
-([#1082](https://github.com/debugmcp/mcp-debugger/issues/1082), js-debug) ships in two PRs: the
-first lands the mechanism behind an explicit `autoAttachChildProcesses: true` (every report after
-the program's own is a child session, the throwaway release, `outputOn`, a child's close as a
-release, the fork/grandchild suite and the parent-exit measurement below); the second flips the
-launch and attach defaults and adds the attach, cluster and cascade suites.
+([#1082](https://github.com/debugmcp/mcp-debugger/issues/1082), js-debug) is complete: PR 1
+(the mechanism behind an explicit `autoAttachChildProcesses: true` — every report after the
+program's own is a child session, the throwaway release, `outputOn`, a child's close as a release,
+the fork/grandchild suite and the parent-exit measurement below) merged in
+[#1094](https://github.com/debugmcp/mcp-debugger/pull/1094), PR 2 (the launch and attach defaults
+on, the attach, cascade and cluster suites) follows it.
 Scope: debuggee children reported by the adapter (debugpy subprocesses, js-debug forks and, later,
 browser targets). The tree is additive to the shipped tool surface: no new tool, no changed
 parameter, new fields only.
@@ -492,17 +493,22 @@ rows, while close removes them. Seams: `src/proxy/minimal-dap.ts`
 (rows), `packages/shared/src/interfaces/adapter-policy*.ts` (the contract),
 `packages/adapter-python/src/python-debug-adapter.ts` (the default).
 
-**M2 — js-debug N targets ([#1082](https://github.com/debugmcp/mcp-debugger/issues/1082)).** `ChildSessionManager`'s single-child gate becomes the per-tree cap;
+**M2 — js-debug N targets ([#1082](https://github.com/debugmcp/mcp-debugger/issues/1082)), done.** `ChildSessionManager`'s single-child gate became the per-tree cap;
 every report after the program's own becomes a child session; grandchild reports on child
 connections are adopted instead of released; #501's throwaway attach stays the release lever and
-the only one; `autoAttachChildProcesses` defaults on for launch and attach with a `changed` entry
-(the `attach_to_process` schema text changes with it); the attach smoke that
-today expects release ([`tests/e2e/mcp-server-smoke-javascript-attach.test.ts`](../../tests/e2e/mcp-server-smoke-javascript-attach.test.ts))
-expects adoption. Reuse M1's subtree-close, idle, attach-target preservation and cleanup-isolation
-cases; verify that cap `0` still adopts the program's own target but releases forks (the first PR's
-suite does), and measure parent exit with an already adopted, paused child (measured in the first
-PR: the child ends with the parent, lifecycle row 2). Unblocks #985 M2 (jest and vitest workers as
-sessions).
+the only one (PR 1, [#1094](https://github.com/debugmcp/mcp-debugger/pull/1094)).
+`autoAttachChildProcesses` defaults on for launch and attach with a `changed` entry (the
+`attach_to_process` schema text changed with it); the attach smoke
+([`tests/e2e/mcp-server-smoke-javascript-attach.test.ts`](../../tests/e2e/mcp-server-smoke-javascript-attach.test.ts))
+expects adoption by default and untouched forks on opt-out; the attach suite
+(`javascript-subprocess-attach.test.ts`: the designed flow over `node --inspect`, detach and close as
+releases, the opt-out, #501's wedge guard) and the cascade suite (`javascript-subprocess-cascade.test.ts`:
+row 1, a sibling's close as a release, a cluster primary's four workers) ride beside the fork/grandchild
+suite of PR 1, which also verified that cap `0` still adopts the program's own target but releases
+forks and measured parent exit with an already adopted, paused child (the child ends with the parent,
+lifecycle row 2). Measured in PR 2: an attach root's children keep their own console output (no
+`outputOn`; the attach owns no pipes), and `cluster.fork()` workers are reported like any fork.
+Unblocks #985 M2 (jest and vitest workers as sessions).
 
 **M3 — browser targets.** After the [#989](https://github.com/debugmcp/mcp-debugger/issues/989)
 spike: the same mechanism, one session per page, frame and worker; the attach-addressing form is
