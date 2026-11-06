@@ -6,6 +6,7 @@
  * reports children, each adopted as a session with a MockChildProxyView.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { setTimeout as realDelay } from 'node:timers/promises';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import type { DebugResult, WaitForStopResultData } from '../../../../src/session/session-manager-core.js';
 import { DebugLanguage, SessionState } from '@debugmcp/shared';
@@ -28,7 +29,9 @@ describe('SessionManager - the tree-aware waitForStop (issue #1081)', () => {
   };
 
   beforeEach(() => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    // These races depend on resuming/closing a child before its 10 ms landing
+    // read finishes. Automatic ticks let real runner delays cross that boundary.
+    vi.useFakeTimers();
     dependencies = createMockDependencies();
     sessionManager = new SessionManager(config, dependencies);
   });
@@ -41,8 +44,9 @@ describe('SessionManager - the tree-aware waitForStop (issue #1081)', () => {
 
   async function startRoot(): Promise<string> {
     const session = await sessionManager.createSession({ language: DebugLanguage.MOCK });
-    await sessionManager.startDebugging(session.id, 'test.py');
+    const started = sessionManager.startDebugging(session.id, 'test.py');
     await vi.runAllTimersAsync();
+    await started;
     expect(sessionManager.getSession(session.id)!.state).toBe(SessionState.RUNNING);
     return session.id;
   }
@@ -58,6 +62,11 @@ describe('SessionManager - the tree-aware waitForStop (issue #1081)', () => {
   }
 
   const afterStop = () => vi.advanceTimersByTimeAsync(20);
+  async function readStop(sessionId: string) {
+    const pending = sessionManager.waitForStop(sessionId);
+    await afterStop();
+    return pending;
+  }
   function track(pending: Promise<DebugResult<WaitForStopResultData>>) {
     let result: DebugResult<WaitForStopResultData> | undefined;
     void pending.then((settled) => { result = settled; });
@@ -68,7 +77,7 @@ describe('SessionManager - the tree-aware waitForStop (issue #1081)', () => {
     const rootId = await startRoot();
     dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
 
-    const result = await sessionManager.waitForStop(rootId);
+    const result = await readStop(rootId);
 
     expect(result).toMatchObject({ success: true, state: SessionState.PAUSED });
     expect(result.data?.sessionId).toBe(rootId);
@@ -109,7 +118,7 @@ describe('SessionManager - the tree-aware waitForStop (issue #1081)', () => {
     dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
     await afterStop();
 
-    const result = await sessionManager.waitForStop(rootId);
+    const result = await readStop(rootId);
 
     expect(result.data?.sessionId).toBe(rootId);
     expect(result.state).toBe(SessionState.PAUSED);
@@ -127,7 +136,7 @@ describe('SessionManager - the tree-aware waitForStop (issue #1081)', () => {
     grandchild.view.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1, allThreadsStopped: true });
     await afterStop();
 
-    const result = await sessionManager.waitForStop(rootId);
+    const result = await readStop(rootId);
 
     expect(result.data?.sessionId).toBe(grandchild.id);
     expect(result.data?.children?.map((c) => c.sessionId)).toEqual([first.id, grandchild.id, second.id]);
@@ -176,7 +185,7 @@ describe('SessionManager - the tree-aware waitForStop (issue #1081)', () => {
     child.view.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1, allThreadsStopped: true });
     await afterStop();
 
-    const result = await sessionManager.waitForStop(rootId);
+    const result = await readStop(rootId);
 
     expect(result.state).toBe(SessionState.PAUSED);
     expect(result.data?.sessionId).toBe(child.id);
@@ -227,7 +236,7 @@ describe('SessionManager - the tree-aware waitForStop (issue #1081)', () => {
     grandchild.view.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1, allThreadsStopped: true });
     await afterStop();
 
-    const result = await sessionManager.waitForStop(child.id);
+    const result = await readStop(child.id);
 
     expect(result.data?.sessionId).toBe(grandchild.id);
     expect(result.data?.children).toEqual([
@@ -275,7 +284,13 @@ describe('SessionManager - the tree-aware waitForStop (issue #1081)', () => {
     const child = await adopt(dependencies.mockProxyManager, rootId, 4242);
     child.view.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1, allThreadsStopped: true });
     const wait = track(sessionManager.waitForStop(rootId, 100));
+    const startedAt = Date.now();
     await vi.advanceTimersByTimeAsync(5);
+    // Reproduce a loaded runner yielding past an automatic clock tick. Real
+    // time must not finish the landing before we resume the selected child.
+    await realDelay(40);
+    expect(Date.now() - startedAt).toBe(5);
+    expect(wait.result()).toBeUndefined();
     await sessionManager.continue(child.id);
 
     await vi.advanceTimersByTimeAsync(94);
