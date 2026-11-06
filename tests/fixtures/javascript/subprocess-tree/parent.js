@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 console.log('parent start');
 const childScript = join(here, process.argv[2] ?? 'child.js'); // argv names another child (child_grand.js)
-const child = fork(childScript, [], { stdio: 'inherit' });
+const child = fork(childScript, [], { stdio: 'inherit', windowsHide: true });
 const marker = child.pid; // BREAKPOINT: the parent pauses here while the child is reported and adopted
 child.on('exit', (code) => {
   console.log(`parent child exit ${code} (${marker})`);

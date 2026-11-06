@@ -153,11 +153,7 @@ export class ChildConnections extends EventEmitter {
       return false;
     }
     this.options.logger.info(`[ChildConnections] Releasing child ${held.report.targetId} (${held.report.name}): ${reason}`);
-    if (this.lever() === 'throwaway-attach') {
-      void this.releaseByThrowaway(held, reason);
-    } else {
-      held.client.respondToReverseRequest?.(held.request, {}, false, reason);
-    }
+    this.giveUp(held, reason);
     return true;
   }
 
@@ -260,7 +256,9 @@ export class ChildConnections extends EventEmitter {
           this.emitEmptyIfSo();
         }
       }
-      this.answer(held, false, `adoption failed: ${message}`);
+      // The report is no longer held, so the server's release command that
+      // follows finds nothing: let the child go here, by the policy's lever.
+      this.giveUp(held, `adoption failed: ${message}`);
       try {
         client?.shutdown(`child adoption failed: ${message}`);
       } catch {
@@ -374,6 +372,15 @@ export class ChildConnections extends EventEmitter {
       return;
     }
     held.client.respondToReverseRequest?.(held.request, {}, success, message);
+  }
+
+  /** Let a taken report's child run undebugged, by the policy's lever: refuse the request, or attach and detach. */
+  private giveUp(held: HeldReport, reason: string): void {
+    if (this.lever() === 'throwaway-attach') {
+      void this.releaseByThrowaway(held, reason);
+    } else {
+      held.client.respondToReverseRequest?.(held.request, {}, false, reason);
+    }
   }
 
   /** The policy for a connection opened here: never an in-session adopter (issue #1082). */

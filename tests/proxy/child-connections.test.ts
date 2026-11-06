@@ -720,7 +720,7 @@ describe('ChildConnections under the throwaway-attach lever (js-debug, issue #10
     expect(root.respondToReverseRequest).not.toHaveBeenCalled();
   });
 
-  it('an adoption that fails does not refuse the request either, and tears its connection down', async () => {
+  it('an adoption that fails releases the child by the throwaway attach (the acked report cannot be refused), and tears its connection down', async () => {
     root.emit('child-report', { request: jsStartDebugging(7), report: jsReport });
     const adopting = connections.adopt('child-1', { reportId: reported()[0].reportId as string, breakpoints: [] });
     await new Promise((resolve) => setImmediate(resolve));
@@ -731,6 +731,11 @@ describe('ChildConnections under the throwaway-attach lever (js-debug, issue #10
     expect(root.respondToReverseRequest).not.toHaveBeenCalledWith(expect.anything(), expect.anything(), false, expect.anything());
     expect(childClient.shutdown).toHaveBeenCalled();
     expect(connections.has('child-1')).toBe(false);
+    // The server's release command that follows finds nothing held: the
+    // child is let go here, or it stays parked forever.
+    await throwawayRan(releaseClient);
+    expect(releaseClient.sendRequest).toHaveBeenCalledWith('attach', expect.objectContaining({ __pendingTargetId: 'a1b2c3d4e5f60718293a4b5c' }), 15000);
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('adoption failed: attach refused'));
   });
 
   it('a report during worker shutdown is acked and left parked, with a warning', async () => {

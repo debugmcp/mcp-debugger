@@ -15,10 +15,10 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 console.log('parent start');
-const child = fork(join(here, 'child.js'), [], { stdio: 'inherit' });
+const child = fork(join(here, 'child.js'), [], { stdio: 'inherit', windowsHide: true });
 child.unref();
 child.disconnect();
 setTimeout(() => {
   console.log('parent exiting');
   process.exit(0);
-}, 4000);
+}, 12000);

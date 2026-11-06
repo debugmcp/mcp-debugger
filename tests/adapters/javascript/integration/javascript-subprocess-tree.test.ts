@@ -298,8 +298,9 @@ describe('JavaScript forks as child sessions (the session tree, issue #1082)', (
     const { sessionId: childId } = await waitForChildStop(rootId, /child\.js$/, CHILD_BREAKPOINT_LINE);
     expect((await rows()).find((row) => row.id === childId)?.state).toBe('paused');
 
-    // The parent exits 4 s after the fork, while the fork is still paused.
-    const listing = await pollUntil(rows, (list) => list.find((row) => row.id === rootId)?.state === 'stopped', 20000);
+    // The parent exits 12 s after the fork (room for a slow CI runner to
+    // adopt and observe the stop first), while the fork is still paused.
+    const listing = await pollUntil(rows, (list) => list.find((row) => row.id === rootId)?.state === 'stopped', 30000);
     expect(listing.find((row) => row.id === rootId)?.state, JSON.stringify(listing)).toBe('stopped');
     const rootOutput = await pollUntil(() => outputText(rootId), (text) => text.includes('parent exiting'), 5000);
     expect(rootOutput).toContain('parent exiting');

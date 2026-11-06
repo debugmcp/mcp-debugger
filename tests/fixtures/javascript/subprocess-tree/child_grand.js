@@ -17,7 +17,7 @@ console.log('child start');
 setTimeout(() => {
   const marker = 1; // BREAKPOINT
   console.log(`child step ${marker}`);
-  const result = spawnSync(process.execPath, [join(here, 'grandchild.js')], { stdio: 'inherit' });
+  const result = spawnSync(process.execPath, [join(here, 'grandchild.js')], { stdio: 'inherit', windowsHide: true });
   console.log(`child grandchild exit ${result.status}`);
   process.exit(result.status ?? 1);
 }, 200);

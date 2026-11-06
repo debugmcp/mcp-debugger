@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 console.log('parent start');
-const children = [0, 1].map(() => fork(join(here, 'child.js'), [], { stdio: 'inherit' }));
+const children = [0, 1].map(() => fork(join(here, 'child.js'), [], { stdio: 'inherit', windowsHide: true }));
 let worst = 0;
 let exited = 0;
 for (const child of children) {
