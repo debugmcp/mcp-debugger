@@ -11,7 +11,7 @@
  * disabled, so only the rust probe runs.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { execFile } from 'node:child_process';
+import { execFile, type ExecFileException } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -63,10 +63,10 @@ function extraction(versionJson: string | undefined, packageJson: string | undef
   return executable;
 }
 
-async function doctorRust(executable: string): Promise<DoctorReport> {
+async function doctorRust(executable: string, command = cli, killAfterMs = CLI_KILL_MS): Promise<DoctorReport> {
   const { stdout } = await run(
     process.execPath,
-    [cli, 'doctor', 'rust', '--json', '--timeout', String(DOCTOR_TIMEOUT_MS)],
+    [command, 'doctor', 'rust', '--json', '--timeout', String(DOCTOR_TIMEOUT_MS)],
     {
       cwd: fixtureRoot,
       env: {
@@ -77,10 +77,19 @@ async function doctorRust(executable: string): Promise<DoctorReport> {
           .filter((language) => language !== DebugLanguage.RUST)
           .join(',')
       },
-      timeout: CLI_KILL_MS,
+      timeout: killAfterMs,
       windowsHide: true
     }
-  );
+  ).catch((error: ExecFileException & { stdout: string; stderr: string }) => {
+    throw new Error([
+      error.message,
+      `exit code: ${error.code}`,
+      `signal: ${error.signal}`,
+      `killed: ${error.killed}`,
+      `stdout:\n${error.stdout || '(empty)'}`,
+      `stderr:\n${error.stderr || '(empty)'}`
+    ].join('\n'), { cause: error });
+  });
   return JSON.parse(stdout) as DoctorReport;
 }
 
@@ -129,4 +138,37 @@ describe('doctor CodeLLDB version under CODELLDB_PATH (issue #1066)', () => {
       label: 'CodeLLDB', path: executable, source: 'env:CODELLDB_PATH'
     });
   }, CASE_TIMEOUT_MS);
+});
+
+describe('doctor subprocess failure diagnostics (issue #1098)', () => {
+  it.each([
+    { name: 'JSON stdout and stderr', stdout: '{"exitCode":0}', stderr: 'toolchain diagnostic' },
+    { name: 'empty output', stdout: '', stderr: '' }
+  ])('reports the exit status and $name', async ({ stdout, stderr }) => {
+    const command = path.join(fixtureRoot, 'exit-failure.mjs');
+    fs.writeFileSync(command, [
+      `process.stdout.write(${JSON.stringify(stdout)});`,
+      `process.stderr.write(${JSON.stringify(stderr)});`,
+      'process.exitCode = 17;'
+    ].join('\n'));
+
+    const failure = doctorRust('', command);
+    await expect(failure).rejects.toThrow('exit code: 17');
+    await expect(failure).rejects.toThrow('signal: null');
+    await expect(failure).rejects.toThrow('killed: false');
+    await expect(failure).rejects.toThrow(`stdout:\n${stdout || '(empty)'}`);
+    await expect(failure).rejects.toThrow(`stderr:\n${stderr || '(empty)'}`);
+  });
+
+  it('reports a parent kill separately from a nonzero exit', async () => {
+    const command = path.join(fixtureRoot, 'wait-for-kill.mjs');
+    fs.writeFileSync(command, 'setInterval(() => {}, 1000);');
+
+    const failure = doctorRust('', command, 100);
+    await expect(failure).rejects.toThrow('exit code: null');
+    await expect(failure).rejects.toThrow('signal: SIGTERM');
+    await expect(failure).rejects.toThrow('killed: true');
+    await expect(failure).rejects.toThrow('stdout:\n(empty)');
+    await expect(failure).rejects.toThrow('stderr:\n(empty)');
+  });
 });
