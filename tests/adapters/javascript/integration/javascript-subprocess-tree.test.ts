@@ -8,7 +8,8 @@
  * moment it is held, release is a throwaway attach, the tree's output lands
  * on the launch session only, and a child's close releases it.
  *
- * Every case names the key explicitly: the default flips in M2's second PR.
+ * Every case names the key explicitly for the record; it is on by default
+ * since M2's second PR, which the attach and cascade suites rely on.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import path from 'node:path';
