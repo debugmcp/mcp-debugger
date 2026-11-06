@@ -687,16 +687,17 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
       expect(cfg.continueOnAttach).toBe(true);
     });
 
-    it('defaults autoAttachChildProcesses to false on attach (issue #501)', async () => {
+    it('defaults autoAttachChildProcesses to true on attach (issues #501, #1082)', async () => {
       const adapter = new JavascriptDebugAdapter(deps);
       const cfg = await adapter.transformAttachConfig({
         request: 'attach',
         port: 9229
       } as any) as Record<string, unknown>;
 
-      // js-debug's pwa-node attach defaults this to true, which parks every
-      // fork() of the inspected process in waitForDebugger
-      expect(cfg.autoAttachChildProcesses).toBe(false);
+      // Every fork the target starts after the attach is reported by js-debug
+      // and adopted as a child session (the session tree, issue #1082), so the
+      // #501 park that made the attach default this off cannot happen.
+      expect(cfg.autoAttachChildProcesses).toBe(true);
     });
 
     it('respects a caller-supplied autoAttachChildProcesses (issue #501)', async () => {
@@ -880,6 +881,20 @@ describe('JavascriptDebugAdapter.transformLaunchConfig passthrough (issue #703)'
     // launch/attach selection is never forwarded
     expect(cfg.request).toBe('launch');
     expect(cfg.__attachMode).toBeUndefined();
+  });
+
+  it('defaults autoAttachChildProcesses to true on launch and keeps a caller false (issue #1082)', async () => {
+    const adapter = new JavascriptDebugAdapter(depsWithFileSystem([]));
+    const defaulted = await adapter.transformLaunchConfig({
+      program: path.resolve('/proj/app.js')
+    } as any) as Record<string, unknown>;
+    expect(defaulted.autoAttachChildProcesses).toBe(true);
+
+    const optedOut = await adapter.transformLaunchConfig({
+      program: path.resolve('/proj/app.js'),
+      autoAttachChildProcesses: false
+    } as any) as Record<string, unknown>;
+    expect(optedOut.autoAttachChildProcesses).toBe(false);
   });
 
   it('pins the launch shape mcp-debugger owns, lets autoAttachChildProcesses follow the caller, and says so', async () => {

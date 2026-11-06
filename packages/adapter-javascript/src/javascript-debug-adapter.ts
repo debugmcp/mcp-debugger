@@ -628,10 +628,13 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       skipFiles,
       console: 'internalConsole',
       outputCapture: 'std',
-      // Off by default (every fork() would park under waitForDebugger, #501);
-      // an explicit caller value wins, as it does on attach
+      // On by default (the session tree, issue #1082): every Node process the
+      // program starts is reported by js-debug and adopted as a child debug
+      // session, or released by a throwaway attach beyond the cap, so the
+      // park of #501 cannot happen. An explicit caller value wins, as it
+      // does on attach: `false` keeps the children undebugged.
       autoAttachChildProcesses:
-        typeof u.autoAttachChildProcesses === 'boolean' ? u.autoAttachChildProcesses : false,
+        typeof u.autoAttachChildProcesses === 'boolean' ? u.autoAttachChildProcesses : true,
       env: mergedEnv
     };
 
@@ -991,15 +994,17 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       name: 'Attach to Node.js process',
       host: attachHost,
       port: attachPort,
-      // js-debug's pwa-node attach defaults this to true, injecting its
-      // NODE_OPTIONS bootloader into the inspected process; every fork() then
-      // parks under waitForDebugger and only one child can be adopted (#501).
-      // Default it off like launch mode does; an explicit caller value wins
-      // (never silently override a supported key — cf. #499).
+      // On by default, like launch (the session tree, issue #1082): js-debug
+      // injects its NODE_OPTIONS bootloader into the inspected process, and
+      // every process it forks after the attach is reported and adopted as a
+      // child debug session (released by a throwaway attach beyond the cap),
+      // so the park of #501 cannot happen. An explicit caller value wins
+      // (never silently override a supported key — cf. #499): `false` keeps
+      // the children undebugged.
       autoAttachChildProcesses:
         typeof rest.autoAttachChildProcesses === 'boolean'
           ? rest.autoAttachChildProcesses
-          : false,
+          : true,
       // js-debug's smart-stepper turns a user pause that lands on a
       // blackboxed/unmapped frame into an auto-step — and on a mostly-idle
       // server every frame the pause can land on is a node-internal one, so

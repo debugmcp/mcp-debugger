@@ -651,7 +651,7 @@ describe('JsDebugAdapterPolicy', () => {
       expect(sendDapRequest.mock.calls.some(([cmd]) => cmd === 'launch')).toBe(false);
     });
 
-    it('defaults autoAttachChildProcesses to false in attach args, keeping a caller value (issue #501)', async () => {
+    it('defaults autoAttachChildProcesses to true in attach args, keeping a caller false (issues #501, #1082)', async () => {
       const runAttachHandshake = async (dapLaunchArgs: Record<string, unknown>) => {
         vi.useFakeTimers();
         try {
@@ -687,13 +687,15 @@ describe('JsDebugAdapterPolicy', () => {
       const defaulted = await runAttachHandshake({
         request: 'attach', attachSimplePort: 9229, type: 'pwa-node'
       });
-      expect(defaulted.autoAttachChildProcesses).toBe(false);
+      // The session tree (issue #1082): forks are adopted, so the #501 guard's
+      // `false` is gone; an explicit false still keeps the children undebugged.
+      expect(defaulted.autoAttachChildProcesses).toBe(true);
 
-      const optedIn = await runAttachHandshake({
+      const optedOut = await runAttachHandshake({
         request: 'attach', attachSimplePort: 9229, type: 'pwa-node',
-        autoAttachChildProcesses: true
+        autoAttachChildProcesses: false
       });
-      expect(optedIn.autoAttachChildProcesses).toBe(true);
+      expect(optedOut.autoAttachChildProcesses).toBe(false);
 
       // Issue #655: the same self-containment for resolveSourceMapLocations.
       expect(defaulted.resolveSourceMapLocations).toEqual(['**', '!**/node_modules/**']);

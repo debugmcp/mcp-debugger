@@ -928,19 +928,19 @@ export const JsDebugAdapterPolicy = {
       if (typeof stopOnEntryValue === 'boolean') {
         attachArgs.stopOnEntry = stopOnEntryValue;
       }
-      // js-debug's pwa-node attach defaults autoAttachChildProcesses to true,
-      // which bootloads every fork() of the inspected process into
-      // waitForDebugger; with single-child adoption those forks wedge (#501).
-      // The MCP path already defaults this off in transformAttachConfig; this
-      // guard makes the policy self-contained for embedders that bypass the
-      // adapter transform. A caller-supplied boolean is respected, sourced
-      // like stopOnEntry above: launchConfig (via callerAttachExtras), then
-      // dapLaunchArgs.
+      // autoAttachChildProcesses is on by default (the session tree, issue
+      // #1082): every process the inspected one forks after the attach is
+      // reported and adopted as a child session, or released by a throwaway
+      // attach, so the wedge of #501 cannot happen. The MCP path defaults it
+      // in transformAttachConfig; this guard makes the policy self-contained
+      // for embedders that bypass the adapter transform. A caller-supplied
+      // boolean is respected, sourced like stopOnEntry above: launchConfig
+      // (via callerAttachExtras), then dapLaunchArgs.
       if (typeof attachArgs.autoAttachChildProcesses !== 'boolean') {
         attachArgs.autoAttachChildProcesses =
           typeof a.autoAttachChildProcesses === 'boolean'
             ? (a.autoAttachChildProcesses as boolean)
-            : false;
+            : true;
       }
       // Same self-containment for resolveSourceMapLocations (issue #655):
       // js-debug's attach defaults collapse it to null without a workspace
