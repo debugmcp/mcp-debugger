@@ -2,6 +2,10 @@ import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vite
 import * as path from 'path';
 import type { ILogger } from '@debugmcp/shared';
 
+vi.mock('../../src/utils/child-attach-locality.js', () => ({
+  canAutoAttachChildren: vi.fn().mockResolvedValue(true)
+}));
+
 // Mocks for helper modules used by transformLaunchConfig
 vi.mock('../../src/utils/config-transformer.js', async () => {
   const actual = await vi.importActual<typeof import('../../src/utils/config-transformer.js')>(
@@ -33,6 +37,7 @@ import {
 
 import { detectBinary } from '../../src/utils/typescript-detector.js';
 import { JavascriptDebugAdapter } from '../../src/index.js';
+import { canAutoAttachChildren } from '../../src/utils/child-attach-locality.js';
 import { scrubInheritedExitCodeShim } from '../../src/javascript-debug-adapter.js';
 
 // Minimal AdapterDependencies stub for constructor
@@ -56,6 +61,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
   beforeEach(() => {
     adapter = new JavascriptDebugAdapter(deps);
     vi.clearAllMocks();
+    vi.mocked(canAutoAttachChildren).mockResolvedValue(true);
     envBefore = { ...process.env };
   });
 
@@ -687,16 +693,37 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
       expect(cfg.continueOnAttach).toBe(true);
     });
 
-    it('defaults autoAttachChildProcesses to false on attach (issue #501)', async () => {
+    it('defaults autoAttachChildProcesses to true on attach (issues #501, #1082)', async () => {
       const adapter = new JavascriptDebugAdapter(deps);
       const cfg = await adapter.transformAttachConfig({
         request: 'attach',
         port: 9229
       } as any) as Record<string, unknown>;
 
-      // js-debug's pwa-node attach defaults this to true, which parks every
-      // fork() of the inspected process in waitForDebugger
+      // Every fork the target starts after the attach is reported by js-debug
+      // and adopted as a child session (the session tree, issue #1082), so the
+      // #501 park that made the attach default this off cannot happen.
+      expect(cfg.autoAttachChildProcesses).toBe(true);
+      expect(canAutoAttachChildren).toHaveBeenCalledWith(expect.objectContaining({ host: '127.0.0.1', port: 9229 }));
+      expect(adapter.consumeLaunchConfigDiagnostics()).toEqual([]);
+    });
+
+    it('keeps forwarded targets safe when the inspector cannot prove shared bootloader and temporary files', async () => {
+      vi.mocked(canAutoAttachChildren).mockResolvedValue(false);
+      const adapter = new JavascriptDebugAdapter(deps);
+      const cfg = await adapter.transformAttachConfig({ request: 'attach', host: '127.0.0.1', port: 9229 } as any);
       expect(cfg.autoAttachChildProcesses).toBe(false);
+      expect(adapter.consumeLaunchConfigDiagnostics()).toEqual([
+        expect.objectContaining({ key: 'autoAttachChildProcesses', scope: 'launch', message: expect.stringContaining('port-forwarded container') })
+      ]);
+      expect(adapter.consumeLaunchConfigDiagnostics()).toEqual([]);
+    });
+
+    it('probes the inspector URL when supplied, including beside a port', async () => {
+      const adapter = new JavascriptDebugAdapter(deps);
+      const websocketAddress = 'ws://127.0.0.1:9230/target';
+      await adapter.transformAttachConfig({ request: 'attach', port: 9229, websocketAddress } as any);
+      expect(canAutoAttachChildren).toHaveBeenCalledWith(expect.objectContaining({ websocketAddress }));
     });
 
     it('respects a caller-supplied autoAttachChildProcesses (issue #501)', async () => {
@@ -714,6 +741,8 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
         autoAttachChildProcesses: false
       } as any) as Record<string, unknown>;
       expect(optOut.autoAttachChildProcesses).toBe(false);
+      expect(canAutoAttachChildren).not.toHaveBeenCalled();
+      expect(adapter.consumeLaunchConfigDiagnostics()).toEqual([]);
     });
 
     it('lists autoAttachChildProcesses as a supported attach key (issue #501)', () => {
@@ -880,6 +909,20 @@ describe('JavascriptDebugAdapter.transformLaunchConfig passthrough (issue #703)'
     // launch/attach selection is never forwarded
     expect(cfg.request).toBe('launch');
     expect(cfg.__attachMode).toBeUndefined();
+  });
+
+  it('defaults autoAttachChildProcesses to true on launch and keeps a caller false (issue #1082)', async () => {
+    const adapter = new JavascriptDebugAdapter(depsWithFileSystem([]));
+    const defaulted = await adapter.transformLaunchConfig({
+      program: path.resolve('/proj/app.js')
+    } as any) as Record<string, unknown>;
+    expect(defaulted.autoAttachChildProcesses).toBe(true);
+
+    const optedOut = await adapter.transformLaunchConfig({
+      program: path.resolve('/proj/app.js'),
+      autoAttachChildProcesses: false
+    } as any) as Record<string, unknown>;
+    expect(optedOut.autoAttachChildProcesses).toBe(false);
   });
 
   it('pins the launch shape mcp-debugger owns, lets autoAttachChildProcesses follow the caller, and says so', async () => {
