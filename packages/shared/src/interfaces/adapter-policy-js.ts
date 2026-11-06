@@ -928,19 +928,15 @@ export const JsDebugAdapterPolicy = {
       if (typeof stopOnEntryValue === 'boolean') {
         attachArgs.stopOnEntry = stopOnEntryValue;
       }
-      // autoAttachChildProcesses is on by default (the session tree, issue
-      // #1082): every process the inspected one forks after the attach is
-      // reported and adopted as a child session, or released by a throwaway
-      // attach, so the wedge of #501 cannot happen. The MCP path defaults it
-      // in transformAttachConfig; this guard makes the policy self-contained
-      // for embedders that bypass the adapter transform. A caller-supplied
-      // boolean is respected, sourced like stopOnEntry above: launchConfig
-      // (via callerAttachExtras), then dapLaunchArgs.
+      // The adapter transform enables children after proving the attach is
+      // local. An embedder bypassing that transform has no locality proof:
+      // stay off rather than injecting a host-only bootloader into a remote
+      // target. A transformed or caller-supplied boolean is respected.
       if (typeof attachArgs.autoAttachChildProcesses !== 'boolean') {
         attachArgs.autoAttachChildProcesses =
           typeof a.autoAttachChildProcesses === 'boolean'
             ? (a.autoAttachChildProcesses as boolean)
-            : true;
+            : false;
       }
       // Same self-containment for resolveSourceMapLocations (issue #655):
       // js-debug's attach defaults collapse it to null without a workspace

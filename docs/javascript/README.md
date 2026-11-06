@@ -206,7 +206,18 @@ to inspect these decisions inside a running mcp-debugger server.
 
 ### Child Process Debugging
 
-Every Node process the program starts — a `fork()`, a `spawn(process.execPath, …)`, a `cluster` worker, a grandchild — becomes a child debug session of its own, on by default — `autoAttachChildProcesses: true` on launch and attach (the [session tree](../architecture/session-tree.md), issue [#1082](https://github.com/debugmcp/mcp-debugger/issues/1082), from the facts measured in [spike-notes-forks.md](spike-notes-forks.md)): listed by `list_debug_sessions` with `parentSessionId`, stopping on the breakpoints set on the parent before launch (re-sent to each child before it runs), reported by the parent's `wait_for_stop` with its `sessionId`. Three things js-debug does differently from debugpy, all answered rather than hidden: the whole tree's output arrives on the launch session's buffer and none of it on a child's — a child's `get_output` answers `outputOn: <launch session id>`; `close_debug_session` on a child releases it to run on (`released: true`) because js-debug cannot end a target it adopted; and a child the server does not adopt (beyond `DEBUG_MCP_MAX_CHILD_SESSIONS`, default 32, `0` off) is released by a throwaway attach-then-detach ([#501](https://github.com/debugmcp/mcp-debugger/issues/501)'s lever), since refusing js-debug's report would park it forever. Function breakpoints do not carry into a child (they are armed over CDP on the program's own target); logpoints do, printing into the launch session's output. The program's exit ends every process under it, a child paused on a breakpoint included (measured): the launch owns the tree, so keep the parent alive while you inspect a child.
+Child-process debugging is on by default for a Node launch and a verified-local attach (`autoAttachChildProcesses: true`). With it enabled, every Node process the program starts — a `fork()`, a `spawn(process.execPath, …)`, a `cluster` worker, a grandchild — becomes a child debug session of its own (the [session tree](../architecture/session-tree.md), issue [#1082](https://github.com/debugmcp/mcp-debugger/issues/1082), from the facts measured in [spike-notes-forks.md](spike-notes-forks.md)): listed by `list_debug_sessions` with `parentSessionId`, stopping on the breakpoints set on the parent before launch (re-sent to each child before it runs), reported by the parent's `wait_for_stop` with its `sessionId`. Three things js-debug does differently from debugpy, all answered rather than hidden: the whole tree's output arrives on the launch session's buffer and none of it on a child's — a child's `get_output` answers `outputOn: <launch session id>`; `close_debug_session` on a child releases it to run on (`released: true`) because js-debug cannot end a target it adopted; and a child the server does not adopt (beyond `DEBUG_MCP_MAX_CHILD_SESSIONS`, default 32, `0` off) is released by a throwaway attach-then-detach ([#501](https://github.com/debugmcp/mcp-debugger/issues/501)'s lever), since refusing js-debug's report would park it forever. Function breakpoints do not carry into a child (they are armed over CDP on the program's own target); logpoints do, printing into the launch session's output. The program's exit ends every process under it, a child paused on a breakpoint included (measured): the launch owns the tree, so keep the parent alive while you inspect a child.
+
+To choose the default, every attach form, including `processId`, verifies that the inspector
+target can read both a temporary probe file created by the server and the installed js-debug bootloader files
+(`bootloader.js` and `watchdog.js`). A loopback address or shared PID namespace alone is not
+enough: `localhost` can be an SSH or `kubectl` port forward, and a sidecar can share PIDs without
+sharing files. When that access cannot be verified, including a failed probe, child auto-attach
+defaults to `false` and the attach response warns. This keeps
+js-debug from injecting a server-local bootloader path into a remote or container target, which
+can make later forks fail to start. An explicit `adapterConfig: { autoAttachChildProcesses: true }`
+still enables it; use that override only when the target and its children can load the server's
+js-debug bootloader and reach its debugger endpoint.
 
 For an `attach_to_process` root, the default console capture delivers each child's console
 output to that child's own buffer and resource; it does not return an `outputOn` pointer to the
@@ -220,8 +231,8 @@ way; the bootloader reaches the child through `NODE_OPTIONS` regardless. And the
 the attached process only a moment *after* the attach answers: js-debug sets `NODE_OPTIONS` and
 `VSCODE_INSPECTOR_OPTIONS` in its environment over the inspector, with retries, so a child forked
 inside that window runs unreported (measured on a slow CI runner). A program that forks on a
-trigger right after being attached to should wait for `process.env.VSCODE_INSPECTOR_OPTIONS` to
-appear, as the attach fixture does.
+trigger right after being attached to with child auto-attach enabled should wait for
+`process.env.VSCODE_INSPECTOR_OPTIONS` to appear, as the attach fixture does.
 
 Fork logpoints use a `console.log` fallback because each fork does not have its own CDP logpoint
 bridge. A child that replaces `console.log` can suppress those messages; the program target's

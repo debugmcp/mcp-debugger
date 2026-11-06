@@ -651,8 +651,8 @@ describe('JsDebugAdapterPolicy', () => {
       expect(sendDapRequest.mock.calls.some(([cmd]) => cmd === 'launch')).toBe(false);
     });
 
-    it('defaults autoAttachChildProcesses to true in attach args, keeping a caller false (issues #501, #1082)', async () => {
-      const runAttachHandshake = async (dapLaunchArgs: Record<string, unknown>) => {
+    it('keeps an untransformed attach conservative and preserves transformed or explicit child-attach intent', async () => {
+      const runAttachHandshake = async (dapLaunchArgs: Record<string, unknown>, launchConfig?: Record<string, unknown>) => {
         vi.useFakeTimers();
         try {
           const events = new EventEmitter();
@@ -666,6 +666,7 @@ describe('JsDebugAdapterPolicy', () => {
             proxyManager,
             sessionId: 'session-501',
             dapLaunchArgs,
+            launchConfig,
             scriptPath: '/workspace/app.js',
             scriptArgs: [],
             breakpoints: new Map()
@@ -687,9 +688,17 @@ describe('JsDebugAdapterPolicy', () => {
       const defaulted = await runAttachHandshake({
         request: 'attach', attachSimplePort: 9229, type: 'pwa-node'
       });
-      // The session tree (issue #1082): forks are adopted, so the #501 guard's
-      // `false` is gone; an explicit false still keeps the children undebugged.
-      expect(defaulted.autoAttachChildProcesses).toBe(true);
+      // Embedders bypassing the transform have no locality proof. Injecting
+      // a host-only bootloader into a port-forwarded process breaks forks.
+      expect(defaulted.autoAttachChildProcesses).toBe(false);
+
+      const transformed = await runAttachHandshake({ request: 'attach', port: 9229 }, {
+        request: 'attach', port: 9229, autoAttachChildProcesses: true
+      });
+      expect(transformed.autoAttachChildProcesses).toBe(true);
+
+      const optedIn = await runAttachHandshake({ request: 'attach', port: 9229, autoAttachChildProcesses: true });
+      expect(optedIn.autoAttachChildProcesses).toBe(true);
 
       const optedOut = await runAttachHandshake({
         request: 'attach', attachSimplePort: 9229, type: 'pwa-node',

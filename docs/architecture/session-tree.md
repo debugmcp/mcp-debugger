@@ -21,8 +21,8 @@ default, the attach measurement, the lifecycle suites) in
 (the mechanism behind an explicit `autoAttachChildProcesses: true` — every report after the
 program's own is a child session, the throwaway release, `outputOn`, a child's close as a release,
 the fork/grandchild suite and the parent-exit measurement below) merged in
-[#1094](https://github.com/debugmcp/mcp-debugger/pull/1094), PR 2 (the launch and attach defaults
-on, the attach, cascade and cluster suites) follows it.
+[#1094](https://github.com/debugmcp/mcp-debugger/pull/1094), PR 2 (the launch and verified-local
+attach defaults on, the attach, cascade and cluster suites) follows it.
 Scope: debuggee children reported by the adapter (debugpy subprocesses, js-debug forks and, later,
 browser targets). The tree is additive to the shipped tool surface: no new tool, no changed
 parameter, new fields only.
@@ -228,12 +228,21 @@ Two measured effects the answers name:
 
 Adoption is on by default. The Python launch transform stops defaulting `subProcess` to `false`
 (that default existed only because of the park hang, which adoption removes; the warning that
-names the hang goes with it) and the JavaScript launch and attach transforms default
-`autoAttachChildProcesses` to `true` (the attach path's `false` was #501's wedge guard, which
-adoption replaces; the `attach_to_process` schema text that states it changes with it). An
+names the hang goes with it) and the JavaScript launch transform defaults
+`autoAttachChildProcesses` to `true`. The JavaScript attach transform defaults it on only for a
+verified-local target: every attach form, including `processId`, checks that the inspector
+target can read a temporary probe file created by the server and the installed js-debug
+`bootloader.js` and `watchdog.js`. An unverified target defaults it off with a warning, because
+injecting a server-local bootloader path can break its later forks. A loopback address or shared
+PID namespace alone does not establish filesystem access. An explicit attach boolean is retained;
+`true` requires the target and its children to be able to load the server's js-debug bootloader
+and reach its debugger endpoint. The raw policy fallback stays off when no transformed or
+explicit value is available. Adoption replaces #501's wedge guard for local targets; it cannot
+make a host-only bootloader available remotely. An
 explicit `false` in `dapLaunchArgs` turns adoption off for that launch and children run
-undebugged, as they did before the tree (an attach's opt-out is the target's own flag, measured
-below). Each flip ships in the milestone that
+undebugged, as they did before the tree (JavaScript attach uses
+`adapterConfig: { autoAttachChildProcesses: false }`; Python attach uses the target's own flag,
+measured below). Each flip ships in the milestone that
 makes it safe (M1 for Python, M2 for js-debug), as a documented behaviour change with a `changed`
 changelog entry, because it changes what a launch that spawns Python or Node processes shows:
 child rows for every xdist worker, autoreloader child or script that shells out.
@@ -497,10 +506,10 @@ rows, while close removes them. Seams: `src/proxy/minimal-dap.ts`
 every report after the program's own becomes a child session; grandchild reports on child
 connections are adopted instead of released; #501's throwaway attach stays the release lever and
 the only one (PR 1, [#1094](https://github.com/debugmcp/mcp-debugger/pull/1094)).
-`autoAttachChildProcesses` defaults on for launch and attach with a `changed` entry (the
+`autoAttachChildProcesses` defaults on for launch and verified-local attach with a `changed` entry (the
 `attach_to_process` schema text changed with it); the attach smoke
 ([`tests/e2e/mcp-server-smoke-javascript-attach.test.ts`](../../tests/e2e/mcp-server-smoke-javascript-attach.test.ts))
-expects adoption by default and untouched forks on opt-out; the attach suite
+expects local adoption by default and untouched forks on opt-out; the attach suite
 (`javascript-subprocess-attach.test.ts`: the designed flow over `node --inspect`, detach and close as
 releases, the opt-out, #501's wedge guard) and the cascade suite (`javascript-subprocess-cascade.test.ts`:
 row 1, a sibling's close as a release, a cluster primary's four workers) ride beside the fork/grandchild
@@ -554,7 +563,9 @@ Taken by the author of this document, marked so they can be overturned:
 - Detach cascades as a detach (children released); restart closes and removes the previous run's
   children; neither classifies children as `error`.
 - The Python attach default flips in M1 only on its own measurement; the js-debug attach default
-  flips in M2 together with the launch default.
+  flips in M2 for targets with verified access to the server's temporary and debugger files,
+  together with the launch default. Unverified targets retain the safe off default unless the
+  caller explicitly opts in.
 
 ## Left to the builder
 

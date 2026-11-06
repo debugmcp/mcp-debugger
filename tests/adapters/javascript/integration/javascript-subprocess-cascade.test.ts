@@ -78,12 +78,13 @@ async function setBreakpoint(file: string, line: number): Promise<void> {
  * line, which the js policy reports as a breakpoint); that stop is js-debug's
  * entry pause, not the tree's doing, so it is resumed and the wait repeated.
  */
-async function waitForChildStop(sessionId: string, file: RegExp, line: number): Promise<Stop & { sessionId: string }> {
+async function waitForChildStop(sessionId: string, file: RegExp, line: number, childId?: string): Promise<Stop & { sessionId: string }> {
   for (let entryPauses = 0; ; entryPauses += 1) {
-    const stop = await call<Stop>('wait_for_stop', { sessionId, timeout: 30000 });
+    const stop = await call<Stop>('wait_for_stop', { sessionId: childId ?? sessionId, timeout: 30000 });
     expect(stop.state, JSON.stringify(stop)).toBe('paused');
     expect(stop.sessionId, JSON.stringify(stop)).toBeDefined();
     expect(stop.sessionId).not.toBe(sessionId);
+    if (childId) expect(stop.sessionId).toBe(childId);
     expect(fileOf(stop), JSON.stringify(stop)).toMatch(file);
     if (lineOf(stop) === line || entryPauses >= 2) {
       expect(lineOf(stop), JSON.stringify(stop)).toBe(line);
@@ -151,6 +152,11 @@ describe('JavaScript session-tree lifecycle rows (issue #1082)', () => {
     );
     const children = listing.filter((row) => row.parentSessionId === rootId);
     expect(children, JSON.stringify(listing)).toHaveLength(2);
+    // Either sibling can be at js-debug's entry pause. Wait on each id so
+    // the root's already-paused first child cannot hide the other's stop.
+    for (const child of children) {
+      await waitForChildStop(rootId, /child\.js$/, CHILD_BREAKPOINT_LINE, child.id);
+    }
     const [closedChild, survivor] = children;
 
     // js-debug cannot end a target it adopted: the close releases the fork, which runs on undebugged.
