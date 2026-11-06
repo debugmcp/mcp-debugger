@@ -10,12 +10,18 @@ in what order). It is built from the measured facts in
 below cites one of those or a source named in the survey.
 
 Status: decisions taken 2026-11-03 (listed with their owners at the end); merged in
-[#1083](https://github.com/debugmcp/mcp-debugger/pull/1083). Implementation under
-[#1081](https://github.com/debugmcp/mcp-debugger/issues/1081): M1 PR 1 (adoption behind an
-explicit `subProcess: true`) merged in [#1087](https://github.com/debugmcp/mcp-debugger/pull/1087);
-PR 2 (the tree-aware wait and the cascade answers) in [#1090](https://github.com/debugmcp/mcp-debugger/pull/1090);
-the third PR (on by default, the attach measurement, the lifecycle suites) completes M1. M2 is
-[#1082](https://github.com/debugmcp/mcp-debugger/issues/1082).
+[#1083](https://github.com/debugmcp/mcp-debugger/pull/1083). M1
+([#1081](https://github.com/debugmcp/mcp-debugger/issues/1081), Python) is complete: PR 1
+(adoption behind an explicit `subProcess: true`) merged in
+[#1087](https://github.com/debugmcp/mcp-debugger/pull/1087), PR 2 (the tree-aware wait and the
+cascade answers) in [#1090](https://github.com/debugmcp/mcp-debugger/pull/1090), PR 3 (on by
+default, the attach measurement, the lifecycle suites) in
+[#1091](https://github.com/debugmcp/mcp-debugger/pull/1091). M2
+([#1082](https://github.com/debugmcp/mcp-debugger/issues/1082), js-debug) ships in two PRs: the
+first lands the mechanism behind an explicit `autoAttachChildProcesses: true` (every report after
+the program's own is a child session, the throwaway release, `outputOn`, a child's close as a
+release, the fork/grandchild suite and the parent-exit measurement below); the second flips the
+launch and attach defaults and adds the attach, cluster and cascade suites.
 Scope: debuggee children reported by the adapter (debugpy subprocesses, js-debug forks and, later,
 browser targets). The tree is additive to the shipped tool surface: no new tool, no changed
 parameter, new fields only.
@@ -172,10 +178,11 @@ Two measured effects the answers name:
   child ends, because the child inherited the parent's stdout pipe (Python spike, cascade row 2;
   the [#993](https://github.com/debugmcp/mcp-debugger/issues/993) mechanism). While that is the
   case the parent row says `running` and its `wait_for_stop` reports the child.
-- A js-debug program's exit kills its unreported children within 300 ms (JavaScript spike, cascade
-  row 2). That run did not adopt the fork: whether an already adopted child survives its parent's
-  exit is unmeasured and belongs in M2's lifecycle fixture. The server retains the child session
-  until its own terminal event, without promising that the adapter keeps its process alive.
+- A js-debug program's exit ends every process under it: its unreported children within 300 ms
+  (JavaScript spike, cascade row 2), and an adopted child too, even one paused on a breakpoint —
+  its `terminated` arrives at the parent's exit, with no exit code (measured 2026-11-05 in M2's
+  `javascript-subprocess-tree.test.ts`, js-debug v1.140.0). The launch owns the tree. The child's
+  row goes `stopped` and stays listed until closed; the root ends normally with its own exit code.
 
 ### Closing
 
@@ -409,7 +416,7 @@ One row per measured fact; the "answer" column is what this design adds on top o
 | event | debugpy | js-debug | answer |
 |---|---|---|---|
 | child exits while the parent is paused | child `terminated`; the parent, once continued, sees the exit and ends normally (row 1) | same (row 1) | the child row goes `stopped`; the parent's wait still reports the paused parent (rule 1), with the ended child in `children`; after the parent resumes, the child's end alone does not complete that wait (rule 4) |
-| parent exits with a child live | the parent's `exited` is held until the child ends (inherited stdout pipe, #993); the child stays debuggable (row 2) | the program's exit kills unreported children within 300 ms (row 2); an already adopted child's survival is unmeasured, to be checked in M2 | Python: the parent row stays `running` and its wait reports the child; the child row carries `parentSessionId` of a parent that is gone when it finally ends; every adopted child stays listed and follows its own terminal events |
+| parent exits with a child live | the parent's `exited` is held until the child ends (inherited stdout pipe, #993); the child stays debuggable (row 2) | the program's exit kills unreported children within 300 ms (row 2) and ends an adopted, paused child at the same moment — its `terminated` arrives with the parent's exit, no exit code (measured in M2) | Python: the parent row stays `running` and its wait reports the child; the child row carries `parentSessionId` of a parent that is gone when it finally ends. js-debug: the child row goes `stopped` with no exit code and the root ends with its own; every adopted child stays listed and follows its own terminal events |
 | explicit `close_debug_session` on a child | `disconnect(terminateDebuggee: true)`: the child ends, exit 0 reported to the parent (row 4) | `disconnect` with either flag leaves the child running (row 3) | its descendants closed deepest-first, then the child; `processEnded: true` / `released: true`; ancestors, siblings and the shared worker stay open |
 | `close_debug_session` on a launch root | `disconnect(terminateDebuggee: true)` on the root ends the tree (row 6) | only the root's `disconnect` ends the tree, and it never answers (row 6); `terminate` or `disconnect` on a program or child session leave the processes alive (rows 4–5) | children closed deepest-first, then the root; the worker's timeout-then-tree-kill stays the backstop |
 | close or idle expiry of an attach root | `disconnect(terminateDebuggee: false)` releases each child (row 3) | each child keeps running (row 3) | detach descendants deepest-first, then the root; preserve external targets and remove the tree's rows; `released: true`; no target-killing escalation |
@@ -488,8 +495,9 @@ the only one; `autoAttachChildProcesses` defaults on for launch and attach with 
 (the `attach_to_process` schema text changes with it); the attach smoke that
 today expects release ([`tests/e2e/mcp-server-smoke-javascript-attach.test.ts`](../../tests/e2e/mcp-server-smoke-javascript-attach.test.ts))
 expects adoption. Reuse M1's subtree-close, idle, attach-target preservation and cleanup-isolation
-cases; verify that cap `0` still adopts the program's own target but releases forks, and measure
-parent exit with an already adopted, paused child. Unblocks #985 M2 (jest and vitest workers as
+cases; verify that cap `0` still adopts the program's own target but releases forks (the first PR's
+suite does), and measure parent exit with an already adopted, paused child (measured in the first
+PR: the child ends with the parent, lifecycle row 2). Unblocks #985 M2 (jest and vitest workers as
 sessions).
 
 **M3 — browser targets.** After the [#989](https://github.com/debugmcp/mcp-debugger/issues/989)
