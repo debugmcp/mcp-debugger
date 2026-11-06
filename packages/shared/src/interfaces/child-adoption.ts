@@ -44,7 +44,9 @@ export interface ChildAdoptionContract {
   releaseLever: 'reject-request' | 'throwaway-attach';
   /**
    * Where a child's own output lands: on its own connection (debugpy with
-   * `redirectOutput`), or only on the launch session's (js-debug).
+   * `redirectOutput`), or only on the launch session's (js-debug's stdout
+   * capture). Attach roots do not own the process pipes; their children read
+   * their own connections instead (js-debug's default console capture).
    */
   childOutput: 'own-connection' | 'launch-session';
   /**

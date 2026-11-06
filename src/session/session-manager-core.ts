@@ -709,8 +709,8 @@ export abstract class SessionManagerCore extends EventEmitter {
    * tree's root when the adapter delivers the whole tree's output on the
    * launch session's connection and none on the child's (js-debug, the
    * policy's `childOutput: 'launch-session'` pin); undefined when the
-   * session's own buffer is the place to read (a root, or a debugpy child
-   * with its own lines).
+   * session's own buffer is the place to read (a root, a debugpy child,
+   * or a child under an attach root, whose console output is per-target).
    */
   public outputOnFor(sessionId: string): string | undefined {
     const session = this.sessionStore.get(sessionId);
@@ -725,7 +725,10 @@ export abstract class SessionManagerCore extends EventEmitter {
       return undefined;
     }
     const root = this.rootOf(session);
-    return root.id === session.id ? undefined : root.id;
+    // A launch owns the stdout/stderr pipes; an attach does not. js-debug's
+    // default console capture on attach emits on each target's connection,
+    // so pointing at the root would hide the child's actual output.
+    return root.id === session.id || root.attachMode ? undefined : root.id;
   }
 
   /**

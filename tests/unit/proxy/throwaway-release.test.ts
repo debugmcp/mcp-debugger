@@ -90,4 +90,106 @@ describe('releaseByThrowawayAttach', () => {
     expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('timed out'));
     expect(client.shutdown).toHaveBeenCalledWith('release complete');
   });
+
+  it('contains a socket error while attach is pending and stops the release', async () => {
+    vi.useFakeTimers();
+    const client = createMockDapClient();
+    client.sendRequest.mockImplementation((command: string) =>
+      command === 'attach' ? new Promise(() => {}) : Promise.resolve({ body: {} })
+    );
+    const releasing = releaseByThrowawayAttach({ client, policy: JsDebugAdapterPolicy, attachArguments, label: 'fork-1', logger });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.sendRequest).toHaveBeenCalledWith('attach', attachArguments, 15000);
+
+    // A connected MinimalDapClient emits socket failures on its EventEmitter.
+    // Catch the old uncaught-error behavior so this regression cannot kill Vitest.
+    let uncaught: unknown;
+    try {
+      client.emit('error', new Error('connection reset'));
+    } catch (error) {
+      uncaught = error;
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    const stoppedImmediately = client.shutdown.mock.calls.length > 0;
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(await releasing).toBe(false);
+    expect(uncaught).toBeUndefined();
+    expect(stoppedImmediately).toBe(true);
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('connection reset'));
+    expect(client.sendRequest).not.toHaveBeenCalledWith('disconnect', expect.anything(), expect.anything());
+    expect(client.listenerCount('error')).toBe(0);
+    expect(client.listenerCount('close')).toBe(0);
+  });
+
+  it('does not continue the sequence when connect finishes after the deadline', async () => {
+    vi.useFakeTimers();
+    const client = createMockDapClient();
+    let finishConnect!: () => void;
+    client.connect.mockImplementation(() => new Promise<void>((resolve) => { finishConnect = resolve; }));
+    const releasing = releaseByThrowawayAttach({ client, policy: JsDebugAdapterPolicy, attachArguments, label: 'fork-1', logger, timeoutMs: 100 });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(await releasing).toBe(false);
+
+    finishConnect();
+    await vi.advanceTimersByTimeAsync(0);
+    const requestsAfterShutdown = client.sendRequest.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(requestsAfterShutdown).toBe(0);
+    expect(client.sendRequest).not.toHaveBeenCalled();
+    expect(client.shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it('observes a ready event delivered before the attach response', async () => {
+    vi.useFakeTimers();
+    const client = createMockDapClient();
+    client.sendRequest.mockImplementation(async (command: string) => {
+      if (command === 'attach') {
+        client.emit('event', { event: 'thread', body: { reason: 'started', threadId: 1 } });
+      }
+      return { body: {} };
+    });
+    const releasing = releaseByThrowawayAttach({ client, policy: JsDebugAdapterPolicy, attachArguments, label: 'fork-1', logger });
+    await vi.advanceTimersByTimeAsync(0);
+    const detachedImmediately = client.sendRequest.mock.calls.some(([command]) => command === 'disconnect');
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    expect(await releasing).toBe(true);
+    expect(detachedImmediately).toBe(true);
+    expect(client.listenerCount('event')).toBe(0);
+  });
+
+  it('stops on connection close during configuration instead of attempting attach', async () => {
+    vi.useFakeTimers();
+    const client = createMockDapClient();
+    client.sendRequest.mockImplementation((command: string) =>
+      command === 'configurationDone' ? new Promise(() => {}) : Promise.resolve({ body: {} })
+    );
+    const releasing = releaseByThrowawayAttach({ client, policy: JsDebugAdapterPolicy, attachArguments, label: 'fork-1', logger });
+    await vi.advanceTimersByTimeAsync(0);
+    client.emit('close');
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(await releasing).toBe(false);
+    expect(client.sendRequest.mock.calls.map(([command]) => command)).toEqual(['initialize', 'configurationDone']);
+    expect(client.shutdown).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(['error', 'close'])('contains a socket %s during the best-effort disconnect', async (event) => {
+    const client = createMockDapClient();
+    client.sendRequest.mockImplementation(async (command: string) => {
+      if (command === 'attach') {
+        client.emit('event', { event: 'thread', body: { reason: 'started', threadId: 1 } });
+      } else if (command === 'disconnect') {
+        setImmediate(() => client.emit(event, new Error('disconnected')));
+        return new Promise(() => {});
+      }
+      return { body: {} };
+    });
+
+    expect(await releaseByThrowawayAttach({ client, policy: JsDebugAdapterPolicy, attachArguments, label: 'fork-1', logger })).toBe(true);
+    expect(client.shutdown).toHaveBeenCalledTimes(1);
+    expect(client.listenerCount('error')).toBe(0);
+    expect(client.listenerCount('close')).toBe(0);
+  });
 });

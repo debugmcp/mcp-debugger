@@ -173,14 +173,15 @@ export function registerResourceHandlers(
     // A child whose adapter delivers the tree's output on the launch session
     // only (js-debug, issue #1082) reads as a pointer to that resource.
     const outputOn = sessionManager.outputOnFor(session.id);
+    const ownOutput = session.outputBuffer?.renderText() ?? '';
     return {
       contents: [{
         uri,
         mimeType: 'text/plain',
         // Empty until the first launch creates the buffer
         text: outputOn
-          ? `${outputOnNote(outputOn)}\nRead ${outputResourceUri(outputOn)} instead.\n`
-          : session.outputBuffer?.renderText() ?? ''
+          ? `${outputOnNote(outputOn)}\nRead ${outputResourceUri(outputOn)} instead.\n${ownOutput}`
+          : ownOutput
       }]
     };
   });

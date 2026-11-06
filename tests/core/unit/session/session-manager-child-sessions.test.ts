@@ -957,5 +957,16 @@ describe('SessionManager child sessions (issue #1081)', () => {
       overridePolicy(sessionManager, { childAdoption: { ...JsDebugAdapterPolicy.childAdoption!, childOutput: 'own-connection' } });
       expect(sessionManager.outputOnFor(childId)).toBeUndefined();
     });
+
+    it('reads child and grandchild output from their own connections under an attach root', async () => {
+      const { rootId, childId, grandchildId, childView } = await jsTree();
+      sessionManager.getSession(rootId)!.attachMode = true;
+      childView.simulateEvent('output', { category: 'stdout', output: 'child console output\n' });
+
+      expect(sessionManager.outputOnFor(childId)).toBeUndefined();
+      expect(sessionManager.outputOnFor(grandchildId)).toBeUndefined();
+      expect(sessionManager.getSession(childId)!.outputBuffer!.renderText()).toContain('child console output');
+      expect(sessionManager.getSession(rootId)!.outputBuffer!.renderText()).not.toContain('child console output');
+    });
   });
 });

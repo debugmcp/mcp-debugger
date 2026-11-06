@@ -38,6 +38,7 @@ describe('DapProxyWorker child sessions (issue #1081)', () => {
   let mockLogger: ILogger;
   let rootClient: ReturnType<typeof createMockDapClient>;
   let childClient: ReturnType<typeof createMockDapClient>;
+  let releaseClient: ReturnType<typeof createMockDapClient>;
   let processStub: { spawn: Mock; shutdown: Mock };
   let resolveAttach: () => void;
   let send: Mock<(message: SentMessage) => void>;
@@ -84,6 +85,7 @@ describe('DapProxyWorker child sessions (issue #1081)', () => {
     mockLogger = createMockLogger();
     rootClient = createMockDapClient();
     childClient = createMockDapClient();
+    releaseClient = createMockDapClient();
     processStub = {
       spawn: vi.fn().mockResolvedValue({ process: new EventEmitter() as unknown as ChildProcess, pid: 321 }),
       shutdown: vi.fn().mockResolvedValue(undefined)
@@ -108,7 +110,7 @@ describe('DapProxyWorker child sessions (issue #1081)', () => {
       processSpawner: createMockProcessSpawner(),
       dapClientFactory: {
         create: vi.fn((_host: string, _port: number, _policy?: unknown, options?: { traceLabel?: string }) =>
-          options?.traceLabel?.startsWith('child:') ? childClient : rootClient)
+          options?.traceLabel?.startsWith('release:') ? releaseClient : options?.traceLabel?.startsWith('child:') ? childClient : rootClient)
       },
       messageSender: { send }
     };
@@ -304,6 +306,41 @@ describe('DapProxyWorker child sessions (issue #1081)', () => {
     );
     const releasedAt = rootClient.respondToReverseRequest.mock.invocationCallOrder[0];
     const disconnectedAt = connectionStub.disconnect.mock.invocationCallOrder[0];
+    expect(releasedAt).toBeLessThan(disconnectedAt);
+  });
+
+  it.each(['shutdown', 'attach close', 'explicit detach'] as const)('%s waits for a js-debug child release before disconnecting the root', async (mode) => {
+    await connectUnder(JsDebugAdapterPolicy);
+    (worker as any).state = ProxyState.CONNECTED;
+    (worker as any).isAttachMode = mode !== 'shutdown';
+    let connect!: () => void;
+    releaseClient.connect.mockImplementationOnce(() => new Promise<void>((resolve) => { connect = resolve; }));
+    releaseClient.sendRequest.mockImplementation(async (command: string) => {
+      if (command === 'attach') {
+        setImmediate(() => releaseClient.emit('event', { event: 'thread', body: { reason: 'started', threadId: 1 } }));
+      }
+      return { body: {} };
+    });
+    const configuration = { type: 'pwa-node', name: 'child.js', __pendingTargetId: 'fork-1' };
+    rootClient.emit('child-report', {
+      request: { seq: 9, type: 'request', command: 'startDebugging', arguments: { request: 'launch', configuration } },
+      report: { targetId: 'fork-1', name: 'child.js', configuration }
+    });
+    const closing = mode === 'explicit detach'
+      ? worker.handleCommand({ cmd: 'dap', sessionId: 'py-root', requestId: 'detach', dapCommand: 'disconnect', dapArgs: { terminateDebuggee: false } })
+      : worker.handleTerminate();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(releaseClient.connect).toHaveBeenCalled();
+    expect(connectionStub.disconnect).not.toHaveBeenCalled();
+    expect(rootClient.sendRequest).not.toHaveBeenCalledWith('disconnect', expect.anything());
+    expect(processStub.shutdown).not.toHaveBeenCalled();
+
+    connect();
+    await closing;
+    const releasedAt = releaseClient.shutdown.mock.invocationCallOrder[0];
+    const disconnectedAt = mode === 'explicit detach'
+      ? rootClient.sendRequest.mock.invocationCallOrder[rootClient.sendRequest.mock.calls.findIndex(([command]) => command === 'disconnect')]
+      : connectionStub.disconnect.mock.invocationCallOrder[0];
     expect(releasedAt).toBeLessThan(disconnectedAt);
   });
 

@@ -157,13 +157,17 @@ A child's own buffer carries its own lines **where the adapter can attribute the
 - debugpy can: with `redirectOutput: true` in the child's attach, the child's stdout and stderr
   also arrive on the child's connection. The child's `get_output` and
   `debug://sessions/<child>/output` show the child's lines; the parent's show the tree.
-- js-debug cannot: all output of the tree arrives on the root connection and child sessions carry
+- js-debug launches cannot: all output of the tree arrives on the root connection and child sessions carry
   no `output` events at all. A js-debug child's `get_output` answers with an empty page and a note
   that its output is on the launch session (`outputOn: <launch session id>`); its resource reads
-  the same way.
+  the same way, preserving any diagnostics captured in the child's own buffer.
+- js-debug attach roots do not own the process pipes. With the default console capture, each
+  child's console output arrives on its own connection; its `get_output` and resource show those
+  lines, without an `outputOn` pointer. This was measured with an attached Node parent and an
+  adopted fork during the M2 review (js-debug v1.140.0).
 
-The attribution is one per-adapter policy pin (below). The per-process-only alternative (each
-session carries only its own process's lines) is not implementable: js-debug offers no
+The attribution is one per-adapter policy pin (below), applied to launch roots. The per-process-only
+alternative (each session carries only its own process's lines) is not implementable for launches: js-debug offers no
 attribution, and the parent's copy of a debugpy child's lines arrives through the inherited pipe
 with no pid on it.
 

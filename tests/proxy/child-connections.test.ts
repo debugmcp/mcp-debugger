@@ -738,13 +738,89 @@ describe('ChildConnections under the throwaway-attach lever (js-debug, issue #10
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('adoption failed: attach refused'));
   });
 
-  it('a report during worker shutdown is acked and left parked, with a warning', async () => {
+  it('a report during worker shutdown is released without announcing a new session', async () => {
     await connections.closeAll('worker shutdown');
     root.emit('child-report', { request: jsStartDebugging(7), report: jsReport });
 
     expect(reported()).toHaveLength(0);
     expect(root.respondToReverseRequest).toHaveBeenCalledWith(expect.objectContaining({ seq: 7 }), {}, true, undefined);
-    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('stays parked'));
-    expect(dapClientFactory.create).not.toHaveBeenCalled();
+    await throwawayRan(releaseClient);
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('released to run UNDEBUGGED'));
+  });
+
+  it('keeps the worker live and waits for a release already in flight before closing', async () => {
+    let connect!: () => void;
+    releaseClient.connect.mockImplementationOnce(() => new Promise<void>((resolve) => { connect = resolve; }));
+    root.emit('child-report', { request: jsStartDebugging(7), report: jsReport });
+    connections.release(reported()[0].reportId as string, 'over the cap');
+    const empty = vi.fn();
+    connections.on('empty', empty);
+    let closed = false;
+    const closing = connections.closeAll('worker shutdown').then(() => { closed = true; });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(closed).toBe(false);
+    expect(connections.liveCount()).toBe(1);
+    expect(empty).not.toHaveBeenCalled();
+
+    connect();
+    await throwawayRan(releaseClient);
+    await closing;
+    expect(closed).toBe(true);
+    expect(connections.liveCount()).toBe(0);
+    expect(empty).toHaveBeenCalled();
+  });
+
+  it('does not announce an empty worker between a failed adoption and its release', async () => {
+    root.emit('child-report', { request: jsStartDebugging(7), report: jsReport });
+    const adopting = connections.adopt('child-1', { reportId: reported()[0].reportId as string });
+    await new Promise((resolve) => setImmediate(resolve));
+    const empty = vi.fn();
+    connections.on('empty', empty);
+    rejectAttach(new Error('attach refused'));
+    await expect(adopting).rejects.toThrow('attach refused');
+    expect(empty).not.toHaveBeenCalled();
+    expect(connections.liveCount()).toBe(1);
+
+    await throwawayRan(releaseClient);
+    expect(empty).toHaveBeenCalledOnce();
+  });
+
+  it('contains a release-client construction failure and lets shutdown complete', async () => {
+    dapClientFactory.create.mockImplementationOnce(() => { throw new Error('client unavailable'); });
+    root.emit('child-report', { request: jsStartDebugging(7), report: jsReport });
+    connections.release(reported()[0].reportId as string, 'over the cap');
+    await connections.closeAll('worker shutdown');
+    expect(connections.liveCount()).toBe(0);
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('client unavailable'));
+  });
+
+  it('drains a grandchild reported by a release connection during shutdown', async () => {
+    const grandchildClient = createMockDapClient();
+    dapClientFactory.create.mockReturnValueOnce(releaseClient).mockReturnValueOnce(grandchildClient);
+    releaseClient.sendRequest.mockImplementation(async (command: string) => {
+      if (command === 'attach') {
+        releaseClient.emit('child-report', {
+          request: jsStartDebugging(9),
+          report: { targetId: 'grandchild', name: 'grandchild.js', configuration: { __pendingTargetId: 'grandchild' } }
+        });
+        setImmediate(() => releaseClient.emit('event', { event: 'thread', body: {} }));
+      }
+      return { body: {} };
+    });
+    grandchildClient.sendRequest.mockImplementation(async (command: string) => {
+      if (command === 'attach') {
+        setImmediate(() => grandchildClient.emit('event', { event: 'thread', body: {} }));
+      }
+      return { body: {} };
+    });
+    root.emit('child-report', { request: jsStartDebugging(7), report: jsReport });
+
+    await connections.closeAll('worker shutdown');
+
+    expect(reported()).toHaveLength(1);
+    expect(grandchildClient.sendRequest).toHaveBeenCalledWith('attach', expect.objectContaining({ __pendingTargetId: 'grandchild' }), 15000);
+    expect(grandchildClient.shutdown).toHaveBeenCalledWith('release complete');
+    expect(releaseClient.shutdown).toHaveBeenCalledWith('release complete');
+    expect(connections.liveCount()).toBe(0);
   });
 });
