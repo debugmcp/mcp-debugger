@@ -26,6 +26,9 @@ import { createMockFileSystem, createMockProcessSpawner } from '../test-utils/mo
 
 type SentMessage = StatusMessage | DapResponseMessage | DapEventMessage | ErrorMessage;
 
+/** A policy that reports no children (the ten adapters without the tree contract), with debugpy's spawn configuration. */
+const noContractPolicy = { ...PythonAdapterPolicy, childAdoption: undefined } as unknown as typeof PythonAdapterPolicy;
+
 const configuration = { type: 'python', name: 'Subprocess 4242', subProcessId: 4242, connect: { host: '127.0.0.1', port: 5678 } };
 const report = { targetId: '4242', name: 'Subprocess 4242', configuration };
 const startDebugging = { seq: 7, type: 'request' as const, command: 'startDebugging', arguments: { request: 'attach', configuration } };
@@ -35,6 +38,7 @@ describe('DapProxyWorker child sessions (issue #1081)', () => {
   let mockLogger: ILogger;
   let rootClient: ReturnType<typeof createMockDapClient>;
   let childClient: ReturnType<typeof createMockDapClient>;
+  let releaseClient: ReturnType<typeof createMockDapClient>;
   let processStub: { spawn: Mock; shutdown: Mock };
   let resolveAttach: () => void;
   let send: Mock<(message: SentMessage) => void>;
@@ -81,6 +85,7 @@ describe('DapProxyWorker child sessions (issue #1081)', () => {
     mockLogger = createMockLogger();
     rootClient = createMockDapClient();
     childClient = createMockDapClient();
+    releaseClient = createMockDapClient();
     processStub = {
       spawn: vi.fn().mockResolvedValue({ process: new EventEmitter() as unknown as ChildProcess, pid: 321 }),
       shutdown: vi.fn().mockResolvedValue(undefined)
@@ -105,7 +110,7 @@ describe('DapProxyWorker child sessions (issue #1081)', () => {
       processSpawner: createMockProcessSpawner(),
       dapClientFactory: {
         create: vi.fn((_host: string, _port: number, _policy?: unknown, options?: { traceLabel?: string }) =>
-          options?.traceLabel?.startsWith('child:') ? childClient : rootClient)
+          options?.traceLabel?.startsWith('release:') ? releaseClient : options?.traceLabel?.startsWith('child:') ? childClient : rootClient)
       },
       messageSender: { send }
     };
@@ -152,8 +157,25 @@ describe('DapProxyWorker child sessions (issue #1081)', () => {
     expect(response).toMatchObject({ success: true, sessionId: 'py-root', body: { released: true } });
   });
 
-  it('installs no child-report listener for a policy without the tree contract (js-debug stays as it was)', async () => {
+  it('holds the reports of a js-debug root too: every target after the program is a child of the tree (issue #1082)', async () => {
     await connectUnder(JsDebugAdapterPolicy);
+
+    const listened = rootClient.on.mock.calls.map(([event]) => event);
+    expect(listened).toContain('child-report');
+
+    const forkRequest = { seq: 9, type: 'request' as const, command: 'startDebugging', arguments: { request: 'launch', configuration: { type: 'pwa-node', name: 'child.js [7]', __pendingTargetId: 'fork-1' } } };
+    const forkReport = { targetId: 'fork-1', name: 'child.js [7]', configuration: forkRequest.arguments.configuration };
+    rootClient.emit('child-report', { request: forkRequest, report: forkReport });
+
+    const reported = statuses('child_reported');
+    expect(reported).toHaveLength(1);
+    expect(reported[0]).toMatchObject({ sessionId: 'py-root', targetId: 'fork-1', name: 'child.js [7]' });
+    // js-debug's report is answered the moment it is held: the answer decides nothing.
+    expect(rootClient.respondToReverseRequest).toHaveBeenCalledWith(expect.objectContaining({ seq: 9 }), {}, true, undefined);
+  });
+
+  it('installs no child-report listener for a policy without the tree contract', async () => {
+    await connectUnder(noContractPolicy);
 
     const listened = rootClient.on.mock.calls.map(([event]) => event);
     expect(listened).not.toContain('child-report');
@@ -287,6 +309,41 @@ describe('DapProxyWorker child sessions (issue #1081)', () => {
     expect(releasedAt).toBeLessThan(disconnectedAt);
   });
 
+  it.each(['shutdown', 'attach close', 'explicit detach'] as const)('%s waits for a js-debug child release before disconnecting the root', async (mode) => {
+    await connectUnder(JsDebugAdapterPolicy);
+    (worker as any).state = ProxyState.CONNECTED;
+    (worker as any).isAttachMode = mode !== 'shutdown';
+    let connect!: () => void;
+    releaseClient.connect.mockImplementationOnce(() => new Promise<void>((resolve) => { connect = resolve; }));
+    releaseClient.sendRequest.mockImplementation(async (command: string) => {
+      if (command === 'attach') {
+        setImmediate(() => releaseClient.emit('event', { event: 'thread', body: { reason: 'started', threadId: 1 } }));
+      }
+      return { body: {} };
+    });
+    const configuration = { type: 'pwa-node', name: 'child.js', __pendingTargetId: 'fork-1' };
+    rootClient.emit('child-report', {
+      request: { seq: 9, type: 'request', command: 'startDebugging', arguments: { request: 'launch', configuration } },
+      report: { targetId: 'fork-1', name: 'child.js', configuration }
+    });
+    const closing = mode === 'explicit detach'
+      ? worker.handleCommand({ cmd: 'dap', sessionId: 'py-root', requestId: 'detach', dapCommand: 'disconnect', dapArgs: { terminateDebuggee: false } })
+      : worker.handleTerminate();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(releaseClient.connect).toHaveBeenCalled();
+    expect(connectionStub.disconnect).not.toHaveBeenCalled();
+    expect(rootClient.sendRequest).not.toHaveBeenCalledWith('disconnect', expect.anything());
+    expect(processStub.shutdown).not.toHaveBeenCalled();
+
+    connect();
+    await closing;
+    const releasedAt = releaseClient.shutdown.mock.invocationCallOrder[0];
+    const disconnectedAt = mode === 'explicit detach'
+      ? rootClient.sendRequest.mock.invocationCallOrder[rootClient.sendRequest.mock.calls.findIndex(([command]) => command === 'disconnect')]
+      : connectionStub.disconnect.mock.invocationCallOrder[0];
+    expect(releasedAt).toBeLessThan(disconnectedAt);
+  });
+
   it('rejects a request for a child whose connection has ended without sending it to the root', async () => {
     await connectUnder(PythonAdapterPolicy);
     await adoptChild();
@@ -332,7 +389,7 @@ describe('DapProxyWorker child sessions (issue #1081)', () => {
   });
 
   it('refuses child commands when this adapter has no adoption contract', async () => {
-    await connectUnder(JsDebugAdapterPolicy);
+    await connectUnder(noContractPolicy);
     await worker.handleCommand({ cmd: 'dap', sessionId: 'child-1', requestId: 'unsupported-adopt', dapCommand: CHILD_ADOPT_COMMAND });
     expect(responseTo('unsupported-adopt')).toMatchObject({ success: false, sessionId: 'child-1', error: expect.stringContaining('reports no child processes') });
   });

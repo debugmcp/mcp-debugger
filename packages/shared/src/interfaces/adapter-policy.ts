@@ -498,9 +498,10 @@ export interface AdapterPolicy {
   /**
    * The session-tree adoption contract (issue #1081): defined by an adapter that
    * reports the processes its debuggee starts, so each becomes a child debug
-   * session of the reporting one. Undefined for adapters that report nothing;
-   * never combined with `supportsReverseStartDebugging` (the js-shaped
-   * single-target adoption of the program itself).
+   * session of the reporting one. Undefined for adapters that report nothing.
+   * Combined with `supportsReverseStartDebugging` only by js-debug (issue
+   * #1082), whose program is itself the first pending target, adopted
+   * in-session; every report after it is a child of this contract.
    */
   childAdoption?: ChildAdoptionContract;
 

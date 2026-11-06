@@ -27,6 +27,7 @@ import type {
   ProxyMessage
 } from '../dap-core/types.js';
 import { DapResponseError } from './dap-response-error.js';
+import { THROWAWAY_RELEASE_TIMEOUT_MS } from './throwaway-release.js';
 import { disposeAdapterQuietly } from '../adapters/adapter-disposal.js';
 import { ErrorMessages, ProxyInitProgress } from '../utils/error-messages.js';
 import { ProxyConfig } from './proxy-config.js';
@@ -39,6 +40,7 @@ import {
   sanitizePayloadForLogging,
   describeDapEventBodyForLog,
   sanitizeStderr,
+  getPolicyForLanguage,
   LineBuffer
 } from '@debugmcp/shared';
 import type { HandshakeProxy } from '@debugmcp/shared';
@@ -276,6 +278,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   private isStopped = false;
   /** Bounded wait for in-flight DAP requests to settle before stop() cancels them. */
   private stopDrainTimeoutMs = 1000;
+  /** Worker exit grace, including any adapter-specific child-release handshake. */
+  private stopTimeoutMs = 5000;
   /** Worker-side DAP request timeout assumed when no per-request override is given. */
   private defaultDapRequestTimeoutMs = 30000;
   /**
@@ -358,6 +362,12 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     this.exitEmitted = false;
 
     this.sessionId = config.sessionId;
+    // A js-debug release can need its full attach deadline before the worker
+    // disconnects the root. Killing the worker at the ordinary 5s deadline
+    // would strand that child; leave the normal cleanup grace after release.
+    this.stopTimeoutMs = getPolicyForLanguage(config.language).childAdoption?.releaseLever === 'throwaway-attach'
+      ? THROWAWAY_RELEASE_TIMEOUT_MS + 5000
+      : 5000;
     this.isStopped = false;
     this.lastProxyPid = null;
     this.adapterStderrTail = [];
@@ -582,7 +592,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         // accumulate a dead handler on the process object (issue #420).
         process.removeListener('exit', onExit);
         resolve();
-      }, 5000);
+      }, this.stopTimeoutMs);
 
       process.once('exit', onExit);
 

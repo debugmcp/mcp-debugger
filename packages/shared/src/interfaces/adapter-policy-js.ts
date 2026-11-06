@@ -20,6 +20,7 @@ import type { StackFrame, Variable } from '../models/index.js';
 import { toSourceBreakpoint, type BreakpointFields } from '../utils/to-source-breakpoint.js';
 import { compileJsLogpoint, validateJsLogpoint } from '../utils/js-logpoint.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
+import type { ChildAdoptionContract, ChildReport } from './child-adoption.js';
 
 /**
  * Every js-debug scope name this adapter knows, grouped by kind.
@@ -119,6 +120,100 @@ function hasNoSource(filePath: string): boolean {
   return filePath === '' || filePath === '<unknown_source>';
 }
 
+/**
+ * The attach a connection sends to adopt one of js-debug's pending targets —
+ * the program's own (the launch session's single in-session child) and, with
+ * the session tree, every fork after it (issue #1082).
+ */
+function buildJsChildStartArgs(
+  pendingId: string,
+  parentConfig: Record<string, unknown>,
+  attachArguments?: Readonly<Record<string, unknown>>
+): { command: 'launch' | 'attach'; args: Record<string, unknown> } {
+  // js-debug's reverse-request values take precedence over parent extras.
+  // Our request/stopOnEntry intent never enters either adapter argument bag.
+  const config = { ...attachArguments, ...parentConfig };
+  const type = typeof config.type === 'string' ? config.type : 'pwa-node';
+  // Carry the parent's forwardable attach extras (localRoot/remoteRoot,
+  // sourceMaps, skipFiles, …) into the child — source resolution happens
+  // here, so this is where they take effect (issue #466). The orchestration
+  // keys stay pinned/excluded: address/port/attachSimplePort would make the
+  // child a second direct attach to the same inspector (the #124
+  // fight-over-the-process failure). These are adapter connection fields,
+  // not a deny-list of our start-intent fields (issue #730).
+  const {
+    name: _name,
+    __pendingTargetId: _pendingTargetId,
+    host: _host,
+    address: _address,
+    port: _port,
+    attachSimplePort: _attachSimplePort,
+    attachExistingChildren: _attachExistingChildren,
+    continueOnAttach: _continueOnAttach,
+    type: _type,
+    ...parentExtras
+  } = config;
+  void _name; void _pendingTargetId; void _host; void _address;
+  void _port; void _attachSimplePort; void _attachExistingChildren;
+  void _continueOnAttach; void _type;
+  return {
+    command: 'attach',
+    args: {
+      ...parentExtras,
+      type,
+      request: 'attach',
+      __pendingTargetId: pendingId,
+      continueOnAttach: true  // js-debug requires true to work properly
+    }
+  };
+}
+
+/**
+ * A js-debug process report (issue #1082): a `startDebugging` whose
+ * configuration carries a `__pendingTargetId` — the program itself on the
+ * root connection, a fork or a cluster worker on the program's connection, a
+ * grandchild on the fork's (docs/javascript/spike-notes-forks.md). The
+ * request says `request: "launch"` whatever the adoption is; `name` is
+ * `<script> [<pid>]`, the only hint at what the process is.
+ */
+function readJsDebugChildReport(request: DebugProtocol.Request): ChildReport | undefined {
+  if (request.command !== 'startDebugging') {
+    return undefined;
+  }
+  const args = (request.arguments ?? {}) as { configuration?: unknown };
+  const configuration = args.configuration;
+  if (typeof configuration !== 'object' || configuration === null) {
+    return undefined;
+  }
+  const { __pendingTargetId: pendingId, name } = configuration as { __pendingTargetId?: unknown; name?: unknown };
+  if (typeof pendingId !== 'string' || pendingId.length === 0) {
+    return undefined;
+  }
+  return {
+    targetId: pendingId,
+    name: typeof name === 'string' && name.length > 0 ? name : `target ${pendingId.slice(0, 8)}`,
+    configuration: configuration as Record<string, unknown>
+  };
+}
+
+/** js-debug's pins for the session tree (docs/architecture/session-tree.md, the adapter survey; issue #1082). */
+const jsDebugChildAdoption: ChildAdoptionContract = {
+  // Every connection asks for the request form; js-debug reports on each regardless.
+  advertiseStartDebugging: true,
+  // Rejecting a report parks the child forever (measured); a throwaway
+  // attach-then-detach is the only release (#501).
+  releaseLever: 'throwaway-attach',
+  // The whole tree's output arrives on the root connection; child connections carry none.
+  childOutput: 'launch-session',
+  // `disconnect` on a fork, with either flag, leaves it running (measured).
+  closeChild: 'release',
+  readChildReport: readJsDebugChildReport,
+  // The measured second-connection attach; an attach root's forwardable
+  // extras (localRoot/remoteRoot, sourceMaps, skipFiles, #466) ride along.
+  buildChildAttachArguments: (report: ChildReport, rootConfig?: Readonly<Record<string, unknown>>): Record<string, unknown> =>
+    buildJsChildStartArgs(report.targetId, report.configuration, rootConfig?.request === 'attach' ? rootConfig : undefined).args
+};
+
 export const JsDebugAdapterPolicy = {
   name: 'js-debug',
   supportsLogPoints: true,
@@ -163,48 +258,10 @@ export const JsDebugAdapterPolicy = {
   honoursNoDebug: true,
   supportsReverseStartDebugging: true,
   childSessionStrategy: 'launchWithPendingTarget',
-  buildChildStartArgs: (
-    pendingId: string,
-    parentConfig: Record<string, unknown>,
-    attachArguments?: Readonly<Record<string, unknown>>
-  ) => {
-    // js-debug's reverse-request values take precedence over parent extras.
-    // Our request/stopOnEntry intent never enters either adapter argument bag.
-    const config = { ...attachArguments, ...parentConfig };
-    const type = typeof config.type === 'string' ? config.type : 'pwa-node';
-    // Carry the parent's forwardable attach extras (localRoot/remoteRoot,
-    // sourceMaps, skipFiles, …) into the child — source resolution happens
-    // here, so this is where they take effect (issue #466). The orchestration
-    // keys stay pinned/excluded: address/port/attachSimplePort would make the
-    // child a second direct attach to the same inspector (the #124
-    // fight-over-the-process failure). These are adapter connection fields,
-    // not a deny-list of our start-intent fields (issue #730).
-    const {
-      name: _name,
-      __pendingTargetId: _pendingTargetId,
-      host: _host,
-      address: _address,
-      port: _port,
-      attachSimplePort: _attachSimplePort,
-      attachExistingChildren: _attachExistingChildren,
-      continueOnAttach: _continueOnAttach,
-      type: _type,
-      ...parentExtras
-    } = config;
-    void _name; void _pendingTargetId; void _host; void _address;
-    void _port; void _attachSimplePort; void _attachExistingChildren;
-    void _continueOnAttach; void _type;
-    return {
-      command: 'attach',
-      args: {
-        ...parentExtras,
-        type,
-        request: 'attach',
-        __pendingTargetId: pendingId,
-        continueOnAttach: true  // js-debug requires true to work properly
-      }
-    };
-  },
+  // The session tree (issue #1082): every report after the program's own is a
+  // child session on a fresh connection, released by a throwaway attach.
+  childAdoption: jsDebugChildAdoption,
+  buildChildStartArgs: buildJsChildStartArgs,
   isChildReadyEvent: (evt: DebugProtocol.Event): boolean => {
     // js-debug often signals readiness by posting a 'thread' event or an early 'stopped'.
     // Waiting on these ensures threads() will not be empty.
@@ -1226,11 +1283,22 @@ export const JsDebugAdapterPolicy = {
       // Handle reverse startDebugging requests
       handleReverseRequest: async (request: DebugProtocol.Request, context: DapClientContext): Promise<ReverseRequestResult> => {
         if (request.command === 'startDebugging') {
+          // The session tree (issue #1082): the first pending target on this
+          // connection is the program itself, adopted in-session below; every
+          // later one is a child the debuggee started, handed to the worker
+          // unanswered (the held report is acked there, and resolved only by
+          // a connection attaching with its id, or a throwaway one releasing it).
+          if (context.adoptedTargets.size > 0) {
+            const childReport = jsDebugChildAdoption.readChildReport(request);
+            if (childReport && !context.adoptedTargets.has(childReport.targetId)) {
+              return { handled: true, childReport };
+            }
+          }
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const args: any = (request as any)?.arguments ?? {};
           const cfg = args?.configuration ?? {};
           const pendingId: string | undefined = cfg?.__pendingTargetId;
-          
+
           // Send acknowledgment. The early success ack is correct: js-debug
           // ignores the response body — a pending target is resolved only by
           // a fresh DAP connection attaching with its __pendingTargetId.

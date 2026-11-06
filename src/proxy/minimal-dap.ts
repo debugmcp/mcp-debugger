@@ -16,6 +16,7 @@ import {
   DapClientBehavior,
   DapClientContext,
   type ParentStart,
+  type ChildReport,
   type ChildSessionConfig,
   buildNoDebugTargetError,
   sanitizePayloadForLogging,
@@ -171,6 +172,13 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
       
       this.childSessionManager.on('childError', (_pendingId, error) => {
         logger.error('[MinimalDapClient] Child session error:', error);
+      });
+
+      // A process reported on the program target's connection is a child of
+      // this (the launch) session (issue #1082): hand it to this connection's
+      // holder, to be answered on the connection it arrived on.
+      this.childSessionManager.on('childReport', (held: { request: DebugProtocol.Request; report: ChildReport; client: IDapClient }) => {
+        this.relayChildReport(held.request, held.report, held.client);
       });
 
       this.childSessionManager.on('childClosed', () => {
@@ -331,16 +339,7 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
           
           if (result.handled) {
             if (result.childReport) {
-              // A child the debuggee started (the session tree, issue #1081):
-              // the request stays unanswered while whoever listens decides to
-              // adopt or release it. With nobody listening it is released at
-              // once — an acked-but-never-attached child stays parked forever
-              // (docs/python/spike-notes-subprocess.md), a rejected one runs.
-              if (this.listenerCount('child-report') > 0) {
-                this.emit('child-report', { request, report: result.childReport });
-              } else {
-                this.sendResponse(request, {}, false, 'no child-session adopter on this connection: child released');
-              }
+              this.relayChildReport(request, result.childReport, this);
               return;
             }
             // Policy handled the request
@@ -398,6 +397,30 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
         this.sendResponse(request, {});
       }
     }
+  }
+
+  /**
+   * A child the debuggee started (the session tree, issues #1081/#1082):
+   * the request stays unanswered while whoever listens decides to adopt or
+   * release it; `origin` is the connection it arrived on (this one, or the
+   * program target's), which is where the answer must go. With nobody
+   * listening it is released at once — an acked-but-never-attached child
+   * stays parked forever (docs/python/spike-notes-subprocess.md), a rejected
+   * debugpy child runs; a rejected js-debug child parks too, so it is only
+   * acked and said so.
+   */
+  private relayChildReport(request: DebugProtocol.Request, report: ChildReport, origin: IDapClient): void {
+    if (this.listenerCount('child-report') > 0) {
+      this.emit('child-report', { request, report, client: origin });
+      return;
+    }
+    const reason = 'no child-session adopter on this connection: child released';
+    if (this.policy.childAdoption?.releaseLever === 'throwaway-attach') {
+      logger.warn(`[MinimalDapClient] ${reason} — ${report.name} stays parked (no connection will attach to it)`);
+      origin.respondToReverseRequest?.(request, {}, true, undefined);
+      return;
+    }
+    origin.respondToReverseRequest?.(request, {}, false, reason);
   }
 
   private appendTrace(direction: 'in' | 'out', payload: unknown): void {

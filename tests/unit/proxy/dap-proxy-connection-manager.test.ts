@@ -395,12 +395,22 @@ describe('DapConnectionManager', () => {
 
     it('leaves supportsStartDebuggingRequest out for a policy without the tree contract', async () => {
       mockDapClient.sendRequest.mockResolvedValue({ success: true });
-      connectionManager.setAdapterPolicy(JsDebugAdapterPolicy);
+      connectionManager.setAdapterPolicy(DefaultAdapterPolicy);
 
-      await connectionManager.initializeSession(mockDapClient, 'js-root', 'pwa-node');
+      await connectionManager.initializeSession(mockDapClient, 'default-root', 'default');
 
       const [, args] = mockDapClient.sendRequest.mock.calls[0];
       expect(args).not.toHaveProperty('supportsStartDebuggingRequest');
+    });
+
+    it("asks js-debug's child connections for the request form too (issue #1082)", async () => {
+      mockDapClient.sendRequest.mockResolvedValue({ success: true });
+      connectionManager.setAdapterPolicy(JsDebugAdapterPolicy);
+
+      await connectionManager.initializeSession(mockDapClient, 'js-child', 'pwa-node');
+
+      const [, args] = mockDapClient.sendRequest.mock.calls[0];
+      expect(args).toHaveProperty('supportsStartDebuggingRequest', true);
     });
 
     it('should handle initialize request failure', async () => {

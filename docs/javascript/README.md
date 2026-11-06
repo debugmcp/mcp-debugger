@@ -206,16 +206,25 @@ to inspect these decisions inside a running mcp-debugger server.
 
 ### Child Process Debugging
 
-> One child is adopted today and every further fork is released to run undebugged ([#501](https://github.com/debugmcp/mcp-debugger/issues/501)); the [session tree](../architecture/session-tree.md) design makes each fork a session of its own, from the facts measured in [spike-notes-forks.md](spike-notes-forks.md).
+With `autoAttachChildProcesses: true` every Node process the program starts — a `fork()`, a `spawn(process.execPath, …)`, a `cluster` worker, a grandchild — becomes a child debug session of its own (the [session tree](../architecture/session-tree.md), issue [#1082](https://github.com/debugmcp/mcp-debugger/issues/1082), from the facts measured in [spike-notes-forks.md](spike-notes-forks.md)): listed by `list_debug_sessions` with `parentSessionId`, stopping on the breakpoints set on the parent before launch (re-sent to each child before it runs), reported by the parent's `wait_for_stop` with its `sessionId`. Three things js-debug does differently from debugpy, all answered rather than hidden: the whole tree's output arrives on the launch session's buffer and none of it on a child's — a child's `get_output` answers `outputOn: <launch session id>`; `close_debug_session` on a child releases it to run on (`released: true`) because js-debug cannot end a target it adopted; and a child the server does not adopt (beyond `DEBUG_MCP_MAX_CHILD_SESSIONS`, default 32, `0` off) is released by a throwaway attach-then-detach ([#501](https://github.com/debugmcp/mcp-debugger/issues/501)'s lever), since refusing js-debug's report would park it forever. Function breakpoints do not carry into a child (they are armed over CDP on the program's own target); logpoints do, printing into the launch session's output. The program's exit ends every process under it, a child paused on a breakpoint included (measured): the launch owns the tree, so keep the parent alive while you inspect a child.
 
-The adapter can attach to child processes, but `autoAttachChildProcesses` defaults to `false`. To enable automatic child process attachment, pass it explicitly in `dapLaunchArgs`:
+For an `attach_to_process` root, the default console capture delivers each child's console
+output to that child's own buffer and resource; it does not return an `outputOn` pointer to the
+root. A launch child's output resource still includes any diagnostics recorded for that child
+alongside the pointer to the launch output.
+
+Fork logpoints use a `console.log` fallback because each fork does not have its own CDP logpoint
+bridge. A child that replaces `console.log` can suppress those messages; the program target's
+CDP-backed logpoints are unaffected.
+
+The key still defaults to `false` (the default flips in M2's second PR); pass it explicitly in `dapLaunchArgs`:
 
 ```javascript
 // parent.js
-const { spawn } = require('child_process');
+const { fork } = require('child_process');
 
-const child = spawn('node', ['child.js']);
-// Debugger will only attach to child.js if autoAttachChildProcesses is set to true
+const child = fork('child.js');
+// child.js becomes a child debug session when autoAttachChildProcesses is true
 ```
 
 ### Conditional Breakpoints

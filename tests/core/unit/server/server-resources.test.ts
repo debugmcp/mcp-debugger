@@ -216,6 +216,36 @@ describe('Server Output Resources Tests', () => {
       expect(textOf(result.contents[0])).toBe('');
     });
 
+    it('preserves child diagnostics alongside the pointer to launch-session output', async () => {
+      const session = mockSession({ id: 'child-1' });
+      session.outputBuffer.push('console', '[mcp-debugger] Warning: function breakpoint never bound.\n');
+      mockSessionManager.getSession.mockReturnValue(session);
+      mockSessionManager.outputOnFor.mockReturnValue('root-1');
+
+      const { readResourceHandler } = getResourceHandlers(mockServer);
+      const result = await readResourceHandler({
+        method: 'resources/read',
+        params: { uri: 'debug://sessions/child-1/output' }
+      });
+
+      expect(textOf(result.contents[0])).toContain('debug://sessions/root-1/output');
+      expect(textOf(result.contents[0])).toContain('Warning: function breakpoint never bound.');
+    });
+
+    it('shows an attached child\'s own console output without a launch pointer', async () => {
+      const session = mockSession({ id: 'child-1' });
+      session.outputBuffer.push('stdout', 'child console output\n');
+      mockSessionManager.getSession.mockReturnValue(session);
+
+      const { readResourceHandler } = getResourceHandlers(mockServer);
+      const result = await readResourceHandler({
+        method: 'resources/read',
+        params: { uri: 'debug://sessions/child-1/output' }
+      });
+
+      expect(textOf(result.contents[0])).toBe('child console output\n');
+    });
+
     it('routes proxy-log reads through the bounded sanitizer', async () => {
       const logDir = path.join('/logs', 'sess-1', 'run-123');
       mockSessionManager.getSession.mockReturnValue(mockSession({ logDir }));

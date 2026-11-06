@@ -8,7 +8,13 @@
  * `supportsStartDebuggingRequest`. Two of this server's engines implement it
  * (debugpy, js-debug); the rest keep `attach_to_process` as the route to a
  * child and leave the contract undefined. See docs/architecture/session-tree.md.
+ *
+ * js-debug (issue #1082) is the one engine whose program is itself a pending
+ * target: its first report on the root connection is the program, adopted
+ * in-session (`childSessionStrategy: 'launchWithPendingTarget'`); every later
+ * report, on any connection, is a child of this contract.
  */
+import type { DebugProtocol } from '@vscode/debugprotocol';
 
 /** One reported child, as the policy read it off the adapter's request. */
 export interface ChildReport {
@@ -30,12 +36,17 @@ export interface ChildAdoptionContract {
   /**
    * What releases a reported child the server will not adopt: answering the
    * request `success: false` (debugpy unblocks the child itself), or a
-   * throwaway attach-then-detach (js-debug parks a refused child forever).
+   * throwaway attach-then-detach (js-debug parks a refused child forever —
+   * its report is answered `{}` the moment it is held, which neither adopts
+   * nor releases, and only a connection attaching with the target's id
+   * resolves it).
    */
   releaseLever: 'reject-request' | 'throwaway-attach';
   /**
    * Where a child's own output lands: on its own connection (debugpy with
-   * `redirectOutput`), or only on the launch session's (js-debug).
+   * `redirectOutput`), or only on the launch session's (js-debug's stdout
+   * capture). Attach roots do not own the process pipes; their children read
+   * their own connections instead (js-debug's default console capture).
    */
   childOutput: 'own-connection' | 'launch-session';
   /**
@@ -43,6 +54,18 @@ export interface ChildAdoptionContract {
    * debugpy terminates it; js-debug can only release it to run undebugged.
    */
   closeChild: 'terminate' | 'release';
-  /** The `attach` arguments for the child's own connection, built from the report. */
-  buildChildAttachArguments(report: ChildReport): Record<string, unknown>;
+  /**
+   * Report recognition: the child a `startDebugging` request names, or
+   * undefined for a request that is not a child report of this adapter
+   * (debugpy: `request: 'attach'` with a numeric `subProcessId`; js-debug: a
+   * string `__pendingTargetId`).
+   */
+  readChildReport(request: DebugProtocol.Request): ChildReport | undefined;
+  /**
+   * The `attach` arguments for the child's own connection, built from the
+   * report; `rootConfig` is the root session's launch or attach configuration,
+   * for the extras an adapter forwards from the root to each child (js-debug's
+   * `localRoot`/`remoteRoot`, `sourceMaps`, `skipFiles` on an attach root, #466).
+   */
+  buildChildAttachArguments(report: ChildReport, rootConfig?: Readonly<Record<string, unknown>>): Record<string, unknown>;
 }

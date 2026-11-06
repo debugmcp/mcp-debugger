@@ -1049,6 +1049,29 @@ describe('ProxyManager.start', () => {
   });
 
   describe('stop and cleanup behavior', () => {
+    it.each([
+      { language: DebugLanguage.JAVASCRIPT, timeoutMs: 25000 },
+      { language: DebugLanguage.PYTHON, timeoutMs: 5000 }
+    ])('allows $language its child-release and cleanup grace before force killing', async ({ language, timeoutMs }) => {
+      await completeStart({ ...baseConfig, language });
+      vi.useFakeTimers();
+      try {
+        let stopped = false;
+        const stopping = proxyManager.stop().then(() => { stopped = true; });
+
+        await vi.advanceTimersByTimeAsync(timeoutMs - 1);
+        expect(fakeProcess.send).toHaveBeenCalledWith({ cmd: 'terminate', sessionId: baseConfig.sessionId });
+        expect(fakeProcess.kill).not.toHaveBeenCalled();
+        expect(stopped).toBe(false);
+
+        await vi.advanceTimersByTimeAsync(1);
+        await stopping;
+        expect(fakeProcess.kill).toHaveBeenCalledExactlyOnceWith('SIGKILL');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('sends terminate and force kills when proxy does not exit in time', async () => {
       vi.useFakeTimers();
       try {

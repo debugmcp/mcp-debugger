@@ -2423,6 +2423,7 @@ export class DapProxyWorker {
     if (this.isAttachMode && this.state === ProxyState.CONNECTED && this.connectionManager && this.dapClient && !this.dapDisconnectSent) {
       this.logger?.info('[Worker] Attach mode: auto-detaching with terminateDebuggee=false before shutdown.');
       await this.resumeBeforeDetach('close');
+      await this.childConnections?.releaseAllHeld('root detach');
       // The resume may have waited: the adapter can have ended or dropped the
       // socket meanwhile, and a concurrent shutdown may have torn the client down.
       if (this.connectionManager && this.dapClient && !this.dapDisconnectSent) {
@@ -2470,7 +2471,7 @@ export class DapProxyWorker {
 
     // A child still held unanswered would stay parked once this worker is
     // gone (issue #1081): release every held report first, so each runs.
-    this.childConnections?.releaseAllHeld('worker shutdown');
+    await this.childConnections?.releaseAllHeld('worker shutdown');
 
     // Close the mirror before the DAP disconnect so mirror clients receive
     // terminated even if the adapter disconnect eats its 1s cap (#217).
@@ -2767,6 +2768,7 @@ export class DapProxyWorker {
     if (detaching) {
       await this.resumeBeforeDetach('detach');
     }
+    await this.childConnections?.releaseAllHeld('root disconnect');
     if (this.isAttachMode) {
       this.dapDisconnectSent = true;
     }

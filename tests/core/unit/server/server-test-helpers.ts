@@ -106,6 +106,8 @@ export function createMockSessionManager(mockAdapterRegistry: IAdapterRegistry) 
     getSession: vi.fn(),
     closeSession: vi.fn(),
     closeSessionReporting: vi.fn(),
+    // A child whose output rides the launch session (js-debug, issue #1082) answers its root's id.
+    outputOnFor: vi.fn().mockReturnValue(undefined),
     closeAllSessions: vi.fn(),
     setBreakpoint: vi.fn(),
     setFunctionBreakpoint: vi.fn(),

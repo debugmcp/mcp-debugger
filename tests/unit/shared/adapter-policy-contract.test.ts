@@ -32,9 +32,52 @@ import {
   type StackFrame,
   type Variable
 } from '@debugmcp/shared';
+import { createChildSafePolicy } from '../../../src/proxy/child-safe-policy.js';
 
 /** The abstract break-on-exception modes `resolveExceptionFilters` accepts. */
 const EXCEPTION_MODES: ExceptionBreakMode[] = ['none', 'uncaught', 'all'];
+
+interface ChildReportFixture {
+  /** The adapter's `startDebugging` for a process the debuggee started, as measured. */
+  request: DebugProtocol.Request;
+  targetId: string;
+  name: string;
+}
+
+/**
+ * The child reports the two reporting engines send (issues #1081/#1082), in the shape each
+ * spike measured: debugpy's names the parent's program and the adapter's own port under
+ * `request: 'attach'`; js-debug's is three keys under `request: 'launch'`, whatever the
+ * adoption is (docs/javascript/spike-notes-forks.md).
+ */
+const CHILD_REPORT_FIXTURES: Partial<Record<DebugLanguage, ChildReportFixture>> = {
+  [DebugLanguage.PYTHON]: {
+    request: {
+      seq: 7,
+      type: 'request',
+      command: 'startDebugging',
+      arguments: {
+        request: 'attach',
+        configuration: { type: 'python', name: 'Subprocess 37012', subProcessId: 37012, connect: { host: '127.0.0.1', port: 5678 } }
+      }
+    },
+    targetId: '37012',
+    name: 'Subprocess 37012'
+  },
+  [DebugLanguage.JAVASCRIPT]: {
+    request: {
+      seq: 8,
+      type: 'request',
+      command: 'startDebugging',
+      arguments: {
+        request: 'launch',
+        configuration: { type: 'pwa-node', name: 'child.js [4242]', __pendingTargetId: 'a1b2c3d4e5f60718293a4b5c' }
+      }
+    },
+    targetId: 'a1b2c3d4e5f60718293a4b5c',
+    name: 'child.js [4242]'
+  }
+};
 
 interface GeneratedFileHook {
   /** What links the source to the candidate: a `.map` naming it, or the launch that runs it. */
@@ -214,7 +257,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     stepsByTokenPosition: undefined,
     childSessionStrategy: 'launchWithPendingTarget',
     requiresCommandQueueing: true,
-    childAdoption: undefined,
+    childAdoption: { releaseLever: 'throwaway-attach', childOutput: 'launch-session', closeChild: 'release' },
     defaultExceptionBreakMode: 'uncaught'
   },
   [DebugLanguage.RUST]: {
@@ -437,37 +480,57 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
     expect(policy.childAdoption?.advertiseStartDebugging).toBe(true);
   });
 
-  it('never combines the tree contract with the js-shaped reverse adoption', () => {
+  it('combines the tree contract with in-session reverse adoption only when the program is itself a pending target', () => {
     // MinimalDapClient builds the single-target ChildSessionManager for a policy that
-    // `supportsReverseStartDebugging`; a tree-contract policy must not get one.
-    if (policy.childAdoption !== undefined) {
-      expect(policy.supportsReverseStartDebugging).toBe(false);
+    // `supportsReverseStartDebugging`. A tree-contract policy gets one only when its program
+    // arrives as the first pending target (js-debug, issue #1082); every connection it opens
+    // after the root's runs the child-safe derivative, which never adopts in-session.
+    if (policy.childAdoption !== undefined && policy.supportsReverseStartDebugging) {
+      expect(policy.childSessionStrategy).toBe('launchWithPendingTarget');
+      const childSafe = createChildSafePolicy(policy);
+      expect(childSafe.supportsReverseStartDebugging).toBe(false);
+      expect(childSafe.childSessionStrategy).toBe('none');
+      expect(childSafe.childAdoption).toBe(policy.childAdoption);
     }
   });
 
-  it('returns a child report only through the tree contract', async () => {
-    const report: DebugProtocol.Request = {
-      seq: 7,
-      type: 'request',
-      command: 'startDebugging',
-      arguments: {
-        request: 'attach',
-        configuration: { type: 'python', name: 'Subprocess 37012', subProcessId: 37012, connect: { host: '127.0.0.1', port: 5678 } }
+  it('recognises its own child reports through the tree contract, and no other adapter’s', () => {
+    const contract = policy.childAdoption;
+    if (contract === undefined) {
+      return;
+    }
+    const own = CHILD_REPORT_FIXTURES[language];
+    expect(own, `a reporting policy needs a report fixture for ${language}`).toBeDefined();
+    expect(contract.readChildReport(own!.request)).toMatchObject({ targetId: own!.targetId, name: own!.name });
+    for (const [other, fixture] of Object.entries(CHILD_REPORT_FIXTURES)) {
+      if (other !== language && fixture) {
+        expect(contract.readChildReport(fixture.request), `${language} must not read ${other}'s report`).toBeUndefined();
       }
-    };
+    }
+    expect(contract.readChildReport({ seq: 1, type: 'request', command: 'runInTerminal', arguments: {} })).toBeUndefined();
+    // The attach a child connection sends names the target the adapter named.
+    const report = contract.readChildReport(own!.request)!;
+    expect(JSON.stringify(contract.buildChildAttachArguments(report))).toContain(own!.targetId);
+  });
+
+  it('returns a child report only through the tree contract, unanswered', async () => {
+    const fixture = CHILD_REPORT_FIXTURES[language] ?? CHILD_REPORT_FIXTURES[DebugLanguage.PYTHON]!;
     const context = {
       sendResponse: vi.fn(),
       createChildSession: vi.fn(async () => {}),
       activeChildren: new Map<string, unknown>(),
-      adoptedTargets: new Set<string>()
+      // A program that is itself a pending target has been adopted already (js-debug): what
+      // follows is a child of the tree.
+      adoptedTargets: new Set<string>(policy.supportsReverseStartDebugging ? ['the-program'] : [])
     };
-    const result = await policy.getDapClientBehavior().handleReverseRequest?.(report, context);
+    const result = await policy.getDapClientBehavior().handleReverseRequest?.(fixture.request, context);
     if (policy.childAdoption === undefined) {
       expect(result?.childReport).toBeUndefined();
     } else {
-      expect(result).toMatchObject({ handled: true, childReport: { targetId: '37012', name: 'Subprocess 37012' } });
+      expect(result).toMatchObject({ handled: true, childReport: { targetId: fixture.targetId, name: fixture.name } });
       // The report is held by the worker, never answered by the policy.
       expect(context.sendResponse).not.toHaveBeenCalled();
+      expect(context.createChildSession).not.toHaveBeenCalled();
     }
   });
 

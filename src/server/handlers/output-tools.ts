@@ -19,6 +19,10 @@ export async function handleGetOutput(ctx: ToolContext, args: { sessionId: strin
     ? session.outputBuffer.read(since, limit)
     : { entries: [], nextSince: since, hasMore: false, dropped: 0 }; // session created but never launched
   const redaction = redactionSummary(read.entries);
+  // A child whose adapter delivers the tree's output on the launch session
+  // only (js-debug, issue #1082): say where to read instead of answering an
+  // empty page as if the process printed nothing.
+  const outputOn = ctx.sessionManager.outputOnFor(args.sessionId);
   return jsonResult({
     success: true,
     sessionId: args.sessionId,
@@ -26,8 +30,14 @@ export async function handleGetOutput(ctx: ToolContext, args: { sessionId: strin
     nextSince: read.nextSince,
     hasMore: read.hasMore,
     dropped: read.dropped,
-    ...(redaction ? { redaction } : {})
+    ...(redaction ? { redaction } : {}),
+    ...(outputOn ? { outputOn, note: outputOnNote(outputOn) } : {})
   });
+}
+
+/** The one sentence a child answers with when its output lives on the launch session (issue #1082). */
+export function outputOnNote(outputOn: string): string {
+  return `This process's output is on its launch session's buffer (session ${outputOn}); this adapter attributes none of it to the child.`;
 }
 
 export const getOutputTool: ToolHandler = async (ctx, args) => {

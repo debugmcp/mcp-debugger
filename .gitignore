@@ -23,6 +23,7 @@ tests/**/*.js.map
 # Exception: hand-written JS debuggee fixtures (not TS output) — without this
 # negation, `git add` silently skips new fixtures (how PR #252 lost one)
 !tests/fixtures/debug-scripts/*.js
+!tests/fixtures/javascript/subprocess-tree/*.js
 
 # Package source compilation artifacts
 packages/*/src/**/*.js

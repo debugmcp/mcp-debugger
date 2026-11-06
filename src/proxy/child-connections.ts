@@ -8,19 +8,24 @@
  * report is held unanswered here while the parent process decides, then
  * adopted — a fresh connection to the same adapter, the child handshake with
  * the parent's breakpoints re-sent before configurationDone, every event the
- * connection produces forwarded under the child's session id — or released,
- * the request answered `success: false`, on which debugpy unblocks the child
- * itself. A report nobody answers is released by a safety timer, so a child is
- * never parked forever by a silent parent. Every connection opened here is
- * closed here: the adapter lives while any client socket is open.
+ * connection produces forwarded under the child's session id — or released
+ * by the policy's lever: the request answered `success: false`, on which
+ * debugpy unblocks the child itself, or (js-debug, issue #1082, whose report
+ * is acked the moment it is held because its answer decides nothing) a
+ * throwaway connection that attaches to the target and detaches again. A
+ * report nobody answers is released by a safety timer, so a child is never
+ * parked forever by a silent parent. Every connection opened here is closed
+ * here: the adapter lives while any client socket is open.
  */
 import { EventEmitter } from 'events';
 import { randomUUID } from 'node:crypto';
 import path from 'path';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { resolveExceptionFilters } from '@debugmcp/shared';
-import type { AdapterPolicy, ChildReport, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
+import type { AdapterPolicy, ChildAdoptionContract, ChildReport, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
 import type { DapConnectionManager } from './dap-proxy-connection-manager.js';
+import { createChildSafePolicy } from './child-safe-policy.js';
+import { releaseByThrowawayAttach } from './throwaway-release.js';
 import type {
   BreakpointSyncResult,
   ChildAdoptArgs,
@@ -96,8 +101,12 @@ export class ChildConnections extends EventEmitter {
   private readonly held = new Map<string, HeldReport>();
   /** Adopted child connections by their session id. */
   private readonly clients = new Map<string, ChildConnection>();
+  /** Releases own sockets too; shutdown must wait until they have detached. */
+  private readonly releases = new Set<Promise<void>>();
   private readonly releaseTimeoutMs: number;
   private closing = false;
+  /** The policy the connections opened here run (child-safe for an in-session adopter, issue #1082). */
+  private connectionPolicy?: AdapterPolicy;
 
   constructor(private readonly options: ChildConnectionsOptions) {
     super();
@@ -108,11 +117,14 @@ export class ChildConnections extends EventEmitter {
    * Hold every child reported on this connection and tell the parent process.
    * `connectionSessionId` is the session the connection serves: the root's id
    * for the root connection, the child's id for an adopted child (so a
-   * grandchild's report is stamped with its spawning session).
+   * grandchild's report is stamped with its spawning session). A report the
+   * client relays from another connection (js-debug's program target, whose
+   * forks are reported on its own connection) names that connection as
+   * `client`: the answer goes there.
    */
   attach(client: IDapClient, connectionSessionId: string): void {
-    client.on('child-report', ({ request, report }: { request: DebugProtocol.Request; report: ChildReport }) => {
-      this.hold(client, connectionSessionId, request, report);
+    client.on('child-report', ({ request, report, client: origin }: { request: DebugProtocol.Request; report: ChildReport; client?: IDapClient }) => {
+      this.hold(origin ?? client, connectionSessionId, request, report);
     });
   }
 
@@ -126,15 +138,16 @@ export class ChildConnections extends EventEmitter {
     return this.clients.get(sessionId)?.client;
   }
 
-  /** How many adopted child connections are open. */
+  /** How many adopted or releasing child connections are open. */
   liveCount(): number {
-    return this.clients.size;
+    return this.clients.size + this.releases.size;
   }
 
   /**
-   * Release a held report: answer the adapter `success: false` so the child
-   * runs undebugged. Returns false when the report is unknown or already
-   * answered.
+   * Release a held report so the child runs undebugged, by the policy's
+   * lever: answer the adapter `success: false` (debugpy), or attach a
+   * throwaway connection and detach again (js-debug; runs on after this
+   * returns). Returns false when the report is unknown or already answered.
    */
   release(reportId: string, reason: string): boolean {
     const held = this.takeHeld(reportId);
@@ -142,15 +155,19 @@ export class ChildConnections extends EventEmitter {
       return false;
     }
     this.options.logger.info(`[ChildConnections] Releasing child ${held.report.targetId} (${held.report.name}): ${reason}`);
-    held.client.respondToReverseRequest?.(held.request, {}, false, reason);
+    this.giveUp(held, reason);
     return true;
   }
 
-  /** Release every report still held (worker shutdown). */
-  releaseAllHeld(reason: string): void {
-    for (const reportId of Array.from(this.held.keys())) {
-      this.release(reportId, reason);
-    }
+  /** Release held reports and wait for every throwaway socket before the adapter can be stopped. */
+  async releaseAllHeld(reason: string): Promise<void> {
+    do {
+      for (const reportId of Array.from(this.held.keys())) {
+        this.release(reportId, reason);
+      }
+      await Promise.all(this.releases);
+      // A released process can report another process before it detaches.
+    } while (this.held.size > 0 || this.releases.size > 0);
   }
 
   /**
@@ -185,7 +202,7 @@ export class ChildConnections extends EventEmitter {
     let initializedTimer: NodeJS.Timeout | undefined;
     let onInitialized: (() => void) | undefined;
     try {
-      client = deps.dapClientFactory.create(deps.host, deps.port, deps.policy, { traceLabel: label });
+      client = deps.dapClientFactory.create(deps.host, deps.port, this.policyForConnections(deps), { traceLabel: label });
       let cancelAdoption!: (reason: string) => void;
       const cancelled = new Promise<never>((_, reject) => {
         cancelAdoption = (reason) => reject(new Error(reason));
@@ -207,7 +224,10 @@ export class ChildConnections extends EventEmitter {
       });
       const capabilities = await wait(deps.connectionManager.initializeSession(client, childSessionId, deps.adapterId));
 
-      const attach = deps.connectionManager.sendAttachRequest(client, contract.buildChildAttachArguments(held.report));
+      const attach = deps.connectionManager.sendAttachRequest(
+        client,
+        contract.buildChildAttachArguments(held.report, deps.launchConfig as Readonly<Record<string, unknown>> | undefined)
+      );
       const attachFailure = new Promise<never>((_, reject) => {
         attach.catch(reject);
       });
@@ -227,7 +247,7 @@ export class ChildConnections extends EventEmitter {
       await wait(attach);
 
       connection.cancelAdoption = undefined;
-      held.client.respondToReverseRequest?.(held.request, {}, true, undefined);
+      this.answer(held, true);
       logger.info(`[ChildConnections] Child ${held.report.targetId} adopted as session ${childSessionId}`);
       return { sessionId: childSessionId, capabilities };
     } catch (error) {
@@ -239,10 +259,12 @@ export class ChildConnections extends EventEmitter {
         connection.cancelAdoption = undefined;
         if (this.clients.get(childSessionId) === connection) {
           this.clients.delete(childSessionId);
-          this.emitEmptyIfSo();
         }
       }
-      held.client.respondToReverseRequest?.(held.request, {}, false, `adoption failed: ${message}`);
+      // The report is no longer held, so the server's release command that
+      // follows finds nothing: let the child go here, by the policy's lever.
+      this.giveUp(held, `adoption failed: ${message}`);
+      this.emitEmptyIfSo();
       try {
         client?.shutdown(`child adoption failed: ${message}`);
       } catch {
@@ -298,17 +320,19 @@ export class ChildConnections extends EventEmitter {
   /** Close every adopted connection without ending the children (the worker is going down). */
   async closeAll(reason: string): Promise<void> {
     this.closing = true;
-    this.releaseAllHeld(reason);
+    await this.releaseAllHeld(reason);
     this.options.logger.info(`[ChildConnections] Closing ${this.clients.size} child connection(s): ${reason}`);
     for (const sessionId of Array.from(this.clients.keys())) {
       await this.close(sessionId, { terminateDebuggee: false });
     }
+    await this.releaseAllHeld(reason);
   }
 
   // ----- internals -----
 
   private hold(client: IDapClient, connectionSessionId: string, request: DebugProtocol.Request, report: ChildReport): void {
-    if (this.closing) {
+    const throwaway = this.lever() === 'throwaway-attach';
+    if (this.closing && !throwaway) {
       client.respondToReverseRequest?.(request, {}, false, 'worker shutdown');
       return;
     }
@@ -318,6 +342,16 @@ export class ChildConnections extends EventEmitter {
     }, this.releaseTimeoutMs);
     timer.unref?.();
     this.held.set(reportId, { request, report, client, connectionSessionId, timer });
+    if (throwaway) {
+      // The answer decides nothing for this adapter (a pending target is
+      // resolved only by a connection attaching with its id), so answer
+      // once, now, and never again for this request.
+      client.respondToReverseRequest?.(request, {}, true, undefined);
+    }
+    if (this.closing) {
+      this.release(reportId, 'worker shutdown');
+      return;
+    }
     this.options.logger.info(
       `[ChildConnections] Holding child ${report.targetId} (${report.name}) reported on session ${connectionSessionId} as ${reportId}`
     );
@@ -331,6 +365,73 @@ export class ChildConnections extends EventEmitter {
       configuration: report.configuration
     };
     this.options.messageSender.send(message);
+  }
+
+  private lever(): ChildAdoptionContract['releaseLever'] {
+    return this.options.adoption?.policy.childAdoption?.releaseLever ?? 'reject-request';
+  }
+
+  /** Answer a held request the adapter is still waiting on; a throwaway-lever report was answered when held. */
+  private answer(held: HeldReport, success: boolean, message?: string): void {
+    if (this.lever() === 'throwaway-attach') {
+      return;
+    }
+    held.client.respondToReverseRequest?.(held.request, {}, success, message);
+  }
+
+  /** Let a taken report's child run undebugged, by the policy's lever: refuse the request, or attach and detach. */
+  private giveUp(held: HeldReport, reason: string): void {
+    if (this.lever() === 'throwaway-attach') {
+      const releasing = this.releaseByThrowaway(held, reason)
+        .catch((error: unknown) => {
+          this.options.logger.error(`[ChildConnections] Failed to release child ${held.report.targetId}: ${error instanceof Error ? error.message : String(error)}`);
+        })
+        .finally(() => {
+          this.releases.delete(releasing);
+          this.emitEmptyIfSo();
+        });
+      this.releases.add(releasing);
+    } else {
+      held.client.respondToReverseRequest?.(held.request, {}, false, reason);
+    }
+  }
+
+  /** The policy for a connection opened here: never an in-session adopter (issue #1082). */
+  private policyForConnections(deps: ChildAdoptionDeps): AdapterPolicy {
+    this.connectionPolicy ??= createChildSafePolicy(deps.policy);
+    return this.connectionPolicy;
+  }
+
+  /**
+   * The throwaway release (issues #501, #1082): a fresh connection attaches
+   * to the target so the adapter resumes it, then detaches with the target
+   * kept. A process the released child reports in that window is held like
+   * any other, stamped with the session the released child was reported on.
+   */
+  private async releaseByThrowaway(held: HeldReport, reason: string): Promise<void> {
+    const deps = this.options.adoption;
+    const contract = deps?.policy.childAdoption;
+    const { logger } = this.options;
+    if (!deps || !contract) {
+      logger.warn(`[ChildConnections] Child ${held.report.targetId} (${held.report.name}) cannot be released: this worker opens no connections; it stays parked`);
+      return;
+    }
+    const label = held.report.targetId.slice(0, 8);
+    const attachArguments = contract.buildChildAttachArguments(held.report, deps.launchConfig as Readonly<Record<string, unknown>> | undefined);
+    const client = deps.dapClientFactory.create(deps.host, deps.port, this.policyForConnections(deps), { traceLabel: `release:${label}` });
+    this.attach(client, held.connectionSessionId);
+    const released = await releaseByThrowawayAttach({
+      client,
+      policy: deps.policy,
+      attachArguments,
+      label,
+      logger
+    });
+    if (released) {
+      logger.warn(
+        `[ChildConnections] Child ${held.report.targetId} (${held.report.name}) released to run UNDEBUGGED (${reason}) — breakpoints will not bind in that process`
+      );
+    }
   }
 
   private takeHeld(reportId: string): HeldReport | undefined {
@@ -377,11 +478,15 @@ export class ChildConnections extends EventEmitter {
       expected: connection.terminatedSeen || connection.closed
     };
     this.options.messageSender.send(message);
-    this.emitEmptyIfSo();
+    // A cancelled adoption registers its fallback release in its catch.
+    // Let that path announce emptiness, after it owns the replacement socket.
+    if (!connection.cancelAdoption) {
+      this.emitEmptyIfSo();
+    }
   }
 
   private emitEmptyIfSo(): void {
-    if (this.clients.size === 0) {
+    if (this.liveCount() === 0) {
       this.emit('empty');
     }
   }

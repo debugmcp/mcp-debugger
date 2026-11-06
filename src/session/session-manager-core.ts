@@ -621,7 +621,10 @@ export abstract class SessionManagerCore extends EventEmitter {
     const finishClose = this.beginSubtreeClose(sessionId);
     try {
       for (const descendant of this.descendantsDeepestFirst(sessionId)) {
-        if (await this.closeSingleSession(descendant.id, { releaseChild: releaseDescendants })) {
+        // A child whose adapter can only release it (js-debug, issue #1082)
+        // is closed with its target kept, whatever the cascade.
+        const releaseChild = releaseDescendants || (descendant.proxyManager !== undefined && this.childCloseSemantics(descendant) === 'release');
+        if (await this.closeSingleSession(descendant.id, { releaseChild })) {
           closedSessionIds.push(descendant.id);
         }
       }
@@ -635,7 +638,7 @@ export abstract class SessionManagerCore extends EventEmitter {
           this.logger.warn('[SessionManager] Terminating disconnect failed, closing the session anyway:', disconnectError);
         }
       }
-      const closed = await this.closeSingleSession(sessionId);
+      const closed = await this.closeSingleSession(sessionId, { releaseChild: childEnd === 'release' });
       if (closed) {
         closedSessionIds.push(sessionId);
       }
@@ -699,6 +702,33 @@ export abstract class SessionManagerCore extends EventEmitter {
     } catch {
       return 'terminate';
     }
+  }
+
+  /**
+   * Where a child session's output is read (issue #1082): the id of its
+   * tree's root when the adapter delivers the whole tree's output on the
+   * launch session's connection and none on the child's (js-debug, the
+   * policy's `childOutput: 'launch-session'` pin); undefined when the
+   * session's own buffer is the place to read (a root, a debugpy child,
+   * or a child under an attach root, whose console output is per-target).
+   */
+  public outputOnFor(sessionId: string): string | undefined {
+    const session = this.sessionStore.get(sessionId);
+    if (!session?.parentSessionId) {
+      return undefined;
+    }
+    try {
+      if (this.sessionStore.selectPolicy(session.language).childAdoption?.childOutput !== 'launch-session') {
+        return undefined;
+      }
+    } catch {
+      return undefined;
+    }
+    const root = this.rootOf(session);
+    // A launch owns the stdout/stderr pipes; an attach does not. js-debug's
+    // default console capture on attach emits on each target's connection,
+    // so pointing at the root would hide the child's actual output.
+    return root.id === session.id || root.attachMode ? undefined : root.id;
   }
 
   /**

@@ -5,8 +5,8 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
-import { DebugLanguage, SessionState } from '@debugmcp/shared';
-import { createMockDependencies, createMockEnvironment } from './session-manager-test-utils.js';
+import { DebugLanguage, JsDebugAdapterPolicy, SessionState } from '@debugmcp/shared';
+import { createMockDependencies, createMockEnvironment, overridePolicy } from './session-manager-test-utils.js';
 import type { MockChildProxyView } from '../../../test-utils/mocks/mock-proxy-manager.js';
 
 const report = (reportId: string, pid = 4242) => ({
@@ -903,5 +903,70 @@ describe('SessionManager child sessions (issue #1081)', () => {
     expect(childOf(rootId)).toBeUndefined();
     expect(releases()).toEqual([expect.objectContaining({ args: expect.objectContaining({ reportId: 'r1' }) })]);
     expect(dependencies.mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('view unavailable'));
+  });
+
+  describe('a child whose adapter can only release it, with its output on the launch session (js-debug, issue #1082)', () => {
+    async function jsTree(): Promise<{ rootId: string; childId: string; grandchildId: string; childView: MockChildProxyView; grandchildView: MockChildProxyView }> {
+      overridePolicy(sessionManager, { childAdoption: JsDebugAdapterPolicy.childAdoption });
+      const rootId = await startRoot();
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+      await vi.runAllTimersAsync();
+      const childId = childOf(rootId)!.id;
+      const childView = dependencies.mockProxyManager.childViews.get(childId)!;
+      childView.simulateEvent('child-reported', report('r2', 4343));
+      await vi.runAllTimersAsync();
+      const grandchildId = childOf(childId)!.id;
+      const grandchildView = dependencies.mockProxyManager.childViews.get(grandchildId)!;
+      return { rootId, childId, grandchildId, childView, grandchildView };
+    }
+
+    it('closing the child keeps its target: the connection closes with terminateDebuggee false and the answer says released', async () => {
+      const { rootId, childId, grandchildId, childView, grandchildView } = await jsTree();
+
+      const outcome = await sessionManager.closeSessionReporting(childId);
+
+      expect(outcome).toEqual({ closed: true, closedSessionIds: [grandchildId, childId], childrenClosed: 1, released: true });
+      expect(outcome.processEnded).toBeUndefined();
+      expect(childView.stopOptions[0]).toEqual({ terminateDebuggee: false });
+      expect(grandchildView.stopOptions[0]).toEqual({ terminateDebuggee: false });
+      expect(sessionManager.getSession(rootId)).toBeDefined();
+    });
+
+    it('closing the launch root releases such children on its way down', async () => {
+      const { rootId, childView, grandchildView } = await jsTree();
+
+      const outcome = await sessionManager.closeSessionReporting(rootId);
+
+      expect(outcome.closed).toBe(true);
+      expect(outcome.childrenClosed).toBe(2);
+      expect(outcome.released).toBeUndefined();
+      expect(childView.stopOptions[0]).toEqual({ terminateDebuggee: false });
+      expect(grandchildView.stopOptions[0]).toEqual({ terminateDebuggee: false });
+      expect(sessionManager.getAllSessions()).toHaveLength(0);
+    });
+
+    it("outputOnFor names the tree's root for a child whose output rides the launch session, and nothing otherwise", async () => {
+      const { rootId, childId, grandchildId } = await jsTree();
+
+      expect(sessionManager.outputOnFor(childId)).toBe(rootId);
+      expect(sessionManager.outputOnFor(grandchildId)).toBe(rootId);
+      expect(sessionManager.outputOnFor(rootId)).toBeUndefined();
+      expect(sessionManager.outputOnFor('no-such-session')).toBeUndefined();
+
+      // A debugpy child carries its own lines: no pointer.
+      overridePolicy(sessionManager, { childAdoption: { ...JsDebugAdapterPolicy.childAdoption!, childOutput: 'own-connection' } });
+      expect(sessionManager.outputOnFor(childId)).toBeUndefined();
+    });
+
+    it('reads child and grandchild output from their own connections under an attach root', async () => {
+      const { rootId, childId, grandchildId, childView } = await jsTree();
+      sessionManager.getSession(rootId)!.attachMode = true;
+      childView.simulateEvent('output', { category: 'stdout', output: 'child console output\n' });
+
+      expect(sessionManager.outputOnFor(childId)).toBeUndefined();
+      expect(sessionManager.outputOnFor(grandchildId)).toBeUndefined();
+      expect(sessionManager.getSession(childId)!.outputBuffer!.renderText()).toContain('child console output');
+      expect(sessionManager.getSession(rootId)!.outputBuffer!.renderText()).not.toContain('child console output');
+    });
   });
 });
