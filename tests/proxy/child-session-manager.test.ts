@@ -487,7 +487,7 @@ describe('ChildSessionManager', () => {
         }
       });
 
-      it('uses the same parent intent for a release forwarded from a child connection', async () => {
+      it("a fork's startDebugging on the adopted child's connection is a child report, not a release (issue #1082)", async () => {
         vi.useFakeTimers();
         try {
           const getParentStart = vi.fn(() => start);
@@ -508,44 +508,26 @@ describe('ChildSessionManager', () => {
           getParentStart.mockClear();
 
           // js-debug delivers a fork's startDebugging on the adopted child's
-          // own connection; the child-safe policy hands it back to the
-          // manager (issue #501). Drive that handler exactly as the child's
-          // MinimalDapClient would.
+          // own connection. The child-safe policy reads it as a child report
+          // for the worker to hold (the session tree); the manager neither
+          // acks nor releases it, so its parent intent is never consulted.
           const child = MockMinimalDapClient.instances[0];
           const result = await forwardStartDebugging(child, {
             type: 'pwa-node',
             name: 'fork',
             __pendingTargetId: 'forked-child'
           });
-          expect(result.handled).toBe(true);
-          // The release runs the attach + ready-signal wait + disconnect
+          expect(result).toEqual({
+            handled: true,
+            childReport: { targetId: 'forked-child', name: 'fork', configuration: { type: 'pwa-node', name: 'fork', __pendingTargetId: 'forked-child' } }
+          });
           await vi.advanceTimersByTimeAsync(20000);
 
-          expect(getParentStart).toHaveBeenCalledExactlyOnceWith();
-          // The release uses the same attach extras as direct adoption.
-          const release = findReleaseClient('forked-child');
-          expect(release).toBeDefined();
-          expect(release!.options?.traceLabel).toBe('release:forked-c');
-          const releaseAttach = release!.requests.find((r) => r.command === 'attach');
-          expect(releaseAttach?.args).toEqual(expect.objectContaining({ localRoot: '/forwarded' }));
-
-          // The release RAN TO COMPLETION. Everything above holds just as well
-          // for a release that timed out mid-flight or rolled back, because the
-          // attach is recorded before the ready wait and the disconnect.
-          expect(release!.requests.map((r) => r.command)).toEqual([
-            'initialize',
-            'configurationDone',
-            'attach',
-            'disconnect'
-          ]);
-          expect(
-            (release!.requests.at(-1)!.args as Record<string, unknown>).terminateDebuggee
-          ).toBe(false);
-          expect(release!.shutdownCalls).toEqual(['release complete']);
-          // …and the target stayed marked released rather than rolling back
+          expect(getParentStart).not.toHaveBeenCalled();
+          expect(findReleaseClient('forked-child')).toBeUndefined();
           expect(
             (enriched as unknown as { releasedTargets: Set<string> }).releasedTargets.has('forked-child')
-          ).toBe(true);
+          ).toBe(false);
 
           // The active child was never disturbed
           expect(enriched.getActiveChild()).toBe(child as unknown);
@@ -1819,7 +1801,7 @@ describe('ChildSessionManager', () => {
       }
     }
 
-    it('hands children a policy that cannot spawn grandchildren', async () => {
+    it('hands the program target a policy that never adopts in-session and reads forks as child reports', async () => {
       const baseHandle = vi.fn(async (req: DebugProtocol.Request) =>
         req.command === 'startDebugging' ? { handled: true, wouldSpawn: true } : { handled: false }
       );
@@ -1836,18 +1818,26 @@ describe('ChildSessionManager', () => {
       const childPolicy = MockMinimalDapClient.lastInstance!.policy!;
       expect(childPolicy.supportsReverseStartDebugging).toBe(false);
       expect(childPolicy.childSessionStrategy).toBe('none');
+      expect(childPolicy.childAdoption).toBe(JsDebugAdapterPolicy.childAdoption);
 
       const behavior = childPolicy.getDapClientBehavior();
       expect(behavior.mirrorBreakpointsToChild).toBe(false);
       expect(behavior.pauseAfterChildAttach).toBe(false);
       expect(behavior.childRoutedCommands?.size).toBe(0);
 
-      // A grandchild-spawning reverse request is acknowledged and stopped
+      // A startDebugging that names no pending target is not a report: the
+      // base handler runs, and whatever it would adopt is stopped here.
       const spawnResult = await behavior.handleReverseRequest!(
         { seq: 1, type: 'request', command: 'startDebugging' } as never,
         {} as never
       );
       expect(spawnResult).toEqual({ handled: true });
+      expect(baseHandle).toHaveBeenCalledTimes(1);
+
+      // A fork's report is read through the tree contract, never acked here (issue #1082).
+      const forkResult = await forwardStartDebugging(MockMinimalDapClient.lastInstance!, { __pendingTargetId: 'fork-1', name: 'child.js [7]' });
+      expect(forkResult).toEqual({ handled: true, childReport: { targetId: 'fork-1', name: 'child.js [7]', configuration: { __pendingTargetId: 'fork-1', name: 'child.js [7]' } } });
+      expect(baseHandle).toHaveBeenCalledTimes(1);
 
       // Unhandled reverse requests pass through untouched
       const passthrough = await behavior.handleReverseRequest!(
@@ -1859,28 +1849,33 @@ describe('ChildSessionManager', () => {
       await mgr.shutdown();
     });
 
-    it('releases a fork startDebugging arriving on the child connection (issue #501)', async () => {
+    it("relays a fork reported on the program target's connection as a child report with that connection (issue #1082)", async () => {
       const mgr = new ChildSessionManager({ policy: JsDebugAdapterPolicy, host: 'localhost', port: 9229 });
       await createChild(mgr);
 
-      // js-debug delivers fork auto-attach startDebugging requests on the
-      // ADOPTED CHILD's connection, so the child-safe policy must hand them
-      // back to the manager for release instead of dropping them
+      // js-debug delivers fork startDebugging requests on the ADOPTED
+      // CHILD's connection: the manager hands the held request up, naming
+      // the connection it must be answered on, and never releases it itself.
       const forkParent = MockMinimalDapClient.lastInstance!;
+      const relayed = vi.fn();
+      mgr.on('childReport', relayed);
+      const request = { seq: 7, type: 'request', command: 'startDebugging', arguments: { configuration: { __pendingTargetId: 'fork-1' } } };
+      const report = { targetId: 'fork-1', name: 'child.js [7]', configuration: { __pendingTargetId: 'fork-1' } };
 
-      vi.useFakeTimers();
-      try {
-        const result = await forwardStartDebugging(forkParent, { __pendingTargetId: 'grandchild-1' });
-        expect(result).toEqual({ handled: true });
-        // The forward is fire-and-forget; drive the release flow to completion
-        await vi.advanceTimersByTimeAsync(25000);
-      } finally {
-        vi.useRealTimers();
-      }
+      forkParent.emit('child-report', { request, report });
 
-      const releaseClient = findReleaseClient('grandchild-1');
-      expect(releaseClient, 'the forwarded fork target must be released via a throwaway client').toBeDefined();
-      expect(releaseClient!.shutdownCalls).toEqual(['release complete']);
+      expect(relayed).toHaveBeenCalledWith({ request, report, client: forkParent });
+      expect(findReleaseClient('fork-1'), 'the manager no longer releases forks itself').toBeUndefined();
+
+      await mgr.shutdown();
+    });
+
+    it("advertises supportsStartDebuggingRequest on the program target's initialize under the tree contract (issue #1082)", async () => {
+      const mgr = new ChildSessionManager({ policy: JsDebugAdapterPolicy, host: 'localhost', port: 9229 });
+      await createChild(mgr);
+
+      const initialize = MockMinimalDapClient.lastInstance!.requests.find((r) => r.command === 'initialize');
+      expect(initialize?.args).toMatchObject({ supportsStartDebuggingRequest: true });
 
       await mgr.shutdown();
     });

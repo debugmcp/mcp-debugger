@@ -10,6 +10,7 @@ import type {
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { JsDebugAdapterPolicy } from '@debugmcp/shared';
 import type { ChildSessionConfig, DapClientBehavior, ReverseRequestResult } from '@debugmcp/shared';
+import { createMockDapClient } from '../../test-utils/mocks/dap-client.js';
 
 // Mock the net module
 vi.mock('net');
@@ -1609,8 +1610,33 @@ describe('MinimalDapClient', () => {
 
         await (client as any).handleProtocolMessage(request);
 
-        expect(listener).toHaveBeenCalledWith({ request, report: childReport });
+        // The report names the connection it arrived on (this one): the answer goes there.
+        expect(listener).toHaveBeenCalledWith({ request, report: childReport, client });
         expect(responseSpy).not.toHaveBeenCalled();
+      });
+
+      it("relays a report the program target's connection received, naming that connection, unanswered (js-debug, issue #1082)", () => {
+        const manager = createChildSessionManagerStub();
+        const client = new MinimalDapClient('localhost', 9229, JsDebugAdapterPolicy, { childSessionManagerFactory: () => manager });
+        const programTarget = createMockDapClient();
+        const listener = vi.fn();
+        client.on('child-report', listener);
+
+        manager.emit('childReport', { request, report: childReport, client: programTarget });
+
+        expect(listener).toHaveBeenCalledWith({ request, report: childReport, client: programTarget });
+        expect(programTarget.respondToReverseRequest).not.toHaveBeenCalled();
+      });
+
+      it("acks a relayed js-debug report nobody listens for on the connection it came from, and says it stays parked", () => {
+        const manager = createChildSessionManagerStub();
+        const client = new MinimalDapClient('localhost', 9229, JsDebugAdapterPolicy, { childSessionManagerFactory: () => manager });
+        const programTarget = createMockDapClient();
+
+        manager.emit('childReport', { request, report: childReport, client: programTarget });
+
+        // Refusing would park the child just the same (measured); an ack is honest about it.
+        expect(programTarget.respondToReverseRequest).toHaveBeenCalledWith(request, {}, true, undefined);
       });
 
       it('is released at once when nobody listens, so a child is never parked by default', async () => {

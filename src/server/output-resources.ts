@@ -13,6 +13,7 @@ import { WireMcpError } from '../errors/debug-errors.js';
 import type { SessionManager } from '../session/session-manager.js';
 import { proxyLogPathFor } from '../proxy/session-log-layout.js';
 import { readProxyLogTail } from '../session/launch/proxy-failure-diagnostics.js';
+import { outputOnNote } from './handlers/output-tools.js';
 import {
   outputResourceUri,
   parseOutputResourceUri,
@@ -169,12 +170,17 @@ export function registerResourceHandlers(
         contents: [{ uri, mimeType: 'text/plain', text: text ?? '' }]
       };
     }
+    // A child whose adapter delivers the tree's output on the launch session
+    // only (js-debug, issue #1082) reads as a pointer to that resource.
+    const outputOn = sessionManager.outputOnFor(session.id);
     return {
       contents: [{
         uri,
         mimeType: 'text/plain',
         // Empty until the first launch creates the buffer
-        text: session.outputBuffer?.renderText() ?? ''
+        text: outputOn
+          ? `${outputOnNote(outputOn)}\nRead ${outputResourceUri(outputOn)} instead.\n`
+          : session.outputBuffer?.renderText() ?? ''
       }]
     };
   });

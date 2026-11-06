@@ -696,6 +696,35 @@ describe('Server Inspection Tools Tests', () => {
       expect(content.entries).toHaveLength(1);
     });
 
+    it("says where a child's output is read when its adapter delivers it on the launch session only (js-debug, issue #1082)", async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'child-session',
+        parentSessionId: 'root-session',
+        sessionLifecycle: 'ACTIVE',
+        outputBuffer: makeBuffer([])
+      });
+      mockSessionManager.outputOnFor.mockReturnValue('root-session');
+
+      const content = await callGetOutput({ sessionId: 'child-session' });
+      expect(content.success).toBe(true);
+      expect(content.entries).toEqual([]);
+      expect(content.outputOn).toBe('root-session');
+      expect(content.note).toContain('root-session');
+      expect(mockSessionManager.outputOnFor).toHaveBeenCalledWith('child-session');
+    });
+
+    it('carries no output pointer for a session that reads its own buffer', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'ACTIVE',
+        outputBuffer: makeBuffer(['one\n'])
+      });
+
+      const content = await callGetOutput({ sessionId: 'test-session' });
+      expect(content.outputOn).toBeUndefined();
+      expect(content.note).toBeUndefined();
+    });
+
     it('returns success:false for an unknown session', async () => {
       mockSessionManager.getSession.mockReturnValue(undefined);
 

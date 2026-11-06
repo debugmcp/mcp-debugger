@@ -862,3 +862,83 @@ describe('JsDebugAdapterPolicy.generatedFileCandidates (issue #938)', () => {
     expect(hook({ sourcePath: at('a.tsx') })).toEqual([gen('a.js')]);
   });
 });
+
+describe('JsDebugAdapterPolicy and the session tree (issue #1082)', () => {
+  const contract = JsDebugAdapterPolicy.childAdoption;
+  const pendingId = 'a1b2c3d4e5f60718293a4b5c';
+  const configuration = { type: 'pwa-node', name: 'child.js [4242]', __pendingTargetId: pendingId };
+  const report = (seq: number, cfg: Record<string, unknown> = configuration) =>
+    ({ seq, type: 'request', command: 'startDebugging', arguments: { request: 'launch', configuration: cfg } }) as never;
+  const context = (adopted: string[] = []) => ({
+    sendResponse: vi.fn(),
+    createChildSession: vi.fn(async () => {}),
+    activeChildren: new Map<string, unknown>(),
+    adoptedTargets: new Set<string>(adopted)
+  });
+
+  it('pins the measured facts: throwaway release, output on the launch session, close releases', () => {
+    expect(contract).toMatchObject({
+      advertiseStartDebugging: true,
+      releaseLever: 'throwaway-attach',
+      childOutput: 'launch-session',
+      closeChild: 'release'
+    });
+  });
+
+  it('reads a report off a startDebugging with a pending target id, and nothing else', () => {
+    expect(contract.readChildReport(report(1))).toEqual({ targetId: pendingId, name: 'child.js [4242]', configuration });
+    // A report with no usable name is labelled by its target.
+    expect(contract.readChildReport(report(2, { type: 'pwa-node', __pendingTargetId: pendingId }))?.name).toBe(`target ${pendingId.slice(0, 8)}`);
+    expect(contract.readChildReport(report(3, { type: 'pwa-node', name: 'x' }))).toBeUndefined();
+    expect(contract.readChildReport({ seq: 4, type: 'request', command: 'runInTerminal', arguments: {} } as never)).toBeUndefined();
+    expect(contract.readChildReport({ seq: 5, type: 'request', command: 'startDebugging' } as never)).toBeUndefined();
+  });
+
+  it('attaches a child with the measured second-connection body, forwarding an attach root’s extras only', () => {
+    const child = contract.readChildReport(report(1))!;
+    expect(contract.buildChildAttachArguments(child)).toEqual({
+      type: 'pwa-node',
+      request: 'attach',
+      __pendingTargetId: pendingId,
+      continueOnAttach: true
+    });
+    // A launch root's keys (program, cwd, …) never ride into the child.
+    expect(contract.buildChildAttachArguments(child, { request: 'launch', program: '/w/parent.js', skipFiles: ['<node_internals>/**'] })).toEqual({
+      type: 'pwa-node',
+      request: 'attach',
+      __pendingTargetId: pendingId,
+      continueOnAttach: true
+    });
+    // An attach root's forwardable extras do (issue #466); its connection keys do not.
+    expect(contract.buildChildAttachArguments(child, { request: 'attach', port: 9229, address: 'localhost', localRoot: '/l', remoteRoot: '/r', sourceMaps: true })).toEqual({
+      localRoot: '/l',
+      remoteRoot: '/r',
+      sourceMaps: true,
+      request: 'attach',
+      type: 'pwa-node',
+      __pendingTargetId: pendingId,
+      continueOnAttach: true
+    });
+  });
+
+  it('adopts the first pending target in-session (the program) and hands every later one up as a child report, unanswered', async () => {
+    const behavior = JsDebugAdapterPolicy.getDapClientBehavior();
+
+    const first = context();
+    const program = await behavior.handleReverseRequest!(report(1, { ...configuration, __pendingTargetId: 'the-program' }), first);
+    expect(program).toMatchObject({ handled: true, createChildSession: true, childConfig: { pendingId: 'the-program' } });
+    expect(program.childReport).toBeUndefined();
+    expect(first.sendResponse).toHaveBeenCalledTimes(1);
+    expect(first.adoptedTargets.has('the-program')).toBe(true);
+
+    const later = await behavior.handleReverseRequest!(report(2), first);
+    expect(later).toEqual({ handled: true, childReport: { targetId: pendingId, name: 'child.js [4242]', configuration } });
+    expect(first.sendResponse).toHaveBeenCalledTimes(1);
+    expect(first.adoptedTargets.has(pendingId)).toBe(false);
+
+    // A re-sent request for the program itself is still acked and not a child.
+    const resent = await behavior.handleReverseRequest!(report(3, { ...configuration, __pendingTargetId: 'the-program' }), first);
+    expect(resent).toEqual({ handled: true });
+    expect(first.sendResponse).toHaveBeenCalledTimes(2);
+  });
+});

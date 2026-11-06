@@ -9,10 +9,11 @@
 import { randomBytes } from 'crypto';
 import { EventEmitter } from 'events';
 import { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy, ExceptionBreakMode } from '@debugmcp/shared';
+import type { AdapterPolicy, ChildReport, ExceptionBreakMode } from '@debugmcp/shared';
 import type { DapClientBehavior, ChildSessionConfig, ParentStart } from '@debugmcp/shared';
 import { resolveExceptionFilters } from '@debugmcp/shared';
 import { createLogger } from '../utils/logger.js';
+import { createChildSafePolicy } from './child-safe-policy.js';
 import type { MinimalDapClient } from './minimal-dap.js';
 import { CdpFunctionBreakpointBridge } from './cdp-function-breakpoint-bridge.js';
 import { sendSetBreakpointsStamping, watchConditionSyntaxErrors, matchStoredBreakpoint } from './breakpoint-condition-errors.js';
@@ -36,53 +37,6 @@ function loadMinimalDap(): Promise<typeof import('./minimal-dap.js')> {
 
 function createInstanceId(): string {
   return randomBytes(4).toString('hex');
-}
-
-function createChildSafePolicy(
-  policy: AdapterPolicy,
-  onUnadoptableChild?: (config: ChildSessionConfig) => void
-): AdapterPolicy {
-  if (!policy.supportsReverseStartDebugging) {
-    return policy;
-  }
-
-  return {
-    ...policy,
-    supportsReverseStartDebugging: false,
-    childSessionStrategy: 'none',
-    getDapClientBehavior: (): DapClientBehavior => {
-      const baseBehavior = policy.getDapClientBehavior();
-      const behavior: DapClientBehavior = {
-        ...baseBehavior,
-        childRoutedCommands: new Set<string>(),
-        mirrorBreakpointsToChild: false,
-        pauseAfterChildAttach: false,
-        stackTraceRequiresChild: false,
-        // Child/release connections talk to the real target directly — they
-        // must never self-gate on child availability (issue #513)
-        childRequiredCommands: new Set<string>(),
-      };
-
-      if (baseBehavior.handleReverseRequest) {
-        behavior.handleReverseRequest = async (request, context) => {
-          const result = await baseBehavior.handleReverseRequest!(request, context);
-          if (!result.handled) {
-            return result;
-          }
-          // Do not spawn grandchildren — but do not strand them either
-          // (issue #501): js-debug delivers fork auto-attach startDebugging
-          // requests on the adopted child's connection, so hand the target
-          // to the owning manager, which releases it to run undebugged.
-          if (result.createChildSession && result.childConfig && onUnadoptableChild) {
-            onUnadoptableChild(result.childConfig);
-          }
-          return { handled: true };
-        };
-      }
-
-      return behavior;
-    },
-  };
 }
 
 export interface ChildSessionOptions {
@@ -711,7 +665,10 @@ export class ChildSessionManager extends EventEmitter {
       adapterID: this.policy.getDapAdapterConfiguration().type,
       pathFormat: 'path',
       linesStartAt1: true,
-      columnsStartAt1: true
+      columnsStartAt1: true,
+      // The session tree (issue #1082): the processes this target starts are
+      // reported on this connection; ask for the request form here too.
+      ...(this.policy.childAdoption?.advertiseStartDebugging ? { supportsStartDebuggingRequest: true } : {})
     };
     
     logger.info(`[child:${pendingId}] initialize`);
@@ -866,19 +823,13 @@ export class ChildSessionManager extends EventEmitter {
   }
 
   /**
-   * Child-safe policy wired back to this manager: a startDebugging arriving
-   * on a child (or release) connection is handed to createChildSession,
-   * which — with a child already active — releases it (issue #501).
-   * Fire-and-forget: the DAP ack was already sent by the base policy, and a
-   * release must not block the child's message dispatch.
+   * The policy the program target's (and a release's) connection runs: no
+   * in-session adoption, no child routing, and every process the adapter
+   * reports on it read as a child report (issue #1082) that wireChildEvents
+   * relays to the root connection's holder, unanswered.
    */
   private buildChildSafePolicy(): AdapterPolicy {
-    return createChildSafePolicy(this.policy, (config) => {
-      void this.createChildSession(config).catch((err) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        logger.error(`[ChildSessionManager:${this.instanceId}] Forwarded unadoptable child ${config.pendingId} failed: ${msg}`);
-      });
-    });
+    return createChildSafePolicy(this.policy);
   }
 
   /**
@@ -1076,6 +1027,13 @@ export class ChildSessionManager extends EventEmitter {
    * Wire child events to forward to parent
    */
   private wireChildEvents(child: MinimalDapClient): void {
+    // A fork is reported on the program target's connection, i.e. on this
+    // child (issue #1082): relay the held request, with the connection it
+    // must be answered on, for the root client to hand to the worker.
+    child.on('child-report', (held: { request: DebugProtocol.Request; report: ChildReport }) => {
+      this.emit('childReport', { request: held.request, report: held.report, client: child });
+    });
+
     child.on('event', (evt: DebugProtocol.Event) => {
       if (evt.event === 'stopped') {
         this.sawChildStop = true;

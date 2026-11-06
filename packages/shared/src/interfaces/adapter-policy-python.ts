@@ -47,6 +47,7 @@ const pythonChildAdoption: ChildAdoptionContract = {
   childOutput: 'own-connection',
   // `disconnect { terminateDebuggee: true }` on the child ends it (exit 0 reported to the parent).
   closeChild: 'terminate',
+  readChildReport: readDebugpyChildReport,
   buildChildAttachArguments: (report: ChildReport): Record<string, unknown> => ({
     ...report.configuration,
     redirectOutput: true
@@ -352,7 +353,7 @@ export const PythonAdapterPolicy = {
           context.sendResponse(request, {});
           return { handled: true };
         }
-        const childReport = readDebugpyChildReport(request);
+        const childReport = pythonChildAdoption.readChildReport(request);
         if (childReport) {
           // No response here: the worker holds the request until the server
           // adopts the child (success) or releases it (failure, which makes
