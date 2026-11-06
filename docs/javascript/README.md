@@ -211,7 +211,12 @@ Every Node process the program starts — a `fork()`, a `spawn(process.execPath,
 For an `attach_to_process` root, the default console capture delivers each child's console
 output to that child's own buffer and resource; it does not return an `outputOn` pointer to the
 root. A launch child's output resource still includes any diagnostics recorded for that child
-alongside the pointer to the launch output.
+alongside the pointer to the launch output. One hazard of an attached target started with
+`node --inspect`: a child it `fork()`s inherits that flag through `execArgv` by default, fights
+the parent for the inspector port, and js-debug's process-tree scan then attaches it as a
+nameless `Child Process [<pid>]` target whose breakpoints never bind, racing the bootloader's own
+report (seen on a slow CI runner). Fork with `execArgv: []` in a program that is attached to this
+way; the bootloader reaches the child through `NODE_OPTIONS` regardless.
 
 Fork logpoints use a `console.log` fallback because each fork does not have its own CDP logpoint
 bridge. A child that replaces `console.log` can suppress those messages; the program target's

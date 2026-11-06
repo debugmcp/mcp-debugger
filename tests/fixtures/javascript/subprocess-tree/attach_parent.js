@@ -19,7 +19,12 @@ console.log('ATTACH_PARENT_READY');
 process.stdin.setEncoding('utf8');
 process.stdin.once('data', () => {
   console.log('parent go');
-  const child = fork(join(here, 'child.js'), [], { stdio: 'inherit', windowsHide: true });
+  // execArgv: [] so the child does not inherit this process's --inspect flag:
+  // it would fight over the port, and js-debug's process-tree scan attaches to
+  // any child whose arguments carry an inspector port as a nameless
+  // "Child Process" target (seen on a slow CI runner) instead of the
+  // bootloader's own report, which is what the session tree is built on.
+  const child = fork(join(here, 'child.js'), [], { execArgv: [], stdio: 'inherit', windowsHide: true });
   child.on('exit', (code) => {
     console.log(`parent child exit ${code}`);
     process.exit(code ?? 1);
