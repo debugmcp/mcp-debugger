@@ -57,6 +57,13 @@ const TS_GENERATED_EXTENSION: Readonly<Record<string, string>> = {
   '.cts': '.cjs'
 };
 const DECLARATION_FILE = /\.d\.[mc]?ts$/i;
+/**
+ * js-debug's `_createPausedDetails` fallback for a CDP pause it has no
+ * breakpoint for: a real `debugger;` statement, and (issue #1097) its own
+ * leaked module-entry break. The body is the same for both.
+ */
+const isDebuggerStatementPause = (body: DebugProtocol.StoppedEvent['body'] | undefined): boolean =>
+  /debugger statement/i.test(body?.description ?? '');
 /** Output directories tried under the nearest package when no tsconfig names an outDir. */
 const CONVENTIONAL_OUT_DIRS = ['dist', 'build', 'out', 'lib'] as const;
 
@@ -281,7 +288,37 @@ export const JsDebugAdapterPolicy = {
    * code: report it as one, so it is never auto-continued as an incidental
    * first stop and the frame it lands in is treated as the stop location
    * (issue #672). The raw reason is kept alongside by the session layer.
+   *
+   * The same body is also js-debug's generic answer for a pause it has no
+   * breakpoint for, and under load its own module-entry break — set at 1:1 of
+   * every file that carries a user breakpoint, normally swallowed — surfaces
+   * that way at the module's first statement, on a launch's first stop and on
+   * an adopted child's (issue #1097, measured once with four cluster workers
+   * starting at once; the reading of the bundle: the break's CDP registration
+   * is not awaited, so a `Debugger.paused` that lands first is not recognised
+   * as the entry break, and `continueOnAttach` resumes only "Break on start").
+   * Nothing in the event tells the two apart; the source line under the top
+   * frame does. On the first stop of a launch that did not ask to stop on
+   * entry the policy asks the core for that line (`stopNeedsSourceLine`) and
+   * names a line without a `debugger` token 'entry' — the core's
+   * stopOnEntry:false rule then resumes it, unseen. A line with the token
+   * anywhere on it (a comment included), or no line to go on (no path, a
+   * failed read), keeps 'breakpoint': the check only ever resumes on a
+   * positive read.
    */
+  stopNeedsSourceLine: (
+    reason: string,
+    body: DebugProtocol.StoppedEvent['body'] | undefined,
+    context: StopReasonContext
+  ): boolean =>
+    reason === 'pause' &&
+    isDebuggerStatementPause(body) &&
+    !body?.hitBreakpointIds?.length &&
+    context.firstStop === true &&
+    context.sessionMode === 'launch' &&
+    context.stopOnEntry === false &&
+    !context.pausePending,
+
   normalizeStopReason: (
     reason: string,
     body: DebugProtocol.StoppedEvent['body'] | undefined,
@@ -290,7 +327,10 @@ export const JsDebugAdapterPolicy = {
     if (reason === 'step' && context.pausePending) {
       return 'pause';
     }
-    if (reason === 'pause' && /debugger statement/i.test(body?.description ?? '')) {
+    if (reason === 'pause' && isDebuggerStatementPause(body)) {
+      if (!body?.hitBreakpointIds?.length && context.topFrameLine && !/\bdebugger\b/.test(context.topFrameLine.text)) {
+        return 'entry';
+      }
       return 'breakpoint';
     }
     return undefined;

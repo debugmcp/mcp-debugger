@@ -24,7 +24,7 @@ Go. Every process in the tree is one `startDebugging` with a `__pendingTargetId`
 5. `configurationDone`, then the `attach` response 19–40 ms after `attach` was sent; `thread started`, ~150 `loadedSource` events, `continued`; the child's first line ran 10–17 ms after the response.
 6. `threads`: root `[]`; main `[{ id: 0, name: "parent.js [pid]" }]`; fork `[{ id: 1, name: "child.js [pid]" }]`; grandchild id 2 — thread ids are unique across the server's sessions (debugpy numbers them per session).
 
-Variance seen once (`disconnect-main` run): the first event after adoption was `stopped` with reason `pause` at `child.js:1` rather than the breakpoint — the entry pause surfaced before `continueOnAttach` resumed. The proxy's entry-stop handling for the one child already covers that shape.
+Variance seen once (`disconnect-main` run): the first event after adoption was `stopped` with reason `pause` at `child.js:1` rather than the breakpoint — js-debug's module-entry break (set at 1:1 of every file that carries a user breakpoint, normally swallowed) surfacing as its generic "Paused on debugger statement" pause, which `continueOnAttach` does not resume (it resumes "Break on start" only). Seen again under load with four cluster workers (issue #1097, where the js policy's `debugger;` relabel then reported it as a breakpoint): the server now reads the source line under such a first stop and resumes it when the line holds no `debugger` statement, before anything is answered.
 
 What does **not** carry over:
 
