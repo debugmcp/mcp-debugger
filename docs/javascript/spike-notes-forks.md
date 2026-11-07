@@ -35,7 +35,7 @@ What does **not** carry over:
 ## What happens when the report is answered differently
 
 - **Acked (`{}`) and never attached**: parked — 4 s later no child output and the process alive. A late attach 4.9 s after the report adopted it normally (stopped on the breakpoint 240 ms later).
-- **Rejected (`success: false`)**: the child stays parked **indefinitely** — 20 s with no progress, process alive, and the parent (waiting on its exit) never ends. js-debug has no unblock-on-reject; the throwaway attach-then-detach release (#501, `releaseUndebugged`) remains the only way to let an unadopted child run. The opposite of debugpy.
+- **Rejected (`success: false`)**: the child stays parked **indefinitely** — 20 s with no progress, process alive, and the parent (waiting on its exit) never ends. js-debug has no unblock-on-reject; the throwaway attach-then-detach release (#501's lever, `src/proxy/throwaway-release.ts`) remains the only way to let an unadopted child run. The opposite of debugpy.
 
 ## Cascade matrix
 
