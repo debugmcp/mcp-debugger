@@ -7,7 +7,7 @@ import {
   SessionState, SessionLifecycleState, DebugLanguage, DebugSessionInfo, mapLegacyState,
   isTerminalSessionState, AdapterPolicy, SessionOutputEntry, redactSecretsInString
 } from '@debugmcp/shared';
-import type { Breakpoint, FunctionBreakpoint, ProgramEndExplanation, SessionStopInfo, StackFrame } from '@debugmcp/shared';
+import type { Breakpoint, FunctionBreakpoint, ProgramEndExplanation, SessionStopInfo, StackFrame, StopTopFrameLine } from '@debugmcp/shared';
 import { USER_BREAK_REASONS } from '@debugmcp/shared';
 import { stopProvesDebuggerOn } from './debugger-off.js';
 import { isRedactionEnabled } from '../utils/redaction-mode.js';
@@ -218,6 +218,14 @@ export type PauseResultData = DebugResultData & StopAnswerFields & {
  */
 /** How much of the output's tail a policy reads the program's end from (issue #877). */
 const PROGRAM_END_OUTPUT_TAIL_CHARS = 8000;
+
+/**
+ * Ceiling on the `stackTrace` that reads a held stop's top frame (issue
+ * #1097): a paused thread answers in milliseconds; an adapter that does not
+ * answer at all holds the stop this long and then gets its own reason kept.
+ * The same bound as the exceptionInfo enrichment.
+ */
+const TOP_FRAME_LINE_TIMEOUT_MS = 3000;
 
 /**
  * One descendant in a `children` answer (the session tree, issue #1081):
@@ -1190,13 +1198,93 @@ export abstract class SessionManagerCore extends EventEmitter {
     });
   }
 
+  /**
+   * Whether the adapter policy wants the source line under this stop's top
+   * frame before the stop is named (issue #1097). Asked with the mode facts
+   * the normalization will see and the breakpoint counts — never the id
+   * sets, which the gate must not need. No policy, or a policy that throws,
+   * answers no.
+   */
+  private stopNeedsSourceLine(
+    session: ManagedSession,
+    rawReason: string,
+    body: DebugProtocol.StoppedEvent['body'] | undefined,
+    facts: { isFirstStop: boolean; isAttachSession: boolean; stopOnEntry: boolean }
+  ): boolean {
+    try {
+      const policy = this.sessionStore.selectPolicy(session.language);
+      if (!policy.stopNeedsSourceLine) {
+        return false;
+      }
+      const pauseIntent = getCurrentPauseIntent(session);
+      return policy.stopNeedsSourceLine(rawReason, body, {
+        pausePending: pauseIntent !== undefined,
+        ...(pauseIntent ? { pauseSource: pauseIntent.source } : {}),
+        sessionMode: facts.isAttachSession ? 'attach' : 'launch',
+        firstStop: facts.isFirstStop,
+        stopOnEntry: facts.stopOnEntry,
+        lineBreakpointCount: session.breakpoints.size,
+        functionBreakpointCount: session.functionBreakpoints.size
+      });
+    } catch (err) {
+      this.logger.debug(
+        `[SessionManager ${session.id}] Could not ask the policy whether the stop needs its source line: ${err instanceof Error ? err.message : String(err)}`
+      );
+      return false;
+    }
+  }
+
+  /**
+   * The source line under a stop's top frame (issue #1097): one bounded
+   * `stackTrace` for the top frame on the stopped thread, then the file at
+   * the frame's path, read through the injected file system (the handler
+   * layer's LineReader is not reachable from here). Never rejects — a missing
+   * thread, a frame without a path or a readable line, a failed request or
+   * read all answer undefined, and the policy then keeps the answer it gave
+   * before the line existed.
+   */
+  private async readTopFrameLine(
+    sessionId: string,
+    proxyManager: IProxyManager,
+    threadId: number | undefined
+  ): Promise<StopTopFrameLine | undefined> {
+    if (typeof threadId !== 'number') {
+      return undefined;
+    }
+    try {
+      const response = await proxyManager.sendDapRequest<DebugProtocol.StackTraceResponse>(
+        'stackTrace',
+        { threadId, startFrame: 0, levels: 1 },
+        { timeoutMs: TOP_FRAME_LINE_TIMEOUT_MS }
+      );
+      const frame = response?.body?.stackFrames?.[0];
+      const filePath = frame?.source?.path;
+      const line = frame?.line;
+      if (typeof filePath !== 'string' || filePath.length === 0 || typeof line !== 'number' || line < 1) {
+        this.logger.debug(`[SessionManager ${sessionId}] Top frame has no readable source position; the stop keeps the adapter's reason`);
+        return undefined;
+      }
+      const text = (await this.fileSystem.readFile(filePath, 'utf8')).split(/\r?\n/)[line - 1];
+      if (typeof text !== 'string') {
+        this.logger.debug(`[SessionManager ${sessionId}] ${filePath} has no line ${line}; the stop keeps the adapter's reason`);
+        return undefined;
+      }
+      return { path: filePath, line, text };
+    } catch (err) {
+      this.logger.debug(
+        `[SessionManager ${sessionId}] Could not read the top frame's source line: ${err instanceof Error ? err.message : String(err)}`
+      );
+      return undefined;
+    }
+  }
+
   protected setupProxyEventHandlers(
     session: ManagedSession,
     proxyManager: IProxyManager,
     effectiveLaunchArgs: Partial<CustomLaunchRequestArguments>
   ): void {
     const sessionId = session.id;
-    beginProxyGeneration(session);
+    const generation = beginProxyGeneration(session);
     const handlers = new Map<string, (...args: any[]) => void>(); // eslint-disable-line @typescript-eslint/no-explicit-any -- Event handlers require flexible argument signatures to support various event types
 
     // Reset first-stop tracking for this launch — a session may be re-launched.
@@ -1272,8 +1360,51 @@ export abstract class SessionManagerCore extends EventEmitter {
       this.logger.debug(`[SessionManager ${sessionId}] Could not determine adapter policy for first-stop heuristic: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    // Named function for stopped event
-    const handleStopped = (threadId: number | undefined, rawReason: string, body?: DebugProtocol.StoppedEvent['body']) => {
+    // Mode facts, shared by the stop-reason normalization and the auto-continue
+    // decision after it, and read again when a held stop settles (issue #1097)
+    // so a stop that landed meanwhile is accounted for. Attach sessions have no
+    // launch entry stop to skip: any stop observed after attach is either the
+    // deliberate post-attach pause issued by attachToProcess (pauseAfterAttach
+    // policies) or a real debug event, and auto-continuing those resumed the
+    // target right after we paused it (issue #124), so auto-continue is
+    // launch-only.
+    const readStopModeFacts = (): { isFirstStop: boolean; isAttachSession: boolean; stopOnEntry: boolean } => {
+      const isFirstStop = !session.firstStopHandled;
+      const launchArgsRecord = effectiveLaunchArgs as Record<string, unknown>;
+      const isAttachSession =
+        launchArgsRecord.request === 'attach' ||
+        launchArgsRecord.__attachMode === true;
+      // Whether the session asked for an initial stop. The two modes default
+      // differently: a launch stops on entry only when asked (`=== true`), an
+      // attach stops unless told not to (`!== false`) — the reading the attach
+      // controller and the adapters (CodeLLDB's `stopOnEntry ?? true`) apply.
+      // A default attach reaches here as `stopOnEntry: undefined`: the launch
+      // default (false) is spread first and the caller's undefined key over it
+      // (issue #817).
+      const stopOnEntry = isAttachSession
+        ? effectiveLaunchArgs.stopOnEntry !== false
+        : effectiveLaunchArgs.stopOnEntry === true;
+      return { isFirstStop, isAttachSession, stopOnEntry };
+    };
+
+    // The stop, named and recorded. Runs in the stopped handler's own call
+    // stack — or, for a stop whose reason depends on the source line under its
+    // top frame (issue #1097), once that line has been read.
+    const settleStop = (
+      threadId: number | undefined,
+      rawReason: string,
+      body: DebugProtocol.StoppedEvent['body'] | undefined,
+      topFrameLine: StopTopFrameLine | undefined,
+      afterHold: boolean
+    ): void => {
+      if (afterHold && (session.proxyGeneration !== generation || isTerminalSessionState(session.state))) {
+        // The session ended or was relaunched while the line was read: a stop
+        // delivered now would revive it. Nothing was shown, nothing to undo.
+        this.logger.info(
+          `[SessionManager ${sessionId}] Held stop dropped: the session moved on while its source line was read (state=${session.state})`
+        );
+        return;
+      }
       // A stop that names breakpoint ids proves those breakpoints are bound,
       // whatever the adapter reported (or never reported) about them (issue
       // #673: js-debug launch verifies a source-mapped request under its
@@ -1301,27 +1432,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       // before the reason drives auto-continue, lastStop, and exceptionInfo.
       let reason = rawReason;
       let pauseIntent: ReturnType<typeof getCurrentPauseIntent>;
-      // Mode facts, shared by the stop-reason normalization below and the
-      // auto-continue decision after it. Attach sessions have no launch entry
-      // stop to skip: any stop observed after attach is either the deliberate
-      // post-attach pause issued by attachToProcess (pauseAfterAttach policies)
-      // or a real debug event, and auto-continuing those resumed the target
-      // right after we paused it (issue #124), so auto-continue is launch-only.
-      const isFirstStop = !session.firstStopHandled;
-      const launchArgsRecord = effectiveLaunchArgs as Record<string, unknown>;
-      const isAttachSession =
-        launchArgsRecord.request === 'attach' ||
-        launchArgsRecord.__attachMode === true;
-      // Whether the session asked for an initial stop. The two modes default
-      // differently: a launch stops on entry only when asked (`=== true`), an
-      // attach stops unless told not to (`!== false`) — the reading the attach
-      // controller and the adapters (CodeLLDB's `stopOnEntry ?? true`) apply.
-      // A default attach reaches here as `stopOnEntry: undefined`: the launch
-      // default (false) is spread first and the caller's undefined key over it
-      // (issue #817).
-      const stopOnEntry = isAttachSession
-        ? effectiveLaunchArgs.stopOnEntry !== false
-        : effectiveLaunchArgs.stopOnEntry === true;
+      const { isFirstStop, isAttachSession, stopOnEntry } = readStopModeFacts();
       try {
         const policy = this.sessionStore.selectPolicy(session.language);
         // Collect the adapter-assigned ids of all user breakpoints so the
@@ -1367,7 +1478,8 @@ export abstract class SessionManagerCore extends EventEmitter {
           userBreakpointIds,
           functionBreakpointIds: fnComplete ? fnIds : undefined,
           lineBreakpointCount: session.breakpoints.size,
-          functionBreakpointCount: session.functionBreakpoints.size
+          functionBreakpointCount: session.functionBreakpoints.size,
+          ...(topFrameLine ? { topFrameLine } : {})
         });
         if (normalized && normalized !== rawReason) {
           this.logger.info(
@@ -1562,6 +1674,27 @@ export abstract class SessionManagerCore extends EventEmitter {
       if (stopProvesDebuggerOn(reason, rawReason, body)) {
         session.launchDebuggerOff = undefined;
       }
+    };
+
+    // Named function for stopped event
+    const handleStopped = (threadId: number | undefined, rawReason: string, body?: DebugProtocol.StoppedEvent['body']) => {
+      // A policy may need the source line under the stop's top frame before
+      // it can name the stop (issue #1097: js-debug's leaked module-entry break
+      // and a `debugger;` statement arrive with one body). The hold never
+      // enters PAUSED — the session stays RUNNING, so a wait keeps waiting —
+      // and the settle then runs lastStop → PAUSED → auto-continue in one call
+      // stack, exactly as an unheld stop does (the #849 re-read still hides an
+      // auto-continued stop). A read that fails answers no line, and the
+      // policy keeps the answer it always gave.
+      if (this.stopNeedsSourceLine(session, rawReason, body, readStopModeFacts())) {
+        this.logger.debug(`[SessionManager ${sessionId}] Holding stop (reason='${rawReason}') until its source line is read`);
+        this.readTopFrameLine(sessionId, proxyManager, threadId)
+          .catch(() => undefined)
+          .then((topFrameLine) => settleStop(threadId, rawReason, body, topFrameLine, true))
+          .catch((err) => this.logger.error(`[SessionManager ${sessionId}] Error settling a held stop:`, err));
+        return;
+      }
+      settleStop(threadId, rawReason, body, undefined, false);
     };
     proxyManager.on('stopped', handleStopped);
     handlers.set('stopped', handleStopped);

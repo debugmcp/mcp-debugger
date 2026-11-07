@@ -85,6 +85,51 @@ describe('JsDebugAdapterPolicy', () => {
     expect(JsDebugAdapterPolicy.normalizeStopReason!('pause', { reason: 'pause' }, ctx)).toBeUndefined();
   });
 
+  describe("a first-stop 'debugger statement' pause is verified against the source line (issue #1097)", () => {
+    // The body js-debug sends for a real `debugger;` AND for its leaked
+    // module-entry break: identical, so only the line under the frame decides.
+    const DEBUGGER_PAUSE = { reason: 'pause', description: 'Paused on debugger statement' };
+    const firstLaunchStop: StopReasonContext = {
+      pausePending: false,
+      lineBreakpointCount: 1,
+      functionBreakpointCount: 0,
+      sessionMode: 'launch',
+      firstStop: true,
+      stopOnEntry: false
+    };
+    const needsLine = JsDebugAdapterPolicy.stopNeedsSourceLine!;
+
+    it('asks for the line only for that shape, on the first stop of a launch that did not ask to stop on entry', () => {
+      expect(needsLine('pause', DEBUGGER_PAUSE, firstLaunchStop)).toBe(true);
+      expect(needsLine('pause', DEBUGGER_PAUSE, { ...firstLaunchStop, firstStop: false })).toBe(false);
+      expect(needsLine('pause', DEBUGGER_PAUSE, { ...firstLaunchStop, stopOnEntry: true })).toBe(false);
+      expect(needsLine('pause', DEBUGGER_PAUSE, { ...firstLaunchStop, sessionMode: 'attach' })).toBe(false);
+      expect(needsLine('pause', DEBUGGER_PAUSE, { ...firstLaunchStop, pausePending: true, pauseSource: 'user' })).toBe(false);
+      // Other shapes are never ambiguous: a plain pause, a breakpoint hit, a step.
+      expect(needsLine('pause', { reason: 'pause', description: 'Paused' }, firstLaunchStop)).toBe(false);
+      expect(needsLine('breakpoint', { reason: 'breakpoint', hitBreakpointIds: [] }, firstLaunchStop)).toBe(false);
+      expect(needsLine('step', { reason: 'step' }, firstLaunchStop)).toBe(false);
+    });
+
+    it("names a line without a debugger statement js-debug's module entry, and one with it a breakpoint", () => {
+      const normalize = JsDebugAdapterPolicy.normalizeStopReason!;
+      const at = (text: string): StopReasonContext => ({
+        ...firstLaunchStop,
+        topFrameLine: { path: '/w/cluster_parent.js', line: 9, text }
+      });
+      expect(normalize('pause', DEBUGGER_PAUSE, at('const WORKERS = 4;'))).toBe('entry');
+      expect(normalize('pause', DEBUGGER_PAUSE, at('debugger;'))).toBe('breakpoint');
+      expect(normalize('pause', DEBUGGER_PAUSE, at('  debugger'))).toBe('breakpoint');
+      expect(normalize('pause', DEBUGGER_PAUSE, at('if (x) { debugger; }'))).toBe('breakpoint');
+      // The token anywhere on the line keeps the stop, a comment included:
+      // the check only ever resumes on a line that cannot be a debugger statement.
+      expect(normalize('pause', DEBUGGER_PAUSE, at('// debugger'))).toBe('breakpoint');
+      // Nothing to go on (the policy did not ask, the read failed, the frame
+      // had no path): the answer it always gave.
+      expect(normalize('pause', DEBUGGER_PAUSE, firstLaunchStop)).toBe('breakpoint');
+    });
+  });
+
   it('recognizes async boundary frames (the sourceless line-0 separators) (#672)', () => {
     expect(JsDebugAdapterPolicy.isAsyncBoundaryFrame!({ id: 1, name: 'await', file: '<unknown_source>', line: 0 })).toBe(true);
     expect(JsDebugAdapterPolicy.isAsyncBoundaryFrame!({ id: 2, name: 'HTTPINCOMINGMESSAGE', file: '', line: 0 })).toBe(true);

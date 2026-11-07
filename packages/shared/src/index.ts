@@ -203,6 +203,7 @@ export type {
   HandshakeContext,
   QueuedDapCommand,
   PendingStopContext,
+  StopTopFrameLine,
   GeneratedFileContext,
   GeneratedFileCandidate
 } from './interfaces/adapter-policy.js';

@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
-import { DebugLanguage, SessionState } from '@debugmcp/shared';
+import { DebugLanguage, JsDebugAdapterPolicy, SessionState } from '@debugmcp/shared';
 import { createMockDependencies , overridePolicy } from './session-manager-test-utils.js';
 
 describe('SessionManager - Integration Tests', () => {
@@ -113,6 +113,51 @@ describe('SessionManager - Integration Tests', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(loggerSpy).toHaveBeenCalledWith(expect.stringContaining('Auto-continuing (stopOnEntry=false)'));
+    });
+  });
+
+  describe("a first-stop 'debugger statement' pause on a launch (issue #1097)", () => {
+    // js-debug's leaked module-entry break and a real `debugger;` arrive with
+    // the same body; the policy asks for the line under the top frame and the
+    // core reads it before the stop is decided (the #875 root-launch shape).
+    async function firstStopAt(lineText: string): Promise<{ sessionId: string; loggerSpy: ReturnType<typeof vi.spyOn> }> {
+      const session = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      overridePolicy(sessionManager, {
+        normalizeStopReason: JsDebugAdapterPolicy.normalizeStopReason,
+        stopNeedsSourceLine: JsDebugAdapterPolicy.stopNeedsSourceLine,
+        getDapClientBehavior: () => ({ pauseAfterChildAttach: true })
+      } as any);
+      const loggerSpy = vi.spyOn(dependencies.logger, 'info');
+
+      await sessionManager.startDebugging(session.id, 'target.cjs', [], { stopOnEntry: false });
+      await vi.runAllTimersAsync();
+      dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => (
+        command === 'stackTrace'
+          ? { success: true, body: { stackFrames: [{ id: 1, name: '<module>', source: { path: '/w/target.cjs' }, line: 2 }] } }
+          : { success: true, body: {} }
+      ));
+      vi.mocked(dependencies.mockFileSystem.readFile).mockImplementation(async () => `// the fixture's header\n${lineText}\n`);
+
+      dependencies.mockProxyManager.simulateStopped(1, 'pause', { reason: 'pause', description: 'Paused on debugger statement', threadId: 1 });
+      await vi.runAllTimersAsync();
+      return { sessionId: session.id, loggerSpy };
+    }
+
+    it("resumes js-debug's leaked module-entry break, read as the first statement under the frame", async () => {
+      const { sessionId, loggerSpy } = await firstStopAt("console.log('LAUNCH_CONFIG');");
+
+      expect(loggerSpy).toHaveBeenCalledWith(expect.stringContaining("Stop reason normalized: 'pause' -> 'entry'"));
+      expect(loggerSpy).toHaveBeenCalledWith(expect.stringContaining('Auto-continuing (stopOnEntry=false)'));
+      expect(sessionManager.getSession(sessionId)?.state).toBe(SessionState.RUNNING);
+      expect(sessionManager.getSession(sessionId)?.lastStop).toBeUndefined();
+    });
+
+    it('keeps a real `debugger;` statement as the breakpoint stop it has always been (#672)', async () => {
+      const { sessionId, loggerSpy } = await firstStopAt('debugger;');
+
+      expect(loggerSpy).not.toHaveBeenCalledWith(expect.stringContaining('Auto-continuing (stopOnEntry=false)'));
+      expect(sessionManager.getSession(sessionId)?.state).toBe(SessionState.PAUSED);
+      expect(sessionManager.getSession(sessionId)?.lastStop).toMatchObject({ reason: 'breakpoint', rawReason: 'pause' });
     });
   });
 

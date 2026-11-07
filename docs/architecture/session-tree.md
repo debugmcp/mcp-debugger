@@ -144,6 +144,10 @@ over*; JavaScript spike, row "Breakpoints"). So:
   parent is not mirrored to children already running.
 - `stopOnEntry` on the child's attach is a no-op (measured for debugpy; js-debug's
   `continueOnAttach` resumes). The entry stop a child would show is the breakpoint the agent set.
+  Under load js-debug can leak its own module-entry break as a first-stop "debugger statement"
+  pause at the module's first statement (issue #1097); the core holds such a first stop, reads
+  the source line under its top frame, and resumes it unseen unless the line holds a `debugger`
+  statement — the same check a root launch's first stop gets.
 - `list_breakpoints` on the child reports the child's verified set with the child's adapter ids.
 
 ### Output

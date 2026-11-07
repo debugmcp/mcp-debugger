@@ -103,6 +103,22 @@ export interface StopReasonContext {
    * adapters' own default — issue #817).
    */
   stopOnEntry?: boolean;
+  /**
+   * The source line under the stop's top frame (issue #1097), read by the
+   * core before normalization when the policy asked for it through
+   * `stopNeedsSourceLine`. Absent when the policy did not ask, the frame had
+   * no path, or the stack or the file could not be read — a policy that
+   * cannot see it keeps the answer it gave before.
+   */
+  topFrameLine?: StopTopFrameLine;
+}
+
+/** The source line under a stop's top frame: where it is, and what it says. */
+export interface StopTopFrameLine {
+  path: string;
+  /** 1-based. */
+  line: number;
+  text: string;
 }
 
 /**
@@ -785,6 +801,28 @@ export interface AdapterPolicy {
   explainProgramEnd?(context: ProgramEndContext): ProgramEndExplanation | undefined;
 
   /**
+   * Whether this stop can only be named once the source line under its top
+   * frame is known (issue #1097). js-debug reports a `debugger;` statement
+   * and its own leaked module-entry break with one body; the line tells
+   * them apart. When this answers true the core holds the stop — the session
+   * stays RUNNING, nothing is shown — resolves the top frame, reads the line,
+   * and only then calls `normalizeStopReason` with `context.topFrameLine`.
+   * A failed read calls it without the line, so a policy that asks must
+   * still answer without one.
+   *
+   * Asked before the id sets are collected: `context` carries the mode facts
+   * (`sessionMode`, `firstStop`, `stopOnEntry`, `pausePending`) and the
+   * counts, never `userBreakpointIds`/`functionBreakpointIds`. Keep it cheap
+   * and specific — every stop pays the question, a held stop pays a DAP
+   * round trip and a file read.
+   */
+  stopNeedsSourceLine?(
+    reason: string,
+    body: DebugProtocol.StoppedEvent['body'] | undefined,
+    context: StopReasonContext
+  ): boolean;
+
+  /**
    * Normalize an adapter-specific DAP stop reason into a canonical reason
    * ('pause', 'breakpoint', 'step', 'exception', ...). Some adapters report
    * misleading raw reasons — e.g. CodeLLDB surfaces a user-initiated pause as
@@ -793,7 +831,10 @@ export interface AdapterPolicy {
    * Called from the session-manager stopped handler BEFORE the auto-continue
    * decision and before the stop is recorded, so the normalized reason drives
    * both. A policy that also sets pauseAfterChildAttach must therefore be
-   * careful not to normalize a first stop into a user-break reason.
+   * careful not to normalize a first stop into a user-break reason — and
+   * when the body alone cannot tell a user break from an incidental first
+   * stop, ask for the top frame's source line through `stopNeedsSourceLine`
+   * and decide from `context.topFrameLine` (issue #1097).
    *
    * @param reason The raw DAP stop reason from the adapter
    * @param body The full stopped-event body, if available
