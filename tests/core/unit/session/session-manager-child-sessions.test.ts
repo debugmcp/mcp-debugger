@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
-import { DebugLanguage, JsDebugAdapterPolicy, SessionState, type DapClientBehavior } from '@debugmcp/shared';
+import { DebugLanguage, JsDebugAdapterPolicy, SessionState, type AdapterPolicy, type DapClientBehavior } from '@debugmcp/shared';
 import { createMockDependencies, createMockEnvironment, overridePolicy } from './session-manager-test-utils.js';
 import type { MockChildProxyView } from '../../../test-utils/mocks/mock-proxy-manager.js';
 
@@ -981,11 +981,16 @@ describe('SessionManager child sessions (issue #1081)', () => {
      * rule, the #672 relabel and the #1097 line check — with the child's top
      * frame and the source line under it scripted.
      */
-    async function jsChild(topFrame: Record<string, unknown> | 'fails' = TOP_FRAME, lineNine = FIRST_STATEMENT) {
+    async function jsChild(
+      topFrame: Record<string, unknown> | 'fails' = TOP_FRAME,
+      lineNine = FIRST_STATEMENT,
+      policyOverrides: Partial<AdapterPolicy> = {}
+    ) {
       overridePolicy(sessionManager, {
         normalizeStopReason: JsDebugAdapterPolicy.normalizeStopReason,
         stopNeedsSourceLine: JsDebugAdapterPolicy.stopNeedsSourceLine,
-        getDapClientBehavior: () => ({ pauseAfterChildAttach: true }) as DapClientBehavior
+        getDapClientBehavior: () => ({ pauseAfterChildAttach: true }) as DapClientBehavior,
+        ...policyOverrides
       });
       const rootId = await startRoot();
       dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
@@ -1069,6 +1074,100 @@ describe('SessionManager child sessions (issue #1081)', () => {
       expect(requests).not.toContain('continue');
       expect(child(childId).state).toBe(SessionState.PAUSED);
       expect(child(childId).lastStop).toMatchObject({ reason: 'breakpoint', rawReason: 'pause' });
+    });
+
+    it.each([new Error('source policy unavailable'), 'source policy unavailable'])(
+      'keeps the breakpoint when the source-line policy throws %s', async (failure) => {
+        const { childId, view, requests } = await jsChild(TOP_FRAME, FIRST_STATEMENT, {
+          stopNeedsSourceLine: () => { throw failure; }
+        });
+        vi.mocked(dependencies.mockFileSystem.readFile).mockClear();
+
+        expect(() => view.simulateStopped(3, 'pause', ENTRY_PAUSE)).not.toThrow();
+        await vi.runAllTimersAsync();
+
+        expect(requests).not.toContain('stackTrace');
+        expect(requests).not.toContain('continue');
+        expect(dependencies.mockFileSystem.readFile).not.toHaveBeenCalled();
+        expect(child(childId).state).toBe(SessionState.PAUSED);
+        expect(child(childId).lastStop).toMatchObject({ reason: 'breakpoint', rawReason: 'pause' });
+        expect(dependencies.mockLogger.debug).toHaveBeenCalledWith(expect.stringContaining(
+          'Could not ask the policy whether the stop needs its source line: source policy unavailable'
+        ));
+      }
+    );
+
+    it('keeps a stop without a thread ID instead of querying an arbitrary thread', async () => {
+      const { childId, view, requests } = await jsChild();
+      vi.mocked(dependencies.mockFileSystem.readFile).mockClear();
+
+      view.simulateEvent('stopped', undefined, 'pause', { ...ENTRY_PAUSE, threadId: undefined });
+      await vi.runAllTimersAsync();
+
+      expect(requests).not.toContain('stackTrace');
+      expect(requests).not.toContain('continue');
+      expect(dependencies.mockFileSystem.readFile).not.toHaveBeenCalled();
+      expect(child(childId).state).toBe(SessionState.PAUSED);
+      expect(child(childId).lastStop).toMatchObject({ reason: 'breakpoint', rawReason: 'pause', threadId: undefined });
+    });
+
+    it('keeps the breakpoint when the frame points past the end of the local file', async () => {
+      const { childId, view, requests } = await jsChild();
+      vi.mocked(dependencies.mockFileSystem.readFile).mockResolvedValue('const WORKERS = 4;\n');
+
+      view.simulateStopped(3, 'pause', ENTRY_PAUSE);
+      await vi.runAllTimersAsync();
+
+      expect(requests).toContain('stackTrace');
+      expect(dependencies.mockFileSystem.readFile).toHaveBeenCalledWith(TOP_FRAME.source.path, 'utf8');
+      expect(requests).not.toContain('continue');
+      expect(child(childId).state).toBe(SessionState.PAUSED);
+      expect(child(childId).lastStop).toMatchObject({ reason: 'breakpoint', rawReason: 'pause' });
+    });
+
+    it('keeps the breakpoint even if reporting a source-read failure also throws', async () => {
+      const { childId, view, requests } = await jsChild();
+      vi.mocked(dependencies.mockFileSystem.readFile).mockRejectedValue('source unavailable');
+      const failedDiagnostic = vi.fn(() => { throw new Error('diagnostic sink unavailable'); });
+      vi.mocked(dependencies.mockLogger.debug).mockImplementation((message) => {
+        if (message.includes('Could not read the top frame\'s source line: source unavailable')) {
+          failedDiagnostic();
+        }
+      });
+
+      view.simulateStopped(3, 'pause', ENTRY_PAUSE);
+      await vi.runAllTimersAsync();
+
+      expect(failedDiagnostic).toHaveBeenCalledOnce();
+      expect(requests).not.toContain('continue');
+      expect(child(childId).state).toBe(SessionState.PAUSED);
+      expect(child(childId).lastStop).toMatchObject({ reason: 'breakpoint', rawReason: 'pause' });
+    });
+
+    it('contains a failure while settling a held stop and can process the next stop', async () => {
+      const { childId, view, requests } = await jsChild(TOP_FRAME, 'debugger;');
+      const failure = new Error('stop diagnostic unavailable');
+      const failedDiagnostic = vi.fn(() => { throw failure; });
+      vi.mocked(dependencies.mockLogger.info).mockImplementation((message) => {
+        if (message.includes('Stopped event:')) failedDiagnostic();
+      });
+
+      view.simulateStopped(3, 'pause', ENTRY_PAUSE);
+      await vi.runAllTimersAsync();
+
+      expect(failedDiagnostic).toHaveBeenCalledOnce();
+      expect(dependencies.mockLogger.error).toHaveBeenCalledWith(
+        expect.stringContaining('Error settling a held stop:'), failure
+      );
+      expect(requests).not.toContain('continue');
+
+      vi.mocked(dependencies.mockLogger.info).mockReset();
+      view.simulateStopped(3, 'pause', ENTRY_PAUSE);
+      await vi.runAllTimersAsync();
+
+      expect(child(childId).state).toBe(SessionState.PAUSED);
+      expect(child(childId).lastStop).toMatchObject({ reason: 'breakpoint', rawReason: 'pause' });
+      expect(requests).not.toContain('continue');
     });
 
     it('drops a held stop when the child ends during the verification, instead of reviving an ended session', async () => {

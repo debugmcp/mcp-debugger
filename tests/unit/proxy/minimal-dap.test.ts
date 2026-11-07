@@ -1691,6 +1691,101 @@ describe('MinimalDapClient', () => {
       expect((client as any).activeChild).toBe(child);
     });
 
+    it('awaits policy-context child adoption before acknowledging and routes requests to the adopted child', async () => {
+      const manager = createChildSessionManagerStub();
+      const config: ChildSessionConfig = {
+        host: 'localhost', port: 5679, pendingId: 'context-child',
+        parentConfig: { __pendingTargetId: 'context-child', type: 'pwa-node' }
+      };
+      let finishAdoption!: () => void;
+      manager.createChildSession.mockImplementationOnce(() => new Promise((resolve) => {
+        finishAdoption = () => resolve('adopted');
+      }));
+      const childResponse: DebugProtocol.ThreadsResponse = {
+        seq: 3, type: 'response', request_seq: 2, command: 'threads', success: true,
+        body: { threads: [{ id: 7, name: 'adopted worker' }] }
+      };
+      const child = new MinimalDapClient('localhost', 5679);
+      const sendToChild = vi.spyOn(child, 'sendRequest').mockResolvedValue(childResponse);
+      manager.getActiveChild.mockReturnValue(child);
+      manager.shouldRouteToChild.mockReturnValue(true);
+      const behavior: DapClientBehavior = {
+        handleReverseRequest: async (request, context) => {
+          await context.createChildSession(config);
+          context.sendResponse(request, { adopted: config.pendingId });
+          return { handled: true };
+        }
+      };
+      client = new MinimalDapClient('localhost', 5678, {
+        ...JsDebugAdapterPolicy,
+        getDapClientBehavior: () => behavior
+      }, { childSessionManagerFactory: () => manager });
+      await client.connect();
+
+      mockSocket.emit('data', createDapMessage({
+        seq: 41, type: 'request', command: 'startDebugging',
+        arguments: { configuration: config.parentConfig }
+      }));
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(manager.createChildSession).toHaveBeenCalledExactlyOnceWith(config);
+      expect(manager.getActiveChild).not.toHaveBeenCalled();
+      expect(mockSocket.write).not.toHaveBeenCalled();
+
+      finishAdoption();
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(manager.getActiveChild).toHaveBeenCalledTimes(1);
+      expect(mockSocket.write).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(mockSocket.write.mock.calls[0][0]).split('\r\n\r\n')[1])).toMatchObject({
+        type: 'response', request_seq: 41, command: 'startDebugging', success: true,
+        body: { adopted: 'context-child' }
+      });
+      mockSocket.write.mockClear();
+      expect(await client.sendRequest('threads')).toBe(childResponse);
+      expect(sendToChild).toHaveBeenCalledExactlyOnceWith('threads', undefined, 30000);
+      expect(mockSocket.write).not.toHaveBeenCalled();
+    });
+
+    it('lets the policy report a context-adoption failure without promoting a child or adding a fallback ack', async () => {
+      const manager = createChildSessionManagerStub();
+      const config: ChildSessionConfig = {
+        host: 'localhost', port: 5679, pendingId: 'context-failure', parentConfig: {}
+      };
+      const failure = new Error('child adoption rejected');
+      manager.createChildSession.mockRejectedValueOnce(failure);
+      const reportedFailure = vi.fn();
+      const behavior: DapClientBehavior = {
+        handleReverseRequest: async (request, context) => {
+          try {
+            await context.createChildSession(config);
+            context.sendResponse(request, {});
+          } catch (error) {
+            reportedFailure(error);
+            context.sendResponse(request, {}, false, failure.message);
+          }
+          return { handled: true };
+        }
+      };
+      client = new MinimalDapClient('localhost', 5678, {
+        ...JsDebugAdapterPolicy,
+        getDapClientBehavior: () => behavior
+      }, { childSessionManagerFactory: () => manager });
+      await client.connect();
+
+      mockSocket.emit('data', createDapMessage({ seq: 42, type: 'request', command: 'startDebugging' }));
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(manager.createChildSession).toHaveBeenCalledExactlyOnceWith(config);
+      expect(reportedFailure).toHaveBeenCalledExactlyOnceWith(failure);
+      expect(manager.getActiveChild).not.toHaveBeenCalled();
+      expect(mockSocket.write).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(mockSocket.write.mock.calls[0][0]).split('\r\n\r\n')[1])).toMatchObject({
+        type: 'response', request_seq: 42, command: 'startDebugging', success: false,
+        message: failure.message
+      });
+    });
+
     it('falls back to default response when policy throws', async () => {
       const childSessionManager = createChildSessionManagerStub();
       const failingBehavior: DapClientBehavior = {
