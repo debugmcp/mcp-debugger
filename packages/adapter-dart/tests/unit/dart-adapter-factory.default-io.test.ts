@@ -1,7 +1,9 @@
 /**
  * DartAdapterFactory without a `locate` hook runs the real locator (process env, fs, which).
  * Whatever the box has, the shape is stable; with an explicit DART_SDK pointing at a temp SDK the
- * answer is deterministic. The version probes stay stubbed: they would spawn the SDK.
+ * answer is deterministic. All four probes stay stubbed: every one of them would spawn the SDK,
+ * and the two device probes find a real Flutter through `which` even with FLUTTER_ROOT unset — a
+ * cold `flutter devices --machine` on a developer Mac is seconds past the case budget (issue #1101).
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
@@ -51,6 +53,8 @@ describe('DartAdapterFactory default io', () => {
     const f = new DartAdapterFactory({
       probeDartVersion: async () => '3.13.4',
       probeFlutterVersion: async () => null,
+      probeFlutterDevices: async () => null,
+      probeFlutterEmulators: async () => null,
     });
     const v = await f.validate();
     expect(v.valid).toBe(true);
