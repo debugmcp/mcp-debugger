@@ -1341,11 +1341,10 @@ export const JsDebugAdapterPolicy = {
           context.sendResponse(request, {});
 
           if (pendingId && typeof pendingId === 'string') {
-            // Bookkeeping invariant (issues #249/#501): the id is added here,
-            // before the adoption/release runs; MinimalDapClient removes it
-            // again when adoption throws or the release fails, so a re-sent
-            // startDebugging can retry. Adopted and released targets stay
-            // recorded — both are settled server-side.
+            // Bookkeeping invariant (issue #249): the id is added here, before
+            // the adoption runs; MinimalDapClient removes it again when the
+            // adoption throws, so a re-sent startDebugging can retry. An
+            // adopted target stays recorded — it is settled server-side.
             if (!context.adoptedTargets.has(pendingId)) {
               context.adoptedTargets.add(pendingId);
               return {
