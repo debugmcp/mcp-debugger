@@ -651,8 +651,8 @@ describe('JsDebugAdapterPolicy', () => {
       expect(sendDapRequest.mock.calls.some(([cmd]) => cmd === 'launch')).toBe(false);
     });
 
-    it('defaults autoAttachChildProcesses to false in attach args, keeping a caller value (issue #501)', async () => {
-      const runAttachHandshake = async (dapLaunchArgs: Record<string, unknown>) => {
+    it('keeps an untransformed attach conservative and preserves transformed or explicit child-attach intent', async () => {
+      const runAttachHandshake = async (dapLaunchArgs: Record<string, unknown>, launchConfig?: Record<string, unknown>) => {
         vi.useFakeTimers();
         try {
           const events = new EventEmitter();
@@ -666,6 +666,7 @@ describe('JsDebugAdapterPolicy', () => {
             proxyManager,
             sessionId: 'session-501',
             dapLaunchArgs,
+            launchConfig,
             scriptPath: '/workspace/app.js',
             scriptArgs: [],
             breakpoints: new Map()
@@ -687,13 +688,23 @@ describe('JsDebugAdapterPolicy', () => {
       const defaulted = await runAttachHandshake({
         request: 'attach', attachSimplePort: 9229, type: 'pwa-node'
       });
+      // Embedders bypassing the transform have no locality proof. Injecting
+      // a host-only bootloader into a port-forwarded process breaks forks.
       expect(defaulted.autoAttachChildProcesses).toBe(false);
 
-      const optedIn = await runAttachHandshake({
-        request: 'attach', attachSimplePort: 9229, type: 'pwa-node',
-        autoAttachChildProcesses: true
+      const transformed = await runAttachHandshake({ request: 'attach', port: 9229 }, {
+        request: 'attach', port: 9229, autoAttachChildProcesses: true
       });
+      expect(transformed.autoAttachChildProcesses).toBe(true);
+
+      const optedIn = await runAttachHandshake({ request: 'attach', port: 9229, autoAttachChildProcesses: true });
       expect(optedIn.autoAttachChildProcesses).toBe(true);
+
+      const optedOut = await runAttachHandshake({
+        request: 'attach', attachSimplePort: 9229, type: 'pwa-node',
+        autoAttachChildProcesses: false
+      });
+      expect(optedOut.autoAttachChildProcesses).toBe(false);
 
       // Issue #655: the same self-containment for resolveSourceMapLocations.
       expect(defaulted.resolveSourceMapLocations).toEqual(['**', '!**/node_modules/**']);
