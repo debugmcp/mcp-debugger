@@ -220,10 +220,9 @@ export type PauseResultData = DebugResultData & StopAnswerFields & {
 const PROGRAM_END_OUTPUT_TAIL_CHARS = 8000;
 
 /**
- * Ceiling on the `stackTrace` that reads a held stop's top frame (issue
- * #1097): a paused thread answers in milliseconds; an adapter that does not
- * answer at all holds the stop this long and then gets its own reason kept.
- * The same bound as the exceptionInfo enrichment.
+ * Ceiling on the entire held-stop source lookup (issue #1097), including
+ * the stack request and file read. If either stalls, keep the adapter's
+ * reason. The same bound as the exceptionInfo enrichment.
  */
 const TOP_FRAME_LINE_TIMEOUT_MS = 3000;
 
@@ -1251,13 +1250,19 @@ export abstract class SessionManagerCore extends EventEmitter {
     if (typeof threadId !== 'number') {
       return undefined;
     }
-    try {
+    const readLine = async (): Promise<StopTopFrameLine | undefined> => {
       const response = await proxyManager.sendDapRequest<DebugProtocol.StackTraceResponse>(
         'stackTrace',
         { threadId, startFrame: 0, levels: 1 },
         { timeoutMs: TOP_FRAME_LINE_TIMEOUT_MS }
       );
       const frame = response?.body?.stackFrames?.[0];
+      // DAP requires a `source` request for a nonzero reference even when a
+      // path is present. The local file can contain different source (for
+      // example an eval or source-map snapshot); it cannot disprove a stop.
+      if ((frame?.source?.sourceReference ?? 0) > 0) {
+        return undefined;
+      }
       const filePath = frame?.source?.path;
       const line = frame?.line;
       if (typeof filePath !== 'string' || filePath.length === 0 || typeof line !== 'number' || line < 1) {
@@ -1270,11 +1275,25 @@ export abstract class SessionManagerCore extends EventEmitter {
         return undefined;
       }
       return { path: filePath, line, text };
+    };
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        readLine(),
+        new Promise<undefined>((resolve) => {
+          timeout = setTimeout(() => {
+            this.logger.debug(`[SessionManager ${sessionId}] Top-frame source lookup timed out; the stop keeps the adapter's reason`);
+            resolve(undefined);
+          }, TOP_FRAME_LINE_TIMEOUT_MS);
+        })
+      ]);
     } catch (err) {
       this.logger.debug(
         `[SessionManager ${sessionId}] Could not read the top frame's source line: ${err instanceof Error ? err.message : String(err)}`
       );
       return undefined;
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout);
     }
   }
 
@@ -1387,6 +1406,10 @@ export abstract class SessionManagerCore extends EventEmitter {
       return { isFirstStop, isAttachSession, stopOnEntry };
     };
 
+    // A source lookup can outlive the stop it describes. A newer stopped or
+    // continued event invalidates it even within the same proxy generation.
+    let stopEventEpoch = 0;
+
     // The stop, named and recorded. Runs in the stopped handler's own call
     // stack — or, for a stop whose reason depends on the source line under its
     // top frame (issue #1097), once that line has been read.
@@ -1395,11 +1418,11 @@ export abstract class SessionManagerCore extends EventEmitter {
       rawReason: string,
       body: DebugProtocol.StoppedEvent['body'] | undefined,
       topFrameLine: StopTopFrameLine | undefined,
-      afterHold: boolean
+      heldEpoch?: number
     ): void => {
-      if (afterHold && (session.proxyGeneration !== generation || isTerminalSessionState(session.state))) {
-        // The session ended or was relaunched while the line was read: a stop
-        // delivered now would revive it. Nothing was shown, nothing to undo.
+      if (heldEpoch !== undefined && (heldEpoch !== stopEventEpoch || session.proxyGeneration !== generation || isTerminalSessionState(session.state))) {
+        // The session resumed, stopped again, ended or was relaunched while
+        // the line was read. Never revive or resume an obsolete stop.
         this.logger.info(
           `[SessionManager ${sessionId}] Held stop dropped: the session moved on while its source line was read (state=${session.state})`
         );
@@ -1678,6 +1701,7 @@ export abstract class SessionManagerCore extends EventEmitter {
 
     // Named function for stopped event
     const handleStopped = (threadId: number | undefined, rawReason: string, body?: DebugProtocol.StoppedEvent['body']) => {
+      const eventEpoch = ++stopEventEpoch;
       // A policy may need the source line under the stop's top frame before
       // it can name the stop (issue #1097: js-debug's leaked module-entry break
       // and a `debugger;` statement arrive with one body). The hold never
@@ -1690,17 +1714,18 @@ export abstract class SessionManagerCore extends EventEmitter {
         this.logger.debug(`[SessionManager ${sessionId}] Holding stop (reason='${rawReason}') until its source line is read`);
         this.readTopFrameLine(sessionId, proxyManager, threadId)
           .catch(() => undefined)
-          .then((topFrameLine) => settleStop(threadId, rawReason, body, topFrameLine, true))
+          .then((topFrameLine) => settleStop(threadId, rawReason, body, topFrameLine, eventEpoch))
           .catch((err) => this.logger.error(`[SessionManager ${sessionId}] Error settling a held stop:`, err));
         return;
       }
-      settleStop(threadId, rawReason, body, undefined, false);
+      settleStop(threadId, rawReason, body, undefined);
     };
     proxyManager.on('stopped', handleStopped);
     handlers.set('stopped', handleStopped);
 
     // Named function for continued event
     const handleContinued = () => {
+      stopEventEpoch += 1;
       this.logger.debug(`[SessionManager] 'continued' event handler called for session ${sessionId}`);
       this.logger.info(`[ProxyManager ${sessionId}] Continued event`);
       

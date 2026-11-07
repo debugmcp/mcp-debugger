@@ -147,7 +147,10 @@ over*; JavaScript spike, row "Breakpoints"). So:
   Under load js-debug can leak its own module-entry break as a first-stop "debugger statement"
   pause at the module's first statement (issue #1097); the core holds such a first stop, reads
   the source line under its top frame, and resumes it unseen unless the line holds a `debugger`
-  statement — the same check a root launch's first stop gets.
+  statement — the same check a root launch's first stop gets. Named breakpoint hits are
+  preserved. The lookup has a three-second budget, including the file read; an unavailable
+  line or adapter-owned source keeps the breakpoint stop. A newer stop or resume invalidates
+  the pending lookup so its delayed answer cannot resume a later breakpoint.
 - `list_breakpoints` on the child reports the child's verified set with the child's adapter ids.
 
 ### Output

@@ -105,6 +105,7 @@ describe('JsDebugAdapterPolicy', () => {
       expect(needsLine('pause', DEBUGGER_PAUSE, { ...firstLaunchStop, stopOnEntry: true })).toBe(false);
       expect(needsLine('pause', DEBUGGER_PAUSE, { ...firstLaunchStop, sessionMode: 'attach' })).toBe(false);
       expect(needsLine('pause', DEBUGGER_PAUSE, { ...firstLaunchStop, pausePending: true, pauseSource: 'user' })).toBe(false);
+      expect(needsLine('pause', { ...DEBUGGER_PAUSE, hitBreakpointIds: [7] }, firstLaunchStop)).toBe(false);
       // Other shapes are never ambiguous: a plain pause, a breakpoint hit, a step.
       expect(needsLine('pause', { reason: 'pause', description: 'Paused' }, firstLaunchStop)).toBe(false);
       expect(needsLine('breakpoint', { reason: 'breakpoint', hitBreakpointIds: [] }, firstLaunchStop)).toBe(false);
@@ -118,6 +119,7 @@ describe('JsDebugAdapterPolicy', () => {
         topFrameLine: { path: '/w/cluster_parent.js', line: 9, text }
       });
       expect(normalize('pause', DEBUGGER_PAUSE, at('const WORKERS = 4;'))).toBe('entry');
+      expect(normalize('pause', { ...DEBUGGER_PAUSE, hitBreakpointIds: [7] }, at('const WORKERS = 4;'))).toBe('breakpoint');
       expect(normalize('pause', DEBUGGER_PAUSE, at('debugger;'))).toBe('breakpoint');
       expect(normalize('pause', DEBUGGER_PAUSE, at('  debugger'))).toBe('breakpoint');
       expect(normalize('pause', DEBUGGER_PAUSE, at('if (x) { debugger; }'))).toBe('breakpoint');

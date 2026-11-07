@@ -313,6 +313,7 @@ export const JsDebugAdapterPolicy = {
   ): boolean =>
     reason === 'pause' &&
     isDebuggerStatementPause(body) &&
+    !body?.hitBreakpointIds?.length &&
     context.firstStop === true &&
     context.sessionMode === 'launch' &&
     context.stopOnEntry === false &&
@@ -327,7 +328,7 @@ export const JsDebugAdapterPolicy = {
       return 'pause';
     }
     if (reason === 'pause' && isDebuggerStatementPause(body)) {
-      if (context.topFrameLine && !/\bdebugger\b/.test(context.topFrameLine.text)) {
+      if (!body?.hitBreakpointIds?.length && context.topFrameLine && !/\bdebugger\b/.test(context.topFrameLine.text)) {
         return 'entry';
       }
       return 'breakpoint';

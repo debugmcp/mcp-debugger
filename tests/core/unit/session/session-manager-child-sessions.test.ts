@@ -1055,6 +1055,22 @@ describe('SessionManager child sessions (issue #1081)', () => {
       expect(child(childId).lastStop).toMatchObject({ reason: 'breakpoint', rawReason: 'pause' });
     });
 
+    it('does not use a local file to disprove a stop in adapter-owned source', async () => {
+      const { childId, view, requests } = await jsChild({
+        ...TOP_FRAME,
+        source: { ...TOP_FRAME.source, sourceReference: 1 }
+      });
+      vi.mocked(dependencies.mockFileSystem.readFile).mockClear();
+
+      view.simulateStopped(3, 'pause', ENTRY_PAUSE);
+      await vi.runAllTimersAsync();
+
+      expect(dependencies.mockFileSystem.readFile).not.toHaveBeenCalled();
+      expect(requests).not.toContain('continue');
+      expect(child(childId).state).toBe(SessionState.PAUSED);
+      expect(child(childId).lastStop).toMatchObject({ reason: 'breakpoint', rawReason: 'pause' });
+    });
+
     it('drops a held stop when the child ends during the verification, instead of reviving an ended session', async () => {
       const { childId, view } = await jsChild();
       let answerStack: (() => void) | undefined;
@@ -1080,6 +1096,84 @@ describe('SessionManager child sessions (issue #1081)', () => {
       await vi.runAllTimersAsync();
       expect(child(childId).state).toBe(SessionState.STOPPED);
       expect(child(childId).lastStop).toBeUndefined();
+    });
+
+    it.each([false, true])('does not resume a newer breakpoint when an old source read finishes (continued first: %s)', async (continuedFirst) => {
+      const { childId, view, requests } = await jsChild();
+      let answerRead: ((text: string) => void) | undefined;
+      vi.mocked(dependencies.mockFileSystem.readFile).mockImplementation(() => new Promise<string>((resolve) => {
+        answerRead = resolve;
+      }));
+
+      view.simulateStopped(3, 'pause', ENTRY_PAUSE);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(answerRead).toBeDefined();
+
+      if (continuedFirst) view.simulateEvent('continued');
+      view.simulateStopped(3, 'breakpoint', { reason: 'breakpoint', threadId: 3, hitBreakpointIds: [7] });
+      const newerStop = child(childId).lastStop;
+      expect(newerStop).toMatchObject({ reason: 'breakpoint' });
+
+      answerRead!(`${'// header\n'.repeat(8)}${FIRST_STATEMENT}`);
+      await vi.runAllTimersAsync();
+
+      expect(requests).not.toContain('continue');
+      expect(child(childId).state).toBe(SessionState.PAUSED);
+      expect(child(childId).lastStop).toBe(newerStop);
+    });
+
+    it('drops a held stop if the adapter resumes while the source is being read', async () => {
+      const { childId, view, requests } = await jsChild();
+      let answerRead: ((text: string) => void) | undefined;
+      vi.mocked(dependencies.mockFileSystem.readFile).mockImplementation(() => new Promise<string>((resolve) => {
+        answerRead = resolve;
+      }));
+
+      view.simulateStopped(3, 'pause', ENTRY_PAUSE);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(answerRead).toBeDefined();
+      view.simulateEvent('continued');
+
+      answerRead!(`${'// header\n'.repeat(8)}debugger;`);
+      await vi.runAllTimersAsync();
+
+      expect(requests).not.toContain('continue');
+      expect(child(childId).state).toBe(SessionState.RUNNING);
+      expect(child(childId).lastStop).toBeUndefined();
+    });
+
+    it('keeps the stop when the file read exceeds the lookup budget and ignores its late answer', async () => {
+      const { childId, view, requests } = await jsChild();
+      let answerRead: ((text: string) => void) | undefined;
+      vi.mocked(dependencies.mockFileSystem.readFile).mockImplementation(() => new Promise<string>((resolve) => {
+        answerRead = resolve;
+      }));
+
+      view.simulateStopped(3, 'pause', ENTRY_PAUSE);
+      await vi.advanceTimersByTimeAsync(2999);
+      expect(answerRead).toBeDefined();
+      expect(child(childId).state).toBe(SessionState.RUNNING);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(child(childId).state).toBe(SessionState.PAUSED);
+      expect(child(childId).lastStop).toMatchObject({ reason: 'breakpoint', rawReason: 'pause' });
+      const timedOutStop = child(childId).lastStop;
+
+      answerRead!(`${'// header\n'.repeat(8)}${FIRST_STATEMENT}`);
+      await vi.runAllTimersAsync();
+      expect(requests).not.toContain('continue');
+      expect(child(childId).lastStop).toBe(timedOutStop);
+    });
+
+    it('keeps the stop when the stack lookup itself never settles', async () => {
+      const { childId, view } = await jsChild();
+      view.setDapRequestHandler(async () => new Promise(() => {}));
+
+      view.simulateStopped(3, 'pause', ENTRY_PAUSE);
+      await vi.advanceTimersByTimeAsync(3000);
+
+      expect(child(childId).state).toBe(SessionState.PAUSED);
+      expect(child(childId).lastStop).toMatchObject({ reason: 'breakpoint', rawReason: 'pause' });
     });
 
     it("reads nothing for a later 'debugger statement' pause: the stop is a breakpoint at once", async () => {
