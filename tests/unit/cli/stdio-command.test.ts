@@ -458,5 +458,82 @@ describe('STDIO Command Handler', () => {
       expect(mockServer.stop).toHaveBeenCalledTimes(1);
       expect(mockExitProcess).toHaveBeenCalledTimes(1);
     });
+
+    it('bounds the serving handle close on its own, so a hung close still leaves the debug server its teardown inside the guard', async () => {
+      // Review of PR #1116, Important #1: handle.close() and core.stop() used to share
+      // the one 5 s guard, so a handle that never settled (a listen stream whose
+      // consumer stopped reading) starved closeAllSessions() entirely.
+      mockHandle.close = vi.fn<() => Promise<void>>().mockReturnValue(new Promise(() => {}));
+      const stdin = await startWithStdin();
+      vi.useFakeTimers();
+      try {
+        stdin.emit('end');
+        expect(mockServer.stop).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(1000);
+
+        expect(mockServer.stop).toHaveBeenCalledTimes(1);
+        expect(mockExitProcess).toHaveBeenCalledWith(0);
+        expect(mockLogger.debug).toHaveBeenCalledWith(expect.stringContaining('serving handle did not close'), expect.anything());
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe('the stdio wire closing under the serving entry (issue #1025, step 2)', () => {
+    // The SDK transport closes itself — and tells only its own onclose, which
+    // serveStdio owns — on a stdout error (the client's end of the pipe is gone)
+    // or an oversized frame, with stdin still open: no EOF handler ever fires.
+    // Review of PR #1116, Important #2.
+    function servedTransport(): StdioServerTransport {
+      const [, serveOptions] = mockServeStdio.mock.calls[0];
+      return serveOptions!.transport as StdioServerTransport;
+    }
+
+    async function start(stdin = makeFakeStdin()) {
+      await handleStdioCommand({}, {
+        logger: mockLogger,
+        serverFactory: mockServerFactory,
+        protocolServerFactory: mockProtocolServerFactory,
+        serveStdio: mockServeStdio,
+        exitProcess: mockExitProcess,
+        stdin,
+        proc: fakeProc
+      });
+      return stdin;
+    }
+
+    it('stops the debug server and exits when the transport closes the wire while stdin is still open', async () => {
+      await start();
+
+      await servedTransport().close();
+
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
+      expect(mockServer.stop).toHaveBeenCalledTimes(1);
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('Stdio transport closed'));
+    });
+
+    it('runs the wire close through the same container gate as a stdin EOF: no client ever spoke, so stay alive', async () => {
+      fakeProc.env.MCP_CONTAINER = 'true';
+      await start();
+
+      await servedTransport().close();
+
+      expect(mockExitProcess).not.toHaveBeenCalled();
+      expect(mockServer.stop).not.toHaveBeenCalled();
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('detached container, staying alive'));
+    });
+
+    it('tears down once when the shutdown itself closes the wire (the hook re-enters an idempotent shutdown)', async () => {
+      mockHandle.close = vi.fn<() => Promise<void>>(async () => { await servedTransport().close(); });
+      const stdin = await start();
+
+      stdin.emit('end');
+
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
+      expect(mockServer.stop).toHaveBeenCalledTimes(1);
+      expect(mockExitProcess).toHaveBeenCalledTimes(1);
+    });
   });
 });
