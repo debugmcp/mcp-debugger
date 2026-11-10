@@ -153,9 +153,19 @@ describe('mcp-conformance runner: the 2026-07-28 requirements lane (issue #1025)
 
     it('gives every entry the fixture or feature that makes it untestable here', () => {
       for (const line of entries) {
-        expect(line, line).toMatch(/^\s+- [a-z0-9-]+(:[a-z0-9-]+)?\s+# \S/);
+        expect(line, line).toMatch(/^\s+- [a-z0-9-]+:[a-z0-9-]+\s+# \S/);
       }
       expect(entries.length).toBeGreaterThan(0);
+    });
+
+    // A whole-scenario entry excuses every check in the scenario. Naming one
+    // check keeps the others enforced — above all wire-schema-valid, the suite's
+    // check that every message this server sent is valid per the spec's schema.
+    it('excuses one check per entry, never a whole scenario, and never the schema check', () => {
+      for (const name of entries.map((line) => /- (\S+)/.exec(line)![1])) {
+        expect(name, name).toMatch(/^[a-z0-9-]+:[a-z0-9-]+$/);
+        expect(name, name).not.toMatch(/:wire-schema-valid$/);
+      }
     });
 
     it('lists each entry once, and no scenario both whole and by check (the suite refuses that)', () => {
@@ -167,10 +177,10 @@ describe('mcp-conformance runner: the 2026-07-28 requirements lane (issue #1025)
       }
     });
 
-    it('names checks by the suite\'s check ids, which is what the suite matches', () => {
-      const checks = entries.map((line) => /- (\S+)/.exec(line)![1]).filter((name) => name.includes(':'));
-      for (const name of checks) {
-        expect(name, name).toMatch(/^[a-z0-9-]+:sep-\d+-[a-z0-9-]+$/);
+    it('names checks by the suite\'s check ids, which is what the suite matches (ids are kebab-case; names are CamelCase)', () => {
+      const checks = entries.map((line) => /- (\S+)/.exec(line)![1].split(':')[1]);
+      for (const id of checks) {
+        expect(id, id).toMatch(/^[a-z0-9]+(-[a-z0-9]+)+$/);
       }
     });
   });

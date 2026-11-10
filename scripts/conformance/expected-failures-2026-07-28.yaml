@@ -1,4 +1,4 @@
-# Not testable against mcp-debugger: the scenarios and checks of
+# Not testable against mcp-debugger: the checks of
 # `@modelcontextprotocol/conformance server --requirements 2026-07-28` that need something
 # this server does not host. Nothing in this file is a protocol divergence of ours.
 #
@@ -7,28 +7,34 @@
 # a baseline like this one is the mechanism it names for a server without the fixtures.
 # The suite reads this file itself (`--expected-failures`, scripts/mcp-conformance.mjs
 # --era 2026-07-28) and fails the lane on a failure or warning that is NOT listed, and on a
-# listed entry that starts passing — so the file can only shrink honestly, and a real
-# divergence can never hide in it. An entry is a scenario, or `scenario:check-id`.
+# listed check that starts passing, so the file can only shrink honestly.
+#
+# Every entry is `scenario:check-id` — one check, never a whole scenario. A whole-scenario
+# entry would excuse every check in it; this way each scenario's other checks stay enforced,
+# above all `wire-schema-valid` (every message this server sent, its error answers included,
+# is valid per the spec's JSON schema). One limit of the mechanism: the suite ignores an entry
+# for a scenario it does not run or score, so a mistyped entry is silent — the failure it
+# was meant to cover then shows as unexpected, which is what fails the lane.
 #
 # Measured 2026-11-10 against 0.2.0-alpha.12: 37 scored scenarios; the fixture names below
 # are read from the suite's source. Upstream discussion of reporting these as not applicable:
 # modelcontextprotocol/conformance#516.
 server:
   # --- Needs only a reference fixture this server does not have (18) ---
-  - tools-call-simple-text                   # tool test_simple_text
-  - tools-call-image                         # tool test_image_content
-  - tools-call-audio                         # tool test_audio_content
-  - tools-call-embedded-resource             # tool test_embedded_resource
-  - tools-call-mixed-content                 # tool test_multiple_content_types
-  - tools-call-error                         # tool test_error_handling
-  - tools-call-with-progress                 # tool test_tool_with_progress
-  - resources-read-text                      # resource test://static-text
-  - resources-read-binary                    # resource test://static-binary
-  - resources-templates-read                 # resource template test://template/{id}/data
-  - prompts-get-simple                       # prompt test_simple_prompt
-  - prompts-get-with-args                    # prompt test_prompt_with_arguments
-  - prompts-get-embedded-resource            # prompt test_prompt_with_embedded_resource
-  - prompts-get-with-image                   # prompt test_prompt_with_image
+  - tools-call-simple-text:tools-call-simple-text                 # tool test_simple_text
+  - tools-call-image:tools-call-image                             # tool test_image_content
+  - tools-call-audio:tools-call-audio                             # tool test_audio_content
+  - tools-call-embedded-resource:tools-call-embedded-resource     # tool test_embedded_resource
+  - tools-call-mixed-content:tools-call-mixed-content             # tool test_multiple_content_types
+  - tools-call-error:tools-call-error                             # tool test_error_handling
+  - tools-call-with-progress:tools-call-with-progress             # tool test_tool_with_progress
+  - resources-read-text:resources-read-text                       # resource test://static-text
+  - resources-read-binary:resources-read-binary                   # resource test://static-binary
+  - resources-templates-read:resources-templates-read             # resource template test://template/{id}/data
+  - prompts-get-simple:prompts-get-simple                         # prompt test_simple_prompt
+  - prompts-get-with-args:prompts-get-with-args                   # prompt test_prompt_with_arguments
+  - prompts-get-embedded-resource:prompts-get-embedded-resource   # prompt test_prompt_with_embedded_resource
+  - prompts-get-with-image:prompts-get-with-image                 # prompt test_prompt_with_image
   # Four checks of the core 2026 scenario report "Not testable: server does not list the
   # diagnostic tool". The MUSTs behind them hold vacuously here: this server never requires a
   # client capability and never sends a server-to-client request or a log notification.
@@ -39,20 +45,20 @@ server:
 
   # --- Needs an optional feature this server does not declare (13) ---
   # `completions` is not declared; the scenario also asks about the reference prompt.
-  - completion-complete                              # completion/complete on prompt test_prompt_with_arguments
+  - completion-complete:completion-complete                       # completion/complete on prompt test_prompt_with_arguments
   # Input-required results (SEP-2322): a tool that answers by asking the client for
   # elicitation, sampling or roots. Each scenario drives a reference tool or prompt.
-  - input-required-result-basic-elicitation          # tool test_input_required_result_elicitation
-  - input-required-result-basic-sampling             # tool test_input_required_result_sampling
-  - input-required-result-basic-list-roots           # tool test_input_required_result_list_roots
-  - input-required-result-request-state              # tool test_input_required_result_request_state
-  - input-required-result-multiple-input-requests    # tool test_input_required_result_multiple_inputs
-  - input-required-result-multi-round                # tool test_input_required_result_multi_round
-  - input-required-result-non-tool-request           # prompt test_input_required_result_prompt
-  - input-required-result-result-type                # tool test_input_required_result_elicitation
-  - input-required-result-tampered-state             # tool test_input_required_result_tampered_state
-  - input-required-result-capability-check           # tools test_input_required_result_capabilities, _elicitation
+  - input-required-result-basic-elicitation:sep-2322-elicitation-incomplete               # tool test_input_required_result_elicitation
+  - input-required-result-basic-sampling:sep-2322-sampling-incomplete                     # tool test_input_required_result_sampling
+  - input-required-result-basic-list-roots:sep-2322-list-roots-incomplete                 # tool test_input_required_result_list_roots
+  - input-required-result-request-state:sep-2322-request-state-incomplete                 # tool test_input_required_result_request_state
+  - input-required-result-multiple-input-requests:sep-2322-multiple-inputs-incomplete     # tool test_input_required_result_multiple_inputs
+  - input-required-result-multi-round:sep-2322-multi-round-r1                             # tool test_input_required_result_multi_round
+  - input-required-result-non-tool-request:sep-2322-non-tool-incomplete                   # prompt test_input_required_result_prompt
+  - input-required-result-result-type:sep-2322-result-type-included                       # tool test_input_required_result_elicitation
+  - input-required-result-tampered-state:sep-2322-reject-tampered-state                   # tool test_input_required_result_tampered_state
+  - input-required-result-capability-check:sep-2322-respect-client-capabilities           # tools test_input_required_result_capabilities, _elicitation
   # These two end in a WARNING, not a failure (the unknown tool answers with an error where
   # the suite recommends another input request); the suite's baseline counts a warning.
-  - input-required-result-missing-input-response     # tool test_input_required_result_elicitation, prompt _prompt
-  - input-required-result-ignore-extra-params        # tool test_input_required_result_elicitation
+  - input-required-result-missing-input-response:sep-2322-missing-response-rerequests     # tool test_input_required_result_elicitation, prompt _prompt
+  - input-required-result-ignore-extra-params:sep-2322-ignore-unexpected-params           # tool test_input_required_result_elicitation
