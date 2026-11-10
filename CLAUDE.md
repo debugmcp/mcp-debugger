@@ -520,7 +520,7 @@ The dev proxy (`tools/dev-proxy/dev-proxy.mjs`) is a lightweight MCP proxy that 
 
 **When to use**: Whenever you are actively developing mcp-debugger — making code changes, adding adapters, or installing new toolchains (Go, etc.) that need to be picked up by the running server.
 
-**How it works**: After code changes, call the `dev_rebuild_and_restart` tool. The proxy kills the backend, runs `npm run build`, spawns a fresh process, and reconnects — all transparently. If the backend crashes, dev tools remain available to bring it back.
+**How it works**: After code changes, call the `dev_rebuild_and_restart` tool. The proxy kills the backend, runs `npm run build`, spawns a fresh process, and reconnects — all transparently. If the backend crashes, dev tools remain available to bring it back. The proxy speaks both protocol eras to its client through the SDK's stdio entry (a probing client lands on 2026-07-28), negotiates the era with an `http` backend, translates resource subscriptions across eras and re-expresses them after every restart, and starts the backend on the first request that needs it — never when the process starts, because a v2 client's `auto` probe runs on a disposable sibling proxy process (issue #1025, step 2; `tools/dev-proxy/README.md`).
 
 **Configuration** (env vars, all optional):
 - `DEV_PROXY_PORT` — Backend HTTP port (default: 3001; used by `http` mode)
@@ -584,7 +584,7 @@ Each session also exposes its captured output as an MCP resource (`debug://sessi
 **Dev proxy only** (these 3 tools are injected by the dev proxy process itself, not by the main mcp-debugger server):
 - `dev_restart_debugger` - Restart the backend (pass `rebuild: true` to build first)
 - `dev_rebuild_and_restart` - Run `npm run build` then restart the backend
-- `dev_server_status` - Check backend state, PID, uptime, transport, project root, port, and display-safe backend environment overrides
+- `dev_server_status` - Check backend state, PID, uptime, transport, protocol era and version, project root, port, and display-safe backend environment overrides
 
 ### Troubleshooting MCP Connection
 - **If server shows "Failed to connect"**:

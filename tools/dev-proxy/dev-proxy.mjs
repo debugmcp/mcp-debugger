@@ -23,8 +23,7 @@
 
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
-import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
-import { Server } from '@modelcontextprotocol/server';
+import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
@@ -49,11 +48,14 @@ import {
   resolveBackendPort,
   resolveBackendTransport,
   updateBackendEnvOverrides,
+  withBackendDefaults,
 } from './backend-env.mjs';
 import { LifecycleQueue, queueGenerationCleanup } from './lifecycle-queue.mjs';
 import { runBuild } from './build-runner.mjs';
 import { ensurePortFree, forceKillPid } from './process-cleanup.mjs';
-import { dedupeMcpErrorPrefix, assertBackendAvailable, backendCallOptions, backendFailureHint } from './tool-error.mjs';
+import { backendCallOptions } from './tool-error.mjs';
+import { createFront, ObservedStdioServerTransport } from './front-server.mjs';
+import { createSubscriptionRelay } from './backend-subscriptions.mjs';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -183,6 +185,13 @@ class BackendManager {
     this.buildWaiters = new Set();
     /** Unique owner for Docker containers started by this stable proxy process. */
     this.dockerOwnerId = `${process.pid}-${randomUUID()}`;
+    /** The one initial start, once a request has asked for it (issue #1025, step 2). */
+    this.initialStart = null;
+    /** Announces the inventory after a successful initial start; set by main(). */
+    this.onInitialStart = null;
+    /** The client's resource subscriptions, expressed in the backend's era; set by main(). */
+    /** @type {{ reopen(): Promise<void>, close(): Promise<void> } | null} */
+    this.relay = null;
   }
 
   // ---- Command computation ------------------------------------------------
@@ -207,7 +216,7 @@ class BackendManager {
 
   _buildBackendEnv({ forceStdinClose = false } = {}) {
     return buildBackendEnvironment(
-      process.env,
+      withBackendDefaults(process.env),
       this.backendEnvOverrides,
       forceStdinClose ? { MCP_EXIT_ON_STDIN_CLOSE: '1' } : {}
     );
@@ -217,6 +226,32 @@ class BackendManager {
 
   start() {
     return this.lifecycleQueue.run(() => this._start());
+  }
+
+  /**
+   * The initial start, deferred to the first request that reaches a handler
+   * (issue #1025, step 2). A v2 client's `auto` negotiation probes server/discover
+   * on a disposable sibling process spawned from the same parameters; the SDK's
+   * stdio entry answers that probe itself, so a sibling never reaches a handler
+   * and never spawns a backend to race this one for the port. One start per
+   * process: a failed one is not retried here (dev_restart_debugger is the retry).
+   * Callers do not await it — `whenReady` bounds their wait (issue #716).
+   */
+  ensureStarted() {
+    if (this.initialStart) return this.initialStart;
+    this.initialStart = this.start().then(
+      async () => {
+        // Refresh clients whose discovery gave up before the backend was ready.
+        await this.onInitialStart?.();
+        return true;
+      },
+      (err) => {
+        log(`Initial backend start failed: ${err.message}`);
+        log('Dev tools are still available — use dev_restart_debugger to retry');
+        return false;
+      }
+    );
+    return this.initialStart;
   }
 
   async _start() {
@@ -483,6 +518,8 @@ class BackendManager {
       buildCmd: BUILD_CMD,
       buildInProgress: this.buildInProgress,
       backendTransport: this.backendTransport,
+      protocolEra: this.state === 'running' && this.mcpClient ? (this.mcpClient.getProtocolEra?.() ?? null) : null,
+      protocolVersion: this.state === 'running' && this.mcpClient ? (this.mcpClient.getNegotiatedProtocolVersion?.() ?? null) : null,
       backendCmd: BACKEND_CMD || null,
       backendEnvOverrides: sanitizedEnv.values,
       backendEnvRedaction: sanitizedEnv.redaction,
@@ -537,7 +574,12 @@ class BackendManager {
   async _connectClient(command, args) {
     const closeState = { expected: false };
     this.transportCloseState = closeState;
-    this.mcpClient = new Client({ name: 'dev-proxy', version: '1.0.0' });
+    // The http backend speaks both eras (issue #1025): negotiate. A stdio backend
+    // stays legacy — `auto` over stdio would probe on a sibling of the backend.
+    this.mcpClient = new Client(
+      { name: 'dev-proxy', version: '1.0.0' },
+      { versionNegotiation: { mode: this.backendTransport === 'http' ? 'auto' : 'legacy' } }
+    );
 
     // Relay backend resource notifications (resources/updated, list_changed)
     // to the front client (issue #218). Registered as the fallback handler so
@@ -595,6 +637,7 @@ class BackendManager {
       this.stdioPid = transport.pid;
       await connecting;
       log('MCP Client connected to backend via stdio');
+      await this._reopenRelay();
     } else {
       // Streamable HTTP mode (the only other value resolveBackendTransport
       // admits): SDK handles reconnection internally.
@@ -621,13 +664,27 @@ class BackendManager {
       };
 
       await this.mcpClient.connect(transport, { signal: this.shutdownController.signal });
-      log('MCP Client connected to backend via Streamable HTTP');
+      log(`MCP Client connected to backend via Streamable HTTP (${this.mcpClient.getProtocolEra()} era, ${this.mcpClient.getNegotiatedProtocolVersion()})`);
+      await this._reopenRelay();
+    }
+  }
+
+  async _reopenRelay() {
+    try {
+      await this.relay?.reopen();
+    } catch (err) {
+      log(`Could not re-express the resource subscriptions to the backend: ${err?.message ?? err}`);
     }
   }
 
   async _disconnectClient() {
     if (this.mcpClient) {
       const client = this.mcpClient;
+      try {
+        await this.relay?.close();
+      } catch (err) {
+        log(`Ignoring relay close error: ${err?.message ?? err}`);
+      }
       if (this.transportCloseState) this.transportCloseState.expected = true;
       try {
         await client.close();
@@ -748,7 +805,7 @@ const DEV_TOOLS = [
   {
     name: 'dev_server_status',
     description:
-      'Get the current status of the mcp-debugger backend (state, PID, uptime, buildInProgress, transport, project root, port, and display-safe environment overrides).',
+      'Get the current status of the mcp-debugger backend (state, PID, uptime, buildInProgress, transport, protocol era and version, project root, port, and display-safe environment overrides).',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -817,139 +874,58 @@ async function main() {
 
   const backend = new BackendManager();
 
-  // Create the MCP Server that Claude Code talks to (via stdio)
-  const server = new Server(
-    { name: 'dev-proxy', version: '1.0.0' },
-    { capabilities: { tools: { listChanged: true }, resources: { subscribe: true, listChanged: true } } }
-  );
+  // The relay expresses the client's resource subscriptions to the backend in
+  // whichever era it speaks (issue #1025, step 2); the backend re-expresses the
+  // set after every (re)connect and ends its listen before going away.
+  const relay = createSubscriptionRelay({ getClient: () => backend.mcpClient, log });
+  backend.relay = relay;
 
-  // Relay backend resource notifications to the front client (issue #218)
+  // The client-facing server, one instance per connection, in the era the client
+  // opens with (issue #1025, step 2): a probing client (Claude Code's v2 runtime)
+  // lands on 2026-07-28, an `initialize` client on the 2025 era. The dev tools
+  // are answered locally; everything else forwards to the backend.
+  const front = createFront({
+    backend,
+    relay,
+    devTools: DEV_TOOLS,
+    handleDevTool: (name, args) => handleDevTool(backend, front, name, args),
+    discoveryWaitMs: DISCOVERY_WAIT_MS,
+    log,
+  });
+
+  // Relay backend resource notifications to the pinned front instance (issue #218).
   backend.onResourceNotification = (notification) => {
-    server.notification(notification).catch((err) => {
+    front.notify(notification).catch((err) => {
       log(`Failed to relay ${notification.method}: ${err.message}`);
     });
   };
+  // A rebuild whose new dist throws at startup leaves the client holding a tool
+  // list that no longer exists; the initial start announces its inventory too.
+  backend.onInitialStart = () => notifyToolListChanged(front);
 
-  // ListTools: forward live to backend, fall back to dev-tools-only when backend is down.
-  // The wait keeps the first inventory from being taken before the backend has
-  // started (issue #716); a cancelled request stops waiting with the client.
-  server.setRequestHandler('tools/list', async (_request, ctx) => {
-    await backend.whenReady({ signal: ctx?.mcpReq.signal });
-    if (backend.state === 'running' && backend.mcpClient) {
-      try {
-        const result = await backend.mcpClient.listTools();
-        return { tools: [...(result.tools || []), ...DEV_TOOLS] };
-      } catch (err) {
-        log(`Live tools/list failed: ${err.message}`);
-      }
-    }
-    return { tools: [...DEV_TOOLS] };
-  });
-
-  // CallTool: route dev_* locally, forward everything else to backend
-  server.setRequestHandler('tools/call', async (request, ctx) => {
-    const { name, arguments: args } = request.params;
-
-    // Dev tools are always handled locally — status and recovery stay callable
-    // while a start or restart is still in flight.
-    if (name.startsWith('dev_')) {
-      return await handleDevTool(backend, server, name, args);
-    }
-
-    // Forward to backend
-    try {
-      const result = await backend.callTool(name, args || {}, { signal: ctx?.mcpReq.signal });
-      return result;
-    } catch (err) {
-      // A well-formed JSON-RPC error from a running backend (e.g. -32602
-      // InvalidParams) proves the backend is alive — pass it through without
-      // the restart hint, which would send agents on a false detour (#304).
-      const body = { error: dedupeMcpErrorPrefix(err.message) };
-      // Only a stopped backend wants restarting. Telling an agent to restart
-      // one that is mid-start queues a second restart that kills it (#716),
-      // and a running backend that was merely slow is neither (#854).
-      const hint = backendFailureHint(err, {
-        state: backend.state,
-        needsRestart: backend.needsRestart(),
-        discoveryWaitMs: DISCOVERY_WAIT_MS,
-      });
-      if (hint) {
-        body.hint = hint;
-      }
-      return {
-        content: [{ type: 'text', text: JSON.stringify(body, null, 2) }],
-        isError: true,
-      };
-    }
-  });
-
-  // Resources: pure passthrough to the backend (issue #218). Note that
-  // subscriptions live in the backend process, so they are lost when the
-  // backend is restarted (dev_rebuild_and_restart) — re-subscribe after.
-  server.setRequestHandler('resources/list', async () => {
-    if (backend.state === 'running' && backend.mcpClient) {
-      try {
-        return await backend.mcpClient.listResources();
-      } catch (err) {
-        log(`Live resources/list failed: ${err.message}`);
-      }
-    }
-    return { resources: [] };
-  });
-
-  server.setRequestHandler('resources/read', async (request, ctx) => {
-    await backend.whenReady({ signal: ctx?.mcpReq.signal });
-    assertBackendAvailable(backend);
-    return await backend.mcpClient.readResource(request.params);
-  });
-
-  server.setRequestHandler('resources/subscribe', async (request, ctx) => {
-    await backend.whenReady({ signal: ctx?.mcpReq.signal });
-    assertBackendAvailable(backend);
-    return await backend.mcpClient.subscribeResource(request.params);
-  });
-
-  server.setRequestHandler('resources/unsubscribe', async (request, ctx) => {
-    await backend.whenReady({ signal: ctx?.mcpReq.signal });
-    assertBackendAvailable(backend);
-    return await backend.mcpClient.unsubscribeResource(request.params);
-  });
-
-  // Exit when the MCP client goes away — stdin EOF/close/error, protocol-level
-  // server close, or SIGINT/SIGTERM — stopping the backend child on the way out.
-  // Installed before backend.start() so a client that dies during a slow backend
-  // startup still triggers shutdown (backend.stop() handles the 'starting' state).
+  // Exit when the MCP client goes away — stdin EOF/close/error, the transport
+  // closing the wire by itself (a broken stdout, an oversized frame), or
+  // SIGINT/SIGTERM — stopping the backend child on the way out. Installed before
+  // the wire goes live so a client that dies during a slow backend start still
+  // triggers shutdown (backend.stop() handles a backend that never started).
   // Without this, on Windows both the proxy and its backend outlive a dead
-  // Claude Code forever (issue #122). Safe to install before server.connect():
-  // only 'end'/'close'/'error' go on stdin, none of which make it flow.
-  installShutdownHandlers({ stdin: process.stdin, backend, server, log });
+  // Claude Code forever (issue #122).
+  const shutdown = installShutdownHandlers({ stdin: process.stdin, backend, log });
+  const transport = new ObservedStdioServerTransport(() => {
+    void shutdown('stdio transport closed (MCP client gone)');
+  });
 
-  // Queue the automatic start BEFORE the transport goes live, so the first
-  // tools/list finds a lifecycle operation in flight and waits for it rather
-  // than racing it to a dev-tools-only inventory (issue #716).
-  const initialStart = backend.start().then(
-    () => true,
-    (err) => {
-      log(`Initial backend start failed: ${err.message}`);
-      log('Dev tools are still available — use dev_restart_debugger to retry');
-      return false;
-    }
-  );
+  // The SDK's stdio entry owns the wire and answers server/discover itself. The
+  // backend is NOT started here: a v2 client's `auto` negotiation probes on a
+  // disposable sibling process spawned from the same parameters, which used to
+  // start a backend of its own and race this one for the port (issue #1025,
+  // step 2). The first request that reaches a handler starts it.
+  serveStdio(front.factory, {
+    transport,
+    onerror: (err) => log(`Front transport error: ${err?.message ?? err}`),
+  });
 
-  // Connect to stdio transport for Claude Code
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-
-  log(`Proxy server connected to stdio (backend transport: ${BACKEND_TRANSPORT})`);
-
-  if (await initialStart) {
-    // Refresh clients whose discovery gave up before the backend was ready.
-    // Swallowing: a client that died during a slow start leaves the transport
-    // closed, and `notification()` throws 'Not connected'. Letting that escape
-    // would reject main() and hard-exit before the shutdown handler's queued
-    // backend.stop() ran, orphaning the child (issue #122).
-    await notifyToolListChanged(server);
-  }
+  log(`Proxy serving stdio in both protocol eras (backend transport: ${BACKEND_TRANSPORT}; the backend starts on first use)`);
 }
 
 main().catch((err) => {

@@ -12,6 +12,24 @@ session. The proxy keeps the client-facing stdio process stable while it replace
 The backend is a restartable Streamable HTTP child process by default. A stdio
 backend is also supported through `DEV_PROXY_BACKEND_TRANSPORT`.
 
+The proxy speaks both MCP protocol eras to its client (issue #1025): it is served through the
+SDK's stdio entry, so a client that probes with `server/discover` — Claude Code's v2 runtime does —
+lands on the current 2026-07-28 revision (sessionless; resource notifications over
+`subscriptions/listen`), and a client that opens with `initialize` gets the 2025 era as before.
+Towards an `http` backend the proxy negotiates the same way and lands on 2026-07-28; a stdio
+backend stays on the 2025 era. `dev_server_status` reports `protocolEra` and `protocolVersion`.
+Resource subscriptions are translated across eras: the set the client subscribed to is expressed
+to the backend in the era it speaks (one `subscriptions/listen` for a 2026 backend, one
+`resources/subscribe` per URI for a 2025 one) and re-expressed after every backend restart, so a
+`dev_rebuild_and_restart` no longer loses them.
+
+The backend starts on the first request that needs it, not when the proxy process starts. A v2
+client's `auto` negotiation over stdio probes `server/discover` on a disposable sibling process
+spawned from the same command line; the SDK entry answers that probe itself, so the sibling never
+reaches a request handler and never spawns a backend of its own to race the real proxy for
+`DEV_PROXY_PORT` (measured before this change: two backends per connect). The first
+`tools/list` still waits for the start to settle (`DEV_PROXY_DISCOVERY_WAIT_MS`).
+
 ## Architecture
 
 ```
@@ -157,6 +175,11 @@ or `DEBUG_MCP_LOG_LEVEL=debug`. Supplying `env` replaces the persistent override
 preserves the current set, and passing `{}` clears it. Overrides are merged into every subsequent
 backend spawn but are not passed to the build command. Proxy-controlled values required for clean
 shutdown take precedence.
+
+One default sits under everything else: the backend runs with `MCP_DEBUG_SESSION_IDLE_MS=0`
+(the per-debug-session idle policy off) unless your environment or an override sets the variable
+— one client, and the proxy's lifetime is the backend's, so a 30-minute window would close a
+paused session under you.
 
 Each request's overrides are applied when its queued restart begins, after any build succeeds.
 An omitted `env` inherits the preceding applied settings. Concurrent requests cannot overwrite one

@@ -39,3 +39,11 @@ export function buildBackendEnvironment(
   overrides: Record<string, string>,
   forced?: Record<string, string>
 ): Record<string, string | undefined>;
+
+/**
+ * The proxy's backend defaults under the inherited environment, so the user's
+ * own setting wins: `MCP_DEBUG_SESSION_IDLE_MS=0` unless set (issue #1025).
+ */
+export function withBackendDefaults(
+  inherited: Record<string, string | undefined>
+): Record<string, string | undefined>;

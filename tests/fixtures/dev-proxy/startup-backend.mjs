@@ -31,7 +31,7 @@ if (releaseFile) {
   }
 }
 
-const server = new Server({ name: 'startup-fixture', version: '1.0.0' }, { capabilities: { tools: {}, resources: {} } });
+const server = new Server({ name: 'startup-fixture', version: '1.0.0' }, { capabilities: { tools: {}, resources: { subscribe: true } } });
 server.setRequestHandler('tools/list', async () => ({
   tools: [{
     name: process.env.DEV_PROXY_FIXTURE_TOOL || 'fixture_tool',
@@ -42,6 +42,13 @@ server.setRequestHandler('tools/list', async () => ({
 // Answering at all is the point: it proves the proxy forwarded the call rather
 // than refusing it while the backend was still starting.
 server.setRequestHandler('tools/call', async (request) => {
+  // `touch: <uri>` makes this 2025 backend send resources/updated for a URI the
+  // proxy subscribed on a client's behalf (issue #1025, step 2: the proxy's
+  // subscription relay across eras).
+  const touch = request.params.arguments?.touch;
+  if (typeof touch === 'string') {
+    await server.sendResourceUpdated({ uri: touch });
+  }
   if (request.params.arguments?.floodStderr) {
     // More than a pipe's capacity: answering proves the proxy drained stderr
     // while a build was running, rather than leaving this write blocked.
@@ -57,5 +64,9 @@ server.setRequestHandler('resources/list', async () => ({
 server.setRequestHandler('resources/read', async () => ({
   contents: [{ uri: 'fixture://status', text: process.env.DEV_PROXY_FIXTURE_TOOL || 'fixture_tool' }],
 }));
+// A 2025 backend's subscriptions: accepted and forgotten, like the real server's
+// per-connection set (the proxy re-sends them after a restart).
+server.setRequestHandler('resources/subscribe', async () => ({}));
+server.setRequestHandler('resources/unsubscribe', async () => ({}));
 process.stdin.on('end', () => process.exit(0));
 await server.connect(new StdioServerTransport());
