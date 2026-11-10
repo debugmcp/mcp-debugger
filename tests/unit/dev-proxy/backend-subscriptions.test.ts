@@ -15,12 +15,13 @@ import { createSubscriptionRelay } from '../../../tools/dev-proxy/backend-subscr
 
 type Era = 'legacy' | 'modern';
 
-function fakeClient(era: Era) {
+function fakeClient(era: Era, listed: string[] = []) {
   const closes: Array<ReturnType<typeof vi.fn>> = [];
   const client = {
     getProtocolEra: vi.fn(() => era),
     subscribeResource: vi.fn(async (_params: { uri: string }) => ({})),
     unsubscribeResource: vi.fn(async (_params: { uri: string }) => ({})),
+    listResources: vi.fn(async () => ({ resources: listed.map((uri) => ({ uri, name: uri })) })),
     listen: vi.fn(async (filter: unknown) => {
       const close = vi.fn(async () => {});
       closes.push(close);
@@ -144,6 +145,102 @@ describe('dev-proxy backend subscription relay', () => {
     expect(client.listen).toHaveBeenCalledWith(expect.objectContaining({
       resourceSubscriptions: ['debug://sessions/a/output'],
     }));
+  });
+
+  describe('serialization (review of PR #1118, Important #2)', () => {
+    it('two subscribes arriving before either listen settles leave exactly one listen open', async () => {
+      const { client, closes } = fakeClient('modern');
+      const releases: Array<() => void> = [];
+      client.listen.mockImplementation((filter: unknown) => new Promise((resolve) => {
+        releases.push(() => {
+          const close = vi.fn(async () => {});
+          closes.push(close);
+          resolve({ honoredFilter: filter, close });
+        });
+      }));
+      const relay = createSubscriptionRelay({ getClient: () => client });
+
+      const first = relay.subscribe('debug://sessions/a/output');
+      const second = relay.subscribe('debug://sessions/b/output');
+      await vi.waitFor(() => expect(client.listen).toHaveBeenCalledTimes(1));
+      // The second subscribe waits for the first to settle rather than racing it.
+      expect(client.listen).toHaveBeenCalledTimes(1);
+
+      releases[0]();
+      await first;
+      await vi.waitFor(() => expect(client.listen).toHaveBeenCalledTimes(2));
+      releases[1]();
+      await second;
+
+      // The first listen was closed before the second opened; the second stays open.
+      expect(closes).toHaveLength(2);
+      expect(closes[0]).toHaveBeenCalledTimes(1);
+      expect(closes[1]).not.toHaveBeenCalled();
+      expect(client.listen).toHaveBeenLastCalledWith(expect.objectContaining({
+        resourceSubscriptions: ['debug://sessions/a/output', 'debug://sessions/b/output'],
+      }));
+    });
+  });
+
+  describe('tracking everything the backend lists (review of PR #1118, Important #1)', () => {
+    // A 2026-07-28 front client's listen set is served by the SDK entry and never
+    // reaches the proxy, so while such a client is pinned the proxy subscribes the
+    // backend to every resource it lists; the front's router filters per client.
+    it('expresses the listed resources too while track-all is on, refreshes them on request, and drops them when it is off', async () => {
+      const { client } = fakeClient('modern', ['debug://sessions/a/output', 'debug://sessions/a/proxy-log']);
+      const relay = createSubscriptionRelay({ getClient: () => client });
+
+      relay.trackAll(true);
+      await relay.reopen();
+      expect(client.listen).toHaveBeenLastCalledWith(expect.objectContaining({
+        resourceSubscriptions: ['debug://sessions/a/output', 'debug://sessions/a/proxy-log'],
+      }));
+
+      // A new session appeared (resources/list_changed): re-list and re-express.
+      client.listResources.mockResolvedValue({ resources: [{ uri: 'debug://sessions/a/output', name: 'a' }, { uri: 'debug://sessions/b/output', name: 'b' }] });
+      await relay.refreshKnown();
+      expect(client.listen).toHaveBeenLastCalledWith(expect.objectContaining({
+        resourceSubscriptions: ['debug://sessions/a/output', 'debug://sessions/b/output'],
+      }));
+
+      // The modern pin closed: only what a client asked for by name remains.
+      relay.trackAll(false);
+      await relay.reopen();
+      expect(client.listen).toHaveBeenLastCalledWith(expect.objectContaining({ resourceSubscriptions: [] }));
+    });
+
+    it('against a 2025 backend subscribes each listed resource, and a refusal is logged rather than thrown', async () => {
+      const { client } = fakeClient('legacy', ['debug://sessions/a/output', 'debug://sessions/a/proxy-log']);
+      client.subscribeResource.mockImplementation(async ({ uri }: { uri: string }) => {
+        if (uri.endsWith('proxy-log')) throw new Error('Unknown resource: ' + uri);
+        return {};
+      });
+      const log = vi.fn();
+      const relay = createSubscriptionRelay({ getClient: () => client, log });
+
+      relay.trackAll(true);
+      await expect(relay.reopen()).resolves.toBeUndefined();
+
+      expect(client.subscribeResource.mock.calls.map(([p]) => p.uri)).toEqual(['debug://sessions/a/output', 'debug://sessions/a/proxy-log']);
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('debug://sessions/a/proxy-log'));
+    });
+
+    it('refreshKnown is a no-op while track-all is off', async () => {
+      const { client } = fakeClient('modern', ['debug://sessions/a/output']);
+      const relay = createSubscriptionRelay({ getClient: () => client });
+      await relay.refreshKnown();
+      expect(client.listResources).not.toHaveBeenCalled();
+      expect(client.listen).not.toHaveBeenCalled();
+    });
+  });
+
+  it('does not remember a URI whose listen the 2026 backend refused', async () => {
+    const { client } = fakeClient('modern');
+    client.listen.mockRejectedValueOnce(new Error('listen refused'));
+    const relay = createSubscriptionRelay({ getClient: () => client });
+
+    await expect(relay.subscribe('debug://sessions/x/output')).rejects.toThrow('listen refused');
+    expect(relay.uris()).toEqual([]);
   });
 
   it('reports, not throws, when the backend refuses a subscription', async () => {

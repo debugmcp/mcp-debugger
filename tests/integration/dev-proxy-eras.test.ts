@@ -67,6 +67,8 @@ describe('dev-proxy protocol eras (issue #1025, step 2)', () => {
     expect(client.getProtocolEra()).toBe('modern');
     expect(client.getNegotiatedProtocolVersion()).toBe('2026-07-28');
     // The sibling probe and the real connect have both happened; neither started a backend.
+    // (An eager sibling start might not have appended its event yet, so this first read is
+    // a probabilistic detector; the two reads below are the deterministic ones.)
     expect(await backendStarts()).toBe(0);
 
     const status = await client.callTool({ name: 'dev_server_status', arguments: {} });
@@ -100,10 +102,13 @@ describe('dev-proxy protocol eras (issue #1025, step 2)', () => {
     await client.listTools();
     const subscription = await client.listen({ resourceSubscriptions: ['fixture://status'] });
 
-    // The fixture backend (2025) sends resources/updated for a touched URI;
-    // the proxy had subscribed it through resources/subscribe on the client's behalf.
+    // The fixture backend (2025) sends resources/updated for a touched URI only
+    // if the proxy subscribed it. A 2026 client's listen set is served by the SDK
+    // entry and never reaches the proxy, so while a 2026 client is pinned the
+    // proxy subscribes the backend to every resource it lists; the front's own
+    // router then delivers only what this client listened for.
     const touched = await client.callTool({ name: 'fixture_tool', arguments: { touch: 'fixture://status' } });
-    expect(touched.isError).not.toBe(true);
+    expect(touched.isError, JSON.stringify(touched.content)).not.toBe(true);
     await expect.poll(() => updated, { timeout: 5000 }).toEqual(['fixture://status']);
     await subscription.close();
   });

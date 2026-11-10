@@ -42,6 +42,25 @@ import { assertBackendAvailable, backendFailureHint, dedupeMcpErrorPrefix } from
 export function createFront({ backend, relay, devTools, handleDevTool, discoveryWaitMs, log = () => {} }) {
   /** @type {Server | null} */
   let current = null;
+  /** @type {'legacy' | 'modern' | null} */
+  let currentEra = null;
+
+  /**
+   * A 2026 client's listen set is served by the SDK entry and never reaches a
+   * handler, so while a modern instance is pinned the relay tracks everything
+   * the backend lists; the front's router delivers each client only what it
+   * listened for. Re-derived from the pinned instance whenever one is built or
+   * closes (a discarded probe closing must not switch a legacy pin's mode on).
+   */
+  const applyTracking = () => {
+    const tracking = currentEra === 'modern';
+    relay.trackAll?.(tracking);
+    if (tracking) {
+      Promise.resolve(relay.refreshKnown?.()).catch((err) => {
+        log(`Could not track the backend's resources: ${err?.message ?? err}`);
+      });
+    }
+  };
 
   const signalOf = (ctx) => ctx?.mcpReq?.signal;
 
@@ -148,10 +167,16 @@ export function createFront({ backend, relay, devTools, handleDevTool, discovery
     // must not clear a newer pin.
     const previousClose = server.onclose;
     server.onclose = () => {
-      if (current === server) current = null;
+      if (current === server) {
+        current = null;
+        currentEra = null;
+      }
+      applyTracking();
       previousClose?.();
     };
     current = server;
+    currentEra = era;
+    applyTracking();
     log(`Front instance built for the ${era} era`);
     return server;
   };
@@ -165,10 +190,22 @@ export function createFront({ backend, relay, devTools, handleDevTool, discovery
     const target = current;
     if (!target) return;
     switch (notification.method) {
-      case 'notifications/resources/updated':
-        await target.sendResourceUpdated({ uri: notification.params?.uri });
+      case 'notifications/resources/updated': {
+        const uri = notification.params?.uri;
+        if (typeof uri !== 'string') {
+          log('Dropping a resources/updated without a uri');
+          return;
+        }
+        await target.sendResourceUpdated({ uri });
         return;
+      }
       case 'notifications/resources/list_changed':
+        // A new or removed debug session: the tracked set follows the backend's list.
+        try {
+          await relay.refreshKnown?.();
+        } catch (err) {
+          log(`Could not refresh the tracked resources: ${err?.message ?? err}`);
+        }
         await target.sendResourceListChanged();
         return;
       case 'notifications/tools/list_changed':

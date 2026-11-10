@@ -17,6 +17,10 @@ export interface FrontBackend {
 export interface FrontRelay {
   subscribe(uri: string): Promise<void>;
   unsubscribe(uri: string): Promise<void>;
+  /** Track everything the backend lists while a 2026 client is pinned. */
+  trackAll?(enabled: boolean): void;
+  /** Re-read the backend's list (after a resources/list_changed, or when tracking starts). */
+  refreshKnown?(): Promise<void>;
 }
 
 export interface Front {

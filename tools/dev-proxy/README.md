@@ -16,12 +16,19 @@ The proxy speaks both MCP protocol eras to its client (issue #1025): it is serve
 SDK's stdio entry, so a client that probes with `server/discover` — Claude Code's v2 runtime does —
 lands on the current 2026-07-28 revision (sessionless; resource notifications over
 `subscriptions/listen`), and a client that opens with `initialize` gets the 2025 era as before.
-Towards an `http` backend the proxy negotiates the same way and lands on 2026-07-28; a stdio
-backend stays on the 2025 era. `dev_server_status` reports `protocolEra` and `protocolVersion`.
-Resource subscriptions are translated across eras: the set the client subscribed to is expressed
-to the backend in the era it speaks (one `subscriptions/listen` for a 2026 backend, one
-`resources/subscribe` per URI for a 2025 one) and re-expressed after every backend restart, so a
-`dev_rebuild_and_restart` no longer loses them.
+Towards an `http` backend the proxy negotiates the same way and lands on 2026-07-28 when that
+backend's dist serves it (an older dist answers the 2025 era; `dev_server_status` says which
+under `protocolEra`/`protocolVersion`); a stdio backend stays on the 2025 era. Resource
+subscriptions are translated across eras: the set is expressed to the backend in the era it
+speaks (one `subscriptions/listen` for a 2026 backend, one `resources/subscribe` per URI for a
+2025 one) and re-expressed after every backend restart, so a `dev_rebuild_and_restart` no longer
+loses them. A 2025 client names what it wants through `resources/subscribe`. A 2026 client's
+listen set is served by the SDK entry and never reaches the proxy, so while such a client is
+connected the proxy subscribes the backend to every resource it lists (re-read on each
+`resources/list_changed`) and the proxy's own router delivers the client only what it listened
+for. That router also drops a `tools/list_changed` a 2026 client did not opt into
+(`toolsListChanged: true` on its listen): after a restart that changes the inventory, such a
+client keeps its tool list until it lists again.
 
 The backend starts on the first request that needs it, not when the proxy process starts. A v2
 client's `auto` negotiation over stdio probes `server/discover` on a disposable sibling process

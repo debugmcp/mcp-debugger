@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { serveStdio, type StdioServerHandle } from '@modelcontextprotocol/server/stdio';
 import { Client } from '@modelcontextprotocol/client';
-import { createFront } from '../../../tools/dev-proxy/front-server.mjs';
+import { createFront, ObservedStdioServerTransport } from '../../../tools/dev-proxy/front-server.mjs';
 
 const URI = 'debug://sessions/sess-1/output';
 const DEV_TOOLS = [{ name: 'dev_server_status', description: 'status', inputSchema: { type: 'object', properties: {} } }];
@@ -32,7 +32,12 @@ function fakeBackend(overrides: Record<string, unknown> = {}) {
 }
 
 function fakeRelay() {
-  return { subscribe: vi.fn(async () => {}), unsubscribe: vi.fn(async () => {}) };
+  return {
+    subscribe: vi.fn(async () => {}),
+    unsubscribe: vi.fn(async () => {}),
+    trackAll: vi.fn(),
+    refreshKnown: vi.fn(async () => {}),
+  };
 }
 
 describe('dev-proxy front behind serveStdio (issue #1025, step 2)', () => {
@@ -136,6 +141,59 @@ describe('dev-proxy front behind serveStdio (issue #1025, step 2)', () => {
     await expect(front.sendToolListChanged()).resolves.toBeUndefined();
   });
 
+  // Review of PR #1118, Important #1: a 2026 client's listen set is served by the
+  // SDK entry and never reaches a handler, so the proxy cannot learn which URIs
+  // it wants. While a modern instance is pinned, the relay tracks everything the
+  // backend lists; the front's own router delivers each client only what it
+  // listened for.
+  it('a modern pin turns track-all on, and the pin closing turns it off', async () => {
+    const { relay, clientTransport } = serve();
+    client = new Client({ name: 'modern', version: '0.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
+    await client.connect(clientTransport);
+    expect(relay.trackAll).toHaveBeenLastCalledWith(true);
+
+    await client.close();
+    client = undefined;
+    await vi.waitFor(() => expect(relay.trackAll).toHaveBeenLastCalledWith(false));
+  });
+
+  it('a legacy pin leaves track-all off: its client names what it wants through resources/subscribe', async () => {
+    const { relay, clientTransport } = serve();
+    client = new Client({ name: 'legacy', version: '0.0.0' }, { versionNegotiation: { mode: 'legacy' } });
+    await client.connect(clientTransport);
+    expect(relay.trackAll).not.toHaveBeenCalledWith(true);
+  });
+
+  it('a relayed resources/list_changed refreshes the tracked set and still reaches the client', async () => {
+    const { front, relay, clientTransport } = serve();
+    client = new Client({ name: 'modern', version: '0.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
+    const changes: string[] = [];
+    client.setNotificationHandler('notifications/resources/list_changed', async (n) => { changes.push(n.method); });
+    await client.connect(clientTransport);
+    const subscription = await client.listen({ resourcesListChanged: true });
+    // The pin itself already refreshed once (a backend may be connected already).
+    const refreshes = relay.refreshKnown.mock.calls.length;
+
+    await front.notify({ method: 'notifications/resources/list_changed' });
+    expect(relay.refreshKnown).toHaveBeenCalledTimes(refreshes + 1);
+    await vi.waitFor(() => expect(changes).toEqual(['notifications/resources/list_changed']));
+    await subscription.close();
+  });
+
+  it('a modern client hears nothing for a URI it did not listen for: the router filters per client', async () => {
+    const { front, clientTransport } = serve();
+    client = new Client({ name: 'modern', version: '0.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
+    const updated: string[] = [];
+    client.setNotificationHandler('notifications/resources/updated', async (n) => { updated.push(n.params.uri); });
+    await client.connect(clientTransport);
+    const subscription = await client.listen({ resourceSubscriptions: [URI] });
+
+    await front.notify({ method: 'notifications/resources/updated', params: { uri: 'debug://sessions/other/output' } });
+    await front.notify({ method: 'notifications/resources/updated', params: { uri: URI } });
+    await vi.waitFor(() => expect(updated).toEqual([URI]));
+    await subscription.close();
+  });
+
   it('clears the relay target when the pinned instance closes', async () => {
     const { front, clientTransport } = serve();
     client = new Client({ name: 'legacy', version: '0.0.0' }, { versionNegotiation: { mode: 'legacy' } });
@@ -145,5 +203,17 @@ describe('dev-proxy front behind serveStdio (issue #1025, step 2)', () => {
     await client.close();
     client = undefined;
     await vi.waitFor(() => expect(front.current()).toBeNull());
+  });
+});
+
+describe('ObservedStdioServerTransport', () => {
+  it('reports the wire closing exactly once, after the SDK close has run', async () => {
+    const seen = vi.fn();
+    const transport = new ObservedStdioServerTransport(seen);
+
+    await transport.close();
+    await transport.close();
+
+    expect(seen).toHaveBeenCalledTimes(1);
   });
 });

@@ -877,7 +877,13 @@ async function main() {
   // The relay expresses the client's resource subscriptions to the backend in
   // whichever era it speaks (issue #1025, step 2); the backend re-expresses the
   // set after every (re)connect and ends its listen before going away.
-  const relay = createSubscriptionRelay({ getClient: () => backend.mcpClient, log });
+  // Not a stopped backend's client: a crash leaves a closed client behind until
+  // the next start, and the relay must not speak to it. A starting backend's
+  // client is live — the set is expressed right after it connects.
+  const relay = createSubscriptionRelay({
+    getClient: () => (backend.state === 'stopped' ? null : backend.mcpClient),
+    log,
+  });
   backend.relay = relay;
 
   // The client-facing server, one instance per connection, in the era the client

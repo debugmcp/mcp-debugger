@@ -12,6 +12,17 @@
  *   list-changed flags keep a listen open even with no URI, so a new debug
  *   session's `resources/list_changed` still reaches the client).
  *
+ * Two sources feed the set. A 2025 front client names what it wants through
+ * `resources/subscribe` (`subscribe`/`unsubscribe`). A 2026-07-28 front
+ * client's listen set is served by the SDK's stdio entry and never reaches the
+ * proxy, so while such a client is pinned (`trackAll(true)`) the relay also
+ * tracks every resource the backend lists — re-read on each
+ * `resources/list_changed` (`refreshKnown`) — and the front's own router
+ * delivers each client only what it listened for.
+ *
+ * Every expression against the backend is serialized: two subscribes arriving
+ * back-to-back must not both open a listen and leak the first one.
+ *
  * The notifications themselves arrive through the client's
  * `fallbackNotificationHandler` exactly as before (the v2 client passes
  * listen-stream change notifications through to its registered handlers); the
@@ -23,6 +34,7 @@
  * @property {() => 'legacy' | 'modern'} [getProtocolEra]
  * @property {(params: { uri: string }) => Promise<unknown>} subscribeResource
  * @property {(params: { uri: string }) => Promise<unknown>} unsubscribeResource
+ * @property {() => Promise<{ resources?: Array<{ uri: string }> }>} listResources
  * @property {(filter: { resourceSubscriptions: string[], toolsListChanged: boolean, resourcesListChanged: boolean }) => Promise<{ close(): Promise<void> }>} listen
  */
 
@@ -30,13 +42,32 @@
  * @param {{ getClient: () => RelayClient | null | undefined, log?: (msg: string) => void }} deps
  */
 export function createSubscriptionRelay({ getClient, log = () => {} }) {
-  /** @type {Set<string>} */
+  /** What front clients asked for by name. @type {Set<string>} */
   const uris = new Set();
-  /** The modern-era listen currently open, if any. */
-  /** @type {{ close(): Promise<void> } | null} */
+  /** What the backend lists, while a 2026 front client is pinned. @type {string[]} */
+  let known = [];
+  let trackingAll = false;
+  /** The modern-era listen currently open, if any. @type {{ close(): Promise<void> } | null} */
   let open = null;
+  /** Serializes every expression against the backend. @type {Promise<void>} */
+  let tail = Promise.resolve();
 
-  const isModern = (client) => client?.getProtocolEra?.() === 'modern';
+  /** @template T @param {() => Promise<T>} work @returns {Promise<T>} */
+  const serialize = (work) => {
+    const run = tail.then(work, work);
+    tail = run.then(() => undefined, () => undefined);
+    return run;
+  };
+
+  const isModern = (client) => {
+    try {
+      return client?.getProtocolEra?.() === 'modern';
+    } catch {
+      return false;
+    }
+  };
+
+  const wanted = () => [...new Set([...uris, ...(trackingAll ? known : [])])];
 
   const closeOpen = async () => {
     const current = open;
@@ -49,55 +80,129 @@ export function createSubscriptionRelay({ getClient, log = () => {} }) {
     }
   };
 
-  /** Express the whole set to the current backend, whichever era it speaks. */
-  const express = async () => {
-    const client = getClient();
-    if (!client) return;
+  /** Re-read what the backend lists (only while tracking everything). */
+  const relist = async (client) => {
+    if (!trackingAll) {
+      known = [];
+      return;
+    }
+    const listed = await client.listResources();
+    known = (listed?.resources ?? [])
+      .map((resource) => resource?.uri)
+      .filter((uri) => typeof uri === 'string');
+  };
+
+  /** One tracked URI the backend refuses is logged, not fatal; a named one is the client's answer. */
+  const subscribeOne = async (client, uri) => {
+    try {
+      await client.subscribeResource({ uri });
+    } catch (err) {
+      if (uris.has(uri)) throw err;
+      log(`Backend refused a tracked subscription for ${uri}: ${err?.message ?? err}`);
+    }
+  };
+
+  /** Express the whole wanted set to the backend in its era. */
+  const express = async (client) => {
     if (isModern(client)) {
       await closeOpen();
       open = await client.listen({
-        resourceSubscriptions: [...uris],
+        resourceSubscriptions: wanted(),
         toolsListChanged: true,
         resourcesListChanged: true,
       });
       return;
     }
-    for (const uri of uris) await client.subscribeResource({ uri });
+    for (const uri of wanted()) await subscribeOne(client, uri);
   };
 
   return {
     uris: () => [...uris],
 
+    /**
+     * Track everything the backend lists (a 2026 front client is pinned) or stop.
+     * The next `reopen()`/`refreshKnown()` applies it; `refreshKnown()` right away
+     * expresses it to a backend that is already connected.
+     * @param {boolean} enabled
+     */
+    trackAll(enabled) {
+      trackingAll = Boolean(enabled);
+      if (!trackingAll) known = [];
+    },
+
     /** @param {string} uri */
     async subscribe(uri) {
       if (uris.has(uri)) return;
-      const client = getClient();
-      if (client && !isModern(client)) {
-        // A refusal (an unknown resource) is the front client's answer: not remembered.
-        await client.subscribeResource({ uri });
+      return serialize(async () => {
+        if (uris.has(uri)) return;
+        const client = getClient();
+        if (!client) {
+          uris.add(uri);
+          return;
+        }
+        if (!isModern(client)) {
+          // A refusal (an unknown resource) is the front client's answer: not remembered.
+          await client.subscribeResource({ uri });
+          uris.add(uri);
+          return;
+        }
         uris.add(uri);
-        return;
-      }
-      uris.add(uri);
-      if (client) await express();
+        try {
+          await express(client);
+        } catch (err) {
+          uris.delete(uri);
+          throw err;
+        }
+      });
     },
 
     /** @param {string} uri */
     async unsubscribe(uri) {
-      if (!uris.delete(uri)) return;
-      const client = getClient();
-      if (!client) return;
-      if (!isModern(client)) {
-        await client.unsubscribeResource({ uri });
-        return;
-      }
-      await express();
+      if (!uris.has(uri)) return;
+      return serialize(async () => {
+        if (!uris.delete(uri)) return;
+        const client = getClient();
+        if (!client) return;
+        if (!isModern(client)) {
+          await client.unsubscribeResource({ uri });
+          return;
+        }
+        await express(client);
+      });
     },
 
     /** After a backend (re)connect: the new backend knows nothing of the set yet. */
-    reopen: express,
+    reopen() {
+      return serialize(async () => {
+        const client = getClient();
+        if (!client) return;
+        await relist(client);
+        await express(client);
+      });
+    },
+
+    /** The backend's resource list changed: re-read it and express what is new. */
+    refreshKnown() {
+      return serialize(async () => {
+        if (!trackingAll) return;
+        const client = getClient();
+        if (!client) return;
+        const before = new Set(known);
+        await relist(client);
+        if (isModern(client)) {
+          await express(client);
+          return;
+        }
+        for (const uri of known) {
+          if (before.has(uri) || uris.has(uri)) continue;
+          await subscribeOne(client, uri);
+        }
+      });
+    },
 
     /** Before a backend goes away: end the open listen; the set stays for the next one. */
-    close: closeOpen,
+    close() {
+      return serialize(closeOpen);
+    },
   };
 }
