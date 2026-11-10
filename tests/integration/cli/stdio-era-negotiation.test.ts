@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { serverEnvironment } from '../../test-utils/helpers/mcp-stdio-client.js';
+import { TOOL_NAMES } from '../../../src/server/tool-schemas.js';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const entry = path.join(root, 'dist/index.js');
@@ -65,7 +66,7 @@ describe('stdio serves both protocol eras (issue #1025, step 2)', () => {
     expect(client.getProtocolEra()).toBe('modern');
     expect(client.getNegotiatedProtocolVersion()).toBe('2026-07-28');
     expect(client.getServerVersion()?.name).toBe('debug-mcp-server');
-    expect((await client.listTools()).tools.length).toBe(29);
+    expect((await client.listTools()).tools.length).toBe(TOOL_NAMES.length);
   }, 60_000);
 
   it('a client pinned to 2026-07-28 drives a full debug session and hears list changes on its listen stream', async () => {

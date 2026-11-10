@@ -513,6 +513,44 @@ describe('STDIO Command Handler', () => {
       expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('Stdio transport closed'));
     });
 
+    // The exit line is what an operator reads to learn why the server went
+    // away, so it is worded from what is true, not from which listener ran
+    // first: only a stdin that ended means the client left.
+    const exitLines = () => vi.mocked(mockLogger.warn).mock.calls.map(([line]) => String(line)).join(' | ');
+
+    it('names the transport error and does not blame the client when the wire closes after a stdout error', async () => {
+      await start();
+      const [, serveOptions] = mockServeStdio.mock.calls[0];
+
+      serveOptions!.onerror!(new Error('write EPIPE'));
+      await servedTransport().close();
+
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
+      expect(exitLines()).toContain('Stdio transport closed after an error (write EPIPE)');
+      expect(exitLines()).not.toContain('MCP client disconnected');
+    });
+
+    it('says only that the transport closed when no error was reported and stdin is still open', async () => {
+      await start();
+
+      await servedTransport().close();
+
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
+      expect(exitLines()).toContain('Stdio transport closed —');
+      expect(exitLines()).not.toContain('MCP client disconnected');
+    });
+
+    it('calls a wire close the client leaving when stdin has already ended', async () => {
+      const stdin = makeFakeStdin();
+      (stdin as unknown as { readableEnded: boolean }).readableEnded = true;
+      await start(stdin);
+
+      await servedTransport().close();
+
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
+      expect(exitLines()).toContain('Stdin ended; MCP client disconnected');
+    });
+
     it('runs the wire close through the same container gate as a stdin EOF: no client ever spoke, so stay alive', async () => {
       fakeProc.env.MCP_CONTAINER = 'true';
       await start();

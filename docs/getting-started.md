@@ -100,7 +100,7 @@ explicitly in a config file is still worth doing: it documents the intent. Conso
 silenced in every mode so nothing can corrupt the JSON-RPC stream.
 
 Both eras of the MCP protocol are served on `stdio`: a client that probes with `server/discover`
-(Claude Code's v2 runtime does, on every connect) gets the current 2026-07-28 revision, and a
+(Claude Code's v2 runtime does) gets the current 2026-07-28 revision, and a
 client that opens with `initialize` gets 2025-11-25 or earlier, as before. Claude Code may keep a
 stdio server it once saw answer as legacy pinned that way for up to seven days; restarting Claude
 Code after upgrading the server, or waiting it out, lets it probe again. `http` speaks 2025-11-25

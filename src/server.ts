@@ -126,6 +126,9 @@ export class DebugMcpServer implements ToolContext {
    * closes nothing. The transport layer supplies it; the default says nobody is.
    */
   private attendedSupplier: () => boolean = () => false;
+  /** The 2026-07-28 clients already named in the log, by identity; bounded. */
+  private readonly identifiedClients = new Set<string>();
+  private static readonly IDENTIFIED_CLIENT_LIMIT = 256;
 
   /** @internal Language discovery is a ToolContext service; see src/server/language-discovery.ts. */
   public async getSupportedLanguagesAsync(): Promise<string[]> {
@@ -841,6 +844,29 @@ export class DebugMcpServer implements ToolContext {
         `is closed (sweep every ${describeIdleWindow(this.idlePolicy.sweepMs)}; MCP_DEBUG_SESSION_IDLE_MS, MCP_DEBUG_SESSION_IDLE_SWEEP_MS)`
       );
     }
+  }
+
+  /**
+   * A 2026-07-28 client reached a handler (issue #1025, step 2). The modern
+   * era has no handshake, so this is the counterpart of the legacy
+   * `Client initialized` line: each distinct client — its self-reported name
+   * and version, and its protocol revision — is logged once per process,
+   * whether it is one stdio connection or an `http` client served by a facade
+   * per request. Past the bound a new identity is logged at debug and not
+   * remembered, so a client that varies its name cannot grow the set.
+   */
+  public noteModernClient(identity: { protocolVersion?: string; client?: string }): void {
+    const key = `${identity.protocolVersion ?? ''}|${identity.client ?? ''}`;
+    if (this.identifiedClients.has(key)) {
+      return;
+    }
+    const line = { era: 'modern', protocolVersion: identity.protocolVersion, client: identity.client };
+    if (this.identifiedClients.size >= DebugMcpServer.IDENTIFIED_CLIENT_LIMIT) {
+      this.logger.debug('[MCP Server] Client identified', line);
+      return;
+    }
+    this.identifiedClients.add(key);
+    this.logger.info('[MCP Server] Client identified', line);
   }
 
   /** Who decides whether a client is attending the process; see attendedSupplier. */
