@@ -103,6 +103,12 @@ export class DebugMcpServer implements ToolContext {
   /** The file system the resource handlers read proxy-log tails through. */
   public readonly fileSystem: IFileSystem;
   /**
+   * The release version every facade advertises (clients and the MCP Registry
+   * show it; the Docker bundle reads it baked in, issue #1054). Read once here:
+   * the helper walks the file system, and a facade is built per request.
+   */
+  public readonly version: string;
+  /**
    * The MCP `instructions` every facade advertises. Mode-gated (issue #271):
    * the handshake must not teach restricted addressing features. Env is
    * process-stable, so construction time is fine. Redaction state rides along
@@ -745,6 +751,7 @@ export class DebugMcpServer implements ToolContext {
     );
 
     this.fileSystem = dependencies.fileSystem;
+    this.version = getVersion();
     this.instructions = buildServerInstructions(getBpAddressingMode(this.environment), {
       redactionEnabled: isRedactionEnabled(this.environment),
       variableAccessMode: getVariableAccessMode(this.environment)
@@ -809,7 +816,7 @@ export class DebugMcpServer implements ToolContext {
   public async start(): Promise<void> {
     // For MCP servers, start is handled by transport
     const buildTime = new Date().toISOString();
-    this.logger.info(`[MCP Server] Started at ${buildTime}, version: ${getVersion()}`);
+    this.logger.info(`[MCP Server] Started at ${buildTime}, version: ${this.version}`);
   }
 
   public async stop(): Promise<void> {

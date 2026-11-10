@@ -12,6 +12,7 @@ import { createProtocolServer } from '../../../../src/server/protocol-facade.js'
 import { OUTPUT_UPDATE_DEBOUNCE_MS } from '../../../../src/server/notification-hub.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { createProductionDependencies, type Dependencies } from '../../../../src/container/dependencies.js';
+import { getVersion } from '../../../../src/cli/version.js';
 import {
   createMockDependencies,
   createMockServer,
@@ -25,7 +26,7 @@ vi.mock('@modelcontextprotocol/server', async () =>
   (await import('../../../test-utils/mocks/sdk-server-module.js')).sdkServerModuleMock());
 vi.mock('../../../../src/session/session-manager.js');
 vi.mock('../../../../src/container/dependencies.js');
-vi.mock('../../../../src/cli/version.js', () => ({ getVersion: () => '1.2.3-test' }));
+vi.mock('../../../../src/cli/version.js', () => ({ getVersion: vi.fn(() => '1.2.3-test') }));
 
 const URI = 'debug://sessions/sess-1/output';
 
@@ -87,6 +88,35 @@ describe('createProtocolServer', () => {
       }
     );
     expect(vi.mocked(Server).mock.calls[0][1]?.instructions).toBe(core.instructions);
+  });
+
+  it('reads the release version once, on the core, not per facade (the version helper walks the file system)', () => {
+    expect(core.version).toBe('1.2.3-test');
+    const callsAfterCore = vi.mocked(getVersion).mock.calls.length;
+
+    legacy();
+    legacy();
+
+    expect(vi.mocked(getVersion).mock.calls.length).toBe(callsAfterCore);
+    expect(vi.mocked(Server).mock.calls[0][0]).toEqual({ name: 'debug-mcp-server', version: core.version });
+  });
+
+  it('two legacy facades over one core are pinged only for their own subscriptions', async () => {
+    legacy();
+    legacy();
+    const [a, b] = mockServers;
+    mockSessionManager.getSession.mockImplementation((id: string) => ({ id, name: id, language: 'mock' }) as any);
+    await getResourceHandlers(a).subscribeHandler({ method: 'resources/subscribe', params: { uri: URI } });
+    await getResourceHandlers(b).subscribeHandler({ method: 'resources/subscribe', params: { uri: 'debug://sessions/sess-2/output' } });
+
+    outputCapturedListener!('sess-1');
+    outputCapturedListener!('sess-2');
+    await vi.advanceTimersByTimeAsync(OUTPUT_UPDATE_DEBOUNCE_MS + 10);
+
+    expect(a.sendResourceUpdated).toHaveBeenCalledTimes(1);
+    expect(a.sendResourceUpdated).toHaveBeenCalledWith({ uri: URI });
+    expect(b.sendResourceUpdated).toHaveBeenCalledTimes(1);
+    expect(b.sendResourceUpdated).toHaveBeenCalledWith({ uri: 'debug://sessions/sess-2/output' });
   });
 
   it('registers exactly the eight MCP handlers', () => {
@@ -197,8 +227,9 @@ describe('createProtocolServer', () => {
     legacy();
     const elapsed = performance.now() - started;
 
-    // Generous bound (the per-request HTTP leg builds one per call); the
-    // dispatch index is built once per core, not per facade.
-    expect(elapsed).toBeLessThan(20);
+    // Generous bound (the per-request HTTP leg builds one per call; a loaded
+    // CI runner pauses for GC): the dispatch index and the version string are
+    // built once per core, not per facade.
+    expect(elapsed).toBeLessThan(50);
   });
 });

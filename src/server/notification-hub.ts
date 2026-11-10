@@ -78,7 +78,9 @@ export class NotificationHub {
   forgetUri(uri: string): void {
     this.clearTimer(uri);
     for (const sink of this.sinks) {
-      sink.forget?.(uri);
+      // Runs inside the SessionManager's 'session-removed' emit (relaunch,
+      // terminating detach): a sink's failure must not escape into those paths.
+      this.deliver(() => sink.forget?.(uri), `[Server] Failed to forget ${uri}`);
     }
   }
 

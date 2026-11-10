@@ -10,7 +10,6 @@
  * SessionManager, no logger of its own.
  */
 import { Server } from '@modelcontextprotocol/server';
-import { getVersion } from '../cli/version.js';
 import type { DebugMcpServer } from '../server.js';
 import { facadeSink } from './notification-hub.js';
 import { FacadeSubscriptions, registerResourceHandlers } from './output-resources.js';
@@ -33,10 +32,10 @@ export interface ProtocolFacadeOptions {
 }
 
 export function createProtocolServer(core: DebugMcpServer, options: ProtocolFacadeOptions): Server {
-  // The release version, not a literal: clients and the MCP Registry show this
-  // string, and the Docker bundle reads it baked in (issue #1054).
+  // Everything the Server advertises is read off the core, computed once per
+  // process: a facade is built per connection or per request.
   const server = new Server(
-    { name: 'debug-mcp-server', version: getVersion() },
+    { name: 'debug-mcp-server', version: core.version },
     {
       capabilities: { tools: {}, resources: { subscribe: true, listChanged: true }, prompts: {} },
       instructions: core.instructions

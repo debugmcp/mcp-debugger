@@ -343,7 +343,7 @@ describe('Server Output Resources Tests', () => {
       await expect(subscribe('debug://sessions/sess-1/proxy-log')).rejects.toBeInstanceOf(ProtocolError);
     });
 
-    it('stops pinging after unsubscribe, cancelling any pending timer', async () => {
+    it('stops pinging after unsubscribe: a pending ping fires into the facade filter and is dropped', async () => {
       mockSessionManager.getSession.mockReturnValue(mockSession());
       await subscribe('debug://sessions/sess-1/output');
 

@@ -156,6 +156,29 @@ describe('NotificationHub', () => {
   });
 });
 
+describe('NotificationHub forget guard', () => {
+  it('a sink whose forget throws is logged at debug and does not block its siblings', () => {
+    const hub = new NotificationHub(logger);
+    const broken: NotificationSink = {
+      resourceUpdated: vi.fn(),
+      resourcesChanged: vi.fn(),
+      forget: vi.fn(() => { throw new Error('gone'); })
+    };
+    const healthy = fakeSink();
+    hub.addSink(broken);
+    hub.addSink(healthy);
+
+    expect(() => hub.forgetUri(URI)).not.toThrow();
+
+    expect(healthy.forget).toHaveBeenCalledWith(URI);
+    expect(logger.debug).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to forget'),
+      expect.objectContaining({ error: expect.any(Error) })
+    );
+    hub.dispose();
+  });
+});
+
 describe('facadeSink', () => {
   const server = () => ({
     sendResourceUpdated: vi.fn().mockResolvedValue(undefined),

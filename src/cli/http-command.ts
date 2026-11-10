@@ -378,6 +378,10 @@ export function createHttpApp(
         });
         createdTransport = newTransport;
 
+        // Set BEFORE facade.connect(): the SDK wraps a transport.onclose that
+        // is already in place and then runs its own teardown, which is what
+        // reaches server.onclose and detaches the facade's notification sink.
+        // Assigning after connect() would replace that wrapper (issue #1025).
         newTransport.onclose = () => {
           const sid = newTransport.sessionId;
           if (!sid) return;
