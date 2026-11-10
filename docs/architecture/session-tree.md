@@ -472,10 +472,19 @@ Two guardrails:
    contract, and went with the one-core-per-process change (shipped 2026-11, #1025 step 2). The
    seam for real isolation is in place: a session is created in its caller's scope — the
    authenticated principal when the request carried one, otherwise the shared anonymous scope —
-   and an out-of-scope id answers as unknown; with no authentication every caller is anonymous.
-2. Lifetime without an MCP session is a **per-debug-session idle policy**:
-   `MCP_DEBUG_SESSION_IDLE_MS`, default thirty minutes on `http` and off on `stdio` (the pipe is
-   the lifetime), `0` disables; the sweep runs every `MCP_DEBUG_SESSION_IDLE_SWEEP_MS` (60 s).
+   and a session outside the caller's scope does not exist for that caller: the dispatch hides it
+   from the call's lookups, so every tool answers it exactly as it answers an id nobody holds
+   (pinned tool by tool in `owner-scope-contract.test.ts`); with no authentication every caller is
+   anonymous.
+2. Lifetime without an MCP session: a debug session ends by its own close, its program ending, or
+   the server exiting. A **per-debug-session idle policy** exists and is **off by default on every
+   transport** (decided with JF 2026-11-10, replacing the thirty-minute `http` default this section
+   first carried: a sessionless client gives the server no sign of life between its calls, so any
+   finite default ends some live agent's program, while a leaked session is visible in
+   `list_debug_sessions` and closable by anyone). An operator of a shared or long-lived server
+   turns it on with `MCP_DEBUG_SESSION_IDLE_MS`; the sweep runs every
+   `MCP_DEBUG_SESSION_IDLE_SWEEP_MS` (60 s). When it is on, a session's row shows `expiresInMs`,
+   and a later call naming a session the policy closed answers what happened, in its owner's scope.
    Only roots have a clock: a tool call naming any session in a tree refreshes the tree's root, and
    a child never expires on a clock of its own — the tree goes with its root (decided 2026-11-09,
    amending the per-descendant clocks this section first proposed: a worker paused under a parent
@@ -560,7 +569,7 @@ Taken by the author of this document, marked so they can be overturned:
 - The child's connection lives in the parent's worker (the constraints above).
 - The per-tree cap defaults to 32 and is named `DEBUG_MCP_MAX_CHILD_SESSIONS`; `0` disables
   child-session adoption, excluding js-debug's mandatory first target.
-- The idle policy knob is named `MCP_DEBUG_SESSION_IDLE_MS` (sweep: `MCP_DEBUG_SESSION_IDLE_SWEEP_MS`).
+- The idle policy knob is named `MCP_DEBUG_SESSION_IDLE_MS` (sweep: `MCP_DEBUG_SESSION_IDLE_SWEEP_MS`); it is off unless set (decided with JF, 2026-11-10).
 - Only roots have an idle clock: activity on any session in a tree refreshes its root, a child never
   expires alone, a tree-aware wait holds the root for the duration of the call, and the sweep is
   skipped while a client attends the process (decided with JF, 2026-11-09).

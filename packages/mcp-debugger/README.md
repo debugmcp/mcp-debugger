@@ -101,7 +101,7 @@ All language adapters are bundled into the CLI package. No separate installation
 | `FLUTTER_ROOT` | Flutter SDK root when `flutter` is not on PATH — its bundled Dart is used when no standalone SDK is found; `FLUTTER_PATH` is an alias |
 | `MCP_HTTP_STALE_SESSION_MS` | HTTP mode: reap a crash-abandoned MCP session that never opened an SSE stream after this idle time (default 30 min) |
 | `MCP_HTTP_STREAM_LOST_SESSION_MS` | HTTP mode: reap a crash-abandoned MCP session whose SSE stream dropped and never returned after this idle time (default 2 min) |
-| `MCP_DEBUG_SESSION_IDLE_MS` | Close a debug-session tree no tool call has named for this long, unless a client is attending the process (default 30 min in HTTP mode, off in stdio mode; `0` disables) — releases a dead client's paused attach target |
+| `MCP_DEBUG_SESSION_IDLE_MS` | Opt-in, off by default: when set, close a debug-session tree no tool call has named for this long, unless a client is attending the process. Set it on a shared or long-lived server so a dead client's paused attach target is released |
 | `MCP_DEBUG_SESSION_IDLE_SWEEP_MS` | How often that idle sweep runs (default 60 s) |
 | `MCP_HTTP_ALLOWED_HOSTS` | HTTP mode: comma-separated `Host` (and browser `Origin`) hostnames to accept besides `localhost`, `127.0.0.1`, `[::1]` — only when another access control fronts the server; same as repeating `--allowed-host` |
 | `MCP_HTTP_BIND` | HTTP mode: IP address to listen on (default `127.0.0.1`, loopback only); same as `--bind`. The Docker image sets `0.0.0.0` so a published port works. An empty value refuses to start |

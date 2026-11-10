@@ -124,8 +124,27 @@ describe('the debug-session idle policy on the core (issue #1025, step 2)', () =
     return typeof options?.attended === 'function' ? options.attended() : Boolean(options?.attended);
   };
 
-  it('start() arms a sweep at the configured default cadence and stop() clears it', async () => {
-    debugServer = new DebugMcpServer({ debugSessionIdle: { defaultMs: 30 * 60_000 } });
+  /** A core with the policy turned on the only way it can be: by the operator's variable. */
+  const coreWithWindow = (ms: number): DebugMcpServer => {
+    vi.stubEnv('MCP_DEBUG_SESSION_IDLE_MS', String(ms));
+    return new DebugMcpServer();
+  };
+
+  it('the policy is off unless the operator sets it, on every transport: nothing is armed and start() says so', async () => {
+    debugServer = new DebugMcpServer();
+    expect(debugServer.idlePolicy).toEqual({ idleMs: 0, sweepMs: 60_000 });
+
+    await debugServer.start();
+    await vi.advanceTimersByTimeAsync(3_600_000);
+
+    expect(mockSessionManager.sweepIdle).not.toHaveBeenCalled();
+    expect(mockDependencies.logger.info).toHaveBeenCalledWith(
+      expect.stringMatching(/Debug-session idle policy: off .*MCP_DEBUG_SESSION_IDLE_MS.*until it is closed, its program ends, or the server exits/)
+    );
+  });
+
+  it('MCP_DEBUG_SESSION_IDLE_MS turns it on: start() arms a sweep at the default cadence, says the window, and stop() clears it', async () => {
+    debugServer = coreWithWindow(30 * 60_000);
     expect(debugServer.idlePolicy).toEqual({ idleMs: 1_800_000, sweepMs: 60_000 });
 
     await debugServer.start();
@@ -134,42 +153,28 @@ describe('the debug-session idle policy on the core (issue #1025, step 2)', () =
     // The supplier itself travels, so the sweep can ask again before each close.
     expect(mockSessionManager.sweepIdle).toHaveBeenCalledWith(1_800_000, { attended: expect.any(Function) });
     expect(attendedAnswer()).toBe(false);
+    expect(mockDependencies.logger.info).toHaveBeenCalledWith(
+      expect.stringContaining('Debug-session idle policy: a tree with no tool call for 30 min is closed')
+    );
 
     await debugServer.stop();
     await vi.advanceTimersByTimeAsync(180_000);
     expect(mockSessionManager.sweepIdle).toHaveBeenCalledTimes(1);
   });
 
-  it('a default of 0 (stdio) arms nothing, and so does an absent option', async () => {
-    debugServer = new DebugMcpServer({ debugSessionIdle: { defaultMs: 0 } });
-    await debugServer.start();
-    await vi.advanceTimersByTimeAsync(3_600_000);
-    expect(mockSessionManager.sweepIdle).not.toHaveBeenCalled();
-    await debugServer.stop();
-
-    debugServer = new DebugMcpServer();
-    expect(debugServer.idlePolicy.idleMs).toBe(0);
-  });
-
-  it('MCP_DEBUG_SESSION_IDLE_MS overrides the default, and 0 disables the policy', async () => {
-    vi.stubEnv('MCP_DEBUG_SESSION_IDLE_MS', '5000');
-    debugServer = new DebugMcpServer({ debugSessionIdle: { defaultMs: 30 * 60_000 } });
-    expect(debugServer.idlePolicy.idleMs).toBe(5000);
-    await debugServer.stop();
-
-    vi.stubEnv('MCP_DEBUG_SESSION_IDLE_MS', '0');
-    debugServer = new DebugMcpServer({ debugSessionIdle: { defaultMs: 30 * 60_000 } });
+  it('an explicit 0 is off, the same as unset', async () => {
+    debugServer = coreWithWindow(0);
     expect(debugServer.idlePolicy.idleMs).toBe(0);
     await debugServer.start();
     await vi.advanceTimersByTimeAsync(3_600_000);
     expect(mockSessionManager.sweepIdle).not.toHaveBeenCalled();
   });
 
-  it('an invalid window warns and keeps the default', () => {
+  it('an invalid window warns and leaves the policy off', () => {
     vi.stubEnv('MCP_DEBUG_SESSION_IDLE_MS', 'soon');
-    debugServer = new DebugMcpServer({ debugSessionIdle: { defaultMs: 30 * 60_000 } });
+    debugServer = new DebugMcpServer();
 
-    expect(debugServer.idlePolicy.idleMs).toBe(1_800_000);
+    expect(debugServer.idlePolicy.idleMs).toBe(0);
     expect(mockDependencies.logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('Ignoring invalid MCP_DEBUG_SESSION_IDLE_MS value "soon"')
     );
@@ -177,14 +182,14 @@ describe('the debug-session idle policy on the core (issue #1025, step 2)', () =
 
   it('MCP_DEBUG_SESSION_IDLE_SWEEP_MS sets the cadence; a non-positive value warns and keeps 60 s', async () => {
     vi.stubEnv('MCP_DEBUG_SESSION_IDLE_SWEEP_MS', '1000');
-    debugServer = new DebugMcpServer({ debugSessionIdle: { defaultMs: 30 * 60_000 } });
+    debugServer = coreWithWindow(30 * 60_000);
     await debugServer.start();
     await vi.advanceTimersByTimeAsync(2_100);
     expect(mockSessionManager.sweepIdle).toHaveBeenCalledTimes(2);
     await debugServer.stop();
 
     vi.stubEnv('MCP_DEBUG_SESSION_IDLE_SWEEP_MS', '0');
-    debugServer = new DebugMcpServer({ debugSessionIdle: { defaultMs: 30 * 60_000 } });
+    debugServer = coreWithWindow(30 * 60_000);
     expect(debugServer.idlePolicy.sweepMs).toBe(60_000);
     expect(mockDependencies.logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('Ignoring invalid MCP_DEBUG_SESSION_IDLE_SWEEP_MS value "0"')
@@ -192,7 +197,7 @@ describe('the debug-session idle policy on the core (issue #1025, step 2)', () =
   });
 
   it('each sweep asks the attended supplier and passes its answer', async () => {
-    debugServer = new DebugMcpServer({ debugSessionIdle: { defaultMs: 30 * 60_000 } });
+    debugServer = coreWithWindow(30 * 60_000);
     let attended = true;
     debugServer.setAttendedSupplier(() => attended);
     await debugServer.start();
@@ -205,7 +210,7 @@ describe('the debug-session idle policy on the core (issue #1025, step 2)', () =
   });
 
   it('a sweep that rejects is logged and the next tick still runs', async () => {
-    debugServer = new DebugMcpServer({ debugSessionIdle: { defaultMs: 30 * 60_000 } });
+    debugServer = coreWithWindow(30 * 60_000);
     mockSessionManager.sweepIdle.mockRejectedValueOnce(new Error('store exploded'));
     await debugServer.start();
 

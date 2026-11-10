@@ -35,6 +35,7 @@ import type { NotificationHub } from './notification-hub.js';
 import type { LanguageMetadata } from './language-discovery.js';
 import type { ToolArguments } from './tool-arguments.js';
 import type { ToolResult } from './tool-result.js';
+import type { IdlePolicy } from '../session/idle-policy.js';
 
 /**
  * Request shape for DebugMcpServer.setBreakpoint (issue #271).
@@ -58,6 +59,8 @@ export interface SetBreakpointRequest {
 export interface ToolContext {
   // ---- live dependencies ----
   readonly sessionManager: SessionManager;
+  /** The idle policy in force (issue #1025); `idleMs` 0 = off, which is the default. */
+  readonly idlePolicy: IdlePolicy;
   readonly logger: ILogger;
   readonly fileChecker: SimpleFileChecker;
   readonly lineReader: LineReader;

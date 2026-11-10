@@ -71,12 +71,6 @@ const JSON_BODY_LIMIT = '10mb';
 /** Idle window before a streamless HTTP session is reaped (issue #337). */
 const DEFAULT_STALE_SESSION_MS = 30 * 60 * 1000;
 /**
- * The per-debug-session idle policy's default on http (issue #1025, step 2):
- * a debug-session tree no tool call has named for this long is closed, unless
- * a client is attending the process. MCP_DEBUG_SESSION_IDLE_MS overrides it.
- */
-const DEFAULT_DEBUG_SESSION_IDLE_MS = 30 * 60 * 1000;
-/**
  * Idle window before a session whose SSE stream dropped and never returned is
  * reaped (issue #658). The SDK client re-opens a lost stream within seconds
  * (three attempts, ~1s apart), and a load balancer that cuts idle streams sees
@@ -208,7 +202,6 @@ export function createHttpApp(
   const core = serverFactory({
     logLevel: options.logLevel,
     logFile: options.logFile,
-    debugSessionIdle: { defaultMs: DEFAULT_DEBUG_SESSION_IDLE_MS },
   });
   // While any client holds an open SSE stream the process is attended and the
   // idle policy closes nothing; the modern era's listen streams join this
