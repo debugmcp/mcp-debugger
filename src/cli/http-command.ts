@@ -440,7 +440,7 @@ export function createHttpApp(
         // reaches server.onclose and detaches the facade's notification sink.
         // Assigning after connect() would replace that wrapper (issue #1025).
         // The debug sessions this client created live on in the core under the
-        // idle policy; the MCP session was only a connection.
+        // idle policy where the operator set one; the MCP session was only a connection.
         newTransport.onclose = () => {
           const sid = newTransport.sessionId;
           if (!sid) return;

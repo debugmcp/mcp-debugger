@@ -497,9 +497,19 @@ export abstract class SessionManagerCore extends EventEmitter {
     return session !== undefined && visibleTo(session.ownerKey, callerKey);
   }
 
-  /** The public listing, filtered to the caller's scope (issue #1025, step 2). */
+  /**
+   * The public listing, filtered to the caller's scope (issue #1025, step 2).
+   * The owner keys are read off the managed rows themselves, never through a
+   * lookup by id: a lookup can be hidden for the current call (session-scope),
+   * and a session whose key cannot be read must not pass for an anonymous one.
+   */
   getSessionsVisibleTo(callerKey: string | undefined): DebugSessionInfo[] {
-    return this.sessionStore.getAll().filter((info) => visibleTo(this.sessionStore.get(info.id)?.ownerKey, callerKey));
+    const visible = new Set(
+      this.sessionStore.getAllManaged()
+        .filter((session) => visibleTo(session.ownerKey, callerKey))
+        .map((session) => session.id)
+    );
+    return this.sessionStore.getAll().filter((info) => visible.has(info.id));
   }
 
   /**
