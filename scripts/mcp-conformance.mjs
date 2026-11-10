@@ -13,16 +13,30 @@
  * The CLI's exit code is not trusted: on Windows it aborts at exit with a libuv assertion even
  * when every check passed, so the printed `Passed: n/m, k failed` summary is what counts.
  *
+ * The 2026-07-28 era (issue #1025, step 2) is a second lane on the suite's 0.2 line, which the
+ * SDKs themselves run: `--era 2026-07-28` runs `--requirements 2026-07-28` — everything the
+ * revision requires of a server — under an expected-failures baseline
+ * (`scripts/conformance/expected-failures-2026-07-28.yaml`) that names each scenario, or
+ * scenario:check, that needs one of the suite's reference fixtures. An unlisted failure fails the
+ * lane; so does a listed entry that passes (a stale baseline), so the baseline only shrinks
+ * honestly. The verdict is read from the CLI's own per-scenario summary lines and the
+ * `checks.json` it writes per scenario (`--output-dir`), never from its exit code.
+ *
  * Usage: node scripts/mcp-conformance.mjs [scenario ...]   (default: the list below)
+ *        node scripts/mcp-conformance.mjs --era 2026-07-28 [--verbose]
  */
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { createServer } from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMain } from './lib/is-main.mjs';
 
 export const CONFORMANCE_CLI = '@modelcontextprotocol/conformance@0.1.16';
+/** The 0.2 line, where the 2026-07-28 scenarios live; pinned to an exact prerelease. */
+export const CONFORMANCE_CLI_2026 = '@modelcontextprotocol/conformance@0.2.0-alpha.12';
+export const REQUIREMENTS_2026 = '2026-07-28';
 
 /** The scenarios that apply to a server without the reference fixtures (measured 2026-10-27: all pass). */
 export const APPLICABLE_SCENARIOS = [
@@ -51,6 +65,129 @@ export function judgeScenario(name, output) {
   return { name, ok: true, summary };
 }
 
+/**
+ * The per-scenario verdict lines of a `--requirements` run (`✓ name: n passed, m failed`), and
+ * the scenarios the revision lists as not scored (the CLI prints them after the total; they do
+ * not affect conformance). Undefined when the output has no summary.
+ */
+export function parseRequirementsSummary(output) {
+  const scenarios = [];
+  const line = /^[✓✗]\s+([A-Za-z0-9-]+):\s+(\d+)\s+passed,\s+(\d+)\s+failed\s*$/gm;
+  for (const match of output.matchAll(line)) {
+    scenarios.push({ name: match[1], passed: Number(match[2]), failed: Number(match[3]) });
+  }
+  if (scenarios.length === 0) return undefined;
+  const notScored = new Set();
+  const notScoredBlock = output.split(/^Not scored for [^\n]*$/m)[1];
+  if (notScoredBlock) {
+    for (const match of notScoredBlock.matchAll(/^\s+[✓✗]\s+([A-Za-z0-9-]+)\s+\(/gm)) {
+      notScored.add(match[1]);
+    }
+  }
+  return { scenarios, notScored };
+}
+
+/**
+ * The expected-failures file: `server:` entries of `<scenario>` (the whole scenario is expected to
+ * fail) or `<scenario>:<check>` (that check is). Comments and blank lines are ignored. Deliberately
+ * a tiny reader for this one shape rather than a YAML dependency.
+ */
+export function parseBaseline(text) {
+  const expected = new Map();
+  let inServer = false;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/\s+#.*$/, '').replace(/^#.*$/, '').trimEnd();
+    if (!line.trim()) continue;
+    if (/^[A-Za-z]+:\s*$/.test(line)) {
+      inServer = line.trim() === 'server:';
+      continue;
+    }
+    const entry = /^\s*-\s*['"]?([A-Za-z0-9:_-]+)['"]?\s*$/.exec(line);
+    if (!entry || !inServer) continue;
+    const [scenario, check] = entry[1].split(':');
+    const current = expected.get(scenario);
+    if (check === undefined) {
+      expected.set(scenario, 'all');
+    } else if (current !== 'all') {
+      expected.set(scenario, new Set([...(current ?? []), check]));
+    }
+  }
+  return expected;
+}
+
+/** The names of the failing checks in one scenario's `checks.json` (an array, or an object holding `checks`). */
+export function failingChecks(checksJson) {
+  const checks = Array.isArray(checksJson) ? checksJson : Array.isArray(checksJson?.checks) ? checksJson.checks : [];
+  return checks.filter((check) => check?.status === 'FAILURE').map((check) => String(check.name));
+}
+
+/**
+ * The lane's verdict for a requirements run: every scored scenario either passes, or fails only
+ * in ways the baseline expects — and every baseline entry still fails (otherwise it is stale).
+ * `failingChecksOf(name)` answers the failing check names of a scenario, read from its checks.json.
+ */
+export function judgeRequirements(summary, baseline, failingChecksOf) {
+  const problems = [];
+  const seen = new Set();
+  for (const { name, failed } of summary.scenarios) {
+    if (summary.notScored.has(name)) continue;
+    seen.add(name);
+    const expected = baseline.get(name);
+    if (failed === 0) {
+      if (expected !== undefined) problems.push(`${name}: listed as an expected failure but it passed — remove it from the baseline`);
+      continue;
+    }
+    if (expected === 'all') continue;
+    const failing = failingChecksOf(name);
+    if (failing.length === 0) {
+      // The summary says it failed but no checks.json named the checks: nothing to compare the
+      // per-check entries against, and nothing to call passed.
+      problems.push(expected === undefined
+        ? `${name}: ${failed} failed check(s) not in the baseline`
+        : `${name}: ${failed} failed check(s) but no checks.json was written for it — the per-check baseline entries cannot be judged`);
+      continue;
+    }
+    const unexpected = failing.filter((check) => !(expected?.has(check)));
+    if (unexpected.length > 0) {
+      problems.push(`${name}: ${failed} failed check(s) not in the baseline (${unexpected.join(', ')})`);
+    }
+    for (const check of expected ?? []) {
+      if (!failing.includes(check)) problems.push(`${name}:${check}: listed as an expected failure but it passed — remove it from the baseline`);
+    }
+  }
+  for (const name of baseline.keys()) {
+    if (!seen.has(name) && !summary.notScored.has(name)) {
+      problems.push(`${name}: in the baseline but the requirements run did not report it`);
+    }
+  }
+  return problems;
+}
+
+/**
+ * Every `checks.json` the CLI wrote under `dir`, keyed by scenario. The CLI names the folder
+ * `server-<scenario>-<ISO timestamp>` with the timestamp's colons and dots turned into dashes
+ * (`server-server-stateless-2026-11-10T02-36-40-817Z`, measured against 0.2.0-alpha.12).
+ */
+export function collectChecks(dir) {
+  const byScenario = new Map();
+  const walk = (current) => {
+    for (const entry of readdirSync(current)) {
+      const full = path.join(current, entry);
+      if (statSync(full).isDirectory()) {
+        walk(full);
+      } else if (entry === 'checks.json') {
+        const folder = path.basename(path.dirname(full));
+        const match = /^(?:server-)?(.+)-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/.exec(folder);
+        if (match) {
+          byScenario.set(match[1], failingChecks(JSON.parse(readFileSync(full, 'utf8'))));
+        }
+      }
+    }
+  };
+  if (existsSync(dir)) walk(dir);
+  return byScenario;
+}
+
 function freePort() {
   return new Promise((resolve, reject) => {
     const probe = createServer();
@@ -76,12 +213,12 @@ async function waitForHealth(port, timeoutMs) {
   return false;
 }
 
-/** Every argument the CLI is given is one of ours (a package spec, a loopback URL, a scenario name). */
-const SAFE_ARGUMENT = /^[A-Za-z0-9@./:_-]+$/;
+/** Every argument the CLI is given is one of ours (a package spec, a loopback URL, a scenario name, a path). */
+const SAFE_ARGUMENT = /^[A-Za-z0-9@./:_\\-]+$/;
 
-function runCli(args, cwd) {
+function runCli(args, cwd, cli = CONFORMANCE_CLI) {
   return new Promise((resolve) => {
-    const argv = ['--yes', CONFORMANCE_CLI, ...args];
+    const argv = ['--yes', cli, ...args];
     const unsafe = argv.find((arg) => !SAFE_ARGUMENT.test(arg));
     if (unsafe !== undefined) throw new Error(`refusing to pass "${unsafe}" to the conformance CLI`);
     // Windows: `npx` is a .cmd shim, which Node spawns only through a shell. The argv is checked
@@ -134,21 +271,94 @@ export async function runConformance(options = {}) {
   }
 }
 
+/**
+ * The 2026-07-28 lane: one `--requirements` run of the 0.2 CLI against a local `http` server,
+ * judged against the baseline. Answers `{ problems, summary }`; an empty `problems` is a pass.
+ */
+export async function runRequirements(options = {}) {
+  const root = options.root ?? fileURLToPath(new URL('../', import.meta.url));
+  const entry = path.join(root, 'dist', 'index.js');
+  if (!existsSync(entry)) throw new Error(`${entry} not found: run the build first`);
+  const revision = options.revision ?? REQUIREMENTS_2026;
+  const baselinePath = options.baselinePath ?? path.join(root, 'scripts', 'conformance', `expected-failures-${revision}.yaml`);
+  const baseline = parseBaseline(readFileSync(baselinePath, 'utf8'));
+  const log = options.log ?? console.log;
+
+  const port = await freePort();
+  const server = spawn(process.execPath, [entry, 'http', '-p', String(port)], {
+    cwd: root,
+    env: { ...process.env, MCP_SKIP_ORPHAN_REAPERS: '1' },
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let serverOutput = '';
+  server.stdout.on('data', (chunk) => { serverOutput += chunk.toString(); });
+  server.stderr.on('data', (chunk) => { serverOutput += chunk.toString(); });
+  const outputDir = mkdtempSync(path.join(os.tmpdir(), 'mcp-conformance-2026-'));
+
+  try {
+    if (!(await waitForHealth(port, 20_000))) {
+      throw new Error(`the server never answered /health on port ${port}:\n${serverOutput}`);
+    }
+    const output = await runCli(
+      ['server', '--url', `http://127.0.0.1:${port}/mcp`, '--requirements', revision, '--output-dir', outputDir],
+      root,
+      CONFORMANCE_CLI_2026
+    );
+    const summary = parseRequirementsSummary(output);
+    if (!summary) {
+      throw new Error(`no per-scenario summary in the conformance CLI output:\n${output}`);
+    }
+    const checks = collectChecks(outputDir);
+    const problems = judgeRequirements(summary, baseline, (name) => checks.get(name) ?? []);
+    for (const { name, passed, failed } of summary.scenarios) {
+      const scored = !summary.notScored.has(name);
+      const expected = baseline.get(name);
+      const tag = !scored ? 'skip' : failed === 0 ? 'ok  ' : expected ? 'base' : 'FAIL';
+      log(`${tag} ${name.padEnd(48)} ${passed}/${passed + failed}${!scored ? '  (not scored)' : expected ? '  (expected: fixture)' : ''}`);
+    }
+    if (problems.length && options.verbose) log(output);
+    return { problems, summary };
+  } finally {
+    server.kill();
+    rmSync(outputDir, { recursive: true, force: true });
+  }
+}
+
 if (isMain(import.meta.url)) {
   const verbose = process.argv.includes('--verbose');
-  const scenarios = process.argv.slice(2).filter((arg) => !arg.startsWith('--'));
-  runConformance({ scenarios, verbose })
-    .then((verdicts) => {
-      const failed = verdicts.filter((verdict) => !verdict.ok);
-      if (failed.length) {
-        console.error(`MCP conformance: ${failed.length} of ${verdicts.length} scenario(s) failed`);
+  const eraIndex = process.argv.indexOf('--era');
+  if (eraIndex !== -1) {
+    const revision = process.argv[eraIndex + 1];
+    runRequirements({ revision, verbose })
+      .then(({ problems, summary }) => {
+        const scored = summary.scenarios.filter((scenario) => !summary.notScored.has(scenario.name));
+        if (problems.length) {
+          for (const problem of problems) console.error(`MCP conformance ${revision}: ${problem}`);
+          process.exitCode = 1;
+        } else {
+          console.log(`MCP conformance ${revision}: ${scored.length} scored scenario(s) conform under the baseline against ${CONFORMANCE_CLI_2026}`);
+        }
+      })
+      .catch((error) => {
+        console.error(error instanceof Error ? error.message : String(error));
         process.exitCode = 1;
-      } else {
-        console.log(`MCP conformance: ${verdicts.length} scenario(s) passed against ${CONFORMANCE_CLI}`);
-      }
-    })
-    .catch((error) => {
-      console.error(error instanceof Error ? error.message : String(error));
-      process.exitCode = 1;
-    });
+      });
+  } else {
+    const scenarios = process.argv.slice(2).filter((arg) => !arg.startsWith('--'));
+    runConformance({ scenarios, verbose })
+      .then((verdicts) => {
+        const failed = verdicts.filter((verdict) => !verdict.ok);
+        if (failed.length) {
+          console.error(`MCP conformance: ${failed.length} of ${verdicts.length} scenario(s) failed`);
+          process.exitCode = 1;
+        } else {
+          console.log(`MCP conformance: ${verdicts.length} scenario(s) passed against ${CONFORMANCE_CLI}`);
+        }
+      })
+      .catch((error) => {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exitCode = 1;
+      });
+  }
 }

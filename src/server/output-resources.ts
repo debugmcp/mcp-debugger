@@ -98,6 +98,11 @@ export function registerResourceHandlers(
     };
   });
 
+  // This server exposes no resource templates, but a server advertising the
+  // resources capability must answer the method — the 2026-07-28 conformance
+  // suite's caching scenario asks it (issue #1025); the SDK stamps the cache fields.
+  server.setRequestHandler('resources/templates/list', async () => ({ resourceTemplates: [] }));
+
   server.setRequestHandler('resources/read', async (request, callCtx) => {
     const uri = request.params.uri;
     const outputSessionId = parseOutputResourceUri(uri);

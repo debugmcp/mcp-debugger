@@ -645,9 +645,39 @@ jobs:
     - name: Run the applicable conformance scenarios
       run: node scripts/mcp-conformance.mjs --verbose
 
+  mcp-conformance-2026:
+    # The same suite's 0.2 line (the one the SDKs run) against the 2026-07-28 revision this
+    # server now speaks beside 2025-11-25 (issue #1025, step 2): `--requirements 2026-07-28`,
+    # everything the revision requires of a server, judged under
+    # scripts/conformance/expected-failures-2026-07-28.yaml — the scenarios that drive the
+    # suite's own reference fixtures (tools, resources, prompts this server does not have).
+    # An unlisted failure fails the job, and so does a listed entry that passes, so the
+    # baseline can only shrink. Linux only, for the same libuv reason as the lane above.
+    name: MCP Conformance (2026-07-28)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Setup pnpm
+      uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+    - name: Setup Node.js
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: '22.x'
+        cache: 'pnpm'
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+      env:
+        SKIP_ADAPTER_VENDOR: 'true'
+    - name: Build project
+      run: pnpm run build:ci
+    - name: Run the 2026-07-28 requirements under the expected-failures baseline
+      run: node scripts/mcp-conformance.mjs --era 2026-07-28 --verbose
+
   test-summary:
     name: Test Summary
-    needs: [build-and-test, windows-python-integration, lint, container-tests, cobol-host, dart-host, flutter-host, go-current, mcp-conformance]
+    needs: [build-and-test, windows-python-integration, lint, container-tests, cobol-host, dart-host, flutter-host, go-current, mcp-conformance, mcp-conformance-2026]
     runs-on: ubuntu-latest
     if: always()
 
@@ -663,6 +693,7 @@ jobs:
         echo "flutter-host: ${{ needs.flutter-host.result }}"
         echo "go-current: ${{ needs.go-current.result }}"
         echo "mcp-conformance: ${{ needs.mcp-conformance.result }}"
+        echo "mcp-conformance-2026: ${{ needs.mcp-conformance-2026.result }}"
         if [ "${{ needs.build-and-test.result }}" != "success" ] \
           || [ "${{ needs.windows-python-integration.result }}" != "success" ] \
           || [ "${{ needs.lint.result }}" != "success" ] \
@@ -671,7 +702,8 @@ jobs:
           || [ "${{ needs.dart-host.result }}" != "success" ] \
           || [ "${{ needs.flutter-host.result }}" != "success" ] \
           || [ "${{ needs.go-current.result }}" != "success" ] \
-          || [ "${{ needs.mcp-conformance.result }}" != "success" ]; then
+          || [ "${{ needs.mcp-conformance.result }}" != "success" ] \
+          || [ "${{ needs.mcp-conformance-2026.result }}" != "success" ]; then
           echo "❌ One or more required jobs did not succeed"
           exit 1
         fi

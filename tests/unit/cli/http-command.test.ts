@@ -11,6 +11,14 @@ import type { createProtocolServer } from '../../../src/server/protocol-facade.j
 
 vi.mock('../../../src/server.js');
 vi.mock('@modelcontextprotocol/node');
+// The 2026-07-28 leg (issue #1025, step 2): the SDK's modern handler and its
+// classifier are doubles here; the handler's own behaviour is pinned over the
+// wire by tests/integration/cli/http-spec-contract-2026.test.ts.
+vi.mock('@modelcontextprotocol/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@modelcontextprotocol/server')>()),
+  createMcpHandler: vi.fn(),
+  isLegacyRequest: vi.fn(),
+}));
 
 // The app is built with express() directly (issues #667/#670): the default
 // export hands back the per-test mockApp, and express.json() returns one
@@ -24,9 +32,14 @@ const expressMock = vi.hoisted(() => {
 });
 vi.mock('express', () => ({ default: expressMock.express }));
 
-import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
+import { NodeStreamableHTTPServerTransport, toNodeHandler, toWebRequest } from '@modelcontextprotocol/node';
+import { createMcpHandler, isLegacyRequest } from '@modelcontextprotocol/server';
 
 const MockedStreamableHTTPServerTransport = vi.mocked(NodeStreamableHTTPServerTransport);
+const mockCreateMcpHandler = vi.mocked(createMcpHandler);
+const mockIsLegacyRequest = vi.mocked(isLegacyRequest);
+const mockToNodeHandler = vi.mocked(toNodeHandler);
+const mockToWebRequest = vi.mocked(toWebRequest);
 
 /** Drive a Host-checking middleware with one request; returns what it did. */
 function runHost(middleware: (req: any, res: any, next: any) => void, host: string) {
@@ -41,6 +54,8 @@ describe('HTTP Command Handler', () => {
   let mockTransport: any;
   let mockFacade: { connect: Mock<() => Promise<void>> };
   let mockProtocolServerFactory: Mock<typeof createProtocolServer>;
+  let mockModernHandler: { fetch: Mock; close: Mock<() => Promise<void>>; notify: { resourceUpdated: Mock; resourcesChanged: Mock } };
+  let mockModernNode: Mock<(req: unknown, res: unknown, body?: unknown) => Promise<void>>;
   let fakeProc: FakeCurrentProcess;
   let mockApp: any;
 
@@ -67,6 +82,7 @@ describe('HTTP Command Handler', () => {
       start: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn().mockResolvedValue(undefined),
       setAttendedSupplier: vi.fn(),
+      notifications: { addSink: vi.fn(() => () => undefined) },
       idlePolicy: { idleMs: 1_800_000, sweepMs: 60_000 },
       sessionManager: {
         getAllSessions: vi.fn().mockReturnValue([]),
@@ -76,6 +92,22 @@ describe('HTTP Command Handler', () => {
     } as any;
     mockFacade = { connect: vi.fn<() => Promise<void>>().mockResolvedValue(undefined) };
     mockProtocolServerFactory = vi.fn<typeof createProtocolServer>(() => mockFacade as any);
+    // The modern leg's doubles. Every request classifies as legacy unless a
+    // test says otherwise, so the sessionful cases below run exactly as before.
+    mockModernHandler = {
+      fetch: vi.fn(),
+      close: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      notify: { resourceUpdated: vi.fn(), resourcesChanged: vi.fn() },
+    };
+    mockModernNode = vi.fn<(req: unknown, res: unknown, body?: unknown) => Promise<void>>().mockResolvedValue(undefined);
+    mockCreateMcpHandler.mockReset();
+    mockCreateMcpHandler.mockReturnValue(mockModernHandler as any);
+    mockToNodeHandler.mockReset();
+    mockToNodeHandler.mockReturnValue(mockModernNode as any);
+    mockToWebRequest.mockReset();
+    mockToWebRequest.mockResolvedValue({} as Request);
+    mockIsLegacyRequest.mockReset();
+    mockIsLegacyRequest.mockResolvedValue(true);
 
     mockServerFactory = vi.fn<(options: ServerFactoryOptions) => DebugMcpServer>().mockReturnValue(mockServer);
     mockExitProcess = vi.fn<(code: number) => void>();
@@ -576,6 +608,154 @@ describe('HTTP Command Handler', () => {
     });
   });
 
+  describe('the 2026-07-28 leg beside the sessionful app (issue #1025, step 2)', () => {
+    // The modern handler is the SDK's; this suite pins only the router split
+    // and the bookkeeping around it. The handler's own behaviour is pinned over
+    // the wire by tests/integration/cli/http-spec-contract-2026.test.ts.
+    const MODERN_BODY = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/list',
+      params: { _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28' } },
+    };
+    const INIT_BODY = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'c', version: '1' } },
+    };
+
+    function makeStreamRes() {
+      const res = new EventEmitter() as any;
+      res.status = vi.fn().mockReturnThis();
+      res.json = vi.fn();
+      res.end = vi.fn();
+      res.headersSent = false;
+      return res;
+    }
+
+    function makeReq(overrides: Partial<{ method: string; headers: any; body: any }> = {}) {
+      return { method: 'POST', headers: {}, body: undefined, ...overrides };
+    }
+
+    function makeRes() {
+      return { status: vi.fn().mockReturnThis(), json: vi.fn(), end: vi.fn(), headersSent: false };
+    }
+
+    function appAndHandler() {
+      const app = createHttpApp(
+        { port: '3001' },
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, proc: fakeProc }
+      );
+      const postCall = mockApp.post.mock.calls.find((c: any) => c[0] === '/mcp');
+      const healthCall = mockApp.get.mock.calls.find((c: any) => c[0] === '/health');
+      return { app, handler: postCall![1] as (req: any, res: any) => Promise<void>, healthHandler: healthCall![1] as (req: any, res: any) => void };
+    }
+
+    function healthBody(healthHandler: (req: any, res: any) => void) {
+      const res = { json: vi.fn() };
+      healthHandler({}, res);
+      return res.json.mock.calls[0][0];
+    }
+
+    it('builds one strict modern handler per app over per-request facades, and feeds its notifier from the hub', () => {
+      appAndHandler();
+
+      expect(mockCreateMcpHandler).toHaveBeenCalledTimes(1);
+      const [factory, options] = mockCreateMcpHandler.mock.calls[0];
+      expect(options).toMatchObject({ legacy: 'reject', maxRequestBodySize: 10 * 1024 * 1024 });
+      expect(typeof options?.onerror).toBe('function');
+      expect(factory({ era: 'modern' })).toBe(mockFacade);
+      expect(mockProtocolServerFactory).toHaveBeenLastCalledWith(mockServer, { era: 'modern', deliver: 'external' });
+      expect(mockToNodeHandler).toHaveBeenCalledWith(mockModernHandler, expect.objectContaining({ onerror: expect.any(Function) }));
+
+      // The hub's sink for this leg is the handler's notifier.
+      expect(mockServer.notifications.addSink).toHaveBeenCalledTimes(1);
+      const sink = vi.mocked(mockServer.notifications.addSink).mock.calls[0][0];
+      sink.resourceUpdated('debug://sessions/s/output');
+      sink.resourcesChanged();
+      expect(mockModernHandler.notify.resourceUpdated).toHaveBeenCalledWith('debug://sessions/s/output');
+      expect(mockModernHandler.notify.resourcesChanged).toHaveBeenCalledTimes(1);
+    });
+
+    it('routes a request the classifier calls modern to the SDK handler, never to the session branch', async () => {
+      const { app, handler, healthHandler } = appAndHandler();
+      mockIsLegacyRequest.mockResolvedValue(false);
+      const req = makeReq({ body: MODERN_BODY });
+      const res = makeRes();
+
+      await handler(req, res);
+
+      expect(mockToWebRequest).toHaveBeenCalledWith(req, MODERN_BODY, { maxRequestBodySize: 10 * 1024 * 1024 });
+      expect(mockIsLegacyRequest).toHaveBeenCalledWith(expect.anything(), MODERN_BODY, { maxRequestBodySize: 10 * 1024 * 1024 });
+      expect(mockModernNode).toHaveBeenCalledWith(req, res, MODERN_BODY);
+      expect(MockedStreamableHTTPServerTransport).not.toHaveBeenCalled();
+      expect(res.status).not.toHaveBeenCalled();
+      expect((app as any).httpSessions.size).toBe(0);
+      expect(healthBody(healthHandler).requests).toEqual({ legacy: 0, modern: 1 });
+    });
+
+    it('routes a request the classifier calls legacy to the sessionful app, untouched', async () => {
+      const { app, handler, healthHandler } = appAndHandler();
+      mockIsLegacyRequest.mockResolvedValue(true);
+
+      await handler(makeReq({ body: INIT_BODY }), makeRes());
+      mockTransport.triggerSessionInit();
+
+      expect(mockModernNode).not.toHaveBeenCalled();
+      expect(MockedStreamableHTTPServerTransport).toHaveBeenCalledTimes(1);
+      expect((app as any).httpSessions.size).toBe(1);
+      expect(healthBody(healthHandler).requests).toEqual({ legacy: 1, modern: 0 });
+    });
+
+    it('classifies a GET or DELETE without a body', async () => {
+      const { handler } = appAndHandler();
+      mockIsLegacyRequest.mockResolvedValue(true);
+      const req = makeReq({ method: 'GET', headers: { 'mcp-session-id': 'nope' }, body: undefined });
+
+      await handler(req, makeRes());
+
+      expect(mockToWebRequest).toHaveBeenCalledWith(req, undefined, { maxRequestBodySize: 10 * 1024 * 1024 });
+      expect(mockIsLegacyRequest).toHaveBeenCalledWith(expect.anything(), undefined, { maxRequestBodySize: 10 * 1024 * 1024 });
+    });
+
+    it('counts an open modern subscriptions/listen stream as attendance until its response closes', async () => {
+      const { handler, healthHandler } = appAndHandler();
+      mockIsLegacyRequest.mockResolvedValue(false);
+      const attended = vi.mocked(mockServer.setAttendedSupplier).mock.calls[0][0] as () => boolean;
+      let release: () => void = () => undefined;
+      mockModernNode.mockImplementation(() => new Promise<void>((resolve) => { release = resolve; }));
+      const res = makeStreamRes();
+      const listen = { ...MODERN_BODY, method: 'subscriptions/listen', params: { ...MODERN_BODY.params, notifications: { resourcesListChanged: true } } };
+
+      const pending = handler(makeReq({ body: listen }), res);
+      // The classifier is asynchronous: the count lands once it has answered.
+      await vi.waitFor(() => expect(attended()).toBe(true));
+      expect(healthBody(healthHandler)).toMatchObject({ attended: true, listenStreams: 1 });
+
+      res.emit('close');
+      release();
+      await pending;
+      expect(attended()).toBe(false);
+      expect(healthBody(healthHandler)).toMatchObject({ attended: false, listenStreams: 0 });
+    });
+
+    it('allows the 2026 request headers through CORS and echoes a preflight\'s requested headers', () => {
+      appAndHandler();
+      const corsMiddleware = mockApp.use.mock.calls[1][0];
+      const headers = new Map<string, string>();
+      const res = { header: vi.fn((name: string, value: string) => headers.set(name.toLowerCase(), value)), sendStatus: vi.fn() };
+
+      corsMiddleware({ method: 'OPTIONS', headers: { 'access-control-request-headers': 'Mcp-Param-Region, X-Custom' } }, res, vi.fn());
+
+      const allowed = headers.get('access-control-allow-headers')?.toLowerCase() ?? '';
+      for (const name of ['mcp-method', 'mcp-name', 'mcp-protocol-version', 'mcp-session-id', 'accept', 'content-type', 'mcp-param-region', 'x-custom']) {
+        expect(allowed, name).toContain(name);
+      }
+      expect(res.sendStatus).toHaveBeenCalledWith(200);
+    });
+  });
+
   describe('/health endpoint', () => {
     it('reports the address and port the server listens on (issue #680)', () => {
       createHttpApp(
@@ -605,6 +785,7 @@ describe('HTTP Command Handler', () => {
         connections: 0,
         attended: false,
         listenStreams: 0,
+        requests: { legacy: 0, modern: 0 },
         sessions: [],
         details: [],
         debugSessions: [],
@@ -1286,7 +1467,10 @@ describe('HTTP Command Handler', () => {
       expect(t1.close).toHaveBeenCalled();
       expect(t2.close).toHaveBeenCalled();
       expect(mockServer.stop).toHaveBeenCalledTimes(1);
-      // Transports first, so no request lands on a core that is closing its sessions.
+      // The modern handler first (its listen streams end gracefully), then the
+      // transports, so no request lands on a core that is closing its sessions.
+      expect(mockModernHandler.close).toHaveBeenCalledTimes(1);
+      expect(mockModernHandler.close.mock.invocationCallOrder[0]).toBeLessThan(t1.close.mock.invocationCallOrder[0]);
       expect(vi.mocked(mockServer.stop).mock.invocationCallOrder[0]).toBeGreaterThan(t2.close.mock.invocationCallOrder[0]);
       expect(mockHttpServer.close).toHaveBeenCalled();
       expect(mockExitProcess).toHaveBeenCalledWith(0);

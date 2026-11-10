@@ -11,6 +11,7 @@ import {
   NotificationHub,
   OUTPUT_UPDATE_DEBOUNCE_MS,
   facadeSink,
+  handlerSink,
   type NotificationSink
 } from '../../../../src/server/notification-hub.js';
 import { FacadeSubscriptions } from '../../../../src/server/output-resources.js';
@@ -176,6 +177,20 @@ describe('NotificationHub forget guard', () => {
       expect.objectContaining({ error: expect.any(Error) })
     );
     hub.dispose();
+  });
+});
+
+describe('handlerSink', () => {
+  it('forwards every ping and list change to the HTTP handler notifier, which filters by its listen streams', async () => {
+    const notify = { resourceUpdated: vi.fn(), resourcesChanged: vi.fn(), toolsChanged: vi.fn(), promptsChanged: vi.fn() };
+    const sink = handlerSink(notify);
+
+    await sink.resourceUpdated(URI);
+    await sink.resourcesChanged();
+
+    expect(notify.resourceUpdated).toHaveBeenCalledWith(URI);
+    expect(notify.resourcesChanged).toHaveBeenCalledTimes(1);
+    expect(sink.forget).toBeUndefined();
   });
 });
 

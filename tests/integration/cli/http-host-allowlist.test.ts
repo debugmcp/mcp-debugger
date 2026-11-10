@@ -36,6 +36,7 @@ async function listen(options: { allowedHost?: string[] } = {}, env: Record<stri
     start: vi.fn(),
     stop: vi.fn(),
     setAttendedSupplier: vi.fn(),
+    notifications: { addSink: () => () => undefined },
     idlePolicy: { idleMs: 0, sweepMs: 60_000 },
     sessionManager: { getAllSessions: () => [], getSession: () => undefined, idleMsOf: () => undefined }
   };

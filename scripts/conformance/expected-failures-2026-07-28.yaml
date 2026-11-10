@@ -1,0 +1,39 @@
+# Expected failures for `@modelcontextprotocol/conformance server --requirements 2026-07-28`
+# against mcp-debugger (scripts/mcp-conformance.mjs --era 2026-07-28; issue #1025).
+#
+# Every entry is a scenario, or a `scenario:check` pair, that drives one of the conformance
+# suite's own reference fixtures — the "everything server" tools (`test_*`), resources
+# (`test://…`) and prompts — which this server does not have. None is a protocol divergence.
+# The lane fails on a failure that is NOT listed here, and on a listed entry that starts
+# passing (a stale baseline), so this file can only shrink honestly. Measured 2026-11-10
+# against 0.2.0-alpha.12: 37 scored scenarios, of which these need a fixture.
+server:
+  - completion-complete                      # completion/complete on a reference prompt argument
+  - tools-call-simple-text                   # tools/call test_simple_text
+  - tools-call-image                         # tools/call test_image
+  - tools-call-audio                         # tools/call test_audio
+  - tools-call-embedded-resource             # tools/call test_embedded_resource
+  - tools-call-mixed-content                 # tools/call test_mixed_content
+  - tools-call-error                         # tools/call test_error
+  - tools-call-with-progress                 # tools/call test_progress (progress notifications)
+  - resources-read-text                      # resources/read test://static-text
+  - resources-read-binary                    # resources/read test://static-binary
+  - resources-templates-read                 # resources/read of a reference template URI
+  - prompts-get-simple                       # prompts/get test_simple_prompt
+  - prompts-get-with-args                    # prompts/get test_prompt_with_args
+  - prompts-get-embedded-resource            # prompts/get test_prompt_embedded_resource
+  - prompts-get-with-image                   # prompts/get test_prompt_with_image
+  - input-required-result-basic-elicitation          # a reference tool that elicits (MRTR)
+  - input-required-result-basic-sampling             # a reference tool that samples (MRTR)
+  - input-required-result-basic-list-roots           # a reference tool that lists roots (MRTR)
+  - input-required-result-request-state              # the reference MRTR tool's requestState
+  - input-required-result-multiple-input-requests    # the reference MRTR tool, several inputs
+  - input-required-result-multi-round                # the reference MRTR tool, several rounds
+  - input-required-result-non-tool-request           # a reference prompt that elicits (MRTR)
+  - input-required-result-result-type                # the reference MRTR tool's resultType
+  - input-required-result-tampered-state             # the reference MRTR tool, tampered state
+  - input-required-result-capability-check           # the reference MRTR tool vs. client capabilities
+  - server-stateless:ServerRejectsUndeclaredCapability      # tools/call test_missing_capability
+  - server-stateless:MissingCapabilityHttp400                # tools/call test_missing_capability (HTTP status)
+  - server-stateless:HttpServerNoIndependentRequestsOnStream # tools/call test_streaming_elicitation
+  - server-stateless:ServerNoLogWithoutLogLevel              # tools/call test_logging_tool

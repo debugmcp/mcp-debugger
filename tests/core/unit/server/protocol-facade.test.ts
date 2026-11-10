@@ -1,7 +1,7 @@
 /**
  * The protocol facade (issue #1025, step 2): one cheap SDK `Server` per
  * connection or request over the one shared DebugMcpServer core. It carries
- * the eight MCP handlers, the error and initialized hooks, and one
+ * the nine MCP handlers, the error and initialized hooks, and one
  * notification sink that lives exactly as long as the facade does. The core
  * never constructs a Server itself any more.
  */
@@ -119,7 +119,7 @@ describe('createProtocolServer', () => {
     expect(b.sendResourceUpdated).toHaveBeenCalledWith({ uri: 'debug://sessions/sess-2/output' });
   });
 
-  it('registers exactly the eight MCP handlers', () => {
+  it('registers exactly the nine MCP handlers', () => {
     legacy();
 
     const [server] = mockServers;
@@ -130,6 +130,7 @@ describe('createProtocolServer', () => {
       'resources/list',
       'resources/read',
       'resources/subscribe',
+      'resources/templates/list',
       'resources/unsubscribe',
       'tools/call',
       'tools/list'

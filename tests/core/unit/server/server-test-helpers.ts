@@ -275,7 +275,9 @@ export function getResourceHandlers(mockServer: MockServer) {
     subscribeHandler: findHandler(mockServer, 'resources/subscribe') as
       (request: TestRequest) => Promise<EmptyResult>,
     unsubscribeHandler: findHandler(mockServer, 'resources/unsubscribe') as
-      (request: TestRequest) => Promise<EmptyResult>
+      (request: TestRequest) => Promise<EmptyResult>,
+    listResourceTemplatesHandler: findHandler(mockServer, 'resources/templates/list') as
+      (request?: TestRequest) => Promise<{ resourceTemplates: unknown[] }>
   };
 }
 
