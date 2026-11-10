@@ -619,8 +619,9 @@ jobs:
   mcp-conformance:
     # The protocol org's own conformance suite (`@modelcontextprotocol/conformance`, pinned in
     # the script) against a local `http` server: the scenarios that apply to a server without
-    # the suite's reference fixtures (issue #1023). Linux only — on Windows the CLI aborts at
-    # exit with a libuv assertion even after every check passed. What the suite does not cover,
+    # the suite's reference fixtures (issue #1023). Linux only — on Windows an affected Node build
+    # aborts inside process.exit after every check passed (nodejs/node#56645, fixed in 24.20.0
+    # and 26.7.0), which is a Node bug and not the suite's. What the suite does not cover,
     # the session-lifecycle clauses this server answers itself, is pinned by
     # tests/integration/cli/http-spec-contract.test.ts in build-and-test.
     name: MCP Conformance (official suite)
@@ -648,11 +649,12 @@ jobs:
   mcp-conformance-2026:
     # The same suite's 0.2 line (the one the SDKs run) against the 2026-07-28 revision this
     # server now speaks beside 2025-11-25 (issue #1025, step 2): `--requirements 2026-07-28`,
-    # everything the revision requires of a server, judged under
-    # scripts/conformance/expected-failures-2026-07-28.yaml — the scenarios that drive the
-    # suite's own reference fixtures (tools, resources, prompts this server does not have).
-    # An unlisted failure fails the job, and so does a listed entry that passes, so the
-    # baseline can only shrink. Linux only, for the same libuv reason as the lane above.
+    # everything the revision requires of a server, judged by the suite itself against
+    # scripts/conformance/expected-failures-2026-07-28.yaml (`--expected-failures`) — what
+    # cannot be tested without the suite's reference fixtures or an optional feature this
+    # server does not declare. The suite fails on an unlisted failure or warning and on a
+    # listed entry that passes, so the baseline can only shrink; its exit code is the verdict.
+    # Linux, where that exit code is always trustworthy (see the script's header).
     name: MCP Conformance (2026-07-28)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -672,7 +674,7 @@ jobs:
         SKIP_ADAPTER_VENDOR: 'true'
     - name: Build project
       run: pnpm run build:ci
-    - name: Run the 2026-07-28 requirements under the expected-failures baseline
+    - name: Run the 2026-07-28 requirements against the baseline, judged by the suite
       run: node scripts/mcp-conformance.mjs --era 2026-07-28 --verbose
 
   test-summary:

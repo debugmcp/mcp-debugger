@@ -699,6 +699,66 @@ describe('HTTP Command Handler', () => {
       expect(healthBody(healthHandler).requests).toEqual({ legacy: 0, modern: 1 });
     });
 
+    // Classifying a request reads its body when Express did not parse it (a non-JSON
+    // content type). A body over the limit is the client's error and is answered as one —
+    // the same 413 the JSON parser gives — not as an "Internal error" with an error log.
+    it('answers 413 when the body is too large to classify, and logs no server error', async () => {
+      const { handler, healthHandler } = appAndHandler();
+      mockToWebRequest.mockRejectedValueOnce(
+        Object.assign(new Error('Payload Too Large: Request body must not exceed 10485760 bytes'), {
+          name: 'RequestBodyTooLargeError',
+          status: 413,
+        })
+      );
+      const res = makeRes();
+
+      await handler(makeReq({ body: undefined, headers: { 'content-type': 'text/plain' } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(413);
+      expect(res.json.mock.calls[0][0]).toMatchObject({
+        jsonrpc: '2.0',
+        error: { code: -32600, message: 'Request body too large (limit 10mb)' },
+        id: null,
+      });
+      expect(mockLogger.error).not.toHaveBeenCalledWith('Error handling MCP request', expect.anything());
+      expect(mockModernNode).not.toHaveBeenCalled();
+      expect(healthBody(healthHandler).requests).toEqual({ legacy: 0, modern: 0 });
+    });
+
+    it('still answers 500 for a fault of its own while classifying', async () => {
+      const { handler } = appAndHandler();
+      mockToWebRequest.mockRejectedValueOnce(new Error('stream exploded'));
+      const res = makeRes();
+
+      await handler(makeReq({ body: undefined }), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(mockLogger.error).toHaveBeenCalledWith('Error handling MCP request', expect.anything());
+    });
+
+    // The SDK reports every request it refuses — a junk body, a missing header, a wrong
+    // content type — through the same hook as its own faults. A refusal is the caller's
+    // doing: a scanner posting `{}` must not write error lines.
+    it('logs a request the SDK refused as a warning, and a fault of the handler as an error', () => {
+      appAndHandler();
+      const [, options] = mockCreateMcpHandler.mock.calls[0];
+
+      options!.onerror!(new Error('Rejected inbound request (jsonrpc-shape): Bad Request: the request body is not a valid JSON-RPC message'));
+      options!.onerror!(new Error('Rejected 2025-era request on a modern-only endpoint (era): Unsupported protocol version'));
+      options!.onerror!(new Error('Unsupported Media Type: Content-Type must be application/json'));
+
+      expect(mockLogger.warn).toHaveBeenCalledTimes(3);
+      expect(mockLogger.warn).toHaveBeenCalledWith('Modern-era MCP request refused', {
+        reason: 'Rejected inbound request (jsonrpc-shape): Bad Request: the request body is not a valid JSON-RPC message',
+      });
+      expect(mockLogger.error).not.toHaveBeenCalledWith('Modern-era MCP handler error', expect.anything());
+
+      const fault = new Error('factory exploded');
+      options!.onerror!(fault);
+
+      expect(mockLogger.error).toHaveBeenCalledWith('Modern-era MCP handler error', { error: fault });
+    });
+
     it('routes a request the classifier calls legacy to the sessionful app, untouched', async () => {
       const { app, handler, healthHandler } = appAndHandler();
       mockIsLegacyRequest.mockResolvedValue(true);
@@ -1450,6 +1510,8 @@ describe('HTTP Command Handler', () => {
     it('handles SIGINT by closing all transports, stopping the one core, then exiting', async () => {
       const listen = vi.fn(() => mockHttpServer);
       mockApp.listen = listen;
+      const detachModernSink = vi.fn();
+      vi.mocked(mockServer.notifications.addSink).mockReturnValue(detachModernSink);
 
       await handleHttpCommand(
         { port: '3001' },
@@ -1475,6 +1537,10 @@ describe('HTTP Command Handler', () => {
       // transports, so no request lands on a core that is closing its sessions.
       expect(mockModernHandler.close).toHaveBeenCalledTimes(1);
       expect(mockModernHandler.close.mock.invocationCallOrder[0]).toBeLessThan(t1.close.mock.invocationCallOrder[0]);
+      // Its sink leaves the hub before the handler closes: the core's own
+      // teardown fires resource changes a closed handler has no stream for.
+      expect(detachModernSink).toHaveBeenCalledTimes(1);
+      expect(detachModernSink.mock.invocationCallOrder[0]).toBeLessThan(mockModernHandler.close.mock.invocationCallOrder[0]);
       expect(vi.mocked(mockServer.stop).mock.invocationCallOrder[0]).toBeGreaterThan(t2.close.mock.invocationCallOrder[0]);
       expect(mockHttpServer.close).toHaveBeenCalled();
       expect(mockExitProcess).toHaveBeenCalledWith(0);

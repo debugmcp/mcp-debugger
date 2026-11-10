@@ -65,6 +65,16 @@ export class FacadeSubscriptions implements ResourceSubscriptions {
 }
 
 /**
+ * The one refusal for a resource this caller cannot have: unknown, gone, or
+ * outside its scope — all the same answer. The error's data names the URI
+ * that was asked for (SEP-2164's SHOULD), so a client can tell which of its
+ * requests this was without parsing the message.
+ */
+function unknownResource(uri: string): WireMcpError {
+  return new WireMcpError(ProtocolErrorCode.InvalidParams, `Unknown resource: ${uri}`, { uri });
+}
+
+/**
  * Registers the MCP resource handlers. Only debuggee output is subscribable;
  * the bounded proxy-log tail is an on-demand diagnostic snapshot.
  */
@@ -113,11 +123,11 @@ export function registerResourceHandlers(
       ? sessionManager.getSession(sessionId)
       : undefined;
     if (!session) {
-      throw new WireMcpError(ProtocolErrorCode.InvalidParams, `Unknown resource: ${uri}`);
+      throw unknownResource(uri);
     }
     if (proxyLogSessionId) {
       if (!session.logDir) {
-        throw new WireMcpError(ProtocolErrorCode.InvalidParams, `Unknown resource: ${uri}`);
+        throw unknownResource(uri);
       }
       const text = await readProxyLogTail(
         fileSystem,
@@ -147,7 +157,7 @@ export function registerResourceHandlers(
     const uri = request.params.uri;
     const sessionId = parseOutputResourceUri(uri);
     if (!sessionId || !sessionManager.isSessionVisibleTo(sessionId, ownerKeyOf(callCtx))) {
-      throw new WireMcpError(ProtocolErrorCode.InvalidParams, `Unknown resource: ${uri}`);
+      throw unknownResource(uri);
     }
     subscriptions.subscribe(uri);
     return {};

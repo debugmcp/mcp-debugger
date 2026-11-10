@@ -1,51 +1,14 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
 import {
   APPLICABLE_SCENARIOS,
-  collectChecks,
-  failingChecks,
-  judgeRequirements,
+  baselineReport,
+  judgeBaselineRun,
   judgeScenario,
-  parseBaseline,
-  parseRequirementsSummary,
-  parseSummary
+  parseSummary,
+  requirementsArgs
 } from '../../../scripts/mcp-conformance.mjs';
-
-const REQUIREMENTS_OUTPUT = [
-  'Running requirements 2026-07-28 (5 scenarios) against http://127.0.0.1:3997/mcp',
-  '=== SUMMARY ===',
-  '✗ server-stateless: 24 passed, 4 failed',
-  '✓ tools-list: 4 passed, 0 failed',
-  '✗ tools-call-simple-text: 1 passed, 1 failed',
-  '✓ caching: 7 passed, 0 failed',
-  '✗ tasks-lifecycle: 1 passed, 8 failed',
-  '',
-  'Total: 37 passed, 13 failed',
-  '',
-  'Not scored for 2026-07-28: 1 scenario(s) run, 1 failing. These do not affect conformance.',
-  '  ✗ tasks-lifecycle (extension)',
-].join('\r\n');
-
-// A scenario name outside [A-Za-z0-9-] and a summary line in a shape the parser does not know.
-const ODD_OUTPUT = [
-  'Running requirements 2026-07-28 (3 scenarios) against http://127.0.0.1:1/mcp',
-  '=== SUMMARY ===',
-  '✓ sep-1234_foo.bar: 1 passed, 0 failed',
-  '✗ tools-list: 4 passed, 1 failed',
-  '✗ a line the CLI printed in a shape this parser does not know',
-  '',
-  'Total: 5 passed, 1 failed',
-].join('\n');
-
-const BASELINE = [
-  '# fixtures this server does not have',
-  'server:',
-  '  - tools-call-simple-text                 # tools/call test_simple_text',
-  '  - server-stateless:ServerRejectsUndeclaredCapability   # test_missing_capability',
-  '  - server-stateless:ServerNoLogWithoutLogLevel',
-].join('\n');
 
 const PASSING = [
   "Running client scenario 'ping' against server: http://127.0.0.1:3919/mcp",
@@ -83,141 +46,132 @@ describe('mcp-conformance runner: reading the CLI summary', () => {
   });
 });
 
+// The tail of a `--requirements … --expected-failures` run, as 0.2.0-alpha.12 prints it
+// (colour codes included: the CLI colours these lines whatever NO_COLOR says).
+const BASELINE_PASS = [
+  'Running requirements 2026-07-28 (50 scenarios) against http://127.0.0.1:3997/mcp',
+  '✗ server-stateless: 24 passed, 4 failed',
+  '✓ tools-list: 4 passed, 0 failed',
+  '',
+  'Total: 104 passed, 66 failed',
+  '',
+  '\u001b[33mExpected failures (in baseline):\u001b[0m',
+  '  ~ server-stateless:sep-2575-server-no-log-without-loglevel',
+  '  ~ tools-call-simple-text',
+  '',
+  '\u001b[32mBaseline check passed: all failures are expected.\u001b[0m',
+].join('\r\n');
+
+const BASELINE_FAIL = [
+  'Running requirements 2026-07-28 (50 scenarios) against http://127.0.0.1:3997/mcp',
+  '✓ sep-2164-resource-not-found: 3 passed, 0 failed',
+  '',
+  'Total: 104 passed, 66 failed',
+  '',
+  '\u001b[33mExpected failures (in baseline):\u001b[0m',
+  '  ~ tools-call-simple-text',
+  '',
+  '\u001b[31mStale baseline entries (now passing - remove from baseline):\u001b[0m',
+  '  ✓ tools-call-image',
+  '',
+  '\u001b[31mUnexpected failures (not in baseline):\u001b[0m',
+  '  ✗ sep-2164-resource-not-found',
+  '',
+  '\u001b[31mBaseline is stale: update your expected-failures file to remove passing entries.\u001b[0m',
+  '',
+  '\u001b[31mUnexpected failures detected: these are not in your expected-failures baseline.\u001b[0m',
+].join('\n');
+
+// Node 23 to 24.19 and 26.0 to 26.6 abort inside process.exit on Windows (nodejs/node#56645).
+const EXIT_ABORT = 'Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\\win\\async.c, line 76';
+const ABORT_STATUS = 3221226505;
+
 describe('mcp-conformance runner: the 2026-07-28 requirements lane (issue #1025)', () => {
-  it('reads the per-scenario verdict lines and the not-scored list, CRLF included', () => {
-    const summary = parseRequirementsSummary(REQUIREMENTS_OUTPUT)!;
-    expect(summary.scenarios).toEqual([
-      { name: 'server-stateless', passed: 24, failed: 4 },
-      { name: 'tools-list', passed: 4, failed: 0 },
-      { name: 'tools-call-simple-text', passed: 1, failed: 1 },
-      { name: 'caching', passed: 7, failed: 0 },
-      { name: 'tasks-lifecycle', passed: 1, failed: 8 },
+  // The suite judges its own baseline: it reads the file, fails on a failure or
+  // warning that is not listed and on a listed entry that passes, and says so in
+  // its exit code. This runner adds no judging of its own.
+  it('hands the suite its own baseline by a path relative to the repository root', () => {
+    expect(requirementsArgs('2026-07-28', 43210)).toEqual([
+      'server',
+      '--url', 'http://127.0.0.1:43210/mcp',
+      '--requirements', '2026-07-28',
+      '--expected-failures', 'scripts/conformance/expected-failures-2026-07-28.yaml'
     ]);
-    expect([...summary.notScored]).toEqual(['tasks-lifecycle']);
-    expect(summary.announced).toBe(5);
-    expect(summary.unparsed).toEqual([]);
-    expect(parseRequirementsSummary('Running requirements ...\nSegmentation fault')).toBeUndefined();
   });
 
-  it('keeps a scenario whose name carries an underscore or a dot, and surfaces a summary line it cannot read instead of dropping it', () => {
-    const summary = parseRequirementsSummary(ODD_OUTPUT)!;
-    expect(summary.scenarios.map((s) => s.name)).toEqual(['sep-1234_foo.bar', 'tools-list']);
-    expect(summary.unparsed).toEqual(['✗ a line the CLI printed in a shape this parser does not know']);
-    expect(summary.announced).toBe(3);
+  it('takes the exit code as the verdict', () => {
+    expect(judgeBaselineRun({ code: 0, output: BASELINE_PASS })).toEqual({ ok: true, abortedAtExit: false, report: '' });
+    expect(judgeBaselineRun({ code: 1, output: BASELINE_FAIL })).toMatchObject({ ok: false, abortedAtExit: false });
   });
 
-  it('fails when the header announces more scenarios than the summary reported, or a summary line could not be read', () => {
-    const problems = judgeRequirements(parseRequirementsSummary(ODD_OUTPUT)!, parseBaseline('server:\n'), () => []);
-    expect(problems).toEqual(expect.arrayContaining([
-      expect.stringContaining('the run announced 3 scenario(s) but the summary reported 2'),
-      expect.stringContaining('could not read a summary line: ✗ a line the CLI printed'),
-    ]));
+  it('never calls a run a pass on its printed text when the exit code says it failed', () => {
+    // A pass line in the output of a run that exited 1 for another reason proves nothing.
+    expect(judgeBaselineRun({ code: 1, output: BASELINE_PASS }).ok).toBe(false);
   });
 
-  it('reads whole-scenario and per-check entries out of the baseline, comments stripped', () => {
-    const baseline = parseBaseline(BASELINE);
-    expect(baseline.get('tools-call-simple-text')).toBe('all');
-    expect(baseline.get('server-stateless')).toEqual(new Set(['ServerRejectsUndeclaredCapability', 'ServerNoLogWithoutLogLevel']));
-    expect(baseline.has('fixtures')).toBe(false);
+  it('reports a failed run in the words of the suite: its stale and unexpected lists, colour stripped', () => {
+    const { report } = judgeBaselineRun({ code: 1, output: BASELINE_FAIL });
+
+    expect(report).toMatch(/^Stale baseline entries \(now passing - remove from baseline\):/);
+    expect(report).toContain('✓ tools-call-image');
+    expect(report).toContain('✗ sep-2164-resource-not-found');
+    expect(report).not.toContain('\u001b');
+    expect(report).not.toContain('Expected failures (in baseline)');
   });
 
-  it('names the failing checks of a checks.json, whichever shape the CLI wrote; a SKIPPED check is not a failure', () => {
-    const checks = [{ name: 'A', status: 'SUCCESS' }, { name: 'B', status: 'FAILURE' }, { name: 'C', status: 'SKIPPED' }];
-    expect(failingChecks(checks)).toEqual(['B']);
-    expect(failingChecks({ checks })).toEqual(['B']);
-    expect(failingChecks(undefined)).toEqual([]);
+  it('reports the tail of the output when the suite never reached its verdict', () => {
+    const output = ['npm error code E404', 'npm error 404 Not Found'].join('\n');
+
+    expect(baselineReport(output)).toBe(output);
+    expect(judgeBaselineRun({ code: 1, output })).toMatchObject({ ok: false, report: output });
   });
 
-  describe('collecting the per-scenario checks.json files', () => {
-    const dirs: string[] = [];
-    afterEach(() => {
-      for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  describe('a Node build that aborts at exit on Windows', () => {
+    // The process dies inside process.exit, after the suite printed its verdict, so
+    // the exit status says nothing. Only then is the suite's closing line the verdict.
+    it('reads the closing line: a pass is a pass, and the answer says how it was read', () => {
+      const output = `${BASELINE_PASS}\r\n${EXIT_ABORT}`;
+
+      expect(judgeBaselineRun({ code: ABORT_STATUS, output })).toEqual({ ok: true, abortedAtExit: true, report: '' });
     });
 
-    it('keys each checks.json by its scenario, read out of the CLI folder name server-<scenario>-<ISO stamp>', () => {
-      // Measured 2026-11-10 against 0.2.0-alpha.12: `--output-dir` holds one folder per scenario,
-      // `server-server-stateless-2026-11-10T02-36-40-817Z/checks.json` (colons and dots of the
-      // ISO timestamp replaced by dashes); a scenario name itself carries dashes.
-      const dir = mkdtempSync(path.join(os.tmpdir(), 'mcp-conformance-test-'));
-      dirs.push(dir);
-      const folder = path.join(dir, 'server-server-stateless-2026-11-10T02-36-40-817Z');
-      mkdirSync(folder);
-      writeFileSync(path.join(folder, 'checks.json'), JSON.stringify([
-        { id: 'sep-2575-a', name: 'ServerRejectsUndeclaredCapability', status: 'FAILURE' },
-        { id: 'sep-2575-b', name: 'ServerSendsPromptsListChangedOnSubscription', status: 'SKIPPED' },
-        { id: 'sep-2575-c', name: 'StatelessNoSessionId', status: 'SUCCESS' },
-      ]));
-      const other = path.join(dir, 'server-tools-list-2026-11-10T02-36-41-000Z');
-      mkdirSync(other);
-      writeFileSync(path.join(other, 'checks.json'), JSON.stringify([{ name: 'ToolsListOk', status: 'SUCCESS' }]));
+    it('still fails a run whose closing line is not the pass line', () => {
+      const output = `${BASELINE_FAIL}\n${EXIT_ABORT}`;
 
-      const byScenario = collectChecks(dir);
-      expect(byScenario.get('server-stateless')).toEqual(['ServerRejectsUndeclaredCapability']);
-      expect(byScenario.get('tools-list')).toEqual([]);
-      expect(collectChecks(path.join(dir, 'does-not-exist')).size).toBe(0);
+      const verdict = judgeBaselineRun({ code: ABORT_STATUS, output });
+      expect(verdict).toMatchObject({ ok: false, abortedAtExit: true });
+      expect(verdict.report).toContain('✗ sep-2164-resource-not-found');
     });
   });
 
-  it('cannot judge a per-check entry without the scenario\'s checks.json, and says so instead of calling it passed', () => {
-    const summary = parseRequirementsSummary(REQUIREMENTS_OUTPUT)!;
-    const problems = judgeRequirements(summary, parseBaseline(BASELINE), () => []);
-    expect(problems).toEqual([
-      expect.stringContaining('server-stateless: 4 failed check(s) but no checks.json was written for it'),
-    ]);
-    expect(problems.join('\n')).not.toContain('listed as an expected failure but it passed');
-  });
-
-  it('passes when every failure is expected and every expectation still fails', () => {
-    const summary = parseRequirementsSummary(REQUIREMENTS_OUTPUT)!;
-    const baseline = parseBaseline([
-      'server:',
-      '  - tools-call-simple-text',
-      '  - server-stateless:ServerRejectsUndeclaredCapability',
-      '  - server-stateless:MissingCapabilityHttp400',
-      '  - server-stateless:HttpServerNoIndependentRequestsOnStream',
-      '  - server-stateless:ServerNoLogWithoutLogLevel',
-    ].join('\n'));
-    // All four server-stateless failures are named by checks.json and listed by check.
-    const checks = new Map([['server-stateless', [
-      'ServerRejectsUndeclaredCapability', 'MissingCapabilityHttp400',
-      'HttpServerNoIndependentRequestsOnStream', 'ServerNoLogWithoutLogLevel',
-    ]]]);
-    expect(judgeRequirements(summary, baseline, (name) => checks.get(name) ?? [])).toEqual([]);
-  });
-
-  it('fails when the summary counts more failures than checks.json names: nothing may go unaccounted', () => {
-    const summary = parseRequirementsSummary(REQUIREMENTS_OUTPUT)!;
-    const baseline = parseBaseline(BASELINE);
-    // Both named checks are listed, but the summary says four failed.
-    const checks = new Map([['server-stateless', ['ServerRejectsUndeclaredCapability', 'ServerNoLogWithoutLogLevel']]]);
-    expect(judgeRequirements(summary, baseline, (name) => checks.get(name) ?? [])).toEqual(expect.arrayContaining([
-      expect.stringContaining('server-stateless: the summary counts 4 failed check(s) but checks.json names 2'),
-    ]));
-  });
-
-  it('flags a baseline entry naming a scenario the revision does not score', () => {
-    const summary = parseRequirementsSummary(REQUIREMENTS_OUTPUT)!;
-    const problems = judgeRequirements(summary, parseBaseline('server:\n  - tasks-lifecycle\n'), () => []);
-    expect(problems).toEqual(expect.arrayContaining([
-      expect.stringContaining('tasks-lifecycle: listed in the baseline but not scored for this revision'),
-    ]));
-  });
-
-  it('fails on an unlisted failure, a listed check that does not fail, and a stale whole-scenario entry', () => {
-    const summary = parseRequirementsSummary(REQUIREMENTS_OUTPUT)!;
-    const checks = new Map([['server-stateless', ['ServerRejectsUndeclaredCapability', 'SomethingNew']]]);
-    const problems = judgeRequirements(
-      summary,
-      parseBaseline(['server:', '  - caching', '  - server-stateless:ServerRejectsUndeclaredCapability', '  - server-stateless:ServerNoLogWithoutLogLevel'].join('\n')),
-      (name) => checks.get(name) ?? []
+  describe('the baseline file', () => {
+    const text = readFileSync(
+      fileURLToPath(new URL('../../../scripts/conformance/expected-failures-2026-07-28.yaml', import.meta.url)),
+      'utf8'
     );
-    expect(problems).toEqual(expect.arrayContaining([
-      expect.stringContaining('server-stateless: 4 failed check(s) not in the baseline (SomethingNew)'),
-      expect.stringContaining('server-stateless:ServerNoLogWithoutLogLevel: listed as an expected failure but it passed'),
-      expect.stringContaining('tools-call-simple-text: 1 failed check(s) not in the baseline'),
-      expect.stringContaining('caching: listed as an expected failure but it passed'),
-    ]));
-    // A not-scored scenario never counts, listed or not.
-    expect(problems.join('\n')).not.toContain('tasks-lifecycle');
+    const entries = text.split(/\r?\n/).filter((line) => /^\s+- /.test(line));
+
+    it('gives every entry the fixture or feature that makes it untestable here', () => {
+      for (const line of entries) {
+        expect(line, line).toMatch(/^\s+- [a-z0-9-]+(:[a-z0-9-]+)?\s+# \S/);
+      }
+      expect(entries.length).toBeGreaterThan(0);
+    });
+
+    it('lists each entry once, and no scenario both whole and by check (the suite refuses that)', () => {
+      const names = entries.map((line) => /- (\S+)/.exec(line)![1]);
+      expect(new Set(names).size).toBe(names.length);
+      const whole = new Set(names.filter((name) => !name.includes(':')));
+      for (const name of names.filter((entry) => entry.includes(':'))) {
+        expect(whole.has(name.split(':')[0]), name).toBe(false);
+      }
+    });
+
+    it('names checks by the suite\'s check ids, which is what the suite matches', () => {
+      const checks = entries.map((line) => /- (\S+)/.exec(line)![1]).filter((name) => name.includes(':'));
+      for (const name of checks) {
+        expect(name, name).toMatch(/^[a-z0-9-]+:sep-\d+-[a-z0-9-]+$/);
+      }
+    });
   });
 });

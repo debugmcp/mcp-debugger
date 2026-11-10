@@ -8,9 +8,9 @@
  * connection's Server be collected.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { InMemoryTransport } from '@modelcontextprotocol/server';
+import { createMcpHandler, InMemoryTransport } from '@modelcontextprotocol/server';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
-import { Client } from '@modelcontextprotocol/client';
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { createProtocolServer } from '../../../../src/server/protocol-facade.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
@@ -135,6 +135,25 @@ describe('a 2026-07-28 client is identified in the log', () => {
     await (await connect('other-client', { pin: '2026-07-28' })).listPrompts();
 
     expect(identified().map(([, meta]) => (meta as { client: string }).client)).toEqual(['era-client 1.2.3', 'other-client 1.2.3']);
+  });
+
+  it('logs an http client once, however many per-request facades serve it', async () => {
+    // The http leg as the command builds it: a strict modern handler over a
+    // facade per request, each of which delivers nothing itself.
+    const handler = createMcpHandler(({ era }) => createProtocolServer(core, { era, deliver: 'external' }), { legacy: 'reject' });
+    const client = new Client({ name: 'http-client', version: '2.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
+    await client.connect(new StreamableHTTPClientTransport(new URL('http://mcp.test/mcp'), {
+      fetch: (input, init) => handler.fetch(new Request(input, init))
+    }));
+    closers.push(() => client.close(), () => handler.close());
+
+    await client.listPrompts();
+    await client.listPrompts();
+    await client.listResources();
+
+    expect(identified()).toEqual([
+      ['[MCP Server] Client identified', { era: 'modern', protocolVersion: '2026-07-28', client: 'http-client 2.0.0' }]
+    ]);
   });
 
   it('leaves a 2025 client to its Client initialized line', async () => {

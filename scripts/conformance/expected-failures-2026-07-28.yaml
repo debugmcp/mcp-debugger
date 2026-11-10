@@ -1,39 +1,58 @@
-# Expected failures for `@modelcontextprotocol/conformance server --requirements 2026-07-28`
-# against mcp-debugger (scripts/mcp-conformance.mjs --era 2026-07-28; issue #1025).
+# Not testable against mcp-debugger: the scenarios and checks of
+# `@modelcontextprotocol/conformance server --requirements 2026-07-28` that need something
+# this server does not host. Nothing in this file is a protocol divergence of ours.
 #
-# Every entry is a scenario, or a `scenario:check` pair, that drives one of the conformance
-# suite's own reference fixtures — the "everything server" tools (`test_*`), resources
-# (`test://…`) and prompts — which this server does not have. None is a protocol divergence.
-# The lane fails on a failure that is NOT listed here, and on a listed entry that starts
-# passing (a stale baseline), so this file can only shrink honestly. Measured 2026-11-10
-# against 0.2.0-alpha.12: 37 scored scenarios, of which these need a fixture.
+# The suite is built to test SDKs against a reference "everything server", and by its own
+# policy a missing prerequisite is a failure, not a skip (suite AGENTS.md; issues #248, #372);
+# a baseline like this one is the mechanism it names for a server without the fixtures.
+# The suite reads this file itself (`--expected-failures`, scripts/mcp-conformance.mjs
+# --era 2026-07-28) and fails the lane on a failure or warning that is NOT listed, and on a
+# listed entry that starts passing — so the file can only shrink honestly, and a real
+# divergence can never hide in it. An entry is a scenario, or `scenario:check-id`.
+#
+# Measured 2026-11-10 against 0.2.0-alpha.12: 37 scored scenarios; the fixture names below
+# are read from the suite's source. Upstream discussion of reporting these as not applicable:
+# modelcontextprotocol/conformance#516.
 server:
-  - completion-complete                      # completion/complete on a reference prompt argument
-  - tools-call-simple-text                   # tools/call test_simple_text
-  - tools-call-image                         # tools/call test_image
-  - tools-call-audio                         # tools/call test_audio
-  - tools-call-embedded-resource             # tools/call test_embedded_resource
-  - tools-call-mixed-content                 # tools/call test_mixed_content
-  - tools-call-error                         # tools/call test_error
-  - tools-call-with-progress                 # tools/call test_progress (progress notifications)
-  - resources-read-text                      # resources/read test://static-text
-  - resources-read-binary                    # resources/read test://static-binary
-  - resources-templates-read                 # resources/read of a reference template URI
-  - prompts-get-simple                       # prompts/get test_simple_prompt
-  - prompts-get-with-args                    # prompts/get test_prompt_with_args
-  - prompts-get-embedded-resource            # prompts/get test_prompt_embedded_resource
-  - prompts-get-with-image                   # prompts/get test_prompt_with_image
-  - input-required-result-basic-elicitation          # a reference tool that elicits (MRTR)
-  - input-required-result-basic-sampling             # a reference tool that samples (MRTR)
-  - input-required-result-basic-list-roots           # a reference tool that lists roots (MRTR)
-  - input-required-result-request-state              # the reference MRTR tool's requestState
-  - input-required-result-multiple-input-requests    # the reference MRTR tool, several inputs
-  - input-required-result-multi-round                # the reference MRTR tool, several rounds
-  - input-required-result-non-tool-request           # a reference prompt that elicits (MRTR)
-  - input-required-result-result-type                # the reference MRTR tool's resultType
-  - input-required-result-tampered-state             # the reference MRTR tool, tampered state
-  - input-required-result-capability-check           # the reference MRTR tool vs. client capabilities
-  - server-stateless:ServerRejectsUndeclaredCapability      # tools/call test_missing_capability
-  - server-stateless:MissingCapabilityHttp400                # tools/call test_missing_capability (HTTP status)
-  - server-stateless:HttpServerNoIndependentRequestsOnStream # tools/call test_streaming_elicitation
-  - server-stateless:ServerNoLogWithoutLogLevel              # tools/call test_logging_tool
+  # --- Needs only a reference fixture this server does not have (18) ---
+  - tools-call-simple-text                   # tool test_simple_text
+  - tools-call-image                         # tool test_image_content
+  - tools-call-audio                         # tool test_audio_content
+  - tools-call-embedded-resource             # tool test_embedded_resource
+  - tools-call-mixed-content                 # tool test_multiple_content_types
+  - tools-call-error                         # tool test_error_handling
+  - tools-call-with-progress                 # tool test_tool_with_progress
+  - resources-read-text                      # resource test://static-text
+  - resources-read-binary                    # resource test://static-binary
+  - resources-templates-read                 # resource template test://template/{id}/data
+  - prompts-get-simple                       # prompt test_simple_prompt
+  - prompts-get-with-args                    # prompt test_prompt_with_arguments
+  - prompts-get-embedded-resource            # prompt test_prompt_with_embedded_resource
+  - prompts-get-with-image                   # prompt test_prompt_with_image
+  # Four checks of the core 2026 scenario report "Not testable: server does not list the
+  # diagnostic tool". The MUSTs behind them hold vacuously here: this server never requires a
+  # client capability and never sends a server-to-client request or a log notification.
+  - server-stateless:sep-2575-server-rejects-undeclared-capability           # tool test_missing_capability
+  - server-stateless:sep-2575-missing-capability-http-400                    # tool test_missing_capability
+  - server-stateless:sep-2575-http-server-no-independent-requests-on-stream  # tool test_streaming_elicitation
+  - server-stateless:sep-2575-server-no-log-without-loglevel                 # tool test_logging_tool
+
+  # --- Needs an optional feature this server does not declare (13) ---
+  # `completions` is not declared; the scenario also asks about the reference prompt.
+  - completion-complete                              # completion/complete on prompt test_prompt_with_arguments
+  # Input-required results (SEP-2322): a tool that answers by asking the client for
+  # elicitation, sampling or roots. Each scenario drives a reference tool or prompt.
+  - input-required-result-basic-elicitation          # tool test_input_required_result_elicitation
+  - input-required-result-basic-sampling             # tool test_input_required_result_sampling
+  - input-required-result-basic-list-roots           # tool test_input_required_result_list_roots
+  - input-required-result-request-state              # tool test_input_required_result_request_state
+  - input-required-result-multiple-input-requests    # tool test_input_required_result_multiple_inputs
+  - input-required-result-multi-round                # tool test_input_required_result_multi_round
+  - input-required-result-non-tool-request           # prompt test_input_required_result_prompt
+  - input-required-result-result-type                # tool test_input_required_result_elicitation
+  - input-required-result-tampered-state             # tool test_input_required_result_tampered_state
+  - input-required-result-capability-check           # tools test_input_required_result_capabilities, _elicitation
+  # These two end in a WARNING, not a failure (the unknown tool answers with an error where
+  # the suite recommends another input request); the suite's baseline counts a warning.
+  - input-required-result-missing-input-response     # tool test_input_required_result_elicitation, prompt _prompt
+  - input-required-result-ignore-extra-params        # tool test_input_required_result_elicitation
