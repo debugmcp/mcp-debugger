@@ -20,7 +20,11 @@
  * scenario:check, that needs one of the suite's reference fixtures. An unlisted failure fails the
  * lane; so does a listed entry that passes (a stale baseline), so the baseline only shrinks
  * honestly. The verdict is read from the CLI's own per-scenario summary lines and the
- * `checks.json` it writes per scenario (`--output-dir`), never from its exit code.
+ * `checks.json` it writes per scenario (`--output-dir`), never from its exit code, and the two
+ * are reconciled: a scenario's failed count must equal the FAILURE rows its checks.json names, a
+ * summary line the parser cannot read is a failure, and the header's scenario count must match
+ * the lines reported. Measured 2026-11-10 against 0.2.0-alpha.12: the alpha's `tools-list`
+ * (on the v1 SDK) runs its four checks against this server's 2026-07-28 leg and passes them.
  *
  * Usage: node scripts/mcp-conformance.mjs [scenario ...]   (default: the list below)
  *        node scripts/mcp-conformance.mjs --era 2026-07-28 [--verbose]
@@ -72,11 +76,23 @@ export function judgeScenario(name, output) {
  */
 export function parseRequirementsSummary(output) {
   const scenarios = [];
-  const line = /^[✓✗]\s+([A-Za-z0-9-]+):\s+(\d+)\s+passed,\s+(\d+)\s+failed\s*$/gm;
-  for (const match of output.matchAll(line)) {
-    scenarios.push({ name: match[1], passed: Number(match[2]), failed: Number(match[3]) });
+  // A verdict line the parser cannot read is kept, not dropped: the judge fails on it.
+  const unparsed = [];
+  const verdict = /^[✓✗]\s+([^\s:]+):\s+(\d+)\s+passed,\s+(\d+)\s+failed\s*$/;
+  // The summary block runs from the banner to the Total line; the not-scored list after it is indented.
+  const lines = output.split(/\r?\n/);
+  const banner = lines.findIndex((text) => /^=== SUMMARY ===/.test(text));
+  for (const raw of lines.slice(banner === -1 ? 0 : banner + 1)) {
+    if (/^Total:/.test(raw)) break;
+    if (!/^[✓✗]/.test(raw)) continue;
+    const match = verdict.exec(raw);
+    if (match) scenarios.push({ name: match[1], passed: Number(match[2]), failed: Number(match[3]) });
+    else unparsed.push(raw.trimEnd());
   }
-  if (scenarios.length === 0) return undefined;
+  if (scenarios.length === 0 && unparsed.length === 0) return undefined;
+  // `Running requirements 2026-07-28 (50 scenarios) against …`: what the run set out to report.
+  const announcedMatch = /^Running requirements \S+ \((\d+) scenarios?\)/m.exec(output);
+  const announced = announcedMatch ? Number(announcedMatch[1]) : undefined;
   const notScored = new Set();
   const notScoredBlock = output.split(/^Not scored for [^\n]*$/m)[1];
   if (notScoredBlock) {
@@ -84,7 +100,7 @@ export function parseRequirementsSummary(output) {
       notScored.add(match[1]);
     }
   }
-  return { scenarios, notScored };
+  return { scenarios, notScored, announced, unparsed };
 }
 
 /**
@@ -129,6 +145,12 @@ export function failingChecks(checksJson) {
 export function judgeRequirements(summary, baseline, failingChecksOf) {
   const problems = [];
   const seen = new Set();
+  // The lane's one promise — an unlisted failure fails it — holds only if every scenario the run
+  // set out to report was read: a line the parser could not read, or a count short of the header's.
+  for (const line of summary.unparsed ?? []) problems.push(`could not read a summary line: ${line}`);
+  if (summary.announced !== undefined && summary.announced !== summary.scenarios.length) {
+    problems.push(`the run announced ${summary.announced} scenario(s) but the summary reported ${summary.scenarios.length}`);
+  }
   for (const { name, failed } of summary.scenarios) {
     if (summary.notScored.has(name)) continue;
     seen.add(name);
@@ -147,6 +169,12 @@ export function judgeRequirements(summary, baseline, failingChecksOf) {
         : `${name}: ${failed} failed check(s) but no checks.json was written for it — the per-check baseline entries cannot be judged`);
       continue;
     }
+    // Nothing may go unaccounted: every failure the summary counts must be a FAILURE row that
+    // checks.json names (a scenario-level failure with no row, or a truncated file, would otherwise
+    // pass under a baseline that lists the rows it does have).
+    if (failing.length !== failed) {
+      problems.push(`${name}: the summary counts ${failed} failed check(s) but checks.json names ${failing.length} (${failing.join(', ')})`);
+    }
     const unexpected = failing.filter((check) => !(expected?.has(check)));
     if (unexpected.length > 0) {
       problems.push(`${name}: ${failed} failed check(s) not in the baseline (${unexpected.join(', ')})`);
@@ -156,7 +184,9 @@ export function judgeRequirements(summary, baseline, failingChecksOf) {
     }
   }
   for (const name of baseline.keys()) {
-    if (!seen.has(name) && !summary.notScored.has(name)) {
+    if (summary.notScored.has(name)) {
+      problems.push(`${name}: listed in the baseline but not scored for this revision — remove it`);
+    } else if (!seen.has(name)) {
       problems.push(`${name}: in the baseline but the requirements run did not report it`);
     }
   }
@@ -223,9 +253,11 @@ function runCli(args, cwd, cli = CONFORMANCE_CLI) {
     if (unsafe !== undefined) throw new Error(`refusing to pass "${unsafe}" to the conformance CLI`);
     // Windows: `npx` is a .cmd shim, which Node spawns only through a shell. The argv is checked
     // above, so one command string (no args array) keeps the shell out of DEP0190's warning.
+    // No colour: the per-scenario summary lines are parsed, and FORCE_COLOR would wrap them in escapes.
+    const env = { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' };
     const child = process.platform === 'win32'
-      ? spawn(['npx', ...argv].join(' '), { cwd, shell: true, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
-      : spawn('npx', argv, { cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      ? spawn(['npx', ...argv].join(' '), { cwd, env, shell: true, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+      : spawn('npx', argv, { cwd, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
     child.stdout.on('data', (chunk) => { output += chunk.toString(); });
     child.stderr.on('data', (chunk) => { output += chunk.toString(); });

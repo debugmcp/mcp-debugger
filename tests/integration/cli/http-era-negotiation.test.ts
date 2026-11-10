@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { serverEnvironment } from '../../test-utils/helpers/mcp-stdio-client.js';
 import { waitForHealthEndpoint } from '../../e2e/smoke-test-utils.js';
+import { TOOL_NAMES } from '../../../src/server/tool-schemas.js';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const entry = path.join(root, 'dist/index.js');
@@ -97,7 +98,7 @@ describe('http serves both protocol eras (issue #1025, step 2)', () => {
     expect(client.getProtocolEra()).toBe('modern');
     expect(client.getNegotiatedProtocolVersion()).toBe('2026-07-28');
     expect(client.getServerVersion()?.name).toBe('debug-mcp-server');
-    expect((await client.listTools()).tools.length).toBe(29);
+    expect((await client.listTools()).tools.length).toBe(TOOL_NAMES.length);
     const h = await health(port);
     expect(h.sessions).toEqual([]);
     expect(h.requests.modern).toBeGreaterThan(0);

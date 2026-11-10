@@ -237,6 +237,9 @@ export function createHttpApp(
   );
   core.notifications.addSink(handlerSink(modern.notify));
   const modernNode = toNodeHandler(modern, {
+    // The same limit as express.json, the classifier and the handler: a body between two
+    // different limits would pass one entry and die in the next.
+    maxRequestBodySize: JSON_BODY_LIMIT_BYTES,
     onerror: (error: Error) => {
       logger.error('Modern-era MCP request failed', { error });
     },

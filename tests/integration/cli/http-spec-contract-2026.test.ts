@@ -19,6 +19,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { serverEnvironment } from '../../test-utils/helpers/mcp-stdio-client.js';
 import { waitForHealthEndpoint } from '../../e2e/smoke-test-utils.js';
+import { TOOL_NAMES } from '../../../src/server/tool-schemas.js';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const entry = path.join(root, 'dist/index.js');
@@ -71,7 +72,10 @@ async function startServer(): Promise<RunningServer> {
   });
   child.stdout!.on('data', (chunk: Buffer) => { output += chunk.toString(); });
   child.stderr!.on('data', (chunk: Buffer) => { output += chunk.toString(); });
-  expect(await waitForHealthEndpoint(port, 20_000), output).toBe(true);
+  // A server that never answers /health must not outlive the failed assertion.
+  const healthy = await waitForHealthEndpoint(port, 20_000);
+  if (!healthy) child.kill();
+  expect(healthy, output).toBe(true);
   return { port, child, output: () => output };
 }
 
@@ -190,7 +194,7 @@ describe('Streamable HTTP contract (spec 2026-07-28, served beside 2025-11-25)',
     const first = messageOf(await request(server!.port, { body, headers: modernHeaders(body) }), 2);
     const second = messageOf(await request(server!.port, { body, headers: modernHeaders(body) }), 2);
 
-    expect(first.result.tools).toHaveLength(29);
+    expect(first.result.tools).toHaveLength(TOOL_NAMES.length);
     expect(typeof first.result.ttlMs).toBe('number');
     expect(['public', 'private']).toContain(first.result.cacheScope);
     expect(first.result.resultType).toBe('complete');
@@ -202,7 +206,7 @@ describe('Streamable HTTP contract (spec 2026-07-28, served beside 2025-11-25)',
     const reply = await request(server!.port, { body, headers: { ...modernHeaders(body), 'Mcp-Session-Id': 'stale-from-another-life' } });
 
     expect(reply.status, reply.body).toBe(200);
-    expect(messageOf(reply, 3).result.tools).toHaveLength(29);
+    expect(messageOf(reply, 3).result.tools).toHaveLength(TOOL_NAMES.length);
     expect(reply.headers['mcp-session-id']).toBeUndefined();
   });
 

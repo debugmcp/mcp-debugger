@@ -14,7 +14,7 @@ import {
 } from '../../../scripts/mcp-conformance.mjs';
 
 const REQUIREMENTS_OUTPUT = [
-  'Running requirements 2026-07-28 (50 scenarios) against http://127.0.0.1:3997/mcp',
+  'Running requirements 2026-07-28 (5 scenarios) against http://127.0.0.1:3997/mcp',
   '=== SUMMARY ===',
   '✗ server-stateless: 24 passed, 4 failed',
   '✓ tools-list: 4 passed, 0 failed',
@@ -27,6 +27,17 @@ const REQUIREMENTS_OUTPUT = [
   'Not scored for 2026-07-28: 1 scenario(s) run, 1 failing. These do not affect conformance.',
   '  ✗ tasks-lifecycle (extension)',
 ].join('\r\n');
+
+// A scenario name outside [A-Za-z0-9-] and a summary line in a shape the parser does not know.
+const ODD_OUTPUT = [
+  'Running requirements 2026-07-28 (3 scenarios) against http://127.0.0.1:1/mcp',
+  '=== SUMMARY ===',
+  '✓ sep-1234_foo.bar: 1 passed, 0 failed',
+  '✗ tools-list: 4 passed, 1 failed',
+  '✗ a line the CLI printed in a shape this parser does not know',
+  '',
+  'Total: 5 passed, 1 failed',
+].join('\n');
 
 const BASELINE = [
   '# fixtures this server does not have',
@@ -83,7 +94,24 @@ describe('mcp-conformance runner: the 2026-07-28 requirements lane (issue #1025)
       { name: 'tasks-lifecycle', passed: 1, failed: 8 },
     ]);
     expect([...summary.notScored]).toEqual(['tasks-lifecycle']);
+    expect(summary.announced).toBe(5);
+    expect(summary.unparsed).toEqual([]);
     expect(parseRequirementsSummary('Running requirements ...\nSegmentation fault')).toBeUndefined();
+  });
+
+  it('keeps a scenario whose name carries an underscore or a dot, and surfaces a summary line it cannot read instead of dropping it', () => {
+    const summary = parseRequirementsSummary(ODD_OUTPUT)!;
+    expect(summary.scenarios.map((s) => s.name)).toEqual(['sep-1234_foo.bar', 'tools-list']);
+    expect(summary.unparsed).toEqual(['✗ a line the CLI printed in a shape this parser does not know']);
+    expect(summary.announced).toBe(3);
+  });
+
+  it('fails when the header announces more scenarios than the summary reported, or a summary line could not be read', () => {
+    const problems = judgeRequirements(parseRequirementsSummary(ODD_OUTPUT)!, parseBaseline('server:\n'), () => []);
+    expect(problems).toEqual(expect.arrayContaining([
+      expect.stringContaining('the run announced 3 scenario(s) but the summary reported 2'),
+      expect.stringContaining('could not read a summary line: ✗ a line the CLI printed'),
+    ]));
   });
 
   it('reads whole-scenario and per-check entries out of the baseline, comments stripped', () => {
@@ -141,10 +169,38 @@ describe('mcp-conformance runner: the 2026-07-28 requirements lane (issue #1025)
 
   it('passes when every failure is expected and every expectation still fails', () => {
     const summary = parseRequirementsSummary(REQUIREMENTS_OUTPUT)!;
-    const baseline = parseBaseline(BASELINE);
-    const checks = new Map([['server-stateless', ['ServerRejectsUndeclaredCapability', 'ServerNoLogWithoutLogLevel']]]);
-    // Two of the four server-stateless failures are listed by check; the other two are not.
+    const baseline = parseBaseline([
+      'server:',
+      '  - tools-call-simple-text',
+      '  - server-stateless:ServerRejectsUndeclaredCapability',
+      '  - server-stateless:MissingCapabilityHttp400',
+      '  - server-stateless:HttpServerNoIndependentRequestsOnStream',
+      '  - server-stateless:ServerNoLogWithoutLogLevel',
+    ].join('\n'));
+    // All four server-stateless failures are named by checks.json and listed by check.
+    const checks = new Map([['server-stateless', [
+      'ServerRejectsUndeclaredCapability', 'MissingCapabilityHttp400',
+      'HttpServerNoIndependentRequestsOnStream', 'ServerNoLogWithoutLogLevel',
+    ]]]);
     expect(judgeRequirements(summary, baseline, (name) => checks.get(name) ?? [])).toEqual([]);
+  });
+
+  it('fails when the summary counts more failures than checks.json names: nothing may go unaccounted', () => {
+    const summary = parseRequirementsSummary(REQUIREMENTS_OUTPUT)!;
+    const baseline = parseBaseline(BASELINE);
+    // Both named checks are listed, but the summary says four failed.
+    const checks = new Map([['server-stateless', ['ServerRejectsUndeclaredCapability', 'ServerNoLogWithoutLogLevel']]]);
+    expect(judgeRequirements(summary, baseline, (name) => checks.get(name) ?? [])).toEqual(expect.arrayContaining([
+      expect.stringContaining('server-stateless: the summary counts 4 failed check(s) but checks.json names 2'),
+    ]));
+  });
+
+  it('flags a baseline entry naming a scenario the revision does not score', () => {
+    const summary = parseRequirementsSummary(REQUIREMENTS_OUTPUT)!;
+    const problems = judgeRequirements(summary, parseBaseline('server:\n  - tasks-lifecycle\n'), () => []);
+    expect(problems).toEqual(expect.arrayContaining([
+      expect.stringContaining('tasks-lifecycle: listed in the baseline but not scored for this revision'),
+    ]));
   });
 
   it('fails on an unlisted failure, a listed check that does not fail, and a stale whole-scenario entry', () => {

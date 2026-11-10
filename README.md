@@ -228,7 +228,7 @@ The endpoint speaks both eras of the protocol: a client that probes with `server
 Code's v2 runtime does) gets the current 2026-07-28 revision, sessionless — every request stands
 alone, resource notifications flow over `subscriptions/listen` streams — and a client that opens
 with `initialize` gets the 2025 sessionful era, `Mcp-Session-Id` and all, exactly as before.
-`GET /health` counts the requests served per era under `requests`.
+`GET /health` counts the requests classified per era under `requests` (refused ones included).
 
 One `http` process is one debugger: every MCP client of it sees the same debug sessions, and a
 session is addressable by whoever holds its id (the handle is the capability — run one process
@@ -236,7 +236,10 @@ per agent if agents must not see each other's work). A debug session outlives th
 that created it, so a client that reconnects can list and resume or close what it left behind.
 What ends an abandoned one is the idle policy: a session tree that no tool call has named for
 30 minutes (`MCP_DEBUG_SESSION_IDLE_MS`; `0` disables) is closed, unless a client is attending
-the process — while any client holds its SSE stream open, nothing expires. Abandoned MCP
+the process — while any client holds a stream open (a 2025 session's SSE stream, a 2026-07-28
+client's `subscriptions/listen` stream), nothing expires. A 2026 client that only calls tools is
+not attending: its sessions live by tool activity (and an in-flight `wait_for_stop`) alone, so
+raise or disable the window if such a client pauses for long. Abandoned MCP
 sessions themselves are reaped separately (`MCP_HTTP_STREAM_LOST_SESSION_MS`,
 `MCP_HTTP_STALE_SESSION_MS`). `GET /health` lists the MCP sessions, the debug sessions with
 their idle time, and whether anyone is attending.

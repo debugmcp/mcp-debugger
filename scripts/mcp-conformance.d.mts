@@ -32,6 +32,10 @@ export interface RequirementsSummary {
   scenarios: RequirementsScenario[];
   /** Scenarios the revision lists as not scored (extensions and pending ones). */
   notScored: Set<string>;
+  /** The scenario count the run's header announced, when it printed one. */
+  announced?: number;
+  /** Verdict lines in the summary block the parser could not read; the judge fails on each. */
+  unparsed: string[];
 }
 /** A whole scenario expected to fail (`'all'`), or the names of its checks that are. */
 export type ExpectedFailures = Map<string, 'all' | Set<string>>;

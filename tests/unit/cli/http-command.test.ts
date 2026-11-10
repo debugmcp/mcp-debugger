@@ -667,7 +667,12 @@ describe('HTTP Command Handler', () => {
       expect(typeof options?.onerror).toBe('function');
       expect(factory({ era: 'modern' })).toBe(mockFacade);
       expect(mockProtocolServerFactory).toHaveBeenLastCalledWith(mockServer, { era: 'modern', deliver: 'external' });
-      expect(mockToNodeHandler).toHaveBeenCalledWith(mockModernHandler, expect.objectContaining({ onerror: expect.any(Function) }));
+      // The one 10 MiB limit reaches every SDK entry the request passes through — the
+      // Node adapter included, or a non-JSON POST between the two limits dies in it.
+      expect(mockToNodeHandler).toHaveBeenCalledWith(mockModernHandler, expect.objectContaining({
+        onerror: expect.any(Function),
+        maxRequestBodySize: 10 * 1024 * 1024,
+      }));
 
       // The hub's sink for this leg is the handler's notifier.
       expect(mockServer.notifications.addSink).toHaveBeenCalledTimes(1);
