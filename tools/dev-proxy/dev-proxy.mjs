@@ -21,7 +21,6 @@
  *                                  or restart to settle (default: 15000)
  */
 
-import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { spawn } from 'child_process';
@@ -49,6 +48,7 @@ import {
   resolveBackendTransport,
   updateBackendEnvOverrides,
 } from './backend-env.mjs';
+import { BackendStdioTransport } from './backend-stdio-transport.mjs';
 import { LifecycleQueue, queueGenerationCleanup } from './lifecycle-queue.mjs';
 import { runBuild } from './build-runner.mjs';
 import { ensurePortFree, forceKillPid } from './process-cleanup.mjs';
@@ -156,18 +156,6 @@ function parseCommandString(cmdStr) {
 // BackendManager — manages the mcp-debugger child process lifecycle
 // ---------------------------------------------------------------------------
 
-/**
- * The stdio transport to the backend. It adds nothing; being a subclass is the
- * point. Under `auto` negotiation the SDK probes server/discover on a
- * disposable SIBLING process spawned from the same parameters, but only for
- * its exact base StdioClientTransport — "subclasses probe in place", on the
- * connection itself. A sibling here would be a second backend; in place, the
- * backend starts once, a 2026-07-28 server pins the modern era, and a 2025
- * server answers the probe with "method not found" and gets `initialize` on
- * the same pipe (issue #1025, step 2).
- */
-class BackendStdioTransport extends StdioClientTransport {}
-
 class BackendManager {
   constructor() {
     /** @type {'stopped' | 'starting' | 'running' | 'restarting'} */
@@ -176,7 +164,7 @@ class BackendManager {
     this.child = null;
     /** @type {Client | null} */
     this.mcpClient = null;
-    /** @type {StdioClientTransport | null} */
+    /** @type {BackendStdioTransport | null} */
     this.stdioTransport = null;
     /** Keep ownership even when the SDK clears transport.pid during close(). */
     this.stdioPid = null;
@@ -201,6 +189,8 @@ class BackendManager {
     this.dockerOwnerId = `${process.pid}-${randomUUID()}`;
     /** The one initial start, once a request has asked for it (issue #1025, step 2). */
     this.initialStart = null;
+    /** Whether any start has begun, by whichever route (the deferred first start, a dev_* restart). */
+    this.everStarted = false;
     /** Announces the inventory after a successful initial start; set by main(). */
     this.onInitialStart = null;
     /** The client's resource subscriptions, expressed in the backend's era; set by main(). */
@@ -274,6 +264,7 @@ class BackendManager {
       return;
     }
 
+    this.everStarted = true;
     this.state = 'starting';
     this.expectedChildExit = false;
     const { command, args } = this._computeBackendCommand();
@@ -538,7 +529,7 @@ class BackendManager {
       backendEnvRedaction: sanitizedEnv.redaction,
       // "stopped" alone reads like a crash. Before the first start it is the
       // normal state: the backend starts on the first request that needs it.
-      ...(this.initialStart
+      ...(this.everStarted
         ? {}
         : { note: 'The backend has not been started yet: it starts on the first request that needs it (any listing or tool call other than the dev_* tools).' }),
     };
@@ -593,8 +584,9 @@ class BackendManager {
     const closeState = { expected: false };
     this.transportCloseState = closeState;
     // The backend speaks both eras on both transports (issue #1025): negotiate.
-    // Over stdio that takes BackendStdioTransport below, so the probe runs on
-    // the backend's own pipe rather than on a second backend process.
+    // Over stdio that takes BackendStdioTransport (backend-stdio-transport.mjs),
+    // so the probe runs on the backend's own pipe rather than on a second
+    // backend process.
     this.mcpClient = new Client(
       { name: 'dev-proxy', version: '1.0.0' },
       { versionNegotiation: { mode: 'auto' } }
@@ -614,13 +606,16 @@ class BackendManager {
 
     if (this.backendTransport === 'stdio') {
       // Stdio mode: StdioClientTransport spawns the child
+      // The shutdown signal goes to the transport as well as to connect(): the
+      // in-place negotiation does not watch connect()'s, so without this a start
+      // still negotiating at shutdown would hang and orphan its backend.
       const transport = new BackendStdioTransport({
         command,
         args,
         cwd: PROJECT_ROOT,
         env: this._buildBackendEnv(),
         stderr: 'pipe',
-      });
+      }, { signal: this.shutdownController.signal });
 
       this.stdioTransport = transport;
 
@@ -634,6 +629,8 @@ class BackendManager {
       };
 
       transport.onclose = () => {
+        // The backend is gone; this transport is done with the shutdown signal.
+        transport.detachFromSignal();
         log('Stdio transport closed');
         // The SDK reports close only once the child has exited, so its PID is
         // no longer ours: a later force-kill could hit a process that reused it.

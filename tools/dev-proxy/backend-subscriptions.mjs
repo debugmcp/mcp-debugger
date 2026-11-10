@@ -28,9 +28,11 @@
  * it points at nothing afterwards: a refused named URI is dropped, said once,
  * and the rest are still sent. A listed resource the backend will not
  * subscribe (its proxy-log tails) is asked once and remembered until the
- * backend stops listing it. Only a JSON-RPC error answer counts as a refusal;
- * a failed connection still surfaces. (A 2026 backend's listen takes any URI,
- * so a dead one named there simply never fires.)
+ * backend stops listing it. Only the answer "that resource is not here"
+ * (InvalidParams, or the older resource-not-found code) counts as a refusal:
+ * any other error answer leaves the subscription in place to be tried again,
+ * and a failed connection still surfaces. (A 2026 backend's listen takes any
+ * URI, so a dead one named there simply never fires.)
  *
  * The notifications themselves arrive through the client's
  * `fallbackNotificationHandler` exactly as before (the v2 client passes
@@ -107,13 +109,16 @@ export function createSubscriptionRelay({ getClient, log = () => {} }) {
     }
   };
 
-  /** The backend answered no (a JSON-RPC error), as opposed to the connection failing. */
-  const isRefusal = (err) => typeof err?.code === 'number';
+  /** The backend answered (a JSON-RPC error, numeric code), as opposed to the connection failing (the SDK's string codes). */
+  const isAnswer = (err) => typeof err?.code === 'number';
+  /** "That resource is not here": InvalidParams (-32602), or the resource-not-found code older servers used (-32002). */
+  const saysGone = (err) => err?.code === -32602 || err?.code === -32002;
 
   /**
    * Re-express one URI to a 2025 backend. A refusal never stops the others: a
    * URI the client named is dropped (the resource is gone), a listed one is
-   * remembered so it is not asked again. A failed connection is thrown.
+   * remembered so it is not asked again. Any other error answer changes
+   * nothing, and a failed connection is thrown.
    */
   const subscribeOne = async (client, uri) => {
     const named = uris.has(uri);
@@ -121,7 +126,13 @@ export function createSubscriptionRelay({ getClient, log = () => {} }) {
     try {
       await client.subscribeResource({ uri });
     } catch (err) {
-      if (!isRefusal(err)) throw err;
+      if (!isAnswer(err)) throw err;
+      if (!saysGone(err)) {
+        // The backend is alive and failed for another reason: no evidence the
+        // resource is gone. Keep it, say so, and try again on the next pass.
+        log(`Backend could not subscribe ${uri} (${err?.message ?? err}); will retry`);
+        return;
+      }
       if (named) {
         uris.delete(uri);
         log(`Dropped the subscription to ${uri}: the backend no longer has it (${err?.message ?? err})`);

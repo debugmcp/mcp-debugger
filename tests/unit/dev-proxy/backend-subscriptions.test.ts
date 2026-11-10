@@ -129,6 +129,39 @@ describe('dev-proxy backend subscription relay', () => {
       expect(client.subscribeResource.mock.calls.map(([params]) => params.uri)).toEqual([PROXY_LOG, PROXY_LOG]);
     });
 
+    it('keeps a subscription the backend failed on for another reason, and still sends the rest', async () => {
+      const { client } = fakeClient('legacy');
+      const log = vi.fn();
+      const relay = createSubscriptionRelay({ getClient: () => client, log });
+      await relay.subscribe(A);
+      await relay.subscribe(B);
+      client.subscribeResource.mockClear();
+      client.subscribeResource.mockImplementation(async ({ uri }: { uri: string }) => {
+        if (uri === A) throw Object.assign(new Error('Internal error'), { code: -32603 });
+        return {};
+      });
+
+      await expect(relay.reopen()).resolves.toBeUndefined();
+
+      // An internal error says nothing about whether the resource exists: A stays, to be tried again.
+      expect(relay.uris()).toEqual([A, B]);
+      expect(client.subscribeResource.mock.calls.map(([params]) => params.uri)).toEqual([A, B]);
+      expect(log).toHaveBeenCalledWith(expect.stringContaining(A));
+      expect(String(log.mock.calls.find(([line]) => String(line).includes(A))![0])).not.toContain('Dropped');
+    });
+
+    it('asks again for a listed resource the backend failed on for another reason', async () => {
+      const { client } = fakeClient('legacy', [PROXY_LOG]);
+      const relay = createSubscriptionRelay({ getClient: () => client });
+      relay.trackAll(true);
+      client.subscribeResource.mockRejectedValueOnce(Object.assign(new Error('Internal error'), { code: -32603 }));
+
+      await relay.reopen();
+      await relay.reopen();
+
+      expect(client.subscribeResource.mock.calls.map(([params]) => params.uri)).toEqual([PROXY_LOG, PROXY_LOG]);
+    });
+
     it('does not mistake a broken connection for a refusal: that failure surfaces and nothing is dropped', async () => {
       const { client } = fakeClient('legacy');
       const relay = createSubscriptionRelay({ getClient: () => client });

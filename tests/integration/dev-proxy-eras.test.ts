@@ -92,6 +92,21 @@ describe('dev-proxy protocol eras (issue #1025, step 2)', () => {
     expect(running).not.toHaveProperty('note');
   });
 
+  it('drops the first-use note once the backend has been started any way at all, a dev restart included', async () => {
+    const { client, backendStarts } = await connect('legacy');
+
+    // The first request this proxy handles is a dev tool: it starts the backend
+    // without going through the deferred first start.
+    const restarted = await client.callTool({ name: 'dev_restart_debugger', arguments: {} });
+    expect(restarted.isError, JSON.stringify(restarted.content)).not.toBe(true);
+    expect(await backendStarts()).toBe(1);
+
+    const status = await client.callTool({ name: 'dev_server_status', arguments: {} });
+    const body = JSON.parse((status.content as Array<{ text: string }>)[0].text);
+    expect(body.state).toBe('running');
+    expect(body).not.toHaveProperty('note');
+  });
+
   it('a 2025 client keeps working unchanged', async () => {
     const { client, backendStarts } = await connect('legacy');
 
