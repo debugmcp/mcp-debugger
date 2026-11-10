@@ -20,14 +20,18 @@ import { TOOL_HANDLERS } from './handlers/index.js';
  * The owner-key gate (issue #1025, step 2). For a caller, a session outside
  * its scope does not exist — so the dispatch gives no answer of its own for
  * one (any fixed answer differs from some tool's real unknown-id answer, and
- * the difference says the session is there). It runs the whole call — the
- * log lines, the argument checks, the handler — with that session hidden from
- * every lookup (session-scope.ts), and each tool answers as it answers an id
- * nobody holds. With no authentication configured every caller is in the
- * shared anonymous scope and sees everything, as before.
+ * the difference says the session is there). A tool that takes a `sessionId`
+ * runs — argument checks, handler and all — with that session hidden from
+ * every lookup (session-scope.ts), and answers as it answers an id nobody
+ * holds. A tool that takes none is not steered by a stray one: it runs as it
+ * always does, and its own scoping (the listings) is what applies. Either way
+ * the operator log names the session as it names an unknown one. With no
+ * authentication configured every caller is in the shared anonymous scope and
+ * sees everything, as before.
  */
-function takesSessionId(definition: ToolDefinition): boolean {
-  return Object.prototype.hasOwnProperty.call(definition.inputSchema.properties ?? {}, 'sessionId');
+function takesSessionId(definition: ToolDefinition | undefined): boolean {
+  return definition !== undefined
+    && Object.prototype.hasOwnProperty.call(definition.inputSchema.properties ?? {}, 'sessionId');
 }
 
 /**
@@ -96,14 +100,24 @@ export function registerToolHandlers(server: Server, ctx: ToolContext): void {
       const toolName = TOOL_ALIASES[requestedName] ?? requestedName;
       const args = coerceToolArguments((request.params.arguments ?? {}) as Record<string, unknown>) as ToolArguments;
       const callerKey = ownerKeyOf(callCtx);
+      // Whether the named session exists outside the caller's scope. The scope
+      // itself is entered only for a tool that takes the id (below): hiding a
+      // session from a tool that lists sessions would hide its owner key too.
       const outOfScope = isOutOfScope(ctx, args.sessionId, callerKey);
+      const takesId = isToolName(toolName) && takesSessionId(dispatchDefinitions.get(toolName));
+      // The log's name for the session, read the way the caller may see it.
+      const sessionNameForLog = (): string | undefined => {
+        const id = args.sessionId;
+        if (!id) return undefined;
+        return outOfScope ? runWithSessionHidden(id, () => ctx.getSessionName(id)) : ctx.getSessionName(id);
+      };
 
       const handle = async (): Promise<CallToolResult> => {
         // Log tool call with structured logging
         ctx.logger.info('tool:call', {
           tool: toolName,
           sessionId: args.sessionId,
-          sessionName: args.sessionId ? ctx.getSessionName(args.sessionId) : undefined,
+          sessionName: sessionNameForLog(),
           request: sanitizeRequest(args as Record<string, unknown>),
           timestamp: Date.now()
         });
@@ -132,7 +146,7 @@ export function registerToolHandlers(server: Server, ctx: ToolContext): void {
           ctx.logger.info('tool:response', {
             tool: toolName,
             sessionId: args.sessionId,
-            sessionName: args.sessionId ? ctx.getSessionName(args.sessionId) : undefined,
+            sessionName: sessionNameForLog(),
             success: extractPayloadSuccess(result),
             timestamp: Date.now()
           });
@@ -145,7 +159,7 @@ export function registerToolHandlers(server: Server, ctx: ToolContext): void {
           ctx.logger.error('tool:error', {
             tool: toolName,
             sessionId: args.sessionId,
-            sessionName: args.sessionId ? ctx.getSessionName(args.sessionId) : undefined,
+            sessionName: sessionNameForLog(),
             error: errorMessage,
             timestamp: Date.now()
           });
@@ -160,7 +174,7 @@ export function registerToolHandlers(server: Server, ctx: ToolContext): void {
         }
       };
 
-      return outOfScope ? runWithSessionHidden(args.sessionId as string, handle) : handle();
+      return outOfScope && takesId ? runWithSessionHidden(args.sessionId as string, handle) : handle();
     }
   );
 }

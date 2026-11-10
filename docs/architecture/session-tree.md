@@ -444,7 +444,7 @@ One row per measured fact; the "answer" column is what this design adds on top o
 | `detach_from_process` on an attach root with children | each child's `disconnect(terminateDebuggee: false)` resumes it undebugged (row 3) | each child keeps running (row 3) | children detached deepest-first (`released: true`), then the parent; the parent-side order with several children is measured by the M1 suite |
 | `restart_debugging` on a parent | the relaunch ends the previous run's processes (row 6) | same (row 6) | the previous run's children are closed and removed; `childrenClosed: n` |
 | grandchildren | reported on the child's connection, adopted there, `terminated` cascades bottom-up (row 7) | same (row 7) | `parentSessionId` = the child; the cap counts the whole tree |
-| the HTTP client's MCP session ends (stale, stream lost, `DELETE /mcp`) | — | — | that client's SDK Server facade closes; its debug sessions, trees included, live on in the one core under the idle policy (`MCP_DEBUG_SESSION_IDLE_MS`; #1025 step 2) |
+| the HTTP client's MCP session ends (stale, stream lost, `DELETE /mcp`) | — | — | that client's SDK Server facade closes; its debug sessions, trees included, live on in the one core until they are closed, their program ends, or the server exits — or, where the operator set it, until the idle policy closes them (`MCP_DEBUG_SESSION_IDLE_MS`, off by default; #1025 step 2) |
 | the parent's worker dies | — | — | every session in the tree goes to `error` with the parent's diagnostics; the adapter process is reaped by the worker's exit path as today |
 
 Per-session machinery that stays per session: the `InFlightGuard` (a child never launches or
@@ -474,8 +474,14 @@ Two guardrails:
    authenticated principal when the request carried one, otherwise the shared anonymous scope —
    and a session outside the caller's scope does not exist for that caller: the dispatch hides it
    from the call's lookups, so every tool answers it exactly as it answers an id nobody holds
-   (pinned tool by tool in `owner-scope-contract.test.ts`); with no authentication every caller is
-   anonymous.
+   (pinned tool by tool in `owner-scope-contract.test.ts`, for another principal and for an
+   anonymous caller); with no authentication every caller is anonymous. Two things the seam does
+   **not** scope yet, both acceptance criteria of the authenticated-`http` issue: a 2026-07-28
+   `subscriptions/listen` (the SDK's entry serves it and publishes by URI, with no hook that sees
+   the listener — and its acknowledgement echoes the filter it honoured, so dropping a foreign URI
+   at request time would itself tell it from an unknown one), which lets a caller who already
+   holds a foreign session's id learn that it exists and when it prints; and `GET /health`, which
+   lists every debug session to whoever can reach the port.
 2. Lifetime without an MCP session: a debug session ends by its own close, its program ending, or
    the server exiting. A **per-debug-session idle policy** exists and is **off by default on every
    transport** (decided with JF 2026-11-10, replacing the thirty-minute `http` default this section
