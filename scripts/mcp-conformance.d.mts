@@ -20,38 +20,23 @@ export function runConformance(options?: {
   log?: (line: string) => void;
 }): Promise<ScenarioVerdict[]>;
 
-// The 2026-07-28 requirements lane (issue #1025, step 2).
+// The 2026-07-28 requirements lane (issue #1025, step 2): judged by the suite itself.
 export const CONFORMANCE_CLI_2026: string;
 export const REQUIREMENTS_2026: string;
-export interface RequirementsScenario {
-  name: string;
-  passed: number;
-  failed: number;
+/** The suite's verdict on a `--requirements … --expected-failures` run. */
+export interface BaselineVerdict {
+  ok: boolean;
+  /** Node's Windows exit abort hid the exit code; the suite's closing line was read instead. */
+  abortedAtExit: boolean;
+  /** What the suite said was wrong, colour stripped; empty on a pass. */
+  report: string;
 }
-export interface RequirementsSummary {
-  scenarios: RequirementsScenario[];
-  /** Scenarios the revision lists as not scored (extensions and pending ones). */
-  notScored: Set<string>;
-  /** The scenario count the run's header announced, when it printed one. */
-  announced?: number;
-  /** Verdict lines in the summary block the parser could not read; the judge fails on each. */
-  unparsed: string[];
-}
-/** A whole scenario expected to fail (`'all'`), or the names of its checks that are. */
-export type ExpectedFailures = Map<string, 'all' | Set<string>>;
-export function parseRequirementsSummary(output: string): RequirementsSummary | undefined;
-export function parseBaseline(text: string): ExpectedFailures;
-export function failingChecks(checksJson: unknown): string[];
-export function judgeRequirements(
-  summary: RequirementsSummary,
-  baseline: ExpectedFailures,
-  failingChecksOf: (scenario: string) => string[]
-): string[];
-export function collectChecks(dir: string): Map<string, string[]>;
+export function requirementsArgs(revision: string, port: number): string[];
+export function baselineReport(output: string): string;
+export function judgeBaselineRun(run: { code: number | null; output: string }): BaselineVerdict;
 export function runRequirements(options?: {
   root?: string;
   revision?: string;
-  baselinePath?: string;
   verbose?: boolean;
   log?: (line: string) => void;
-}): Promise<{ problems: string[]; summary: RequirementsSummary }>;
+}): Promise<BaselineVerdict & { output: string }>;

@@ -8,8 +8,9 @@
  * connection's Server be collected.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { InMemoryTransport } from '@modelcontextprotocol/server';
-import { Client } from '@modelcontextprotocol/client';
+import { createMcpHandler, InMemoryTransport } from '@modelcontextprotocol/server';
+import { serveStdio } from '@modelcontextprotocol/server/stdio';
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { createProtocolServer } from '../../../../src/server/protocol-facade.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
@@ -69,5 +70,117 @@ describe('createProtocolServer over a real transport', () => {
 
     expect(core.notifications.sinkCount).toBe(0);
     await client.close().catch(() => undefined);
+  });
+});
+
+/**
+ * Who is connected, in the server's own log (issue #1025, step 2). A 2025
+ * client is named by the `Client initialized` line its handshake writes. A
+ * 2026-07-28 client has no handshake — its name, version and protocol
+ * revision ride on every request — so the facade names it on the first
+ * request that reaches a handler, once per distinct client per process: a
+ * stdio connection logs one line, and so does an `http` client however many
+ * per-request facades serve it.
+ */
+describe('a 2026-07-28 client is identified in the log', () => {
+  let core: DebugMcpServer;
+  let mockSessionManager: MockSessionManager;
+  let mockDependencies: Dependencies;
+  const closers: Array<() => Promise<unknown>> = [];
+
+  beforeEach(() => {
+    mockDependencies = createMockDependencies();
+    vi.mocked(createProductionDependencies).mockReturnValue(mockDependencies);
+    mockSessionManager = createMockSessionManager(mockDependencies.adapterRegistry);
+    vi.mocked(SessionManager).mockImplementation(function () { return mockSessionManager as any; });
+    core = new DebugMcpServer();
+  });
+
+  afterEach(async () => {
+    for (const close of closers.splice(0)) await close().catch(() => undefined);
+    mockSessionManager.closeAllSessions.mockResolvedValue(undefined);
+    await core.stop();
+    vi.clearAllMocks();
+  });
+
+  /** One client over the SDK's stdio entry, the way the stdio command serves it. */
+  async function connect(name: string, mode: 'legacy' | { pin: string }): Promise<Client> {
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const handle = serveStdio(({ era }) => createProtocolServer(core, { era, deliver: 'instance' }), { transport: serverTransport });
+    const client = new Client({ name, version: '1.2.3' }, { versionNegotiation: { mode } });
+    await client.connect(clientTransport);
+    closers.push(() => client.close(), () => handle.close());
+    return client;
+  }
+
+  const identified = () =>
+    vi.mocked(mockDependencies.logger.info).mock.calls.filter(([message]) => message === '[MCP Server] Client identified');
+
+  it('names the client and its protocol revision on its first handled request, and only once', async () => {
+    const client = await connect('era-client', { pin: '2026-07-28' });
+    expect(identified()).toHaveLength(0);
+
+    await client.listPrompts();
+    await client.listPrompts();
+    await client.listResources();
+
+    expect(identified()).toEqual([
+      ['[MCP Server] Client identified', { era: 'modern', protocolVersion: '2026-07-28', client: 'era-client 1.2.3' }]
+    ]);
+  });
+
+  it('logs the same client once per process, and a different client once more', async () => {
+    await (await connect('era-client', { pin: '2026-07-28' })).listPrompts();
+    await (await connect('era-client', { pin: '2026-07-28' })).listPrompts();
+    await (await connect('other-client', { pin: '2026-07-28' })).listPrompts();
+
+    expect(identified().map(([, meta]) => (meta as { client: string }).client)).toEqual(['era-client 1.2.3', 'other-client 1.2.3']);
+  });
+
+  it('logs an http client once, however many per-request facades serve it', async () => {
+    // The http leg as the command builds it: a strict modern handler over a
+    // facade per request, each of which delivers nothing itself.
+    const handler = createMcpHandler(({ era }) => createProtocolServer(core, { era, deliver: 'external' }), { legacy: 'reject' });
+    const client = new Client({ name: 'http-client', version: '2.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } });
+    await client.connect(new StreamableHTTPClientTransport(new URL('http://mcp.test/mcp'), {
+      fetch: (input, init) => handler.fetch(new Request(input, init))
+    }));
+    closers.push(() => client.close(), () => handler.close());
+
+    await client.listPrompts();
+    await client.listPrompts();
+    await client.listResources();
+
+    expect(identified()).toEqual([
+      ['[MCP Server] Client identified', { era: 'modern', protocolVersion: '2026-07-28', client: 'http-client 2.0.0' }]
+    ]);
+  });
+
+  it('leaves a 2025 client to its Client initialized line', async () => {
+    await (await connect('legacy-client', 'legacy')).listPrompts();
+
+    expect(identified()).toHaveLength(0);
+    expect(mockDependencies.logger.info).toHaveBeenCalledWith(
+      '[MCP Server] Client initialized',
+      expect.objectContaining({ client: 'legacy-client 1.2.3' })
+    );
+  });
+
+  it('names a client that sent no client info by its protocol revision alone', () => {
+    core.noteModernClient({ protocolVersion: '2026-07-28' });
+
+    expect(identified()).toEqual([
+      ['[MCP Server] Client identified', { era: 'modern', protocolVersion: '2026-07-28', client: undefined }]
+    ]);
+  });
+
+  it('keeps a bounded set of identities: past it, a new one is logged at debug and not remembered', () => {
+    for (let i = 0; i < 300; i++) core.noteModernClient({ protocolVersion: '2026-07-28', client: `client-${i} 1.0.0` });
+
+    expect(identified()).toHaveLength(256);
+    expect(mockDependencies.logger.debug).toHaveBeenCalledWith(
+      '[MCP Server] Client identified',
+      expect.objectContaining({ client: 'client-299 1.0.0' })
+    );
   });
 });

@@ -144,10 +144,11 @@ The flags that matter — each one is load-bearing:
   pass `-- /app/entry.sh http -p 3001` — bare `-- http -p 3001` fails with
   `exec: "http": executable file not found`. (Git Bash on Windows mangles
   `/app/...` — prefix the command with `MSYS_NO_PATHCONV=1`.)
-- **`MCP_DEBUG_SESSION_IDLE_MS=300000`** tightens the idle policy that closes a
-  debug session nobody has named from 30 min to 5 — releasing the ptrace claim
-  on your pod sooner once the client is gone (while a client holds its SSE
-  stream open, nothing expires). **`MCP_HTTP_STALE_SESSION_MS=300000`** tightens
+- **`MCP_DEBUG_SESSION_IDLE_MS=300000`** turns the idle policy on at 5 minutes: a
+  debug session nobody has named for that long is closed — releasing the ptrace
+  claim on your pod once the client is gone (while a client holds its SSE stream
+  open, nothing expires). Leave it out and nothing expires: a crashed client's
+  attach keeps its claim until the sidecar exits. **`MCP_HTTP_STALE_SESSION_MS=300000`** tightens
   the separate reaper for abandoned MCP sessions the same way. (A crashed SDK
   client's MCP session, whose stream the server saw close, is reaped after
   2 min regardless — `MCP_HTTP_STREAM_LOST_SESSION_MS`; its debug sessions then
@@ -224,9 +225,9 @@ the MCP endpoint, and the containerized server attaches to python, ruby
   logpoints (`set_breakpoint` with `logMessage`): the pod keeps running at full
   speed while values stream to `get_output`.
 - An abandoned attach no longer leaves an orphaned tracer (#337): teardown
-  kills the adapter's process group, and the sidecar's idle policy closes a
-  crashed client's debug sessions once nobody attends the process
-  (`MCP_DEBUG_SESSION_IDLE_MS`). Suspect a leftover anyway?
+  kills the adapter's process group, and the sidecar's idle policy — on because
+  the recipe sets `MCP_DEBUG_SESSION_IDLE_MS` — closes a crashed client's debug
+  sessions once nobody attends the process. Suspect a leftover anyway?
   `grep TracerPid /proc/1/status` from the sidecar.
 
 ## Distroless and minimal images

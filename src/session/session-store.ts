@@ -45,6 +45,7 @@ import { OutputRingBuffer } from './output-buffer.js';
 import { isDebuggerOff } from './debugger-off.js';
 import type { PauseIntent } from './execution/pause-intent.js';
 import type { ProxyFailureDiagnostics } from './launch/proxy-failure-diagnostics.js';
+import { isSessionHidden } from './session-scope.js';
 
 export interface ToolchainValidationState {
   compatible: boolean;
@@ -316,14 +317,15 @@ export class SessionStore {
    * Retrieves a session by ID
    */
   get(sessionId: string): ManagedSession | undefined {
-    return this.sessions.get(sessionId);
+    // A session outside the calling tool call's owner scope is absent (issue #1025).
+    return isSessionHidden(sessionId) ? undefined : this.sessions.get(sessionId);
   }
 
   /**
    * Retrieves a session by ID, throwing if not found
    */
   getOrThrow(sessionId: string): ManagedSession {
-    const session = this.sessions.get(sessionId);
+    const session = this.get(sessionId);
     if (!session) {
       throw new SessionNotFoundError(sessionId);
     }
@@ -415,7 +417,7 @@ export class SessionStore {
    * Checks if a session exists
    */
   has(sessionId: string): boolean {
-    return this.sessions.has(sessionId);
+    return !isSessionHidden(sessionId) && this.sessions.has(sessionId);
   }
 
   /**

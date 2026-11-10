@@ -80,10 +80,7 @@ export async function handleStdioCommand(
 
     const debugMcpServer = serverFactory({
       logLevel: options.logLevel,
-      logFile: options.logFile,
-      // On stdio the pipe is the lifetime: the per-debug-session idle policy
-      // defaults to off here (MCP_DEBUG_SESSION_IDLE_MS still turns it on; issue #1025).
-      debugSessionIdle: { defaultMs: 0 }
+      logFile: options.logFile
     });
 
     // Keep the event loop alive even if stdin closes (e.g., detached containers).
@@ -147,19 +144,37 @@ export async function handleStdioCommand(
     // disconnect and the container must exit — otherwise `docker run --rm`
     // never fires and every session leaks a container (issue #633). The
     // transport closing the wire by itself goes through the same gate.
-    const onWireGone = (reason: string): void => {
+    const onWireGone = (reason: string, clientLeft: boolean): void => {
       // Reads MCP_CONTAINER directly on purpose: `proc` is the injected
       // ProcessLike this command is tested against, not an IEnvironment.
       if (proc.env.MCP_CONTAINER === 'true' && !sawClientTraffic) {
         logger.warn(`[MCP] ${reason} before any client traffic; detached container, staying alive.`);
         return;
       }
-      shutdownAndExit(0, `${reason}; MCP client disconnected`);
+      shutdownAndExit(0, clientLeft ? `${reason}; MCP client disconnected` : reason);
+    };
+
+    // The exit line is what an operator reads to learn why the server went
+    // away, so it says what is true rather than which listener ran first: only
+    // a stdin that ended means the client left. The transport also closes the
+    // wire by itself after a stdout error or an oversized frame, with the
+    // client possibly still there — then the line names that error instead.
+    const stdin: NodeJS.ReadableStream = dependencies.stdin ?? proc.stdin;
+    let lastTransportError: Error | undefined;
+    const onTransportClosed = (): void => {
+      const { readableEnded, destroyed } = stdin as { readableEnded?: boolean; destroyed?: boolean };
+      if (readableEnded || destroyed) {
+        onWireGone('Stdin ended', true);
+      } else if (lastTransportError) {
+        onWireGone(`Stdio transport closed after an error (${lastTransportError.message})`, false);
+      } else {
+        onWireGone('Stdio transport closed', false);
+      }
     };
 
     // Create stdio transport
     logger.info('[MCP] Creating StdioServerTransport...');
-    const transport = new ObservedStdioServerTransport(() => onWireGone('Stdio transport closed'));
+    const transport = new ObservedStdioServerTransport(onTransportClosed);
 
     // The SDK's stdio serving entry owns the wire and speaks both protocol
     // eras (issue #1025, step 2): the opening message pins one facade for the
@@ -176,6 +191,7 @@ export async function handleStdioCommand(
       {
         transport,
         onerror: (error: Error) => {
+          lastTransportError = error;
           logger.error('[MCP] Transport error:', { error });
         }
       }
@@ -187,7 +203,6 @@ export async function handleStdioCommand(
     logger.info('Server started successfully in stdio mode');
 
     // Keep the process alive
-    const stdin: NodeJS.ReadableStream = dependencies.stdin ?? proc.stdin;
     stdin.resume();
 
     // Additive: Node broadcasts each chunk to every 'data' listener and
@@ -198,9 +213,9 @@ export async function handleStdioCommand(
     // 'end' alone misses an abruptly dropped pipe. shutdownAndExit is
     // idempotent, so the usual end-then-close pair — and the transport's own
     // close on the same EOF — cost nothing.
-    stdin.on('end', () => onWireGone('Stdin ended'));
-    stdin.on('close', () => onWireGone('Stdin closed'));
-    stdin.on('error', (error: Error) => onWireGone(`Stdin error (${error.message})`));
+    stdin.on('end', () => onWireGone('Stdin ended', true));
+    stdin.on('close', () => onWireGone('Stdin closed', true));
+    stdin.on('error', (error: Error) => onWireGone(`Stdin error (${error.message})`, true));
 
     // Add robust exit/signal diagnostics (logged to file; console output is silenced for protocol safety)
     proc.on('SIGTERM', () => {

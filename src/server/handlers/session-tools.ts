@@ -208,6 +208,16 @@ export async function handleListDebugSessions(ctx: ToolContext, callerKey?: stri
           // A child session (the session tree, issue #1081): the row names its parent.
           mappedSession.parentSessionId = session.parentSessionId;
       }
+      // How long since a tool call named this session's tree (issue #1025): what
+      // tells a forgotten session from a live one, and — when the operator turned
+      // the idle policy on — how long it has left. A child reports its root's.
+      const idleMs = ctx.sessionManager.idleMsOf(session.id);
+      if (idleMs !== undefined) {
+          mappedSession.idleMs = idleMs;
+          if (ctx.idlePolicy.idleMs > 0) {
+              mappedSession.expiresInMs = Math.max(0, ctx.idlePolicy.idleMs - idleMs);
+          }
+      }
       return mappedSession;
     });
     return jsonResult({ success: true, sessions: sessionData, count: sessionData.length });

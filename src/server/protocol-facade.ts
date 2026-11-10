@@ -9,7 +9,7 @@
  * that lives exactly as long as the facade does. No dependency container, no
  * SessionManager, no logger of its own.
  */
-import { Server } from '@modelcontextprotocol/server';
+import { CLIENT_INFO_META_KEY, PROTOCOL_VERSION_META_KEY, Server } from '@modelcontextprotocol/server';
 import type { DebugMcpServer } from '../server.js';
 import { facadeSink } from './notification-hub.js';
 import { FacadeSubscriptions, registerResourceHandlers } from './output-resources.js';
@@ -31,6 +31,42 @@ export interface ProtocolFacadeOptions {
   deliver: 'instance' | 'external';
 }
 
+type Registrar = Pick<Server, 'setRequestHandler'>;
+type AnyHandler = (request: unknown, callCtx: unknown) => unknown;
+
+/** What a 2026-07-28 request says about its sender: the envelope the SDK lifts out of `_meta`. */
+function modernClientOf(server: Server, callCtx: unknown): { protocolVersion?: string; client?: string } {
+  // The SDK types the envelope as `{}`; the keys are its own exported constants.
+  const envelope = (callCtx as { mcpReq?: { envelope?: Record<string, unknown> } } | undefined)?.mcpReq?.envelope;
+  const revision = envelope?.[PROTOCOL_VERSION_META_KEY];
+  const info = envelope?.[CLIENT_INFO_META_KEY] as { name?: unknown; version?: unknown } | undefined;
+  // Client info is optional and self-reported: a label for the log, bounded, never a key for behaviour.
+  const client = typeof info?.name === 'string'
+    ? `${info.name}${typeof info.version === 'string' ? ` ${info.version}` : ''}`.slice(0, 200)
+    : undefined;
+  return {
+    protocolVersion: typeof revision === 'string' ? revision : server.getNegotiatedProtocolVersion(),
+    client
+  };
+}
+
+/**
+ * A registrar for a modern-era facade: every handler registered through it
+ * first tells the core who is calling. The 2026-07-28 era has no handshake to
+ * log a client from (`oninitialized` never fires), so the first request that
+ * reaches a handler is where a client becomes known; the core logs each
+ * distinct client once per process.
+ */
+function identifyingClients(server: Server, core: DebugMcpServer): Registrar {
+  const register = server.setRequestHandler.bind(server) as unknown as (method: string, handler: AnyHandler) => void;
+  const setRequestHandler = (method: string, handler: AnyHandler): void =>
+    register(method, (request, callCtx) => {
+      core.noteModernClient(modernClientOf(server, callCtx));
+      return handler(request, callCtx);
+    });
+  return { setRequestHandler: setRequestHandler as unknown as Server['setRequestHandler'] };
+}
+
 export function createProtocolServer(core: DebugMcpServer, options: ProtocolFacadeOptions): Server {
   // Everything the Server advertises is read off the core, computed once per
   // process: a facade is built per connection or per request.
@@ -45,12 +81,14 @@ export function createProtocolServer(core: DebugMcpServer, options: ProtocolFaca
   // resources/subscribe bookkeeping is per facade: a subscription belongs to
   // the connection that made it.
   const subscriptions = new FacadeSubscriptions();
-  registerToolHandlers(server, core);
-  registerResourceHandlers(server, core.sessionManager, subscriptions, core.fileSystem);
-  registerPromptHandlers(server, core.environment);
+  const registrar: Registrar = options.era === 'modern' ? identifyingClients(server, core) : server;
+  registerToolHandlers(registrar, core);
+  registerResourceHandlers(registrar, core.sessionManager, subscriptions, core.fileSystem);
+  registerPromptHandlers(registrar, core.environment);
 
   // The protocol version each legacy client negotiates (issue #1025). The
-  // modern era has no initialize; its clients are identified per request.
+  // modern era has no initialize; its clients are named on their first
+  // handled request, through the registrar above.
   server.oninitialized = () => {
     const client = server.getClientVersion();
     core.logger.info('[MCP Server] Client initialized', {

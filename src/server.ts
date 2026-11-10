@@ -69,13 +69,6 @@ export type { SetBreakpointRequest };
 export interface DebugMcpServerOptions {
   logLevel?: string;
   logFile?: string;
-  /**
-   * The per-debug-session idle policy's default window (issue #1025, step 2):
-   * the transport's choice — thirty minutes for `http`, 0 (off) for `stdio`,
-   * where the pipe is the lifetime. MCP_DEBUG_SESSION_IDLE_MS overrides it.
-   * Absent = off.
-   */
-  debugSessionIdle?: { defaultMs: number };
 }
 
 /**
@@ -133,6 +126,9 @@ export class DebugMcpServer implements ToolContext {
    * closes nothing. The transport layer supplies it; the default says nobody is.
    */
   private attendedSupplier: () => boolean = () => false;
+  /** The 2026-07-28 clients already named in the log, by identity; bounded. */
+  private readonly identifiedClients = new Set<string>();
+  private static readonly IDENTIFIED_CLIENT_LIMIT = 256;
 
   /** @internal Language discovery is a ToolContext service; see src/server/language-discovery.ts. */
   public async getSupportedLanguagesAsync(): Promise<string[]> {
@@ -761,14 +757,11 @@ export class DebugMcpServer implements ToolContext {
 
     this.fileSystem = dependencies.fileSystem;
     this.version = getVersion();
-    this.idlePolicy = resolveIdlePolicy(
-      this.environment,
-      { idleMs: options.debugSessionIdle?.defaultMs ?? 0 },
-      (message) => this.logger.warn(message)
-    );
+    this.idlePolicy = resolveIdlePolicy(this.environment, (message) => this.logger.warn(message));
     this.instructions = buildServerInstructions(getBpAddressingMode(this.environment), {
       redactionEnabled: isRedactionEnabled(this.environment),
-      variableAccessMode: getVariableAccessMode(this.environment)
+      variableAccessMode: getVariableAccessMode(this.environment),
+      ...(this.idlePolicy.idleMs > 0 ? { idleWindow: describeIdleWindow(this.idlePolicy.idleMs) } : {})
     });
 
     const sessionManagerConfig: SessionManagerConfig = {
@@ -831,8 +824,16 @@ export class DebugMcpServer implements ToolContext {
     // For MCP servers, start is handled by transport
     const buildTime = new Date().toISOString();
     this.logger.info(`[MCP Server] Started at ${buildTime}, version: ${this.version}`);
-    // The idle policy's sweep (issue #1025, step 2): armed once per process,
-    // unref'd so it never holds the event loop open on its own.
+    // The idle policy (issue #1025, step 2) is the operator's choice and off
+    // otherwise; either way the log says which rule this process runs under.
+    if (this.idlePolicy.idleMs <= 0) {
+      this.logger.info(
+        '[MCP Server] Debug-session idle policy: off (MCP_DEBUG_SESSION_IDLE_MS is not set): ' +
+        'a debug session lives until it is closed, its program ends, or the server exits'
+      );
+    }
+    // The sweep is armed once per process, unref'd so it never holds the event
+    // loop open on its own.
     if (this.idlePolicy.idleMs > 0 && !this.idleSweepTimer) {
       this.idleSweepTimer = setInterval(() => {
         void this.runIdleSweep();
@@ -843,6 +844,29 @@ export class DebugMcpServer implements ToolContext {
         `is closed (sweep every ${describeIdleWindow(this.idlePolicy.sweepMs)}; MCP_DEBUG_SESSION_IDLE_MS, MCP_DEBUG_SESSION_IDLE_SWEEP_MS)`
       );
     }
+  }
+
+  /**
+   * A 2026-07-28 client reached a handler (issue #1025, step 2). The modern
+   * era has no handshake, so this is the counterpart of the legacy
+   * `Client initialized` line: each distinct client — its self-reported name
+   * and version, and its protocol revision — is logged once per process,
+   * whether it is one stdio connection or an `http` client served by a facade
+   * per request. Past the bound a new identity is logged at debug and not
+   * remembered, so a client that varies its name cannot grow the set.
+   */
+  public noteModernClient(identity: { protocolVersion?: string; client?: string }): void {
+    const key = `${identity.protocolVersion ?? ''}|${identity.client ?? ''}`;
+    if (this.identifiedClients.has(key)) {
+      return;
+    }
+    const line = { era: 'modern', protocolVersion: identity.protocolVersion, client: identity.client };
+    if (this.identifiedClients.size >= DebugMcpServer.IDENTIFIED_CLIENT_LIMIT) {
+      this.logger.debug('[MCP Server] Client identified', line);
+      return;
+    }
+    this.identifiedClients.add(key);
+    this.logger.info('[MCP Server] Client identified', line);
   }
 
   /** Who decides whether a client is attending the process; see attendedSupplier. */

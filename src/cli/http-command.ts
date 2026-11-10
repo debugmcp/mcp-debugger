@@ -68,6 +68,19 @@ interface SessionData {
 
 /** Largest JSON-RPC request body accepted; also named in the 413 the parser answers with (issue #670). */
 const JSON_BODY_LIMIT = '10mb';
+
+/**
+ * What the SDK's modern handler says when it refuses a request it was sent (as
+ * opposed to failing on its own): the messages it builds at its rejection
+ * points. Matched by their openings because the SDK reports them as plain
+ * Errors; a wording it changes falls back to the error level, never the reverse.
+ */
+const SDK_REFUSAL = /^(Rejected |Unsupported Media Type)/;
+
+/** The Node adapter's body-limit error (its class is not exported): the client sent too much. */
+function isBodyTooLarge(error: unknown): error is Error & { status: 413 } {
+  return error instanceof Error && (error as { status?: unknown }).status === 413;
+}
 /** The same limit in bytes, for the SDK's classifier and modern handler (their default is 4 MiB). */
 const JSON_BODY_LIMIT_BYTES = 10 * 1024 * 1024;
 
@@ -78,12 +91,6 @@ function isListenRequest(body: unknown): boolean {
 
 /** Idle window before a streamless HTTP session is reaped (issue #337). */
 const DEFAULT_STALE_SESSION_MS = 30 * 60 * 1000;
-/**
- * The per-debug-session idle policy's default on http (issue #1025, step 2):
- * a debug-session tree no tool call has named for this long is closed, unless
- * a client is attending the process. MCP_DEBUG_SESSION_IDLE_MS overrides it.
- */
-const DEFAULT_DEBUG_SESSION_IDLE_MS = 30 * 60 * 1000;
 /**
  * Idle window before a session whose SSE stream dropped and never returned is
  * reaped (issue #658). The SDK client re-opens a lost stream within seconds
@@ -216,7 +223,6 @@ export function createHttpApp(
   const core = serverFactory({
     logLevel: options.logLevel,
     logFile: options.logFile,
-    debugSessionIdle: { defaultMs: DEFAULT_DEBUG_SESSION_IDLE_MS },
   });
   // The 2026-07-28 leg (issue #1025, step 2): the SDK's sessionless handler,
   // strict — a 2025-era request that reaches it is refused with the supported
@@ -231,11 +237,19 @@ export function createHttpApp(
       legacy: 'reject',
       maxRequestBodySize: JSON_BODY_LIMIT_BYTES,
       onerror: (error: Error) => {
-        logger.error('Modern-era MCP handler error', { error });
+        // The SDK reports every request it refuses through the same hook as its
+        // own faults, as a plain Error. A refusal is the caller's doing — a junk
+        // body, a missing header, a wrong content type — and anyone who can reach
+        // the port can cause one, so it is a warning; only a real fault is an error.
+        if (SDK_REFUSAL.test(error.message)) {
+          logger.warn('Modern-era MCP request refused', { reason: error.message });
+        } else {
+          logger.error('Modern-era MCP handler error', { error });
+        }
       },
     }
   );
-  core.notifications.addSink(handlerSink(modern.notify));
+  const detachModernSink = core.notifications.addSink(handlerSink(modern.notify));
   const modernNode = toNodeHandler(modern, {
     // The same limit as express.json, the classifier and the handler: a body between two
     // different limits would pass one entry and die in the next.
@@ -463,6 +477,17 @@ export function createHttpApp(
 
       await transport.handleRequest(req as IncomingMessage, res as ServerResponse, req.body);
     } catch (error) {
+      if (isBodyTooLarge(error)) {
+        // Classifying reads a body Express did not parse (a non-JSON content
+        // type). Over the limit is the caller's error, answered as the JSON
+        // parser answers it — not an "Internal error" and not an error log.
+        if (!res.headersSent) {
+          res.status(413).json(
+            jsonRpcErrorBody(ProtocolErrorCode.InvalidRequest, `Request body too large (limit ${JSON_BODY_LIMIT})`, error.message)
+          );
+        }
+        return;
+      }
       logger.error('Error handling MCP request', { error });
       if (!res.headersSent) {
         res.status(500).json(
@@ -545,7 +570,14 @@ export function createHttpApp(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (app as any).core = core;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (app as any).modernHandler = modern;
+  (app as any).modernHandler = {
+    close: async (): Promise<void> => {
+      // The sink first: the core closes its sessions after this, and each close
+      // fires a resource change that a closed handler has no stream for.
+      detachModernSink();
+      await modern.close();
+    },
+  };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (app as any).bindAddress = bind;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

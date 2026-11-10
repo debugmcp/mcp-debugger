@@ -1,19 +1,23 @@
 /**
  * The owner-key gate in the tools/call dispatch (issue #1025, step 2). It
  * replaces the #939 foreign-session refusal: with one shared core per process
- * there is no "other server", only scopes. A session outside the caller's
- * scope answers exactly as an unknown id would, so nothing about its existence
- * leaks; a session in scope reaches its handler untouched. The caller's scope
- * is read off the SDK request context (`ctx.http.authInfo`); with no
- * authentication configured every caller is anonymous and sees everything, as
- * before. Decided in front of every handler so all tools say it the same way;
- * only tools whose schema takes a `sessionId` are gated, and
- * `create_debug_session` is never refused — it stamps the caller's scope.
+ * there is no "other server", only scopes. For a caller, a session outside
+ * its scope does not exist, so the dispatch gives no answer of its own: it
+ * runs the call with that session hidden from every lookup and the tool's
+ * handler answers as it answers an unknown id. That equivalence is pinned,
+ * tool by tool over the real session store, in owner-scope-contract.test.ts;
+ * this suite pins the dispatch's own mechanics over a fake context — which
+ * calls run hidden, which refresh the idle clock, and that
+ * `create_debug_session` is never gated and stamps the caller's scope. The
+ * caller's scope is read off the SDK request context (`ctx.http.authInfo`);
+ * with no authentication configured every caller is anonymous and sees
+ * everything, as before.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { registerToolHandlers } from '../../../../src/server/tool-dispatch.js';
 import type { ToolContext } from '../../../../src/server/tool-context.js';
 import { SessionNotFoundError } from '../../../../src/errors/debug-errors.js';
+import { isSessionHidden } from '../../../../src/session/session-scope.js';
 
 // create_debug_session's launch-toolchain gate probes the adapter registry;
 // this suite is about the dispatch, so the gate answers "available".
@@ -46,6 +50,7 @@ function fakeContext(overrides: Partial<ToolContext> = {}): ToolContext {
       isSessionVisibleTo: vi.fn((id: string, key: string | undefined) =>
         id === OWN ? key === 'agent-a' : id === FOREIGN ? key === 'agent-b' : false),
       getSessionsVisibleTo: vi.fn(() => []),
+      idleExpiryOf: vi.fn(() => undefined),
       touchActivity: vi.fn()
     },
     validateSession: (sessionId: string) => {
@@ -92,40 +97,52 @@ describe('tools/call on a session outside the caller scope (issue #1025, step 2)
     vi.clearAllMocks();
   });
 
-  it('close_debug_session answers exactly as an unknown id and never reaches the handler', async () => {
+  /** A context whose close handler records whether the dispatch hid the session it was asked about. */
+  function contextRecordingScope(): { ctx: ToolContext; hiddenAtHandler: () => boolean | undefined } {
+    let hidden: boolean | undefined;
+    const ctx = fakeContext({
+      closeDebugSession: vi.fn(async (id: string) => {
+        hidden = isSessionHidden(id);
+        return { closed: false, closedSessionIds: [] };
+      })
+    } as unknown as Partial<ToolContext>);
+    return { ctx, hiddenAtHandler: () => hidden };
+  }
+
+  it('a session outside the caller scope is hidden for the whole call: the handler runs and answers for itself', async () => {
+    const { ctx, hiddenAtHandler } = contextRecordingScope();
+
+    const result = await answer(dispatcher(ctx), 'close_debug_session', { sessionId: FOREIGN }, 'agent-a');
+
+    // The handler's own not-found answer, not a sentence of the dispatch's.
+    expect(result).toEqual({ success: false, message: `Failed to close debug session: ${FOREIGN}` });
+    expect(hiddenAtHandler()).toBe(true);
+    expect(isSessionHidden(FOREIGN)).toBe(false);
+  });
+
+  it('a call on a session outside the caller scope refreshes no idle clock', async () => {
     const ctx = fakeContext();
-    const call = dispatcher(ctx);
 
-    const result = await answer(call, 'close_debug_session', { sessionId: FOREIGN }, 'agent-a');
+    await answer(dispatcher(ctx), 'close_debug_session', { sessionId: FOREIGN }, 'agent-a');
 
-    expect(result).toEqual({ success: false, error: `Session not found: ${FOREIGN}` });
-    expect(ctx.closeDebugSession).not.toHaveBeenCalled();
-  });
-
-  it.each(['step_over', 'get_output', 'wait_for_stop'])('%s answers the same way', async (tool) => {
-    const call = dispatcher(fakeContext());
-
-    const result = await answer(call, tool, { sessionId: FOREIGN }, 'agent-a');
-
-    expect(result).toEqual({ success: false, error: `Session not found: ${FOREIGN}` });
-  });
-
-  it('hot_reload answers the same way instead of its own protocol error', async () => {
-    const call = dispatcher(fakeContext());
-
-    const result = await answer(call, 'hot_reload', { sessionId: FOREIGN, classesDir: '/classes' }, 'agent-a');
-
-    expect(result).toEqual({ success: false, error: `Session not found: ${FOREIGN}` });
+    expect(ctx.sessionManager.touchActivity).not.toHaveBeenCalled();
   });
 
   it('an anonymous caller does not see a keyed session', async () => {
-    const ctx = fakeContext();
-    const call = dispatcher(ctx);
+    const { ctx, hiddenAtHandler } = contextRecordingScope();
 
-    const result = await answer(call, 'close_debug_session', { sessionId: OWN });
+    await answer(dispatcher(ctx), 'close_debug_session', { sessionId: OWN });
 
-    expect(result).toEqual({ success: false, error: `Session not found: ${OWN}` });
-    expect(ctx.closeDebugSession).not.toHaveBeenCalled();
+    expect(hiddenAtHandler()).toBe(true);
+    expect(ctx.sessionManager.touchActivity).not.toHaveBeenCalled();
+  });
+
+  it('a session in the caller scope is not hidden from its own call', async () => {
+    const { ctx, hiddenAtHandler } = contextRecordingScope();
+
+    await answer(dispatcher(ctx), 'close_debug_session', { sessionId: OWN }, 'agent-a');
+
+    expect(hiddenAtHandler()).toBe(false);
   });
 
   it('a session in the caller scope reaches its handler and refreshes its activity clock', async () => {

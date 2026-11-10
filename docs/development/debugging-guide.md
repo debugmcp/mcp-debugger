@@ -96,10 +96,10 @@ connection active while the nested server is paused.
 Debug sessions on a Streamable HTTP server belong to the process, not to the MCP client session
 that created them (one `DebugMcpServer` core per process, one SDK `Server` facade per MCP
 session; issue #1025). A one-shot driver script that opens a fresh MCP session per run reaches
-the debug session its previous run created by id, and `list_debug_sessions` lists it. What ends
-an abandoned one is the idle policy: a session tree no tool call has named for
-`MCP_DEBUG_SESSION_IDLE_MS` (default 30 min; `0` disables) is closed, unless a client is attending
-the process — while any client holds its SSE stream open, nothing expires. The abandoned MCP
+the debug session its previous run created by id, and `list_debug_sessions` lists it. Nothing
+ends a debug session on a timer by default; with `MCP_DEBUG_SESSION_IDLE_MS` set, a session tree
+no tool call has named for that long is closed, unless a client is attending the process — while
+any client holds its SSE stream open, nothing expires. The abandoned MCP
 sessions themselves are reaped separately (`MCP_HTTP_STREAM_LOST_SESSION_MS`, default 2 min after
 the stream dropped; `MCP_HTTP_STALE_SESSION_MS`, default 30 min for a pure-POST client).
 
