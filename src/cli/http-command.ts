@@ -3,7 +3,7 @@ import type { Express, Request, Response, NextFunction } from 'express';
 import express from 'express';
 import { randomUUID } from 'crypto';
 import { IncomingMessage, ServerResponse } from 'http';
-import { createMcpHandler, isInitializeRequest, isLegacyRequest, ProtocolErrorCode } from '@modelcontextprotocol/server';
+import { createMcpHandler, isInitializeRequest, isLegacyRequest, ProtocolErrorCode, ProtocolError } from '@modelcontextprotocol/server';
 import { NodeStreamableHTTPServerTransport, toNodeHandler, toWebRequest } from '@modelcontextprotocol/node';
 import { DebugMcpServer, type DebugMcpServerOptions } from '../server.js';
 import { createProtocolServer } from '../server/protocol-facade.js';
@@ -76,6 +76,20 @@ const JSON_BODY_LIMIT = '10mb';
  * Errors; a wording it changes falls back to the error level, never the reverse.
  */
 const SDK_REFUSAL = /^(Rejected |Unsupported Media Type)/;
+
+/**
+ * Whether an error the modern handler reported is a refusal of the caller's
+ * request rather than a fault. Besides the plain-Error refusals above, the SDK
+ * reports some as typed protocol errors — an unsupported protocol revision
+ * (-32022), a missing client capability — which are the caller's doing by
+ * definition; only an internal error is the server's.
+ */
+function isRefusedRequest(error: Error): boolean {
+  if (error instanceof ProtocolError) {
+    return error.code !== ProtocolErrorCode.InternalError;
+  }
+  return SDK_REFUSAL.test(error.message);
+}
 
 /** The Node adapter's body-limit error (its class is not exported): the client sent too much. */
 function isBodyTooLarge(error: unknown): error is Error & { status: 413 } {
@@ -241,7 +255,7 @@ export function createHttpApp(
         // own faults, as a plain Error. A refusal is the caller's doing — a junk
         // body, a missing header, a wrong content type — and anyone who can reach
         // the port can cause one, so it is a warning; only a real fault is an error.
-        if (SDK_REFUSAL.test(error.message)) {
+        if (isRefusedRequest(error)) {
           logger.warn('Modern-era MCP request refused', { reason: error.message });
         } else {
           logger.error('Modern-era MCP handler error', { error });
@@ -440,7 +454,7 @@ export function createHttpApp(
         // reaches server.onclose and detaches the facade's notification sink.
         // Assigning after connect() would replace that wrapper (issue #1025).
         // The debug sessions this client created live on in the core under the
-        // idle policy; the MCP session was only a connection.
+        // idle policy where the operator set one; the MCP session was only a connection.
         newTransport.onclose = () => {
           const sid = newTransport.sessionId;
           if (!sid) return;

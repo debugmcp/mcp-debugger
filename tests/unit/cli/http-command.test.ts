@@ -33,7 +33,7 @@ const expressMock = vi.hoisted(() => {
 vi.mock('express', () => ({ default: expressMock.express }));
 
 import { NodeStreamableHTTPServerTransport, toNodeHandler, toWebRequest } from '@modelcontextprotocol/node';
-import { createMcpHandler, isLegacyRequest } from '@modelcontextprotocol/server';
+import { createMcpHandler, isLegacyRequest, ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 
 const MockedStreamableHTTPServerTransport = vi.mocked(NodeStreamableHTTPServerTransport);
 const mockCreateMcpHandler = vi.mocked(createMcpHandler);
@@ -754,6 +754,27 @@ describe('HTTP Command Handler', () => {
       expect(mockLogger.error).not.toHaveBeenCalledWith('Modern-era MCP handler error', expect.anything());
 
       const fault = new Error('factory exploded');
+      options!.onerror!(fault);
+
+      expect(mockLogger.error).toHaveBeenCalledWith('Modern-era MCP handler error', { error: fault });
+    });
+
+    // Some refusals reach the hook as the SDK's typed protocol errors, with no
+    // "Rejected" in front: an unsupported protocol revision (-32022), a missing
+    // client capability. They are refusals all the same — a client whose
+    // preferred revision is newer than ours would write one on every connect.
+    it('logs a typed protocol refusal as a warning too, but an internal error as an error', () => {
+      appAndHandler();
+      const [, options] = mockCreateMcpHandler.mock.calls[0];
+
+      options!.onerror!(new ProtocolError(-32022, 'Unsupported protocol version: 2099-01-01'));
+
+      expect(mockLogger.warn).toHaveBeenCalledWith('Modern-era MCP request refused', {
+        reason: 'Unsupported protocol version: 2099-01-01',
+      });
+      expect(mockLogger.error).not.toHaveBeenCalledWith('Modern-era MCP handler error', expect.anything());
+
+      const fault = new ProtocolError(ProtocolErrorCode.InternalError, 'the factory threw');
       options!.onerror!(fault);
 
       expect(mockLogger.error).toHaveBeenCalledWith('Modern-era MCP handler error', { error: fault });
