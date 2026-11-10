@@ -70,7 +70,7 @@ If your agent runs in a terminal, a pipeline, or a cloud sandbox — or needs to
 - 💥 **Crash-state debugging by default** – Launch sessions pause on uncaught exceptions with stack and locals live (`breakOnExceptions`; exception class/message surfaced via `lastStop`)
 - 🪞 **Read-only IDE mirror** – `expose_session` opens a loopback, token-gated DAP endpoint so a human's IDE can inspect the agent's live session without taking control
 - ☸️ **Kubernetes debugging** – port-forward attach for interpreted runtimes, `kubectl debug --target` + attach-by-PID for native processes ([recipe](docs/kubernetes.md), [turnkey manifests](examples/kubernetes/))
-- 🔌 **STDIO and Streamable HTTP transports** – Works with any MCP client
+- 🔌 **STDIO and Streamable HTTP transports** – Works with any MCP client. `stdio` speaks both protocol eras — the current 2026-07-28 revision (a probing client such as Claude Code's v2 runtime lands on it) and 2025-11-25 and earlier (a client that opens with `initialize`); `http` speaks 2025-11-25 and earlier, with 2026-07-28 next
 - 📦 **Zero-runtime dependencies** – Self-contained bundles via esbuild + tsup
 - ⚡ **npx ready** – Run directly with `npx @debugmcp/mcp-debugger` - no installation needed
 - 🐳 **Docker and npm packages** – Deploy anywhere

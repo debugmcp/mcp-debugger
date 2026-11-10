@@ -1,5 +1,5 @@
 import type { Logger as WinstonLoggerType } from 'winston';
-import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+import { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { DebugMcpServer, type DebugMcpServerOptions } from '../server.js';
 import { createProtocolServer } from '../server/protocol-facade.js';
 import type { StdioOptions } from './setup.js';
@@ -12,6 +12,8 @@ export interface StdioCommandDependencies {
   serverFactory: (options: ServerFactoryOptions) => DebugMcpServer;
   /** Builds the SDK Server facade over the core (issue #1025, step 2); defaults to createProtocolServer. */
   protocolServerFactory?: typeof createProtocolServer;
+  /** The SDK's stdio serving entry (issue #1025, step 2); defaults to the real one. */
+  serveStdio?: typeof serveStdio;
   exitProcess?: (code: number) => void;
   /** Injectable stdin for tests; defaults to proc.stdin. */
   stdin?: NodeJS.ReadStream;
@@ -25,13 +27,13 @@ export async function handleStdioCommand(
 ): Promise<void> {
   const proc = dependencies.proc ?? process;
   const { logger, serverFactory, exitProcess = (code: number) => proc.exit(code) } = dependencies;
-  
+
   if (options.logLevel) {
     logger.level = options.logLevel;
   }
-  
+
   logger.info('Starting Debug MCP Server in stdio mode');
-  
+
   try {
 
     const debugMcpServer = serverFactory({
@@ -41,28 +43,42 @@ export async function handleStdioCommand(
       // defaults to off here (MCP_DEBUG_SESSION_IDLE_MS still turns it on; issue #1025).
       debugSessionIdle: { defaultMs: 0 }
     });
-    
+
     // Create stdio transport
     logger.info('[MCP] Creating StdioServerTransport...');
     const transport = new StdioServerTransport();
     // Keep the event loop alive even if stdin closes (e.g., detached containers).
-    // Cleared on transport close or signals.
+    // Cleared on shutdown.
     const keepAlive = setInterval(() => {}, 60000);
-    
-    // Connect a legacy-era protocol facade over the core to the transport
-    // (issue #1025, step 2): the core owns no SDK Server of its own.
-    logger.info('[MCP] Connecting server to stdio transport...');
+
+    // The SDK's stdio serving entry owns the wire and speaks both protocol
+    // eras (issue #1025, step 2): the opening message pins one facade for the
+    // connection — a 2026-07-28 client's server/discover lands on a modern
+    // instance, a 2025 client's initialize on a legacy one — and the entry
+    // itself answers server/discover and serves subscriptions/listen. The
+    // factory may run twice: once for a discover probe that a client then
+    // abandons for initialize, and once for the pinned instance.
+    logger.info('[MCP] Serving stdio in both protocol eras...');
     const protocolServerFactory = dependencies.protocolServerFactory ?? createProtocolServer;
-    const facade = protocolServerFactory(debugMcpServer, { era: 'legacy', deliver: 'instance' });
-    await facade.connect(transport);
+    const serve = dependencies.serveStdio ?? serveStdio;
+    const handle = serve(
+      ({ era }) => protocolServerFactory(debugMcpServer, { era, deliver: 'instance' }),
+      {
+        transport,
+        onerror: (error: Error) => {
+          logger.error('[MCP] Transport error:', { error });
+        }
+      }
+    );
     logger.info('[MCP] Server connected to stdio transport successfully');
 
     // Every exit path must tear down the debug sessions first (issue #337):
     // exiting without DebugMcpServer.stop() → closeAllSessions() leaves the
     // proxy chains — and, for attach sessions, lldb-server's ptrace claim on
-    // the target — running with no owner. Bounded so a wedged proxy cannot
-    // block exit (ProxyManager.stop() is internally bounded but runs
-    // serially per session).
+    // the target — running with no owner. The serving handle goes first so
+    // an open subscriptions/listen stream ends gracefully. Bounded so a
+    // wedged proxy cannot block exit (ProxyManager.stop() is internally
+    // bounded but runs serially per session).
     let shutdownStarted = false;
     const shutdownAndExit = (code: number, why: string) => {
       if (shutdownStarted) return;
@@ -73,29 +89,25 @@ export async function handleStdioCommand(
         const timer = setTimeout(resolve, 5000);
         timer.unref?.();
       });
-      void Promise.race([
-        debugMcpServer.stop().catch((err) => {
+      const teardown = (async () => {
+        try {
+          await handle.close();
+        } catch (err) {
+          logger.debug('[MCP] Error closing the stdio serving handle during exit:', { err });
+        }
+        try {
+          await debugMcpServer.stop();
+        } catch (err) {
           logger.error('[MCP] Error stopping debug server during exit:', { err });
-        }),
-        guard
-      ]).finally(() => exitProcess(code));
+        }
+      })();
+      void Promise.race([teardown, guard]).finally(() => exitProcess(code));
     };
 
-    // Ensure deterministic shutdown on transport close (the Transport
-    // contract's own hook; the v1 SDK left it undocumented)
-    transport.onclose = () => {
-      shutdownAndExit(0, 'Transport closed');
-    };
-    
     // Start the debug server
     await debugMcpServer.start();
     logger.info('Server started successfully in stdio mode');
-    
-    // Add transport error handling
-    transport.onerror = (error) => {
-      logger.error('[MCP] Transport error:', { error });
-    };
-    
+
     // Keep the process alive
     const stdin: NodeJS.ReadableStream = dependencies.stdin ?? proc.stdin;
     stdin.resume();
@@ -103,8 +115,8 @@ export async function handleStdioCommand(
     // Stdin is the MCP transport here, so any byte on it proves a client was
     // speaking to us — which makes a later EOF mean that client is gone.
     // Nothing else will reap us: on Windows a dying parent delivers no signal,
-    // the SDK transport never notices EOF, and `keepAlive` above holds the
-    // event loop open, so without this the process runs forever (issue #122).
+    // and `keepAlive` above holds the event loop open, so without this the
+    // process runs forever (issue #122).
     let sawClientTraffic = false;
     // Additive: Node broadcasts each chunk to every 'data' listener and
     // stdin.resume() above already put the stream in flowing mode, so this
