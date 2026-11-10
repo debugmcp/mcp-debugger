@@ -99,6 +99,9 @@ describe('execution tool handlers', () => {
       settle({ success: true, state: 'paused', data: { message: 'Paused', lastStop: { reason: 'pause', threadId: 1, timestamp: 1 } } });
       await pending;
       expect(release).toHaveBeenCalledTimes(1);
+      // The wait's end is activity too: the idle clock restarts when it settles,
+      // not from the moment the agent asked.
+      expect(ctx.sessionManager.touchActivity).toHaveBeenCalledWith('test-session');
     });
 
     it('releases the hold when the wait fails', async () => {

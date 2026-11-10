@@ -26,11 +26,12 @@ import { TOOL_HANDLERS } from './handlers/index.js';
  * own not-found answer. With no authentication configured every caller is in
  * the shared anonymous scope and sees everything, as before.
  */
+function takesSessionId(definition: ToolDefinition): boolean {
+  return Object.prototype.hasOwnProperty.call(definition.inputSchema.properties ?? {}, 'sessionId');
+}
+
 function outOfScopeResult(ctx: ToolContext, definition: ToolDefinition, sessionId: unknown, callerKey: string | undefined): ToolResult | undefined {
-  if (typeof sessionId !== 'string') {
-    return undefined;
-  }
-  if (!Object.prototype.hasOwnProperty.call(definition.inputSchema.properties ?? {}, 'sessionId')) {
+  if (typeof sessionId !== 'string' || !takesSessionId(definition)) {
     return undefined;
   }
   if (!ctx.sessionManager.getSession(sessionId) || ctx.sessionManager.isSessionVisibleTo(sessionId, callerKey)) {
@@ -103,8 +104,10 @@ export function registerToolHandlers(server: Server, ctx: ToolContext): void {
         assertRequiredToolArguments(definition, args as unknown as Record<string, unknown>);
         const callerKey = ownerKeyOf(callCtx);
         const refused = outOfScopeResult(ctx, definition, args.sessionId, callerKey);
-        if (!refused && typeof args.sessionId === 'string') {
-          // A tool call naming a session is activity for the idle policy (issue #1025, step 2).
+        if (!refused && typeof args.sessionId === 'string' && takesSessionId(definition)) {
+          // A tool call naming a session is activity for the idle policy (issue
+          // #1025, step 2) — only through a tool that takes the id, so a stray
+          // argument cannot keep a tree alive the caller may not see.
           ctx.sessionManager.touchActivity(args.sessionId);
         }
         const result =

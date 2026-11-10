@@ -99,6 +99,32 @@ describe('SessionManager idle policy (issue #1025, step 2)', () => {
     expect(sessionManager.idleMsOf(childId, now() + 5000)).toBe(sessionManager.idleMsOf(rootId, now() + 5000));
   });
 
+  it('adopting a child is activity: it refreshes the root clock', async () => {
+    const rootId = await startRoot();
+    vi.setSystemTime(now() + WINDOW - 1000);
+    await adoptChild(rootId);
+
+    const closed = await sessionManager.sweepIdle(WINDOW, { now: now() + 5000 });
+
+    expect(closed).toEqual([]);
+    expect(ids()).toContain(rootId);
+  });
+
+  it('attendance is asked again before each close, so a client arriving mid-sweep stops the rest', async () => {
+    const a = (await sessionManager.createSession({ language: DebugLanguage.MOCK })).id;
+    const b = (await sessionManager.createSession({ language: DebugLanguage.MOCK })).id;
+    let attended = false;
+    vi.spyOn(sessionManager, 'closeSession').mockImplementation(async () => {
+      attended = true;
+      return true;
+    });
+
+    const closed = await sessionManager.sweepIdle(WINDOW, { now: now() + WINDOW + 1, attended: () => attended });
+
+    expect(closed).toHaveLength(1);
+    expect([a, b]).toContain(closed[0]);
+  });
+
   it('a child under an active root never expires on a clock of its own', async () => {
     const rootId = await startRoot();
     const childId = await adoptChild(rootId);

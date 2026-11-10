@@ -45,6 +45,7 @@ function fakeContext(overrides: Partial<ToolContext> = {}): ToolContext {
       // OWN belongs to agent-a, FOREIGN to agent-b; the anonymous scope owns nothing here.
       isSessionVisibleTo: vi.fn((id: string, key: string | undefined) =>
         id === OWN ? key === 'agent-a' : id === FOREIGN ? key === 'agent-b' : false),
+      getSessionsVisibleTo: vi.fn(() => []),
       touchActivity: vi.fn()
     },
     validateSession: (sessionId: string) => {
@@ -146,6 +147,16 @@ describe('tools/call on a session outside the caller scope (issue #1025, step 2)
 
     expect(result).toEqual({ success: false, message: 'Failed to close debug session: dbg-nobody' });
     expect(ctx.closeDebugSession).toHaveBeenCalledWith('dbg-nobody');
+  });
+
+  it('a stray sessionId on a tool whose schema takes none refreshes nothing', async () => {
+    const ctx = fakeContext();
+    const call = dispatcher(ctx);
+
+    const result = await answer(call, 'list_debug_sessions', { sessionId: FOREIGN }, 'agent-a');
+
+    expect(result).toMatchObject({ success: true });
+    expect(ctx.sessionManager.touchActivity).not.toHaveBeenCalled();
   });
 
   it('create_debug_session is never gated and stamps the caller scope on the new session', async () => {

@@ -192,6 +192,8 @@ export const waitForStopTool: ToolHandler = async (ctx, args, _toolName, extra) 
     throw error;
   } finally {
     releaseIdleHold();
+    // The wait's end is activity too: the idle clock restarts when it settles.
+    ctx.sessionManager.touchActivity(args.sessionId);
   }
 };
 

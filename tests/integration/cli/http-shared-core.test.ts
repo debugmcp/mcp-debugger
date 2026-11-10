@@ -37,6 +37,7 @@ interface Health {
   attended: boolean;
   listenStreams: number;
   sessions: string[];
+  details: Array<{ id: string; openStreams: number }>;
   debugSessions: Array<{ id: string; idleMs?: number }>;
 }
 
@@ -153,7 +154,15 @@ describe('Streamable HTTP: one core per process (issue #1025, step 2)', () => {
     // No tool call at all: presence alone, through the SDK client's standalone SSE stream.
     const connected = await healthUntil(port, (h) => h.attended);
     expect(connected.attended, JSON.stringify(connected)).toBe(true);
-    expect(connected.listenStreams).toBe(0);
+
+    // Held, not a flicker: the stream is still open well after the connect
+    // (the SDK re-opens a dropped stream within seconds; a client that had let
+    // it go for good would read unattended here).
+    await new Promise((resolve) => setTimeout(resolve, 2_500));
+    const held = await health(port);
+    expect(held.attended, JSON.stringify(held)).toBe(true);
+    expect(held.details).toHaveLength(1);
+    expect(held.details[0].openStreams).toBe(1);
 
     await a.client.close();
     const closed = await healthUntil(port, (h) => !h.attended);

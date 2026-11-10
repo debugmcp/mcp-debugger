@@ -49,6 +49,8 @@ describe('HTTP Command Handler', () => {
   let lastTransportOptions: any;
   // Whether the transport mock completes an initialize handshake inside handleRequest (the SDK does).
   let autoInitialize = true;
+  // Whether the transport mock's handleRequest throws (a transport-level fault).
+  let handleRequestRejects = false;
 
   beforeEach(() => {
     mockLogger = {
@@ -83,6 +85,7 @@ describe('HTTP Command Handler', () => {
 
     createdTransports = [];
     autoInitialize = true;
+    handleRequestRejects = false;
 
     MockedStreamableHTTPServerTransport.mockImplementation(function (options: any) {
       lastTransportOptions = options;
@@ -90,7 +93,7 @@ describe('HTTP Command Handler', () => {
       const t: any = {
         // As in the SDK, the id exists only once initialize has completed.
         sessionId: undefined,
-        close: vi.fn(),
+        close: vi.fn().mockResolvedValue(undefined),
         onclose: undefined,
         onerror: undefined,
         handleRequest: vi.fn(),
@@ -112,6 +115,9 @@ describe('HTTP Command Handler', () => {
       // initialize registers the session before the call resolves. A suite
       // that wants a refused handshake sets autoInitialize = false first.
       t.handleRequest.mockImplementation(async (_req: unknown, _res: unknown, body: any) => {
+        if (handleRequestRejects) {
+          throw new Error('transport exploded');
+        }
         if (autoInitialize && body?.method === 'initialize') {
           t.triggerSessionInit();
         }
@@ -444,14 +450,35 @@ describe('HTTP Command Handler', () => {
     it('closes a transport whose initialize never completed, so nothing leaks (issue #1025)', async () => {
       const { app, handler } = getHandler();
       autoInitialize = false;
+      const res = makeRes();
       await handler(
         makeReq({
           body: { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'c', version: '1' } } },
         }),
-        makeRes()
+        res
       );
-      // onsessioninitialized never fired: the SDK refused the handshake.
+      // onsessioninitialized never fired: the SDK refused the handshake and
+      // answered the client itself; our close is bookkeeping, not an error.
 
+      expect(mockTransport.close).toHaveBeenCalledTimes(1);
+      expect((app as any).httpSessions.size).toBe(0);
+      expect(mockLogger.error).not.toHaveBeenCalled();
+      expect(res.status).not.toHaveBeenCalled();
+    });
+
+    it('closes the opening transport when the handshake throws, after answering 500 (issue #1025)', async () => {
+      const { app, handler } = getHandler();
+      autoInitialize = false;
+      handleRequestRejects = true;
+      const res = makeRes();
+      await handler(
+        makeReq({
+          body: { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'c', version: '1' } } },
+        }),
+        res
+      );
+
+      expect(res.status).toHaveBeenCalledWith(500);
       expect(mockTransport.close).toHaveBeenCalledTimes(1);
       expect((app as any).httpSessions.size).toBe(0);
     });

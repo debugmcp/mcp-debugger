@@ -117,6 +117,13 @@ describe('the debug-session idle policy on the core (issue #1025, step 2)', () =
     vi.clearAllMocks();
   });
 
+  /** What the last sweep's attended supplier answers right now. */
+  const attendedAnswer = (): boolean => {
+    const last = vi.mocked(mockSessionManager.sweepIdle).mock.lastCall;
+    const options = last?.[1] as { attended?: boolean | (() => boolean) } | undefined;
+    return typeof options?.attended === 'function' ? options.attended() : Boolean(options?.attended);
+  };
+
   it('start() arms a sweep at the configured default cadence and stop() clears it', async () => {
     debugServer = new DebugMcpServer({ debugSessionIdle: { defaultMs: 30 * 60_000 } });
     expect(debugServer.idlePolicy).toEqual({ idleMs: 1_800_000, sweepMs: 60_000 });
@@ -124,7 +131,9 @@ describe('the debug-session idle policy on the core (issue #1025, step 2)', () =
     await debugServer.start();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(mockSessionManager.sweepIdle).toHaveBeenCalledTimes(1);
-    expect(mockSessionManager.sweepIdle).toHaveBeenCalledWith(1_800_000, { attended: false });
+    // The supplier itself travels, so the sweep can ask again before each close.
+    expect(mockSessionManager.sweepIdle).toHaveBeenCalledWith(1_800_000, { attended: expect.any(Function) });
+    expect(attendedAnswer()).toBe(false);
 
     await debugServer.stop();
     await vi.advanceTimersByTimeAsync(180_000);
@@ -189,10 +198,10 @@ describe('the debug-session idle policy on the core (issue #1025, step 2)', () =
     await debugServer.start();
 
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(mockSessionManager.sweepIdle).toHaveBeenLastCalledWith(1_800_000, { attended: true });
+    expect(attendedAnswer()).toBe(true);
     attended = false;
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(mockSessionManager.sweepIdle).toHaveBeenLastCalledWith(1_800_000, { attended: false });
+    expect(attendedAnswer()).toBe(false);
   });
 
   it('a sweep that rejects is logged and the next tick still runs', async () => {

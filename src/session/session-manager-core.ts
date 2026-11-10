@@ -544,8 +544,10 @@ export abstract class SessionManagerCore extends EventEmitter {
    * its targets). Skipped entirely while a client is attending the process,
    * and when the window is 0 (the policy is off). Answers the closed root ids.
    */
-  async sweepIdle(windowMs: number, options: { now?: number; attended?: boolean } = {}): Promise<string[]> {
-    if (windowMs <= 0 || options.attended) {
+  async sweepIdle(windowMs: number, options: { now?: number; attended?: boolean | (() => boolean) } = {}): Promise<string[]> {
+    const attended = (): boolean =>
+      typeof options.attended === 'function' ? options.attended() : options.attended === true;
+    if (windowMs <= 0 || attended()) {
       return [];
     }
     const now = options.now ?? Date.now();
@@ -561,6 +563,11 @@ export abstract class SessionManagerCore extends EventEmitter {
       const idleMs = now - last;
       if (idleMs <= windowMs || this.idleHolds.has(root.id)) {
         continue;
+      }
+      // Asked again right before each close: a client that arrived while an
+      // earlier close in this sweep ran stops the rest.
+      if (attended()) {
+        break;
       }
       this.logger.info(
         `Closing idle debug session ${root.id} (idle ${Math.round(idleMs / 1000)}s): ` +
@@ -1221,6 +1228,8 @@ export abstract class SessionManagerCore extends EventEmitter {
         // A child lives in its root's scope (issue #1025, step 2).
         ...(parent.ownerKey !== undefined ? { ownerKey: parent.ownerKey } : {})
       });
+      // The tree is alive: an adoption refreshes its root's idle clock.
+      this.touchActivity(parent.id);
       child = this.sessionStore.getOrThrow(info.id);
       child.logDir = parent.logDir;
       child.effectiveBreakOnExceptions = parent.effectiveBreakOnExceptions;

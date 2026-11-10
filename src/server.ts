@@ -856,7 +856,8 @@ export class DebugMcpServer implements ToolContext {
     }
     this.idleSweepInFlight = true;
     try {
-      await this.sessionManager.sweepIdle(this.idlePolicy.idleMs, { attended: this.attendedSupplier() });
+      // The supplier itself travels, so the sweep can ask again before each close.
+      await this.sessionManager.sweepIdle(this.idlePolicy.idleMs, { attended: this.attendedSupplier });
     } catch (error) {
       this.logger.error('Idle sweep failed', { error });
     } finally {

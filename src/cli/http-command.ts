@@ -212,15 +212,16 @@ export function createHttpApp(
   });
   // While any client holds an open SSE stream the process is attended and the
   // idle policy closes nothing; the modern era's listen streams join this
-  // count when they are served.
-  core.setAttendedSupplier(() => {
+  // count when they are served. One predicate for the supplier and /health.
+  const attended = (): boolean => {
     for (const session of httpSessions.values()) {
       if (session.openStreams > 0) {
         return true;
       }
     }
     return false;
-  });
+  };
+  core.setAttendedSupplier(attended);
 
   // Reap crash-abandoned MCP sessions (issue #337): a client that dies without
   // DELETE leaves its transport registered forever — transport.onclose only
@@ -298,14 +299,15 @@ export function createHttpApp(
   app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
   const handleMcpRequest = async (req: Request, res: Response): Promise<void> => {
+    // Set when this request opens a new MCP session, so a handshake the SDK
+    // refuses — or a transport fault during it — does not leave its transport
+    // and facade behind (issue #1025).
+    let opening: NodeStreamableHTTPServerTransport | undefined;
     try {
       const sessionIdHeader = req.headers['mcp-session-id'];
       const sessionId = Array.isArray(sessionIdHeader) ? sessionIdHeader[0] : sessionIdHeader;
 
       let transport: NodeStreamableHTTPServerTransport;
-      // Set when this request opens a new MCP session, so a handshake the SDK
-      // refuses does not leave its transport and facade behind (issue #1025).
-      let opening: NodeStreamableHTTPServerTransport | undefined;
 
       if (sessionId && httpSessions.has(sessionId)) {
         // Existing session — route to its transport
@@ -391,21 +393,23 @@ export function createHttpApp(
       }
 
       await transport.handleRequest(req as IncomingMessage, res as ServerResponse, req.body);
-      if (opening && !opening.sessionId) {
-        // The handshake did not complete (the SDK refused it): nothing registered
-        // this transport, so nothing would ever close it. Closing it runs the
-        // facade's onclose chain and detaches its notification sink.
-        logger.debug('Closing the transport of an initialize that did not complete');
-        await opening.close().catch((err: unknown) => {
-          logger.debug('Error closing an uninitialized transport', { error: err });
-        });
-      }
     } catch (error) {
       logger.error('Error handling MCP request', { error });
       if (!res.headersSent) {
         res.status(500).json(
           jsonRpcErrorBody(ProtocolErrorCode.InternalError, 'Internal error', error instanceof Error ? error.message : 'Unknown error')
         );
+      }
+    } finally {
+      if (opening && !opening.sessionId) {
+        // The handshake did not complete (the SDK refused it, or the transport
+        // threw): nothing registered this transport, so nothing would ever close
+        // it. Closing it runs the facade's onclose chain and detaches its
+        // notification sink from the process-wide hub.
+        logger.debug('Closing the transport of an initialize that did not complete');
+        await opening.close().catch((err: unknown) => {
+          logger.debug('Error closing an uninitialized transport', { error: err });
+        });
       }
     }
   };
@@ -430,7 +434,7 @@ export function createHttpApp(
       mode: 'http',
       listening: { ...listening },
       connections: httpSessions.size,
-      attended: sessions.some((session) => session.openStreams > 0),
+      attended: attended(),
       listenStreams: 0,
       sessions: Array.from(httpSessions.keys()),
       details: sessions,
