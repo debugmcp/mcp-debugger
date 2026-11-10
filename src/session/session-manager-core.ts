@@ -406,6 +406,8 @@ export abstract class SessionManagerCore extends EventEmitter {
    * and only roots expire. Cleared when the root is removed.
    */
   private readonly lastActivityAt = new Map<string, number>();
+  /** Roots an in-flight wait_for_stop protects from idle expiry, with the number of holds. */
+  private readonly idleHolds = new Map<string, number>();
 
   /**
    * Constructor with full dependency injection
@@ -508,6 +510,66 @@ export abstract class SessionManagerCore extends EventEmitter {
       return;
     }
     this.lastActivityAt.set(this.rootOf(session).id, Date.now());
+  }
+
+  /**
+   * Protect a session's tree from idle expiry for the duration of a blocking
+   * call (wait_for_stop, issue #1025, step 2). Returns the release; releasing
+   * twice is harmless, and an unknown id yields a no-op pair.
+   */
+  holdIdle(sessionId: string): () => void {
+    const session = this.sessionStore.get(sessionId);
+    if (!session) {
+      return () => undefined;
+    }
+    const rootId = this.rootOf(session).id;
+    this.idleHolds.set(rootId, (this.idleHolds.get(rootId) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const remaining = (this.idleHolds.get(rootId) ?? 1) - 1;
+      if (remaining > 0) {
+        this.idleHolds.set(rootId, remaining);
+      } else {
+        this.idleHolds.delete(rootId);
+      }
+    };
+  }
+
+  /**
+   * The idle policy's sweep (issue #1025, step 2): close every root whose tree
+   * has seen no tool call for `windowMs` and is not held, through the normal
+   * close cascade (a launch root closes its subtree, an attach root releases
+   * its targets). Skipped entirely while a client is attending the process,
+   * and when the window is 0 (the policy is off). Answers the closed root ids.
+   */
+  async sweepIdle(windowMs: number, options: { now?: number; attended?: boolean } = {}): Promise<string[]> {
+    if (windowMs <= 0 || options.attended) {
+      return [];
+    }
+    const now = options.now ?? Date.now();
+    const closed: string[] = [];
+    const roots = this.sessionStore.getAllManaged().filter((session) => !session.parentSessionId);
+    for (const root of roots) {
+      const last = this.lastActivityAt.get(root.id);
+      if (last === undefined) {
+        // A root with no clock yet (not created through createSession): start it now.
+        this.lastActivityAt.set(root.id, now);
+        continue;
+      }
+      const idleMs = now - last;
+      if (idleMs <= windowMs || this.idleHolds.has(root.id)) {
+        continue;
+      }
+      this.logger.info(
+        `Closing idle debug session ${root.id} (idle ${Math.round(idleMs / 1000)}s): ` +
+        `no tool call named it or its tree for ${Math.round(windowMs / 1000)}s`
+      );
+      await this.closeSession(root.id);
+      closed.push(root.id);
+    }
+    return closed;
   }
 
   /** How long a root's tree has been idle, in ms; a child reports its root's. Undefined for an unknown id. */
@@ -854,6 +916,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     this.logger.info(`Session ${sessionId} marked as STOPPED/TERMINATED.`);
     this.sessionStore.remove(sessionId);
     this.lastActivityAt.delete(sessionId);
+    this.idleHolds.delete(sessionId);
     this.emit('session-removed', sessionId);
     // Anything still waiting on this session learns it is gone (issue #849),
     // and a wait on an ancestor's tree sees one descendant fewer (issue #1081).

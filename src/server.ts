@@ -52,6 +52,7 @@ import { getVariableAccessMode } from './utils/variable-access.js';
 import { assertLineContent, resolveStatement, stripTrailingComment } from './utils/breakpoint-resolver.js';
 import { outputResourceUri } from './server/output-resources.js';
 import { NotificationHub } from './server/notification-hub.js';
+import { describeIdleWindow, resolveIdlePolicy, type IdlePolicy } from './session/idle-policy.js';
 import {
   discoverSupportedLanguages,
   buildLanguageMetadata,
@@ -68,6 +69,13 @@ export type { SetBreakpointRequest };
 export interface DebugMcpServerOptions {
   logLevel?: string;
   logFile?: string;
+  /**
+   * The per-debug-session idle policy's default window (issue #1025, step 2):
+   * the transport's choice — thirty minutes for `http`, 0 (off) for `stdio`,
+   * where the pipe is the lifetime. MCP_DEBUG_SESSION_IDLE_MS overrides it.
+   * Absent = off.
+   */
+  debugSessionIdle?: { defaultMs: number };
 }
 
 /**
@@ -114,6 +122,17 @@ export class DebugMcpServer implements ToolContext {
   public readonly notifications: NotificationHub;
   /** @internal ToolContext dependency; read live by the tool handlers. */
   public readonly validationCache = new ValidationResultCache();
+
+  /** The idle policy in force (issue #1025, step 2); `idleMs` 0 = off. */
+  public readonly idlePolicy: IdlePolicy;
+  private idleSweepTimer?: NodeJS.Timeout;
+  private idleSweepInFlight = false;
+  /**
+   * Whether a client is attending the process right now (an open legacy SSE
+   * stream or a modern subscriptions/listen stream): while one is, the sweep
+   * closes nothing. The transport layer supplies it; the default says nobody is.
+   */
+  private attendedSupplier: () => boolean = () => false;
 
   /** @internal Language discovery is a ToolContext service; see src/server/language-discovery.ts. */
   public async getSupportedLanguagesAsync(): Promise<string[]> {
@@ -742,6 +761,11 @@ export class DebugMcpServer implements ToolContext {
 
     this.fileSystem = dependencies.fileSystem;
     this.version = getVersion();
+    this.idlePolicy = resolveIdlePolicy(
+      this.environment,
+      { idleMs: options.debugSessionIdle?.defaultMs ?? 0 },
+      (message) => this.logger.warn(message)
+    );
     this.instructions = buildServerInstructions(getBpAddressingMode(this.environment), {
       redactionEnabled: isRedactionEnabled(this.environment),
       variableAccessMode: getVariableAccessMode(this.environment)
@@ -807,9 +831,44 @@ export class DebugMcpServer implements ToolContext {
     // For MCP servers, start is handled by transport
     const buildTime = new Date().toISOString();
     this.logger.info(`[MCP Server] Started at ${buildTime}, version: ${this.version}`);
+    // The idle policy's sweep (issue #1025, step 2): armed once per process,
+    // unref'd so it never holds the event loop open on its own.
+    if (this.idlePolicy.idleMs > 0 && !this.idleSweepTimer) {
+      this.idleSweepTimer = setInterval(() => {
+        void this.runIdleSweep();
+      }, this.idlePolicy.sweepMs);
+      this.idleSweepTimer.unref?.();
+      this.logger.info(
+        `[MCP Server] Debug-session idle policy: a tree with no tool call for ${describeIdleWindow(this.idlePolicy.idleMs)} ` +
+        `is closed (sweep every ${describeIdleWindow(this.idlePolicy.sweepMs)}; MCP_DEBUG_SESSION_IDLE_MS, MCP_DEBUG_SESSION_IDLE_SWEEP_MS)`
+      );
+    }
+  }
+
+  /** Who decides whether a client is attending the process; see attendedSupplier. */
+  public setAttendedSupplier(supplier: () => boolean): void {
+    this.attendedSupplier = supplier;
+  }
+
+  private async runIdleSweep(): Promise<void> {
+    if (this.idleSweepInFlight) {
+      return;
+    }
+    this.idleSweepInFlight = true;
+    try {
+      await this.sessionManager.sweepIdle(this.idlePolicy.idleMs, { attended: this.attendedSupplier() });
+    } catch (error) {
+      this.logger.error('Idle sweep failed', { error });
+    } finally {
+      this.idleSweepInFlight = false;
+    }
   }
 
   public async stop(): Promise<void> {
+    if (this.idleSweepTimer) {
+      clearInterval(this.idleSweepTimer);
+      this.idleSweepTimer = undefined;
+    }
     await this.sessionManager.closeAllSessions();
     // Tear down notification bookkeeping (issue #218): pending debounce
     // timers, the sinks and the SessionManager listeners must not outlive the

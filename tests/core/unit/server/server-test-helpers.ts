@@ -136,6 +136,8 @@ export function createMockSessionManager(mockAdapterRegistry: IAdapterRegistry) 
     getSessionsVisibleTo: vi.fn<SessionManager['getSessionsVisibleTo']>(visibleSessions),
     touchActivity: vi.fn(),
     idleMsOf: vi.fn<SessionManager['idleMsOf']>(() => undefined),
+    holdIdle: vi.fn<SessionManager['holdIdle']>(() => () => undefined),
+    sweepIdle: vi.fn<SessionManager['sweepIdle']>(async () => []),
     getSession: vi.fn(),
     closeSession: vi.fn(),
     closeSessionReporting: vi.fn(),

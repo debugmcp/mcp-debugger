@@ -84,6 +84,34 @@ describe('execution tool handlers', () => {
   describe('waitForStopTool (issue #849)', () => {
     const liveSession = { id: 'test-session', sessionLifecycle: SessionLifecycleState.ACTIVE };
 
+    it('holds the tree against idle expiry for the duration of the wait, then releases it (issue #1025, step 2)', async () => {
+      ctx.sessionManager.getSession.mockReturnValue(liveSession);
+      const release = vi.fn();
+      ctx.sessionManager.holdIdle.mockReturnValue(release);
+      let settle: (value: unknown) => void = () => undefined;
+      ctx.sessionManager.waitForStop.mockReturnValue(new Promise((resolve) => { settle = resolve; }));
+
+      const pending = waitForStopTool(ctx, { sessionId: 'test-session' }, 'wait_for_stop');
+      await Promise.resolve();
+      expect(ctx.sessionManager.holdIdle).toHaveBeenCalledWith('test-session');
+      expect(release).not.toHaveBeenCalled();
+
+      settle({ success: true, state: 'paused', data: { message: 'Paused', lastStop: { reason: 'pause', threadId: 1, timestamp: 1 } } });
+      await pending;
+      expect(release).toHaveBeenCalledTimes(1);
+    });
+
+    it('releases the hold when the wait fails', async () => {
+      ctx.sessionManager.getSession.mockReturnValue(liveSession);
+      const release = vi.fn();
+      ctx.sessionManager.holdIdle.mockReturnValue(release);
+      ctx.sessionManager.waitForStop.mockRejectedValue(new Error('proxy gone'));
+
+      await waitForStopTool(ctx, { sessionId: 'test-session' }, 'wait_for_stop').catch(() => undefined);
+
+      expect(release).toHaveBeenCalledTimes(1);
+    });
+
     it('hands the timeout and the request signal to the session manager and reports the stop', async () => {
       ctx.sessionManager.getSession.mockReturnValue(liveSession);
       const lastStop = { reason: 'breakpoint', threadId: 1, timestamp: 1_700_000_000_000 };
