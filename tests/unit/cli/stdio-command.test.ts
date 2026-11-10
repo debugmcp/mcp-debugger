@@ -93,12 +93,12 @@ describe('STDIO Command Handler', () => {
     // Verify info log was called
     expect(mockLogger.info).toHaveBeenCalledWith('Starting Debug MCP Server in stdio mode');
 
-    // Verify server factory was called with correct options: on stdio the pipe
-    // is the lifetime, so the idle policy defaults to off (issue #1025, step 2)
+    // Verify server factory was called with correct options. No transport
+    // chooses an idle window: the policy is the operator's variable alone
+    // (issue #1025, step 2).
     expect(mockServerFactory).toHaveBeenCalledWith({
       logLevel: 'debug',
-      logFile: '/tmp/test.log',
-      debugSessionIdle: { defaultMs: 0 }
+      logFile: '/tmp/test.log'
     });
 
     // Verify server start was called
@@ -172,8 +172,7 @@ describe('STDIO Command Handler', () => {
     // Verify server factory was called with correct options
     expect(mockServerFactory).toHaveBeenCalledWith({
       logLevel: undefined,
-      logFile: undefined,
-      debugSessionIdle: { defaultMs: 0 }
+      logFile: undefined
     });
   });
 
@@ -512,6 +511,44 @@ describe('STDIO Command Handler', () => {
       await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
       expect(mockServer.stop).toHaveBeenCalledTimes(1);
       expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('Stdio transport closed'));
+    });
+
+    // The exit line is what an operator reads to learn why the server went
+    // away, so it is worded from what is true, not from which listener ran
+    // first: only a stdin that ended means the client left.
+    const exitLines = () => vi.mocked(mockLogger.warn).mock.calls.map(([line]) => String(line)).join(' | ');
+
+    it('names the transport error and does not blame the client when the wire closes after a stdout error', async () => {
+      await start();
+      const [, serveOptions] = mockServeStdio.mock.calls[0];
+
+      serveOptions!.onerror!(new Error('write EPIPE'));
+      await servedTransport().close();
+
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
+      expect(exitLines()).toContain('Stdio transport closed after an error (write EPIPE)');
+      expect(exitLines()).not.toContain('MCP client disconnected');
+    });
+
+    it('says only that the transport closed when no error was reported and stdin is still open', async () => {
+      await start();
+
+      await servedTransport().close();
+
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
+      expect(exitLines()).toContain('Stdio transport closed —');
+      expect(exitLines()).not.toContain('MCP client disconnected');
+    });
+
+    it('calls a wire close the client leaving when stdin has already ended', async () => {
+      const stdin = makeFakeStdin();
+      (stdin as unknown as { readableEnded: boolean }).readableEnded = true;
+      await start(stdin);
+
+      await servedTransport().close();
+
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
+      expect(exitLines()).toContain('Stdin ended; MCP client disconnected');
     });
 
     it('runs the wire close through the same container gate as a stdin EOF: no client ever spoke, so stay alive', async () => {

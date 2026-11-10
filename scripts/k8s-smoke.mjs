@@ -435,7 +435,7 @@ class McpHttpClient extends McpClientBase {
     try {
       // Best-effort MCP-session teardown. The debug sessions are the process's
       // (issue #1025) and are closed by the test's own close_debug_session
-      // calls or, failing that, by the idle policy once nobody attends.
+      // calls or, failing that, with the pod (no idle policy is set here).
       await fetch(this.url, { method: 'DELETE', headers: this.headers() });
       transcribe('note', 'DELETE /mcp sent');
     } catch (err) {

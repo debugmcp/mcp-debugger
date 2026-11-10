@@ -1,0 +1,175 @@
+/**
+ * What an agent can see of the idle policy (issue #1025, step 2). The policy is
+ * the operator's opt-in, and when it is on it ends programs, so the agent must
+ * be able to see it coming and understand it afterwards: `list_debug_sessions`
+ * shows how long each session has sat idle and, with a policy on, how long it
+ * has left; a tool call naming a session the policy closed says so — when,
+ * under which window, and what became of the program — where it used to answer
+ * "Session not found", the same words as a mistyped id; and the server
+ * instructions mention the policy only when one is in force.
+ *
+ * Real dispatch over the real SessionManager and store (mock proxy).
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DebugLanguage } from '@debugmcp/shared';
+import { DebugMcpServer } from '../../../../src/server.js';
+import { registerToolHandlers } from '../../../../src/server/tool-dispatch.js';
+import { createProductionDependencies, type Dependencies } from '../../../../src/container/dependencies.js';
+import { createMockDependencies } from '../session/session-manager-test-utils.js';
+
+vi.mock('../../../../src/container/dependencies.js');
+
+const WINDOW = 5 * 60_000;
+const NOBODY = '00000000-0000-4000-8000-000000000000';
+
+type Handler = (request: unknown, callCtx?: unknown) => Promise<{ content: Array<{ text: string }> }>;
+
+const callCtxFor = (clientId?: string) => ({
+  mcpReq: { signal: new AbortController().signal },
+  ...(clientId !== undefined ? { http: { authInfo: { clientId, token: 't', scopes: [] } } } : {})
+});
+
+describe('what an agent sees of the idle policy (issue #1025, step 2)', () => {
+  let core: DebugMcpServer;
+  let dependencies: ReturnType<typeof createMockDependencies>;
+  let callTool: Handler;
+
+  function build(): void {
+    dependencies = createMockDependencies();
+    vi.mocked(createProductionDependencies).mockReturnValue(dependencies as unknown as Dependencies);
+    core = new DebugMcpServer();
+    let handler: Handler | undefined;
+    registerToolHandlers({
+      setRequestHandler: (method: string, registered: Handler) => {
+        if (method === 'tools/call') handler = registered;
+      }
+    } as never, core);
+    callTool = handler!;
+  }
+
+  async function answer(name: string, args: Record<string, unknown>, clientId?: string): Promise<Record<string, unknown>> {
+    const raw = await callTool({ method: 'tools/call', params: { name, arguments: args } }, callCtxFor(clientId));
+    return JSON.parse(raw.content[0].text) as Record<string, unknown>;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.parse('2026-11-10T12:00:00.000Z'));
+  });
+
+  afterEach(async () => {
+    await core?.sessionManager.closeAllSessions().catch(() => undefined);
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+    vi.clearAllMocks();
+  });
+
+  describe('a session the policy closed', () => {
+    async function expire(ownerKey?: string): Promise<string> {
+      const session = await core.sessionManager.createSession({ language: DebugLanguage.MOCK, ...(ownerKey ? { ownerKey } : {}) });
+      vi.setSystemTime(Date.now() + WINDOW + 60_000);
+      await core.sessionManager.sweepIdle(WINDOW);
+      expect(core.sessionManager.getSession(session.id)).toBeUndefined();
+      return session.id;
+    }
+
+    it('answers what happened to it instead of "Session not found"', async () => {
+      build();
+      const id = await expire();
+
+      const result = await answer('get_output', { sessionId: id });
+
+      expect(result).toEqual({
+        success: false,
+        error:
+          `Session ${id} was closed by the idle policy at 2026-11-10T12:06:00.000Z: ` +
+          'no tool call named it or its tree for 6 min (the window is 5 min, MCP_DEBUG_SESSION_IDLE_MS=300000). ' +
+          'Its program was ended. Create a new session to continue.',
+        closedBy: 'idle-policy'
+      });
+    });
+
+    it.each(['step_over', 'wait_for_stop', 'close_debug_session', 'list_breakpoints'])('%s says it the same way', async (tool) => {
+      build();
+      const id = await expire();
+
+      const result = await answer(tool, { sessionId: id });
+
+      expect(result).toMatchObject({ success: false, closedBy: 'idle-policy' });
+      expect(result.error).toContain('was closed by the idle policy');
+    });
+
+    it('is told only inside the owner scope: a stranger gets the tool\'s own unknown-id answer', async () => {
+      build();
+      const id = await expire('agent-b');
+
+      const forStranger = await answer('get_output', { sessionId: id }, 'agent-a');
+      const forNobody = await answer('get_output', { sessionId: NOBODY }, 'agent-a');
+
+      expect(JSON.stringify(forStranger).split(id).join('<id>')).toBe(JSON.stringify(forNobody).split(NOBODY).join('<id>'));
+      expect(await answer('get_output', { sessionId: id }, 'agent-b')).toMatchObject({ closedBy: 'idle-policy' });
+    });
+
+    it('a session that never existed still answers as it always did', async () => {
+      build();
+
+      expect(await answer('get_output', { sessionId: NOBODY })).toEqual({ success: false, error: `Session not found: ${NOBODY}` });
+    });
+  });
+
+  describe('list_debug_sessions', () => {
+    it('shows how long each session has gone without a tool call; no expiry when the policy is off', async () => {
+      build();
+      const session = await core.sessionManager.createSession({ language: DebugLanguage.MOCK });
+      vi.setSystemTime(Date.now() + 10_000);
+
+      const listed = await answer('list_debug_sessions', {});
+
+      const row = (listed.sessions as Array<Record<string, unknown>>).find((entry) => entry.id === session.id)!;
+      expect(row.idleMs).toBe(10_000);
+      expect(row).not.toHaveProperty('expiresInMs');
+    });
+
+    it('adds the time each session has left when the operator turned the policy on', async () => {
+      vi.stubEnv('MCP_DEBUG_SESSION_IDLE_MS', String(WINDOW));
+      build();
+      const session = await core.sessionManager.createSession({ language: DebugLanguage.MOCK });
+      vi.setSystemTime(Date.now() + 10_000);
+
+      const listed = await answer('list_debug_sessions', {});
+
+      const row = (listed.sessions as Array<Record<string, unknown>>).find((entry) => entry.id === session.id)!;
+      expect(row).toMatchObject({ idleMs: 10_000, expiresInMs: WINDOW - 10_000 });
+    });
+
+    it('never shows a negative time left', async () => {
+      vi.stubEnv('MCP_DEBUG_SESSION_IDLE_MS', String(WINDOW));
+      build();
+      const session = await core.sessionManager.createSession({ language: DebugLanguage.MOCK });
+      vi.setSystemTime(Date.now() + WINDOW * 2);
+
+      const listed = await answer('list_debug_sessions', {});
+
+      const row = (listed.sessions as Array<Record<string, unknown>>).find((entry) => entry.id === session.id)!;
+      expect(row.expiresInMs).toBe(0);
+    });
+  });
+
+  describe('the server instructions', () => {
+    it('say nothing of the policy when it is off', () => {
+      build();
+
+      expect(core.instructions).not.toMatch(/idle/i);
+    });
+
+    it('state the window and what expiry does when it is on', () => {
+      vi.stubEnv('MCP_DEBUG_SESSION_IDLE_MS', String(WINDOW));
+      build();
+
+      expect(core.instructions).toContain(
+        'This server closes a debug session tree that no tool call has named for 5 min'
+      );
+      expect(core.instructions).toContain('expiresInMs');
+    });
+  });
+});

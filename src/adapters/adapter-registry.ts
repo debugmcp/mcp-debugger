@@ -159,8 +159,11 @@ export class AdapterRegistry extends EventEmitter implements IAdapterRegistry {
     // Check instance limit
     const activeSet = this.activeAdapters.get(language) || new Set();
     if (activeSet.size >= this.config.maxInstancesPerLanguage) {
+      // The limit is per process and nothing expires by default (issue #1025),
+      // so what fills it is sessions nobody closed: say how to find and end them.
       throw new Error(
-        `Maximum adapter instances (${this.config.maxInstancesPerLanguage}) reached for language: ${language}`
+        `Maximum adapter instances (${this.config.maxInstancesPerLanguage}) reached for language: ${language}. ` +
+        `Each launched or attached ${language} debug session holds one: list_debug_sessions shows them (idleMs tells a forgotten one from a live one), and close_debug_session ends the ones no longer needed.`
       );
     }
 

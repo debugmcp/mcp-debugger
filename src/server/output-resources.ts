@@ -69,7 +69,7 @@ export class FacadeSubscriptions implements ResourceSubscriptions {
  * the bounded proxy-log tail is an on-demand diagnostic snapshot.
  */
 export function registerResourceHandlers(
-  server: Server,
+  server: Pick<Server, 'setRequestHandler'>,
   sessionManager: SessionManager,
   subscriptions: ResourceSubscriptions,
   fileSystem: Pick<IFileSystem, 'readTail'>

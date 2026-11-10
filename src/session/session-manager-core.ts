@@ -4,6 +4,7 @@
  */
 import { EventEmitter } from 'events';
 import { visibleTo } from '../server/owner-key.js';
+import { IDLE_EXPIRY_RECORD_LIMIT, type IdleExpiryRecord } from './idle-policy.js';
 import {
   SessionState, SessionLifecycleState, DebugLanguage, DebugSessionInfo, mapLegacyState,
   isTerminalSessionState, AdapterPolicy, SessionOutputEntry, redactSecretsInString
@@ -408,6 +409,8 @@ export abstract class SessionManagerCore extends EventEmitter {
   private readonly lastActivityAt = new Map<string, number>();
   /** Roots an in-flight wait_for_stop protects from idle expiry, with the number of holds. */
   private readonly idleHolds = new Map<string, number>();
+  /** What the idle sweep closed, by session id, oldest first and bounded (issue #1025). */
+  private readonly idleExpired = new Map<string, IdleExpiryRecord>();
 
   /**
    * Constructor with full dependency injection
@@ -573,10 +576,52 @@ export abstract class SessionManagerCore extends EventEmitter {
         `Closing idle debug session ${root.id} (idle ${Math.round(idleMs / 1000)}s): ` +
         `no tool call named it or its tree for ${Math.round(windowMs / 1000)}s`
       );
-      await this.closeSession(root.id);
+      const ownerKey = root.ownerKey;
+      const report = await this.closeSessionReporting(root.id);
       closed.push(root.id);
+      if (report.closed) {
+        // An attach root's close releases its targets; a launch root's ends its program.
+        const outcome = report.released ? 'released' : 'ended';
+        for (const sessionId of report.closedSessionIds) {
+          this.recordIdleExpiry({
+            sessionId,
+            rootId: root.id,
+            ...(ownerKey !== undefined ? { ownerKey } : {}),
+            closedAt: now,
+            idleMs,
+            windowMs,
+            outcome
+          });
+        }
+        const others = report.closedSessionIds.length - 1;
+        this.logger.info(
+          `Idle debug session ${root.id} closed: ` +
+          (outcome === 'released' ? 'its target was released and keeps running' : 'its program was ended') +
+          (others > 0 ? ` (with ${others} child session${others === 1 ? '' : 's'})` : '')
+        );
+      }
     }
     return closed;
+  }
+
+  private recordIdleExpiry(record: IdleExpiryRecord): void {
+    this.idleExpired.delete(record.sessionId);
+    this.idleExpired.set(record.sessionId, record);
+    while (this.idleExpired.size > IDLE_EXPIRY_RECORD_LIMIT) {
+      const oldest = this.idleExpired.keys().next().value;
+      if (oldest === undefined) break;
+      this.idleExpired.delete(oldest);
+    }
+  }
+
+  /**
+   * What the idle policy did to a session that is gone (issue #1025), for a
+   * caller in the scope the session was in; undefined for everyone else and
+   * for a session that ended any other way.
+   */
+  idleExpiryOf(sessionId: string, callerKey: string | undefined): IdleExpiryRecord | undefined {
+    const record = this.idleExpired.get(sessionId);
+    return record && visibleTo(record.ownerKey, callerKey) ? record : undefined;
   }
 
   /** How long a root's tree has been idle, in ms; a child reports its root's. Undefined for an unknown id. */
