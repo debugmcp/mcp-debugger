@@ -298,7 +298,7 @@ This architecture enables:
 - **Startup Time**: ~1-2s for session initialization
 - **Command Latency**: <100ms for most DAP commands
 - **Memory Usage**: ~50MB base + ~20MB per active session
-- **Concurrent Sessions**: Limited by system resources. In Streamable HTTP mode, each MCP session gets an isolated `DebugMcpServer` instance routed by `Mcp-Session-Id`, so multiple clients run independently without serialization. STDIO mode supports a single client connection.
+- **Concurrent Sessions**: Limited by system resources. One `DebugMcpServer` core per process in every mode (issue #1025): in Streamable HTTP mode each MCP session is one SDK `Server` facade over it, routed by `Mcp-Session-Id`, so several clients run concurrently against the same debug sessions — the id is the capability, one process per agent is the isolation. STDIO mode supports a single client connection.
 
 ## Error Handling Strategy
 

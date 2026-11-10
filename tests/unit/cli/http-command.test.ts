@@ -47,6 +47,8 @@ describe('HTTP Command Handler', () => {
   // Track transports created so tests can drive them
   let createdTransports: any[];
   let lastTransportOptions: any;
+  // Whether the transport mock completes an initialize handshake inside handleRequest (the SDK does).
+  let autoInitialize = true;
 
   beforeEach(() => {
     mockLogger = {
@@ -62,9 +64,12 @@ describe('HTTP Command Handler', () => {
     mockServer = {
       start: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn().mockResolvedValue(undefined),
+      setAttendedSupplier: vi.fn(),
+      idlePolicy: { idleMs: 1_800_000, sweepMs: 60_000 },
       sessionManager: {
         getAllSessions: vi.fn().mockReturnValue([]),
         getSession: vi.fn().mockReturnValue(undefined),
+        idleMsOf: vi.fn().mockReturnValue(undefined),
       },
     } as any;
     mockFacade = { connect: vi.fn<() => Promise<void>>().mockResolvedValue(undefined) };
@@ -77,18 +82,23 @@ describe('HTTP Command Handler', () => {
     fakeProc = new FakeCurrentProcess();
 
     createdTransports = [];
+    autoInitialize = true;
 
     MockedStreamableHTTPServerTransport.mockImplementation(function (options: any) {
       lastTransportOptions = options;
       const sessionId = 'session-' + Math.random().toString(36).slice(2, 9);
       const t: any = {
-        sessionId,
+        // As in the SDK, the id exists only once initialize has completed.
+        sessionId: undefined,
         close: vi.fn(),
         onclose: undefined,
         onerror: undefined,
-        handleRequest: vi.fn().mockResolvedValue(undefined),
-        // Helper: drive the SDK's onsessioninitialized callback to register the session
+        handleRequest: vi.fn(),
+        // Helper: drive the SDK's onsessioninitialized callback to register the
+        // session. Idempotent, like the SDK's own one-shot callback.
         triggerSessionInit() {
+          if (this.sessionId) return;
+          this.sessionId = sessionId;
           if (options?.onsessioninitialized) options.onsessioninitialized(sessionId);
         },
         triggerClose() {
@@ -98,6 +108,14 @@ describe('HTTP Command Handler', () => {
           if (this.onerror) this.onerror(err);
         },
       };
+      // The SDK completes the handshake inside handleRequest: a successful
+      // initialize registers the session before the call resolves. A suite
+      // that wants a refused handshake sets autoInitialize = false first.
+      t.handleRequest.mockImplementation(async (_req: unknown, _res: unknown, body: any) => {
+        if (autoInitialize && body?.method === 'initialize') {
+          t.triggerSessionInit();
+        }
+      });
       createdTransports.push(t);
       mockTransport = t;
       return t;
@@ -404,7 +422,7 @@ describe('HTTP Command Handler', () => {
       }
     });
 
-    it('removes the session from the map and stops its server when the transport closes', async () => {
+    it('removes the session from the map when the transport closes and leaves the one core running (issue #1025)', async () => {
       const { app, handler } = getHandler();
       await handler(
         makeReq({
@@ -416,11 +434,54 @@ describe('HTTP Command Handler', () => {
       expect((app as any).httpSessions.size).toBe(1);
 
       mockTransport.triggerClose();
-      // Allow async stop() to settle
       await new Promise((r) => setImmediate(r));
 
       expect((app as any).httpSessions.size).toBe(0);
-      expect(mockServer.stop).toHaveBeenCalled();
+      // The debug sessions live on under the idle policy; the protocol session was only a connection.
+      expect(mockServer.stop).not.toHaveBeenCalled();
+    });
+
+    it('closes a transport whose initialize never completed, so nothing leaks (issue #1025)', async () => {
+      const { app, handler } = getHandler();
+      autoInitialize = false;
+      await handler(
+        makeReq({
+          body: { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'c', version: '1' } } },
+        }),
+        makeRes()
+      );
+      // onsessioninitialized never fired: the SDK refused the handshake.
+
+      expect(mockTransport.close).toHaveBeenCalledTimes(1);
+      expect((app as any).httpSessions.size).toBe(0);
+    });
+
+    it('builds one core for the process and tells it who is attending (issue #1025)', async () => {
+      const { app, handler } = getHandler();
+      expect(mockServerFactory).toHaveBeenCalledTimes(1);
+      expect(mockServerFactory).toHaveBeenCalledWith({
+        logLevel: undefined,
+        logFile: undefined,
+        debugSessionIdle: { defaultMs: 1_800_000 },
+      });
+      expect(mockServer.setAttendedSupplier).toHaveBeenCalledTimes(1);
+      const attended = vi.mocked(mockServer.setAttendedSupplier).mock.calls[0][0] as () => boolean;
+      expect(attended()).toBe(false);
+
+      await handler(
+        makeReq({
+          body: { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'c', version: '1' } } },
+        }),
+        makeRes()
+      );
+      mockTransport.triggerSessionInit();
+      // A second MCP session is a second facade over the same core, not a second core.
+      expect(mockServerFactory).toHaveBeenCalledTimes(1);
+      expect(mockProtocolServerFactory).toHaveBeenCalledTimes(1);
+      expect(attended()).toBe(false);
+
+      (app as any).httpSessions.get(mockTransport.sessionId).openStreams = 1;
+      expect(attended()).toBe(true);
     });
 
     it('logs and surfaces transport errors', async () => {
@@ -515,14 +576,16 @@ describe('HTTP Command Handler', () => {
         mode: 'http',
         listening: { address: '127.0.0.1', port: 3001 },
         connections: 0,
+        attended: false,
+        listenStreams: 0,
         sessions: [],
         details: [],
+        debugSessions: [],
       });
 
       // Add a session and re-check
       (app as any).httpSessions.set('s1', {
         transport: {},
-        server: mockServer,
         lastActivity: Date.now(),
         openStreams: 1,
         hadStream: true,
@@ -532,11 +595,12 @@ describe('HTTP Command Handler', () => {
         status: 'ok',
         mode: 'http',
         connections: 1,
+        attended: true,
         sessions: ['s1'],
       }));
     });
 
-    it('names what each HTTP session holds, so an orphan is discoverable (issue #658)', () => {
+    it('names every MCP session and every debug session of the process, so an orphan is discoverable (issues #658, #1025)', () => {
       vi.useFakeTimers();
       vi.setSystemTime(100_000);
       const app = createHttpApp(
@@ -546,10 +610,11 @@ describe('HTTP Command Handler', () => {
       const healthHandler = mockApp.get.mock.calls.find((c: any) => c[0] === '/health')![1];
       (mockServer as any).sessionManager.getAllSessions.mockReturnValue([
         { id: 'dbg-1', name: 'attached', language: 'javascript', state: 'paused', createdAt: new Date(), extra: 'omitted' },
+        { id: 'dbg-2', name: 'worker', language: 'javascript', state: 'running', createdAt: new Date(), parentSessionId: 'dbg-1' },
       ]);
+      (mockServer as any).sessionManager.idleMsOf.mockImplementation((id: string) => (id === 'dbg-1' || id === 'dbg-2' ? 75_000 : undefined));
       (app as any).httpSessions.set('orphan', {
         transport: {},
-        server: mockServer,
         lastActivity: 40_000,
         openStreams: 0,
         hadStream: true,
@@ -557,15 +622,13 @@ describe('HTTP Command Handler', () => {
 
       const res = { json: vi.fn() };
       healthHandler({}, res);
-      expect(res.json.mock.calls[0][0].details).toEqual([
-        {
-          id: 'orphan',
-          openStreams: 0,
-          streamLost: true,
-          idleMs: 60_000,
-          debugSessions: [{ id: 'dbg-1', name: 'attached', language: 'javascript', state: 'paused' }],
-        },
+      const body = res.json.mock.calls[0][0];
+      expect(body.details).toEqual([{ id: 'orphan', openStreams: 0, streamLost: true, idleMs: 60_000 }]);
+      expect(body.debugSessions).toEqual([
+        { id: 'dbg-1', name: 'attached', language: 'javascript', state: 'paused', idleMs: 75_000 },
+        { id: 'dbg-2', name: 'worker', language: 'javascript', state: 'running', parentSessionId: 'dbg-1', idleMs: 75_000 },
       ]);
+      expect(body.attended).toBe(false);
     });
   });
 
@@ -619,9 +682,10 @@ describe('HTTP Command Handler', () => {
 
       expect(transport.close).toHaveBeenCalled();
       // The SDK fires onclose from close(); simulate it and confirm the
-      // existing cleanup path runs: server stopped, session forgotten.
+      // session is forgotten. The core stays: a reaped MCP session is a dead
+      // connection, and its debug sessions answer to the idle policy (#1025).
       transport.triggerClose();
-      expect(mockServer.stop).toHaveBeenCalled();
+      expect(mockServer.stop).not.toHaveBeenCalled();
       expect((app as any).httpSessions.size).toBe(0);
     });
 
@@ -726,8 +790,10 @@ describe('HTTP Command Handler', () => {
       await vi.advanceTimersByTimeAsync(60_000);
       expect(transport.close).toHaveBeenCalled();
       expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringMatching(/its SSE stream closed 180s ago .*MCP_HTTP_STREAM_LOST_SESSION_MS=120000.*holding debug session\(s\) dbg-1 \(javascript, paused\)/)
+        expect.stringMatching(/its SSE stream closed 180s ago .*MCP_HTTP_STREAM_LOST_SESSION_MS=120000/)
       );
+      // The MCP session held nothing of its own any more (#1025): no "holding" suffix.
+      expect(mockLogger.warn).not.toHaveBeenCalledWith(expect.stringMatching(/holding debug session/));
     });
 
     it('a stream that comes back within the window keeps the session alive (issue #658)', async () => {
@@ -1143,7 +1209,33 @@ describe('HTTP Command Handler', () => {
       expect(fakeProc.stderrChunks.join('')).toMatch(/3001.*already in use/);
     });
 
-    it('handles SIGINT by closing all transports, stopping all servers, then exiting', async () => {
+    it('starts the one core before listening, and never again per MCP session (issue #1025)', async () => {
+      const listen = vi.fn(() => mockHttpServer);
+      mockApp.listen = listen;
+
+      await handleHttpCommand(
+        { port: '3001' },
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+      );
+
+      expect(mockServerFactory).toHaveBeenCalledTimes(1);
+      expect(mockServer.start).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(mockServer.start).mock.invocationCallOrder[0]).toBeLessThan(listen.mock.invocationCallOrder[0]);
+
+      const postCall = mockApp.post.mock.calls.find((c: any) => c[0] === '/mcp');
+      const handler = postCall![1] as (req: any, res: any) => Promise<void>;
+      const initBody = { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'c', version: '1' } } };
+      await handler({ method: 'POST', headers: {}, body: initBody }, { status: vi.fn().mockReturnThis(), json: vi.fn(), end: vi.fn(), headersSent: false });
+      mockTransport.triggerSessionInit();
+      await handler({ method: 'POST', headers: {}, body: initBody }, { status: vi.fn().mockReturnThis(), json: vi.fn(), end: vi.fn(), headersSent: false });
+      mockTransport.triggerSessionInit();
+
+      expect(mockServerFactory).toHaveBeenCalledTimes(1);
+      expect(mockServer.start).toHaveBeenCalledTimes(1);
+      expect(mockProtocolServerFactory).toHaveBeenCalledTimes(2);
+    });
+
+    it('handles SIGINT by closing all transports, stopping the one core, then exiting', async () => {
       const listen = vi.fn(() => mockHttpServer);
       mockApp.listen = listen;
 
@@ -1158,18 +1250,17 @@ describe('HTTP Command Handler', () => {
       // Inject mock sessions
       const t1 = { close: vi.fn() };
       const t2 = { close: vi.fn() };
-      const s1 = { stop: vi.fn().mockResolvedValue(undefined) };
-      const s2 = { stop: vi.fn().mockResolvedValue(undefined) };
       const sessions = (mockApp as any).httpSessions as Map<string, any>;
-      sessions.set('a', { transport: t1, server: s1 });
-      sessions.set('b', { transport: t2, server: s2 });
+      sessions.set('a', { transport: t1 });
+      sessions.set('b', { transport: t2 });
 
       await sigintHandler();
 
       expect(t1.close).toHaveBeenCalled();
       expect(t2.close).toHaveBeenCalled();
-      expect(s1.stop).toHaveBeenCalled();
-      expect(s2.stop).toHaveBeenCalled();
+      expect(mockServer.stop).toHaveBeenCalledTimes(1);
+      // Transports first, so no request lands on a core that is closing its sessions.
+      expect(vi.mocked(mockServer.stop).mock.invocationCallOrder[0]).toBeGreaterThan(t2.close.mock.invocationCallOrder[0]);
       expect(mockHttpServer.close).toHaveBeenCalled();
       expect(mockExitProcess).toHaveBeenCalledWith(0);
     });
@@ -1185,11 +1276,9 @@ describe('HTTP Command Handler', () => {
 
       const sigintHandler = fakeProc.lastListener('SIGINT');
       const sessions = (mockApp as any).httpSessions as Map<string, any>;
-      // A wedged proxy makes stop() hang — shutdown must not hang with it.
-      sessions.set('wedged', {
-        transport: { close: vi.fn() },
-        server: { stop: vi.fn().mockReturnValue(new Promise(() => {})) }
-      });
+      // A wedged proxy makes the core's stop() hang — shutdown must not hang with it.
+      sessions.set('wedged', { transport: { close: vi.fn() } });
+      mockServer.stop = vi.fn().mockReturnValue(new Promise(() => {}));
 
       vi.useFakeTimers();
       const shutdownPromise = sigintHandler();
@@ -1250,14 +1339,13 @@ describe('HTTP Command Handler', () => {
 
         // Inject an active session to prove graceful shutdown ran
         const t1 = { close: vi.fn() };
-        const s1 = { stop: vi.fn().mockResolvedValue(undefined) };
-        ((mockApp as any).httpSessions as Map<string, any>).set('a', { transport: t1, server: s1 });
+        ((mockApp as any).httpSessions as Map<string, any>).set('a', { transport: t1 });
 
         stdin.emit('end');
 
         await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
         expect(t1.close).toHaveBeenCalled();
-        expect(s1.stop).toHaveBeenCalled();
+        expect(mockServer.stop).toHaveBeenCalled();
         expect(mockHttpServer.close).toHaveBeenCalled();
       });
 

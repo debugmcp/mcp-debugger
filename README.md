@@ -224,11 +224,16 @@ and point the client at it:
 }
 ```
 
-Each HTTP client gets its own isolated server: debug sessions are never visible to another
-client. A client that disconnects without `DELETE /mcp` keeps its debug sessions — and any
-paused attach target — alive until the server reaps it: 2 minutes after its SSE stream
-dropped (`MCP_HTTP_STREAM_LOST_SESSION_MS`), or 30 minutes idle if it never opened one
-(`MCP_HTTP_STALE_SESSION_MS`). `GET /health` lists what each session is holding.
+One `http` process is one debugger: every MCP client of it sees the same debug sessions, and a
+session is addressable by whoever holds its id (the handle is the capability — run one process
+per agent if agents must not see each other's work). A debug session outlives the MCP session
+that created it, so a client that reconnects can list and resume or close what it left behind.
+What ends an abandoned one is the idle policy: a session tree that no tool call has named for
+30 minutes (`MCP_DEBUG_SESSION_IDLE_MS`; `0` disables) is closed, unless a client is attending
+the process — while any client holds its SSE stream open, nothing expires. Abandoned MCP
+sessions themselves are reaped separately (`MCP_HTTP_STREAM_LOST_SESSION_MS`,
+`MCP_HTTP_STALE_SESSION_MS`). `GET /health` lists the MCP sessions, the debug sessions with
+their idle time, and whether anyone is attending.
 
 The port defaults to 3001, and the server listens on `127.0.0.1` only. `--bind 0.0.0.0` (or
 `MCP_HTTP_BIND=0.0.0.0`) listens on every interface — pair it with `--allowed-host` for the names other

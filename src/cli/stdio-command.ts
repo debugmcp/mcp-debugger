@@ -1,14 +1,11 @@
 import type { Logger as WinstonLoggerType } from 'winston';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
-import { DebugMcpServer } from '../server.js';
+import { DebugMcpServer, type DebugMcpServerOptions } from '../server.js';
 import { createProtocolServer } from '../server/protocol-facade.js';
 import type { StdioOptions } from './setup.js';
 import type { ProcessLike } from '../interfaces/process-interfaces.js';
 
-export interface ServerFactoryOptions {
-  logLevel?: string;
-  logFile?: string;
-}
+export type ServerFactoryOptions = DebugMcpServerOptions;
 
 export interface StdioCommandDependencies {
   logger: WinstonLoggerType;
@@ -39,7 +36,10 @@ export async function handleStdioCommand(
 
     const debugMcpServer = serverFactory({
       logLevel: options.logLevel,
-      logFile: options.logFile
+      logFile: options.logFile,
+      // On stdio the pipe is the lifetime: the per-debug-session idle policy
+      // defaults to off here (MCP_DEBUG_SESSION_IDLE_MS still turns it on; issue #1025).
+      debugSessionIdle: { defaultMs: 0 }
     });
     
     // Create stdio transport

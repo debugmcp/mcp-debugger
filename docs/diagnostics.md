@@ -249,8 +249,10 @@ The runtime-affecting variables the server and its adapters read (the [developme
 | `DEBUG_MCP_LOG_LEVEL` | Server log level (`error`, `warn`, `info`, `debug`) |
 | `MCP_EXIT_ON_STDIN_CLOSE` | `1`/`true`: an `http` server exits when its stdin pipe closes — a parent-death signal for supervised backends |
 | `MCP_HTTP_STALE_SESSION_MS` | Idle time before an HTTP session that never opened an SSE stream is reaped (default `1800000`; `0` disables that path) |
-| `MCP_HTTP_STREAM_LOST_SESSION_MS` | Idle time before an HTTP session whose SSE stream dropped and never returned is reaped — a crashed SDK client's debug sessions, and any paused attach target they hold, are released this soon (default `120000`; `0` falls back to the stale window; issue #658) |
+| `MCP_HTTP_STREAM_LOST_SESSION_MS` | Idle time before an HTTP session whose SSE stream dropped and never returned is reaped (default `120000`; `0` falls back to the stale window; issue #658). Reaping an MCP session closes no debug session (see `MCP_DEBUG_SESSION_IDLE_MS`) |
 | `MCP_HTTP_STALE_SWEEP_INTERVAL_MS` | How often that reap sweep runs (default `60000`) |
+| `MCP_DEBUG_SESSION_IDLE_MS` | Idle window after which a debug-session tree no tool call has named is closed, unless a client is attending the process — a crashed client's sessions, and any paused attach target they hold, are released this soon after its stream dropped (default `1800000` on `http`, `0` = off on `stdio`; `0` disables; issue #1025) |
+| `MCP_DEBUG_SESSION_IDLE_SWEEP_MS` | How often that idle sweep runs (default `60000`) |
 | `MCP_HTTP_ALLOWED_HOSTS` | Comma-separated `Host`/`Origin` hostnames the `http` endpoint accepts besides the loopback trio (same as repeating `--allowed-host`); an unusable entry stops startup with the entry named |
 | `DAP_TRACE` / `DAP_TRACE_FILE` | Enable per-session DAP frame capture / choose its file |
 | `DEBUG_MCP_NO_REDACT` | Disable secret redaction in captured output (diagnosis only) |

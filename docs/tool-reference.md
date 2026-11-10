@@ -87,14 +87,14 @@ Creates a new debugging session.
 **Notes:**
 - Session IDs are UUIDs in the format `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
 - Sessions start in `"created"` state
-- **Streamable HTTP: debug sessions are per MCP client session.** Each HTTP client (each `Mcp-Session-Id`) gets its own server, so a debug session is visible only to the client that created it; `list_debug_sessions` lists that client's sessions alone. A tool call from another client naming the id answers `success: false` with `error: "Session <id> belongs to another MCP client session: …"` and says how it ends: only its client can close it or end its MCP session with an explicit `DELETE /mcp` (an SDK client's `close()` is not a DELETE — a plain disconnect leaves it to the idle reaper: `MCP_HTTP_STREAM_LOST_SESSION_MS` for a client that held an SSE stream, `MCP_HTTP_STALE_SESSION_MS` for one that never did; both `0` means nothing else ends it). Drive one debug session from one client and keep that client's MCP session open; a one-shot script that opens a fresh MCP session per call cannot reach the sessions its previous run created (issue #939). stdio has one client per process
+- **One debugger core per process; the id is the capability (issue #1025).** On Streamable HTTP every MCP client of a process sees the same debug sessions: `list_debug_sessions` is the whole process's list, and any client holding an id can drive or close that session — run one `http` process per agent where agents must not see each other's work. A debug session outlives the MCP session that created it, so a one-shot script that opens a fresh MCP session per call reaches the sessions its previous run created, and a client that reconnects can resume or close what it left behind. What ends an abandoned session is the **idle policy**: a session tree that no tool call has named for `MCP_DEBUG_SESSION_IDLE_MS` (default 30 minutes on `http`, off on `stdio`; `0` disables) is closed through the normal close cascade, unless a client is attending the process — while any client holds its SSE stream open, nothing expires; an in-flight `wait_for_stop` holds its tree; children never expire on a clock of their own. Explicit close and debuggee exit end a session sooner, as always. With authentication in front of `/mcp`, sessions are scoped to the principal that created them and an out-of-scope id answers as unknown; with none, every caller is in the one shared scope
 - When `port`, `processId` or an `adapterConfig` URI/info-file key is provided in `create_debug_session`, the server performs an inline attach (creating the session and immediately attaching). The session exists before the addressing gate can refuse the form (a `port` on C/C++, say), so such a refusal answers `success: false` with a usable `sessionId`. The response then mirrors `attach_to_process`: alongside `sessionId` it carries `state`, the attach `data` payload, an optional `warning`, and — when a requested post-attach pause has not landed yet — `pending: true`, with `message` saying so (`…; post-attach pause pending — the target stops when it next executes code; call wait_for_stop to block until it does (pass stopOnEntry: false to attach without pausing)`)
 
 ---
 
 ### list_debug_sessions
 
-Lists all active debugging sessions — in Streamable HTTP mode, the ones this MCP client session created (see the note under `create_debug_session`).
+Lists all active debugging sessions — the whole process's list, whichever MCP client created them (see the note under `create_debug_session`).
 
 **Parameters:** None (empty object `{}`)
 
@@ -169,7 +169,7 @@ A session with child sessions, a child session or an attach root says what the c
 
 **Notes:**
 - Sessions may close automatically on errors
-- Closing a non-existent session returns `success: false` (`message: "Failed to close debug session: <id>"`); in Streamable HTTP mode a session another MCP client created answers `error: "Session <id> belongs to another MCP client session: …"` instead, and stays open (issue #939)
+- Closing a non-existent session returns `success: false` (`message: "Failed to close debug session: <id>"`); a session another MCP client of the same process created closes like any other — the id is the capability (issue #1025)
 - On a launch session the debuggee is terminated. Adapters that need a DAP `terminate` ahead of the
   disconnect to do so (the Dart and Flutter SDK adapters) receive one first (#885); an attached
   process is detached, not terminated
@@ -1439,7 +1439,7 @@ Each session also exposes its captured output as an MCP resource:
 - **URI:** `debug://sessions/{sessionId}/output` (`text/plain`) — the verbatim console transcript (all categories interleaved in arrival order).
 - **`resources/list`** enumerates one output resource per session; the list changes on session create/close (`notifications/resources/list_changed`).
 - **`resources/subscribe`** to a session's URI to receive `notifications/resources/updated` pings as output arrives. Pings are coalesced (~150 ms), so notification volume is independent of how fast the debuggee prints — on a ping, re-read the resource or call `get_output` with your cursor.
-- Subscriptions are tracked per server instance and cleaned up when the session closes.
+- Subscriptions are tracked per MCP connection and cleaned up when the connection closes or the session is removed; the coalesced pings are fanned out to every connection that subscribed.
 
 After a launch or attach creates its run directory, `resources/list` also includes `debug://sessions/{sessionId}/proxy-log`. Reading it returns at most the final 64 KiB, sanitized and trimmed to 80 lines. It is a point-in-time diagnostic resource and is intentionally not subscribable; output remains the only resource that emits update notifications.
 
@@ -1821,7 +1821,7 @@ Session-lifecycle failures (unknown/terminated session, proxy not running) are a
 ```
 
 ### Common Error Scenarios
-1. **Session not found**: Occurs when a session terminates unexpectedly. In Streamable HTTP mode an id that exists under *another* MCP client session is not reported as not found: every tool answers `error: "Session <id> belongs to another MCP client session: …"` (issue #939)
+1. **Session not found**: Occurs when a session terminates unexpectedly, or when the idle policy closed it (`MCP_DEBUG_SESSION_IDLE_MS`, see `create_debug_session`). An id created by another MCP client of the same process is found like any other; one outside the caller's scope (only with authentication in front of `http`) answers exactly as an unknown id (issue #1025)
 2. **Invalid language**: Language must be one of the supported languages (discovered dynamically from installed adapters)
 3. **File not found**: When setting breakpoints in non-existent files
 4. **Invalid scope**: When passing wrong variablesReference to get_variables

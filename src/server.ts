@@ -878,8 +878,8 @@ export class DebugMcpServer implements ToolContext {
     this.sessionManager.removeListener('child-session-adopted', this.handleChildSessionAdopted);
     this.sessionManager.removeListener('session-removed', this.handleSessionRemoved);
     this.logger.info('Debug MCP Server stopped');
-    // Last: detach this server's logger from the shared file transport so
-    // per-session servers in HTTP mode don't accumulate on it (issue #404).
+    // Last: detach this core's logger from the shared file transport (issue
+    // #404; one core per process now, so this runs once, at shutdown).
     // After this line the logger no longer writes to the shared file.
     this.disposeLogger?.();
   }

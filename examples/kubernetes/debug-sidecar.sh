@@ -22,7 +22,7 @@ POD=$(kubectl -n "$NS" get pods -l "$SELECTOR" -o jsonpath='{.items[0].metadata.
 echo "Injecting ephemeral container '$NAME' into pod/$POD (target container: app)..."
 kubectl -n "$NS" debug "$POD" --image=debugmcp/mcp-debugger:latest \
   --target=app --profile=general --container="$NAME" \
-  --env=MCP_HTTP_STALE_SESSION_MS=300000 \
+  --env=MCP_DEBUG_SESSION_IDLE_MS=300000 --env=MCP_HTTP_STALE_SESSION_MS=300000 \
   -- /app/entry.sh http -p 3001
 
 echo "Register with your agent:  claude mcp add-json k8s-sidecar '{\"type\":\"http\",\"url\":\"http://127.0.0.1:3001/mcp\"}'"

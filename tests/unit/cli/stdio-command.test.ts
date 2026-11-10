@@ -85,10 +85,12 @@ describe('STDIO Command Handler', () => {
     // Verify info log was called
     expect(mockLogger.info).toHaveBeenCalledWith('Starting Debug MCP Server in stdio mode');
 
-    // Verify server factory was called with correct options
+    // Verify server factory was called with correct options: on stdio the pipe
+    // is the lifetime, so the idle policy defaults to off (issue #1025, step 2)
     expect(mockServerFactory).toHaveBeenCalledWith({
       logLevel: 'debug',
-      logFile: '/tmp/test.log'
+      logFile: '/tmp/test.log',
+      debugSessionIdle: { defaultMs: 0 }
     });
 
     // Verify server start was called
@@ -151,7 +153,8 @@ describe('STDIO Command Handler', () => {
     // Verify server factory was called with correct options
     expect(mockServerFactory).toHaveBeenCalledWith({
       logLevel: undefined,
-      logFile: undefined
+      logFile: undefined,
+      debugSessionIdle: { defaultMs: 0 }
     });
   });
 

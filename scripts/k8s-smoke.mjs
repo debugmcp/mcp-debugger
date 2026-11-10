@@ -433,8 +433,9 @@ class McpHttpClient extends McpClientBase {
   async dispose() {
     if (!this.sessionId) return;
     try {
-      // Best-effort session teardown so the sidecar releases its ptrace claim
-      // promptly instead of waiting for the stale-session reaper.
+      // Best-effort MCP-session teardown. The debug sessions are the process's
+      // (issue #1025) and are closed by the test's own close_debug_session
+      // calls or, failing that, by the idle policy once nobody attends.
       await fetch(this.url, { method: 'DELETE', headers: this.headers() });
       transcribe('note', 'DELETE /mcp sent');
     } catch (err) {

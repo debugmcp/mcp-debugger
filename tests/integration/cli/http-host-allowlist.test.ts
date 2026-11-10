@@ -7,6 +7,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import * as http from 'http';
 import type { AddressInfo } from 'net';
 import { createHttpApp } from '../../../src/cli/http-command.js';
+import type { DebugMcpServer } from '../../../src/server.js';
 import { FakeCurrentProcess } from '../../test-utils/mocks/fake-current-process.js';
 import type { Logger as WinstonLogger } from 'winston';
 import { createMockLogger } from '../../test-utils/mocks/mock-logger.js';
@@ -29,9 +30,18 @@ async function listen(options: { allowedHost?: string[] } = {}, env: Record<stri
   const proc = new FakeCurrentProcess();
   // Disable the session reapers so no interval outlives the test.
   Object.assign(proc.env, { MCP_HTTP_STALE_SESSION_MS: '0', MCP_HTTP_STREAM_LOST_SESSION_MS: '0' }, env);
+  // The one core the app builds (issue #1025): nothing here speaks MCP, so a
+  // stub that answers /health's reads is all the app needs.
+  const core = {
+    start: vi.fn(),
+    stop: vi.fn(),
+    setAttendedSupplier: vi.fn(),
+    idlePolicy: { idleMs: 0, sweepMs: 60_000 },
+    sessionManager: { getAllSessions: () => [], getSession: () => undefined, idleMsOf: () => undefined }
+  };
   const app = createHttpApp(
     { port: '0', ...options },
-    { logger: createMockLogger() as unknown as WinstonLogger, serverFactory: vi.fn(), proc }
+    { logger: createMockLogger() as unknown as WinstonLogger, serverFactory: vi.fn(() => core as unknown as DebugMcpServer), proc }
   );
   const server = app.listen(0, '127.0.0.1');
   servers.push(server);

@@ -122,7 +122,7 @@ binary. Send the debugger to it:
 POD=$(kubectl get pods -l app=cpp-demo -o jsonpath='{.items[0].metadata.name}')
 kubectl debug "$POD" --image=debugmcp/mcp-debugger:latest \
   --target=app --profile=general --container=debugger \
-  --env=MCP_HTTP_STALE_SESSION_MS=300000 \
+  --env=MCP_DEBUG_SESSION_IDLE_MS=300000 --env=MCP_HTTP_STALE_SESSION_MS=300000 \
   -- /app/entry.sh http -p 3001
 kubectl port-forward "pod/$POD" 3001:3001 &
 ```
@@ -144,11 +144,14 @@ The flags that matter — each one is load-bearing:
   pass `-- /app/entry.sh http -p 3001` — bare `-- http -p 3001` fails with
   `exec: "http": executable file not found`. (Git Bash on Windows mangles
   `/app/...` — prefix the command with `MSYS_NO_PATHCONV=1`.)
-- **`MCP_HTTP_STALE_SESSION_MS=300000`** tightens the reaper that cleans up MCP
-  sessions abandoned by a client that never opened an SSE stream from 30 min
-  to 5 — releasing the ptrace claim on your pod sooner. (A crashed SDK client,
-  whose stream the server saw close, is reaped after 2 min regardless —
-  `MCP_HTTP_STREAM_LOST_SESSION_MS`.)
+- **`MCP_DEBUG_SESSION_IDLE_MS=300000`** tightens the idle policy that closes a
+  debug session nobody has named from 30 min to 5 — releasing the ptrace claim
+  on your pod sooner once the client is gone (while a client holds its SSE
+  stream open, nothing expires). **`MCP_HTTP_STALE_SESSION_MS=300000`** tightens
+  the separate reaper for abandoned MCP sessions the same way. (A crashed SDK
+  client's MCP session, whose stream the server saw close, is reaped after
+  2 min regardless — `MCP_HTTP_STREAM_LOST_SESSION_MS`; its debug sessions then
+  answer to the idle policy.)
 - Ephemeral containers **cannot be removed or restarted** — each retry needs a
   fresh `--container` name; only a pod restart clears them.
 
@@ -188,7 +191,8 @@ though `--profile=general` avoids a deprecation warning):
 
 ```bash
 kubectl debug "$POD" --image=debugmcp/mcp-debugger:latest --profile=general \
-  --container=debugger --env=MCP_HTTP_STALE_SESSION_MS=300000 -- /app/entry.sh http -p 3001
+  --container=debugger --env=MCP_DEBUG_SESSION_IDLE_MS=300000 --env=MCP_HTTP_STALE_SESSION_MS=300000 \
+  -- /app/entry.sh http -p 3001
 ```
 
 Then `attach_to_process {host: "127.0.0.1", port: 5678, ...}` from a session on
@@ -220,8 +224,9 @@ the MCP endpoint, and the containerized server attaches to python, ruby
   logpoints (`set_breakpoint` with `logMessage`): the pod keeps running at full
   speed while values stream to `get_output`.
 - An abandoned attach no longer leaves an orphaned tracer (#337): teardown
-  kills the adapter's process group, and the sidecar's HTTP reaper cleans up
-  crashed-client sessions after the stale window. Suspect a leftover anyway?
+  kills the adapter's process group, and the sidecar's idle policy closes a
+  crashed client's debug sessions once nobody attends the process
+  (`MCP_DEBUG_SESSION_IDLE_MS`). Suspect a leftover anyway?
   `grep TracerPid /proc/1/status` from the sidecar.
 
 ## Distroless and minimal images

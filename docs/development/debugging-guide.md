@@ -93,14 +93,15 @@ request its tool list. The outer debugger can now inspect `req.body`, step throu
 handler, and resume the pending request with `continue_execution`. Keep the outer debugger's
 connection active while the nested server is paused.
 
-Debug sessions on a Streamable HTTP server belong to the MCP client session that created them
-(each `Mcp-Session-Id` has its own `DebugMcpServer`). Drive one debug session from one client
-and keep that client's MCP session open: a one-shot driver script that opens a fresh MCP session
-per run cannot reach the debug session its previous run created — it is answered
-`Session <id> belongs to another MCP client session: …` — and the idle reaper closes the
-abandoned one about `MCP_HTTP_STREAM_LOST_SESSION_MS` (default 2 min) after the first run's SSE
-stream dropped (an SDK client holds one; a pure-POST driver falls under
-`MCP_HTTP_STALE_SESSION_MS`, default 30 min), which is what finally ends its program (issue #939).
+Debug sessions on a Streamable HTTP server belong to the process, not to the MCP client session
+that created them (one `DebugMcpServer` core per process, one SDK `Server` facade per MCP
+session; issue #1025). A one-shot driver script that opens a fresh MCP session per run reaches
+the debug session its previous run created by id, and `list_debug_sessions` lists it. What ends
+an abandoned one is the idle policy: a session tree no tool call has named for
+`MCP_DEBUG_SESSION_IDLE_MS` (default 30 min; `0` disables) is closed, unless a client is attending
+the process — while any client holds its SSE stream open, nothing expires. The abandoned MCP
+sessions themselves are reaped separately (`MCP_HTTP_STREAM_LOST_SESSION_MS`, default 2 min after
+the stream dropped; `MCP_HTTP_STALE_SESSION_MS`, default 30 min for a pure-POST client).
 
 Pausing a server's **proxy worker** (attach by PID to its `proxy-bootstrap.js` child; the
 inspector opens on 9229 unless `NODE_OPTIONS=--inspect-port=…` says otherwise) has one more
@@ -542,8 +543,10 @@ Note: the HTTP command handler (`src/cli/http-command.ts`) exposes a `GET /healt
 # Query the built-in health endpoint (default port 3001)
 curl http://localhost:3001/health
 # Returns: { "status": "ok", "mode": "http", "listening": { "address", "port" }, "connections": N,
+#            "attended": bool, "listenStreams": N,
 #            "sessions": [<Mcp-Session-Id>…],
-#            "details": [{ "id", "openStreams", "streamLost", "idleMs", "debugSessions": [{ "id", "name", "language", "state" }] }] }
+#            "details": [{ "id", "openStreams", "streamLost", "idleMs" }],
+#            "debugSessions": [{ "id", "name", "language", "state", "parentSessionId"?, "idleMs"? }] }
 ```
 
 ## Debugging Checklists

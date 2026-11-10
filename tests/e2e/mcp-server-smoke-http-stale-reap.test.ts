@@ -115,7 +115,11 @@ describe('MCP Server E2E HTTP stale-session reap (issue #502)', () => {
       env: {
         ...process.env,
         MCP_HTTP_STALE_SESSION_MS: '2000',
-        MCP_HTTP_STALE_SWEEP_INTERVAL_MS: '1000'
+        MCP_HTTP_STALE_SWEEP_INTERVAL_MS: '1000',
+        // The debug session is the core's (issue #1025): the MCP-session reap
+        // above no longer ends it; the per-debug-session idle policy does.
+        MCP_DEBUG_SESSION_IDLE_MS: '2000',
+        MCP_DEBUG_SESSION_IDLE_SWEEP_MS: '1000'
       }
     });
     const serverPid = serverProcess.pid!;
@@ -173,7 +177,7 @@ describe('MCP Server E2E HTTP stale-session reap (issue #502)', () => {
     await mcpClient.close();
     mcpClient = null;
 
-    // The stale sweep (idle > 2s, ticked every 1s) must reap the session…
+    // The stale sweep (idle > 2s, ticked every 1s) must reap the MCP session…
     const reaped = await pollUntil(async () => {
       try {
         return readFileSync(logFile, 'utf8').includes('Reaping stale HTTP session')
@@ -184,6 +188,19 @@ describe('MCP Server E2E HTTP stale-session reap (issue #502)', () => {
       }
     }, 20000, 250);
     expect(reaped).toBe(true);
+
+    // …the idle policy must close the debug session once nobody attends the
+    // process (the client's SSE stream closed with it; issue #1025)…
+    const idleClosed = await pollUntil(async () => {
+      try {
+        return readFileSync(logFile, 'utf8').includes('Closing idle debug session')
+          ? true
+          : undefined;
+      } catch {
+        return undefined;
+      }
+    }, 20000, 250);
+    expect(idleClosed).toBe(true);
 
     // …and the worker OS process must actually die.
     const workerGone = await pollUntil(
