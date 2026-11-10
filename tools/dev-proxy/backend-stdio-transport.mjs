@@ -9,13 +9,17 @@
  * modern era, and a 2025 server answers the probe with "method not found" and
  * gets `initialize` on the same pipe.
  *
- * The shutdown signal is the second. Negotiating in place, the SDK does not
- * watch the signal given to connect() (measured, client 2.4.0): a start still
- * negotiating when the proxy shuts down hangs until the probe gives up, and the
- * backend it spawned outlives the proxy. With its base transport the SDK closes
- * the transport itself on that abort; this class does the same, which ends the
- * child and fails the pending negotiation at once, so the start's own failure
- * path can clean up.
+ * The shutdown signal is the second. Under `auto` negotiation the SDK does not
+ * watch the signal given to connect() while its probe is unanswered — measured
+ * on client 2.4.0 with all four combinations: in `legacy` mode an abort rejects
+ * the connect and the SDK closes the transport, base class or subclass; in
+ * `auto` mode the connect stays pending and the child keeps running, on the
+ * sibling path and in place alike. So a start still negotiating when the proxy
+ * shuts down would hang until the probe gives up, and the backend it spawned
+ * would outlive the proxy (Linux CI caught exactly that). This class does what
+ * the SDK does in `legacy` mode: it closes itself on that abort, which ends
+ * the child and fails the pending negotiation at once, so the start's own
+ * failure path can clean up.
  *
  * Kept in its own module so unit tests can import it without executing the
  * dev-proxy entry point (dev-proxy.mjs runs main() at module top level).

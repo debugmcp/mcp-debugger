@@ -607,7 +607,7 @@ class BackendManager {
     if (this.backendTransport === 'stdio') {
       // Stdio mode: StdioClientTransport spawns the child
       // The shutdown signal goes to the transport as well as to connect(): the
-      // in-place negotiation does not watch connect()'s, so without this a start
+      // SDK's `auto` negotiation does not watch connect()'s, so without this a start
       // still negotiating at shutdown would hang and orphan its backend.
       const transport = new BackendStdioTransport({
         command,

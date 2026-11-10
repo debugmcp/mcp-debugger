@@ -3,12 +3,15 @@
  *
  * It is a subclass of the SDK's transport so that `auto` negotiation probes on
  * the backend's own pipe instead of on a second backend process. That has a
- * cost the SDK does not cover: negotiating in place, the SDK does not watch
- * the signal given to connect() (measured, client 2.4.0), so a start that is
- * still negotiating when the proxy shuts down hangs, and the backend it
- * spawned outlives the proxy — CI caught it on Linux in the rebuild suite's
- * shutdown cases. The transport therefore closes itself on the proxy's
- * shutdown signal, as the SDK does by itself for its base transport.
+ * cost the SDK does not cover: under `auto` negotiation the SDK does not watch
+ * the signal given to connect() while its probe is unanswered (measured, client
+ * 2.4.0: `legacy` rejects the connect and closes the transport on an abort,
+ * `auto` leaves the connect pending and the child running, sibling path and
+ * in place alike). So a start that is still negotiating when the proxy shuts
+ * down hangs, and the backend it spawned outlives the proxy — CI caught it on
+ * Linux in the rebuild suite's shutdown cases. The transport therefore closes
+ * itself on the proxy's shutdown signal, as the SDK does by itself in
+ * `legacy` mode.
  */
 import { getEventListeners } from 'node:events';
 import { afterEach, describe, expect, it } from 'vitest';

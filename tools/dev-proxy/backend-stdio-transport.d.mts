@@ -3,8 +3,8 @@ import { StdioClientTransport, type StdioServerParameters } from '@modelcontextp
 /**
  * The dev proxy's stdio transport to its backend: a subclass of the SDK's, so
  * `auto` negotiation probes on the backend's own pipe, that closes itself when
- * the proxy's shutdown signal aborts (the SDK's in-place negotiation does not
- * watch connect()'s signal).
+ * the proxy's shutdown signal aborts (under `auto` negotiation the SDK does not
+ * watch connect()'s signal while its probe is unanswered).
  */
 export class BackendStdioTransport extends StdioClientTransport {
   constructor(params: StdioServerParameters, options?: { signal?: AbortSignal });
