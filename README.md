@@ -228,9 +228,13 @@ One `http` process is one debugger: every MCP client of it sees the same debug s
 session is addressable by whoever holds its id (the handle is the capability — run one process
 per agent if agents must not see each other's work). A debug session outlives the MCP session
 that created it, so a client that reconnects can list and resume or close what it left behind.
-What ends an abandoned one is the idle policy: a session tree that no tool call has named for
-30 minutes (`MCP_DEBUG_SESSION_IDLE_MS`; `0` disables) is closed, unless a client is attending
-the process — while any client holds its SSE stream open, nothing expires. Abandoned MCP
+A debug session ends by its own close, by its program ending, or with the server: nothing expires
+on a timer by default, so a quiet agent never loses a paused program. A server that is shared or
+long-lived, or that attaches to something that must not stay paused, can turn the idle policy on:
+with `MCP_DEBUG_SESSION_IDLE_MS` set, a session tree that no tool call has named for that long is
+closed (a launched program is ended, an attached one released), unless a client is attending the
+process — while any client holds its SSE stream open, nothing expires. `list_debug_sessions`
+shows each session's idle time, so a forgotten one is easy to find and close. Abandoned MCP
 sessions themselves are reaped separately (`MCP_HTTP_STREAM_LOST_SESSION_MS`,
 `MCP_HTTP_STALE_SESSION_MS`). `GET /health` lists the MCP sessions, the debug sessions with
 their idle time, and whether anyone is attending.

@@ -489,7 +489,6 @@ describe('HTTP Command Handler', () => {
       expect(mockServerFactory).toHaveBeenCalledWith({
         logLevel: undefined,
         logFile: undefined,
-        debugSessionIdle: { defaultMs: 1_800_000 },
       });
       expect(mockServer.setAttendedSupplier).toHaveBeenCalledTimes(1);
       const attended = vi.mocked(mockServer.setAttendedSupplier).mock.calls[0][0] as () => boolean;

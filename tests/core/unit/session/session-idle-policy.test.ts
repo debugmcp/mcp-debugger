@@ -63,7 +63,8 @@ describe('SessionManager idle policy (issue #1025, step 2)', () => {
 
   it('a root with no activity for the window is closed, and the sweep names it', async () => {
     const rootId = await startRoot();
-    const closeSpy = vi.spyOn(sessionManager, 'closeSession');
+    // The close the sweep runs is the one close_debug_session answers from.
+    const closeSpy = vi.spyOn(sessionManager, 'closeSessionReporting');
 
     const closed = await sessionManager.sweepIdle(WINDOW, { now: now() + WINDOW + 1 });
 
@@ -114,9 +115,9 @@ describe('SessionManager idle policy (issue #1025, step 2)', () => {
     const a = (await sessionManager.createSession({ language: DebugLanguage.MOCK })).id;
     const b = (await sessionManager.createSession({ language: DebugLanguage.MOCK })).id;
     let attended = false;
-    vi.spyOn(sessionManager, 'closeSession').mockImplementation(async () => {
+    vi.spyOn(sessionManager, 'closeSessionReporting').mockImplementation(async (id: string) => {
       attended = true;
-      return true;
+      return { closed: true, closedSessionIds: [id] };
     });
 
     const closed = await sessionManager.sweepIdle(WINDOW, { now: now() + WINDOW + 1, attended: () => attended });
@@ -203,5 +204,88 @@ describe('SessionManager idle policy (issue #1025, step 2)', () => {
 
     expect(sessionManager.idleMsOf(rootId)).toBeUndefined();
     expect(await sessionManager.sweepIdle(WINDOW, { now: now() + WINDOW + 1 })).toEqual([]);
+  });
+
+  // What an expiry leaves behind (issue #1025, the second look): the agent that
+  // comes back to a closed session is told what happened, not "not found".
+  describe('the record an expiry leaves', () => {
+    it('names when a launch root was closed, how long it sat idle, the window, and that its program was ended', async () => {
+      const rootId = await startRoot();
+      const at = now() + WINDOW + 60_000;
+      const idleMs = sessionManager.idleMsOf(rootId, at);
+      expect(idleMs).toBeGreaterThan(WINDOW);
+
+      await sessionManager.sweepIdle(WINDOW, { now: at });
+
+      expect(sessionManager.idleExpiryOf(rootId, undefined)).toEqual({
+        sessionId: rootId,
+        rootId,
+        closedAt: at,
+        idleMs,
+        windowMs: WINDOW,
+        outcome: 'ended'
+      });
+    });
+
+    it('says an attach root was released: its target keeps running', async () => {
+      const session = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      // An attach root, the way attach_to_process marks the row.
+      (sessionManager as unknown as { sessionStore: { update(id: string, patch: object): void } })
+        .sessionStore.update(session.id, { attachMode: true });
+
+      await sessionManager.sweepIdle(WINDOW, { now: now() + WINDOW + 1 });
+
+      expect(sessionManager.idleExpiryOf(session.id, undefined)?.outcome).toBe('released');
+    });
+
+    it('records every session the expiry took with its root', async () => {
+      const rootId = await startRoot();
+      const childId = await adoptChild(rootId);
+
+      await sessionManager.sweepIdle(WINDOW, { now: now() + WINDOW + 1 });
+
+      expect(sessionManager.idleExpiryOf(childId, undefined)).toMatchObject({ sessionId: childId, rootId });
+    });
+
+    it('is visible in the owner scope only', async () => {
+      const session = await sessionManager.createSession({ language: DebugLanguage.MOCK, ownerKey: 'agent-b' });
+
+      await sessionManager.sweepIdle(WINDOW, { now: now() + WINDOW + 1 });
+
+      expect(sessionManager.idleExpiryOf(session.id, 'agent-b')).toMatchObject({ sessionId: session.id });
+      expect(sessionManager.idleExpiryOf(session.id, 'agent-a')).toBeUndefined();
+      expect(sessionManager.idleExpiryOf(session.id, undefined)).toBeUndefined();
+    });
+
+    it('is not left by a close the agent asked for', async () => {
+      const rootId = await startRoot();
+
+      await sessionManager.closeSession(rootId);
+
+      expect(sessionManager.idleExpiryOf(rootId, undefined)).toBeUndefined();
+    });
+
+    it('is bounded: the oldest records go first', async () => {
+      const created: string[] = [];
+      for (let i = 0; i < 201; i++) {
+        created.push((await sessionManager.createSession({ language: DebugLanguage.MOCK })).id);
+      }
+
+      await sessionManager.sweepIdle(WINDOW, { now: now() + WINDOW + 1 });
+
+      expect(sessionManager.idleExpiryOf(created[0], undefined)).toBeUndefined();
+      expect(sessionManager.idleExpiryOf(created[1], undefined)).toBeDefined();
+      expect(sessionManager.idleExpiryOf(created[200], undefined)).toBeDefined();
+    });
+
+    it('the log says what the close did to the program', async () => {
+      const rootId = await startRoot();
+
+      await sessionManager.sweepIdle(WINDOW, { now: now() + WINDOW + 1 });
+
+      expect(dependencies.mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining(`Idle debug session ${rootId} closed: its program was ended`)
+      );
+    });
   });
 });

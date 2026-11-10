@@ -80,10 +80,7 @@ export async function handleStdioCommand(
 
     const debugMcpServer = serverFactory({
       logLevel: options.logLevel,
-      logFile: options.logFile,
-      // On stdio the pipe is the lifetime: the per-debug-session idle policy
-      // defaults to off here (MCP_DEBUG_SESSION_IDLE_MS still turns it on; issue #1025).
-      debugSessionIdle: { defaultMs: 0 }
+      logFile: options.logFile
     });
 
     // Keep the event loop alive even if stdin closes (e.g., detached containers).
