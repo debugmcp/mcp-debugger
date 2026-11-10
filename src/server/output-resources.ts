@@ -5,10 +5,12 @@
  * debug://sessions/{id}/output — a verbatim console transcript (all categories
  * interleaved, in arrival order). Clients may subscribe to receive coalesced
  * resources/updated pings as output arrives; structured/cursor access is
- * available via the get_output tool.
+ * available via the get_output tool. The pings themselves are coalesced and
+ * fanned out by the core's NotificationHub (issue #1025, step 2); this module
+ * holds the handlers and the per-facade subscription set.
  */
 import { Server, ProtocolErrorCode } from '@modelcontextprotocol/server';
-import { ILogger, type IFileSystem } from '@debugmcp/shared';
+import type { IFileSystem } from '@debugmcp/shared';
 import { WireMcpError } from '../errors/debug-errors.js';
 import type { SessionManager } from '../session/session-manager.js';
 import { proxyLogPathFor } from '../proxy/session-log-layout.js';
@@ -28,91 +30,36 @@ export {
   proxyLogResourceUri
 } from '../session/session-resource-uris.js';
 
-/** Debounce window for resources/updated pings. */
-export const OUTPUT_UPDATE_DEBOUNCE_MS = 150;
+/** Which output URIs one protocol facade subscribed to through resources/subscribe. */
+export interface ResourceSubscriptions {
+  subscribe(uri: string): void;
+  unsubscribe(uri: string): void;
+}
 
 /**
- * Subscription bookkeeping and debounced resources/updated pings for the
- * output resources. URIs subscribed via resources/subscribe; updated-pings are
- * debounced so notification volume is independent of debuggee output volume.
+ * The per-facade subscription set (issue #1025, step 2). A subscription
+ * belongs to the connection that made it; the coalesced resources/updated
+ * pings themselves come from the core's NotificationHub, which asks this set
+ * whether the facade wants a given URI.
  */
-export class OutputResourceNotifier {
-  private readonly subscribedUris = new Set<string>();
-  private readonly outputUpdateTimers = new Map<string, NodeJS.Timeout>();
-
-  constructor(
-    private readonly server: Server,
-    private readonly logger: ILogger
-  ) {}
-
-  /**
-   * Stable listener for SessionManager's 'output-captured' event: the owner
-   * registers this exact reference with on() and removes it with
-   * removeListener() on stop().
-   */
-  readonly handleOutputCaptured = (sessionId: string): void => {
-    this.scheduleUpdated(sessionId);
-  };
+export class FacadeSubscriptions implements ResourceSubscriptions {
+  private readonly uris = new Set<string>();
 
   subscribe(uri: string): void {
-    this.subscribedUris.add(uri);
+    this.uris.add(uri);
   }
 
   unsubscribe(uri: string): void {
-    this.subscribedUris.delete(uri);
-    this.clearTimer(uri);
+    this.uris.delete(uri);
   }
 
-  /** The session's output resource is gone: drop its subscription and timer. */
-  forgetSession(sessionId: string): void {
-    this.unsubscribe(outputResourceUri(sessionId));
+  has(uri: string): boolean {
+    return this.uris.has(uri);
   }
 
-  /**
-   * Throttled resources/updated ping for a session's output resource: the
-   * first captured event after a quiet period arms a timer; everything that
-   * arrives inside the window rides the same ping.
-   */
-  scheduleUpdated(sessionId: string): void {
-    const uri = outputResourceUri(sessionId);
-    if (!this.subscribedUris.has(uri) || this.outputUpdateTimers.has(uri)) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      this.outputUpdateTimers.delete(uri);
-      this.server.sendResourceUpdated({ uri }).catch((error: unknown) => {
-        // Not connected yet / transport gone — nothing to notify, not an error.
-        this.logger.debug(`[Server] Failed to send resources/updated for ${uri}`, { error });
-      });
-    }, OUTPUT_UPDATE_DEBOUNCE_MS);
-    timer.unref?.();
-    this.outputUpdateTimers.set(uri, timer);
-  }
-
-  /** Fire-and-forget resources/list_changed (sessions appeared/disappeared). */
-  notifyListChanged(): void {
-    this.server.sendResourceListChanged().catch((error: unknown) => {
-      this.logger.debug('[Server] Failed to send resources/list_changed', { error });
-    });
-  }
-
-  /**
-   * Tear down output-resource bookkeeping: pending debounce timers must not
-   * outlive the server (the test suite runs with a strict leak guard).
-   */
-  dispose(): void {
-    for (const uri of this.outputUpdateTimers.keys()) {
-      this.clearTimer(uri);
-    }
-    this.subscribedUris.clear();
-  }
-
-  private clearTimer(uri: string): void {
-    const timer = this.outputUpdateTimers.get(uri);
-    if (timer) {
-      clearTimeout(timer);
-      this.outputUpdateTimers.delete(uri);
-    }
+  /** The resource is gone (its session was removed): drop the subscription. */
+  forget(uri: string): void {
+    this.uris.delete(uri);
   }
 }
 
@@ -123,7 +70,7 @@ export class OutputResourceNotifier {
 export function registerResourceHandlers(
   server: Server,
   sessionManager: SessionManager,
-  notifier: OutputResourceNotifier,
+  subscriptions: ResourceSubscriptions,
   fileSystem: Pick<IFileSystem, 'readTail'>
 ): void {
   server.setRequestHandler('resources/list', async () => {
@@ -192,13 +139,13 @@ export function registerResourceHandlers(
     if (!sessionId || !sessionManager.getSession(sessionId)) {
       throw new WireMcpError(ProtocolErrorCode.InvalidParams, `Unknown resource: ${uri}`);
     }
-    notifier.subscribe(uri);
+    subscriptions.subscribe(uri);
     return {};
   });
 
   server.setRequestHandler('resources/unsubscribe', async (request) => {
     const uri = request.params.uri;
-    notifier.unsubscribe(uri);
+    subscriptions.unsubscribe(uri);
     return {};
   });
 }

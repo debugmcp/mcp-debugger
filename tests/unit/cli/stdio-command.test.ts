@@ -6,6 +6,7 @@ import type { ServerFactoryOptions } from '../../../src/cli/stdio-command.js';
 import { FakeCurrentProcess } from '../../test-utils/mocks/fake-current-process.js';
 import type { Logger as WinstonLoggerType } from 'winston';
 import { DebugMcpServer } from '../../../src/server.js';
+import type { createProtocolServer } from '../../../src/server/protocol-facade.js';
 
 vi.mock('../../../src/server.js');
 
@@ -14,6 +15,8 @@ describe('STDIO Command Handler', () => {
   let mockServerFactory: Mock<(options: ServerFactoryOptions) => DebugMcpServer>;
   let mockExitProcess: Mock<(code: number) => void>;
   let mockServer: DebugMcpServer;
+  let mockFacade: { connect: Mock<() => Promise<void>> };
+  let mockProtocolServerFactory: Mock<typeof createProtocolServer>;
   let fakeProc: FakeCurrentProcess;
 
   function makeFakeStdin() {
@@ -35,14 +38,14 @@ describe('STDIO Command Handler', () => {
       level: 'info'
     } as any;
 
-    // Create mock server with proper structure
+    // The core (issue #1025, step 2): it owns no SDK Server; the command
+    // builds a protocol facade over it and connects THAT to the transport.
     mockServer = {
-      server: {
-        connect: vi.fn().mockResolvedValue(undefined)
-      },
       start: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn().mockResolvedValue(undefined)
     } as any;
+    mockFacade = { connect: vi.fn().mockResolvedValue(undefined) };
+    mockProtocolServerFactory = vi.fn(() => mockFacade as any);
 
     // Create mock server factory
     mockServerFactory = vi.fn(() => mockServer);
@@ -70,6 +73,7 @@ describe('STDIO Command Handler', () => {
     await handleStdioCommand(options, {
       logger: mockLogger,
       serverFactory: mockServerFactory,
+      protocolServerFactory: mockProtocolServerFactory,
       exitProcess: mockExitProcess,
       stdin: makeFakeStdin(),
       proc: fakeProc
@@ -90,6 +94,11 @@ describe('STDIO Command Handler', () => {
     // Verify server start was called
     expect(mockServer.start).toHaveBeenCalled();
 
+    // The transport is connected to a legacy-era protocol facade over the core,
+    // never to the core itself (issue #1025, step 2)
+    expect(mockProtocolServerFactory).toHaveBeenCalledWith(mockServer, { era: 'legacy', deliver: 'instance' });
+    expect(mockFacade.connect).toHaveBeenCalledTimes(1);
+
     // Verify success log
     expect(mockLogger.info).toHaveBeenCalledWith('Server started successfully in stdio mode');
 
@@ -101,6 +110,7 @@ describe('STDIO Command Handler', () => {
     await handleStdioCommand({}, {
       logger: mockLogger,
       serverFactory: mockServerFactory,
+      protocolServerFactory: mockProtocolServerFactory,
       exitProcess: mockExitProcess,
       stdin: makeFakeStdin(),
       proc: fakeProc
@@ -129,6 +139,7 @@ describe('STDIO Command Handler', () => {
     await handleStdioCommand(options, {
       logger: mockLogger,
       serverFactory: mockServerFactory,
+      protocolServerFactory: mockProtocolServerFactory,
       exitProcess: mockExitProcess,
       stdin: makeFakeStdin(),
       proc: fakeProc
@@ -154,6 +165,7 @@ describe('STDIO Command Handler', () => {
     await handleStdioCommand(options, {
       logger: mockLogger,
       serverFactory: mockServerFactory,
+      protocolServerFactory: mockProtocolServerFactory,
       exitProcess: mockExitProcess,
       proc: fakeProc
     });
@@ -174,6 +186,7 @@ describe('STDIO Command Handler', () => {
     await handleStdioCommand({}, {
       logger: mockLogger,
       serverFactory: mockServerFactory,
+      protocolServerFactory: mockProtocolServerFactory,
       proc: fakeProc
     });
 
@@ -190,6 +203,7 @@ describe('STDIO Command Handler', () => {
     await handleStdioCommand({}, {
       logger: mockLogger,
       serverFactory: mockServerFactory,
+      protocolServerFactory: mockProtocolServerFactory,
       exitProcess: mockExitProcess,
       proc: fakeProc
     });
@@ -208,6 +222,7 @@ describe('STDIO Command Handler', () => {
       await handleStdioCommand({}, {
         logger: mockLogger,
         serverFactory: mockServerFactory,
+      protocolServerFactory: mockProtocolServerFactory,
         exitProcess: mockExitProcess,
         stdin,
         proc: fakeProc
@@ -234,6 +249,7 @@ describe('STDIO Command Handler', () => {
       await handleStdioCommand({}, {
         logger: mockLogger,
         serverFactory: mockServerFactory,
+      protocolServerFactory: mockProtocolServerFactory,
         exitProcess: mockExitProcess,
         stdin,
         proc: fakeProc
@@ -256,6 +272,7 @@ describe('STDIO Command Handler', () => {
       await handleStdioCommand({}, {
         logger: mockLogger,
         serverFactory: mockServerFactory,
+      protocolServerFactory: mockProtocolServerFactory,
         exitProcess: mockExitProcess,
         stdin,
         proc: fakeProc
@@ -311,6 +328,7 @@ describe('STDIO Command Handler', () => {
       await handleStdioCommand({}, {
         logger: mockLogger,
         serverFactory: mockServerFactory,
+      protocolServerFactory: mockProtocolServerFactory,
         exitProcess: mockExitProcess,
         stdin,
         proc: fakeProc
@@ -331,6 +349,7 @@ describe('STDIO Command Handler', () => {
       await handleStdioCommand({}, {
         logger: mockLogger,
         serverFactory: mockServerFactory,
+      protocolServerFactory: mockProtocolServerFactory,
         exitProcess: mockExitProcess,
         stdin,
         proc: fakeProc

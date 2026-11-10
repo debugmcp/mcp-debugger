@@ -14,6 +14,7 @@ import {
   createMockServer,
   createMockSessionManager,
   createMockStdioTransport,
+  createDebugServerWithFacade,
   getToolHandlers,
   type MockServer,
   type MockSessionManager
@@ -54,17 +55,13 @@ describe('Server Initialization Tests', () => {
   });
 
   describe('Constructor and Initialization', () => {
-    it('should initialize server with correct configuration', () => {
+    it('builds the core without an SDK Server of its own (issue #1025, step 2)', () => {
       debugServer = new DebugMcpServer({ logLevel: 'debug' });
-      
-      expect(Server).toHaveBeenCalledWith(
-        { name: 'debug-mcp-server', version: '1.2.3-test' },
-        {
-          capabilities: { tools: {}, resources: { subscribe: true, listChanged: true }, prompts: {} },
-          instructions: expect.stringContaining('mcp-debugger drives real step-through debuggers')
-        }
-      );
-      
+
+      // The facade (createProtocolServer) constructs the Server per connection
+      // or request; the core carries what every facade advertises.
+      expect(Server).not.toHaveBeenCalled();
+      expect(debugServer.instructions).toContain('mcp-debugger drives real step-through debuggers');
       expect(createProductionDependencies).toHaveBeenCalledWith({
         logLevel: 'debug',
         logFile: undefined,
@@ -97,16 +94,16 @@ describe('Server Initialization Tests', () => {
       expect(() => new DebugMcpServer()).toThrow('Failed to create dependencies');
     });
 
-    it('should register tool and resource handlers', () => {
-      debugServer = new DebugMcpServer();
+    it('a facade over the core registers the tool, resource and prompt handlers', () => {
+      debugServer = createDebugServerWithFacade();
 
       // ListTools + CallTool, ListResources/ReadResource/Subscribe/Unsubscribe (issue #218),
       // plus ListPrompts/GetPrompt for the debugging-workflow prompt
       expect(mockServer.setRequestHandler).toHaveBeenCalledTimes(8);
     });
 
-    it('should set error handler', () => {
-      debugServer = new DebugMcpServer();
+    it('a facade routes SDK errors to the core logger', () => {
+      debugServer = createDebugServerWithFacade();
       
       expect(mockServer.onerror).toBeDefined();
       
@@ -122,7 +119,7 @@ describe('Server Initialization Tests', () => {
 
   describe('Tool Handler Registration', () => {
     it('should handle tools/list request', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { listToolsHandler } = getToolHandlers(mockServer);
       
       const result = await listToolsHandler({ method: 'tools/list', params: {} });
@@ -139,7 +136,7 @@ describe('Server Initialization Tests', () => {
     });
 
     it('should handle unknown tool error', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
       
       await expect(callToolHandler({
@@ -152,7 +149,7 @@ describe('Server Initialization Tests', () => {
     });
 
     it('should handle tool execution errors', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
       
       mockSessionManager.createSession.mockRejectedValue(new Error('Session creation failed'));

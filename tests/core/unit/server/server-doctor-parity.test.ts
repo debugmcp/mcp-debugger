@@ -21,7 +21,8 @@ import {
   createMockDependencies,
   createMockServer,
   createMockSessionManager,
-  getToolHandlers
+  getToolHandlers,
+  createDebugServerWithFacade
 } from './server-test-helpers.js';
 
 vi.mock('@modelcontextprotocol/server', async () =>
@@ -126,7 +127,7 @@ describe('doctor / list_supported_languages availability parity (issue #435)', (
 
   it('reports identical per-language modes from both paths against the same registry', async () => {
     // Server path
-    new DebugMcpServer();
+    createDebugServerWithFacade();
     const { callToolHandler } = getToolHandlers(mockServer);
     const serverResult = await callToolHandler({
       method: 'tools/call',

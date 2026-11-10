@@ -30,7 +30,8 @@ import {
   createMockStdioTransport,
   getToolHandlers,
   getResourceHandlers,
-  getPromptHandlers
+  getPromptHandlers,
+  createDebugServerWithFacade
 } from './server-test-helpers.js';
 
 vi.mock('@modelcontextprotocol/server', async () =>
@@ -91,7 +92,7 @@ describe('Server tool/resource/prompt list snapshot fence', () => {
         vi.stubEnv('DEBUG_MCP_VARIABLE_ACCESS', vaMode);
         vi.stubEnv('MCP_CONTAINER', containerMode);
 
-        new DebugMcpServer();
+        createDebugServerWithFacade();
         const { listToolsHandler } = getToolHandlers(mockServer);
         const { listResourcesHandler } = getResourceHandlers(mockServer);
         const { listPromptsHandler } = getPromptHandlers(mockServer);

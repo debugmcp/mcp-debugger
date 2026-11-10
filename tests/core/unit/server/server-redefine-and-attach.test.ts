@@ -20,7 +20,8 @@ import {
   type CallToolHandler,
   type ListToolsHandler,
   type MockServer,
-  type MockSessionManager
+  type MockSessionManager,
+  createDebugServerWithFacade
 } from './server-test-helpers.js';
 
 vi.mock('@modelcontextprotocol/server', async () =>
@@ -49,7 +50,7 @@ describe('hot_reload and attach stopOnEntry tests', () => {
     mockSessionManager = createMockSessionManager(mockDependencies.adapterRegistry);
     vi.mocked(SessionManager).mockImplementation(function () { return mockSessionManager as any; });
 
-    new DebugMcpServer();
+    createDebugServerWithFacade();
     const handlers = getToolHandlers(mockServer);
     callToolHandler = handlers.callToolHandler;
     listToolsHandler = handlers.listToolsHandler;

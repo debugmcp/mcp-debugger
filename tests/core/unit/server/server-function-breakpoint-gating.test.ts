@@ -23,7 +23,8 @@ import {
   type CallToolHandler,
   type ListToolsHandler,
   type MockServer,
-  type MockSessionManager
+  type MockSessionManager,
+  createDebugServerWithFacade
 } from './server-test-helpers.js';
 
 vi.mock('@modelcontextprotocol/server', async () =>
@@ -51,7 +52,7 @@ describe('set_breakpoint function gating (#271 phase 3)', () => {
     mockSessionManager = createMockSessionManager(mockDependencies.adapterRegistry);
     vi.mocked(SessionManager).mockImplementation(function() { return mockSessionManager as any; });
 
-    new DebugMcpServer();
+    createDebugServerWithFacade();
     const handlers = getToolHandlers(mockServer);
     callToolHandler = handlers.callToolHandler;
     listToolsHandler = handlers.listToolsHandler;
@@ -244,7 +245,7 @@ describe('set_breakpoint function-name normalization (issue #467)', () => {
     vi.mocked(StdioServerTransport).mockImplementation(function() { return mockStdioTransport as any; });
     mockSessionManager = createMockSessionManager(mockDependencies.adapterRegistry);
     vi.mocked(SessionManager).mockImplementation(function() { return mockSessionManager as any; });
-    new DebugMcpServer();
+    createDebugServerWithFacade();
     callToolHandler = getToolHandlers(mockServer).callToolHandler;
     mockSessionManager.getSession.mockReturnValue({ id: 'test-session', sessionLifecycle: 'active' });
   });

@@ -21,7 +21,8 @@ import {
   getToolHandlers,
   type ListToolsHandler,
   type MockServer,
-  type MockSessionManager
+  type MockSessionManager,
+  createDebugServerWithFacade
 } from './server-test-helpers.js';
 
 vi.mock('@modelcontextprotocol/server', async () =>
@@ -54,7 +55,7 @@ describe('DEBUG_MCP_BP_ADDRESSING gating (#271)', () => {
   });
 
   function buildServer() {
-    new DebugMcpServer();
+    createDebugServerWithFacade();
     return getToolHandlers(mockServer);
   }
 
@@ -138,7 +139,7 @@ describe('DEBUG_MCP_BP_ADDRESSING gating (#271)', () => {
 
   it('mentions expectedContent in server instructions only outside line mode', () => {
     vi.stubEnv('DEBUG_MCP_BP_ADDRESSING', 'line');
-    new DebugMcpServer();
+    createDebugServerWithFacade();
     const lineInstructions = (vi.mocked(Server).mock.calls.at(-1)![1] as {
       instructions?: string;
     }).instructions;
@@ -146,7 +147,7 @@ describe('DEBUG_MCP_BP_ADDRESSING gating (#271)', () => {
     expect(lineInstructions).not.toContain('expectedContent');
 
     vi.stubEnv('DEBUG_MCP_BP_ADDRESSING', 'content');
-    new DebugMcpServer();
+    createDebugServerWithFacade();
     const contentInstructions = (vi.mocked(Server).mock.calls.at(-1)![1] as {
       instructions?: string;
     }).instructions;

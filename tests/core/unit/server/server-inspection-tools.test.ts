@@ -15,7 +15,8 @@ import {
   getToolHandlers,
   type CallToolHandler,
   type MockServer,
-  type MockSessionManager
+  type MockSessionManager,
+  createDebugServerWithFacade
 } from './server-test-helpers.js';
 import { OutputRingBuffer } from '../../../../src/session/output-buffer.js';
 import { CppAdapterPolicy, JavaAdapterPolicy, JsDebugAdapterPolicy, SessionState, type AdapterPolicy } from '@debugmcp/shared';
@@ -49,7 +50,7 @@ describe('Server Inspection Tools Tests', () => {
     mockSessionManager = createMockSessionManager(mockDependencies.adapterRegistry);
     vi.mocked(SessionManager).mockImplementation(function() { return mockSessionManager as any; });
 
-    new DebugMcpServer();
+    createDebugServerWithFacade();
     callToolHandler = getToolHandlers(mockServer).callToolHandler;
   });
 

@@ -21,7 +21,8 @@ import {
   getToolHandlers,
   type CallToolHandler,
   type MockServer,
-  type MockSessionManager
+  type MockSessionManager,
+  createDebugServerWithFacade
 } from './server-test-helpers.js';
 
 vi.mock('@modelcontextprotocol/server', async () =>
@@ -49,7 +50,7 @@ describe('set_breakpoint logMessage gating', () => {
     mockSessionManager = createMockSessionManager(mockDependencies.adapterRegistry);
     vi.mocked(SessionManager).mockImplementation(function() { return mockSessionManager as any; });
 
-    new DebugMcpServer();
+    createDebugServerWithFacade();
     callToolHandler = getToolHandlers(mockServer).callToolHandler;
 
     mockSessionManager.getSession.mockReturnValue({

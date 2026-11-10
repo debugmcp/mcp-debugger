@@ -3,9 +3,10 @@ import type { Express, Request, Response, NextFunction } from 'express';
 import express from 'express';
 import { randomUUID } from 'crypto';
 import { IncomingMessage, ServerResponse } from 'http';
-import { isInitializeRequest, ProtocolErrorCode } from '@modelcontextprotocol/server';
+import { isInitializeRequest, ProtocolErrorCode, type Server } from '@modelcontextprotocol/server';
 import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
 import { DebugMcpServer, type DebugMcpServerOptions } from '../server.js';
+import { createProtocolServer } from '../server/protocol-facade.js';
 import { attachSharedFileTransport } from '../utils/logger.js';
 import type { HttpOptions } from './setup.js';
 import {
@@ -68,6 +69,8 @@ export function describeForeignDebugSession(
 export interface HttpCommandDependencies {
   logger: WinstonLoggerType;
   serverFactory: (options: ServerFactoryOptions) => DebugMcpServer;
+  /** Builds the SDK Server facade over a core (issue #1025, step 2); defaults to createProtocolServer. */
+  protocolServerFactory?: typeof createProtocolServer;
   exitProcess?: (code: number) => void;
   /** Injectable stdin for tests; defaults to proc.stdin. */
   stdin?: NodeJS.ReadStream;
@@ -78,6 +81,8 @@ export interface HttpCommandDependencies {
 interface SessionData {
   transport: NodeStreamableHTTPServerTransport;
   server: DebugMcpServer;
+  /** The SDK Server facade connected to this session's transport (issue #1025, step 2). */
+  facade: Server;
   /** Timestamp of the last routed request (or stream close) for this session. */
   lastActivity: number;
   /** Open SSE (GET) streams; a session with a live stream is never idle. */
@@ -181,6 +186,7 @@ export function createHttpApp(
   dependencies: HttpCommandDependencies
 ): Express {
   const { logger, serverFactory } = dependencies;
+  const protocolServerFactory = dependencies.protocolServerFactory ?? createProtocolServer;
   const proc = dependencies.proc ?? process;
 
   // The app is built here rather than with the SDK's createMcpExpressApp()
@@ -346,6 +352,9 @@ export function createHttpApp(
           describeForeignSession,
         });
         await newDebugServer.start();
+        // The SDK Server this session speaks through: a legacy-era facade over
+        // the core (issue #1025, step 2).
+        const facade = protocolServerFactory(newDebugServer, { era: 'legacy', deliver: 'instance' });
 
         // Forward declarations so the closures below can refer to the transport.
         // The SDK assigns its own internal sessionId before invoking onsessioninitialized.
@@ -358,6 +367,7 @@ export function createHttpApp(
               httpSessions.set(sid, {
                 transport: createdTransport,
                 server: newDebugServer,
+                facade,
                 lastActivity: Date.now(),
                 openStreams: 0,
                 hadStream: false,
@@ -385,7 +395,7 @@ export function createHttpApp(
           logger.error(`HTTP transport error for session ${sid}`, error);
         };
 
-        await newDebugServer.server.connect(newTransport);
+        await facade.connect(newTransport);
         transport = newTransport;
       } else if (sessionId) {
         logger.warn('Rejecting MCP request: unknown session ID', { method: req.method });

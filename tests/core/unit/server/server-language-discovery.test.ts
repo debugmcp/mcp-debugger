@@ -15,7 +15,8 @@ import {
   createMockSessionManager,
   getToolHandlers,
   type MockServer,
-  type MockSessionManager
+  type MockSessionManager,
+  createDebugServerWithFacade
 } from './server-test-helpers.js';
 
 // Mock dependencies
@@ -66,7 +67,7 @@ describe('Server Language Discovery Tests', () => {
 
   describe('JavaScript availability and metadata', () => {
     it('should report javascript installed:true in available and include rich JS metadata when resolvable', async () => {
-      const debugServer = new DebugMcpServer();
+      const debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       // Simulate dynamic registry reporting JS resolvable (installed)
@@ -105,7 +106,7 @@ describe('Server Language Discovery Tests', () => {
 
   describe('Ruby availability and metadata', () => {
     it('should report ruby metadata when dynamically discovered', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       mockAdapterRegistry.listLanguages = vi.fn().mockResolvedValue(['python', 'mock', 'ruby']);
@@ -149,7 +150,7 @@ describe('Server Language Discovery Tests', () => {
 
   describe('C/C++ availability and metadata', () => {
     it('should report cpp metadata when dynamically discovered', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       mockAdapterRegistry.listLanguages = vi.fn().mockResolvedValue(['python', 'mock', 'cpp']);
@@ -193,7 +194,7 @@ describe('Server Language Discovery Tests', () => {
 
   describe('per-mode availability (issue #331)', () => {
     it('reports attach-only availability when the launch toolchain is missing on a direct-connect adapter', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       mockAdapterRegistry.listAvailableAdapters = vi.fn().mockResolvedValue([
@@ -219,7 +220,7 @@ describe('Server Language Discovery Tests', () => {
     });
 
     it('reports attach unsupported for adapters that declare no attach implementation', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       mockAdapterRegistry.listAvailableAdapters = vi.fn().mockResolvedValue([
@@ -246,7 +247,7 @@ describe('Server Language Discovery Tests', () => {
     it('keeps disabled languages in available[] with a disabled reason for both modes', async () => {
       vi.stubEnv('DEBUG_MCP_DISABLE_LANGUAGES', 'go');
 
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       mockAdapterRegistry.listAvailableAdapters = vi.fn().mockResolvedValue([
@@ -273,7 +274,7 @@ describe('Server Language Discovery Tests', () => {
     });
 
     it('reports uninstalled adapters as unavailable in both modes with a not-installed reason', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       mockAdapterRegistry.listAvailableAdapters = vi.fn().mockResolvedValue([
@@ -297,7 +298,7 @@ describe('Server Language Discovery Tests', () => {
     });
 
     it('fails open (reports available) when the toolchain probe throws', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       mockAdapterRegistry.listAvailableAdapters = vi.fn().mockResolvedValue([
@@ -322,7 +323,7 @@ describe('Server Language Discovery Tests', () => {
 
   describe('getSupportedLanguagesAsync', () => {
     it('should return languages from dynamic discovery when available', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       // Mock the registry to support dynamic discovery
@@ -350,7 +351,7 @@ describe('Server Language Discovery Tests', () => {
     });
 
     it('should fallback to getSupportedLanguages when dynamic discovery fails', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       // Mock dynamic discovery to fail
@@ -379,7 +380,7 @@ describe('Server Language Discovery Tests', () => {
       // the session manager. Delete the key rather than widen the doubles' types.
       Reflect.deleteProperty(mockSessionManager, 'adapterRegistry');
 
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       const result = await callToolHandler({
@@ -397,7 +398,7 @@ describe('Server Language Discovery Tests', () => {
     });
 
     it('should handle empty language lists from registry', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       // Mock empty responses
@@ -427,7 +428,7 @@ describe('Server Language Discovery Tests', () => {
       mockAdapterRegistry.listLanguages = vi.fn().mockResolvedValue(['mock']);
       mockAdapterRegistry.getSupportedLanguages = vi.fn().mockReturnValue(['mock']);
 
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       const result = await callToolHandler({
@@ -448,7 +449,7 @@ describe('Server Language Discovery Tests', () => {
 
   describe('getLanguageMetadata', () => {
     it('should generate metadata for discovered languages', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       mockAdapterRegistry.listLanguages = vi.fn().mockResolvedValue(['python', 'mock']);
@@ -469,7 +470,7 @@ describe('Server Language Discovery Tests', () => {
     });
 
     it('should handle unknown languages in metadata generation', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       mockAdapterRegistry.listLanguages = vi.fn().mockResolvedValue(['python', 'unknown-language']);
@@ -505,7 +506,7 @@ describe('Server Language Discovery Tests', () => {
 
   describe('create_debug_session with language validation', () => {
     it('should validate language support before creating session', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       mockAdapterRegistry.listLanguages = vi.fn().mockResolvedValue(['python', 'mock']);
@@ -537,7 +538,7 @@ describe('Server Language Discovery Tests', () => {
     });
 
     it('should reject unsupported languages', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       mockAdapterRegistry.listLanguages = vi.fn().mockResolvedValue(['python', 'mock']);
@@ -556,7 +557,7 @@ describe('Server Language Discovery Tests', () => {
     });
 
     it('should handle language validation errors gracefully', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       // Mock language discovery to fail
@@ -577,7 +578,7 @@ describe('Server Language Discovery Tests', () => {
     });
 
     it('fails fast with the availability reason when the toolchain probe reports unavailable (issue #360)', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       mockAdapterRegistry.getFactory = vi.fn().mockResolvedValue({
@@ -606,7 +607,7 @@ describe('Server Language Discovery Tests', () => {
     });
 
     it('fails open (creates the session) when the toolchain probe throws (issue #360)', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       mockAdapterRegistry.getFactory = vi.fn().mockResolvedValue({
@@ -631,7 +632,7 @@ describe('Server Language Discovery Tests', () => {
     });
 
     it('allows session creation despite a failed launch probe when direct-connect attach is usable (issue #360)', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       const validate = vi.fn().mockResolvedValue({ valid: false, errors: ['no toolchain'], warnings: [] });
@@ -659,7 +660,7 @@ describe('Server Language Discovery Tests', () => {
     });
 
     it('still fails creation when launch is unavailable and attach is spawn-based (issue #360)', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       mockAdapterRegistry.getFactory = vi.fn().mockResolvedValue({
@@ -693,7 +694,7 @@ describe('Server Language Discovery Tests', () => {
     });
 
     it('starts debugging for a READY session', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       const result = await callToolHandler({
@@ -722,7 +723,7 @@ describe('Server Language Discovery Tests', () => {
     });
 
     it('starts debugging without re-validating the session language', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       // A session language outside the default list: start_debugging does not
@@ -774,7 +775,7 @@ describe('Server Language Discovery Tests', () => {
       Reflect.deleteProperty(registryWithoutListLanguages, 'listLanguages');
       mockSessionManager.adapterRegistry = registryWithoutListLanguages;
 
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       const result = await callToolHandler({
@@ -799,7 +800,7 @@ describe('Server Language Discovery Tests', () => {
     });
 
     it('should handle registry method exceptions', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       const { callToolHandler } = getToolHandlers(mockServer);
 
       mockAdapterRegistry.listLanguages = vi.fn().mockImplementation(() => {

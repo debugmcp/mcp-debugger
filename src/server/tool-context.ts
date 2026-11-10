@@ -31,7 +31,7 @@ import type { SimpleFileChecker, FileExistenceResult } from '../utils/simple-fil
 import type { LineReader } from '../utils/line-reader.js';
 import type { BuildStalenessChecker } from '../session/breakpoints/build-staleness.js';
 import type { ValidationResultCache } from '../utils/language-availability.js';
-import type { OutputResourceNotifier } from './output-resources.js';
+import type { NotificationHub } from './notification-hub.js';
 import type { LanguageMetadata } from './language-discovery.js';
 import type { ToolArguments } from './tool-arguments.js';
 import type { ToolResult } from './tool-result.js';
@@ -65,7 +65,8 @@ export interface ToolContext {
   readonly buildStaleness: BuildStalenessChecker;
   readonly environment: IEnvironment;
   readonly validationCache: ValidationResultCache;
-  readonly outputResources: OutputResourceNotifier;
+  /** The process-wide notification hub: resource list changes and coalesced output pings (issue #1025, step 2). */
+  readonly notifications: NotificationHub;
 
   // ---- context services ----
   getAdapterRegistry(): IAdapterRegistry;

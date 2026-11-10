@@ -13,7 +13,8 @@ import {
   createMockSessionManager,
   createMockStdioTransport,
   type MockServer,
-  type MockSessionManager
+  type MockSessionManager,
+  createDebugServerWithFacade
 } from './server-test-helpers.js';
 
 // Mock dependencies
@@ -49,7 +50,7 @@ describe('Server Lifecycle Tests', () => {
 
   describe('Server Start', () => {
     it('should start server with stdio transport', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
 
       await debugServer.start();
 
@@ -59,7 +60,7 @@ describe('Server Lifecycle Tests', () => {
 
   describe('Server Stop', () => {
     it('should stop server and close all sessions', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       mockSessionManager.closeAllSessions.mockResolvedValue(undefined);
 
       await debugServer.stop();
@@ -70,7 +71,7 @@ describe('Server Lifecycle Tests', () => {
 
     it('stop() disposes the container logger so churning HTTP sessions do not leak (issue #404)', async () => {
       mockDependencies.disposeLogger = vi.fn();
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       mockSessionManager.closeAllSessions.mockResolvedValue(undefined);
 
       await debugServer.stop();
@@ -79,7 +80,7 @@ describe('Server Lifecycle Tests', () => {
     });
 
     it('should propagate closeAllSessions errors from stop', async () => {
-      debugServer = new DebugMcpServer();
+      debugServer = createDebugServerWithFacade();
       mockSessionManager.closeAllSessions.mockRejectedValue(new Error('Close sessions failed'));
 
       // stop() awaits closeAllSessions() without catching, so the rejection propagates

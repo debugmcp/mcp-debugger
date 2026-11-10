@@ -1,6 +1,7 @@
 import type { Logger as WinstonLoggerType } from 'winston';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { DebugMcpServer } from '../server.js';
+import { createProtocolServer } from '../server/protocol-facade.js';
 import type { StdioOptions } from './setup.js';
 import type { ProcessLike } from '../interfaces/process-interfaces.js';
 
@@ -12,6 +13,8 @@ export interface ServerFactoryOptions {
 export interface StdioCommandDependencies {
   logger: WinstonLoggerType;
   serverFactory: (options: ServerFactoryOptions) => DebugMcpServer;
+  /** Builds the SDK Server facade over the core (issue #1025, step 2); defaults to createProtocolServer. */
+  protocolServerFactory?: typeof createProtocolServer;
   exitProcess?: (code: number) => void;
   /** Injectable stdin for tests; defaults to proc.stdin. */
   stdin?: NodeJS.ReadStream;
@@ -46,9 +49,12 @@ export async function handleStdioCommand(
     // Cleared on transport close or signals.
     const keepAlive = setInterval(() => {}, 60000);
     
-    // Connect MCP server to transport
+    // Connect a legacy-era protocol facade over the core to the transport
+    // (issue #1025, step 2): the core owns no SDK Server of its own.
     logger.info('[MCP] Connecting server to stdio transport...');
-    await debugMcpServer.server.connect(transport);
+    const protocolServerFactory = dependencies.protocolServerFactory ?? createProtocolServer;
+    const facade = protocolServerFactory(debugMcpServer, { era: 'legacy', deliver: 'instance' });
+    await facade.connect(transport);
     logger.info('[MCP] Server connected to stdio transport successfully');
 
     // Every exit path must tear down the debug sessions first (issue #337):

@@ -16,7 +16,8 @@ import {
   createMockSessionManager,
   createMockStdioTransport,
   getPromptHandlers,
-  type MockServer
+  type MockServer,
+  createDebugServerWithFacade
 } from './server-test-helpers.js';
 
 vi.mock('@modelcontextprotocol/server', async () =>
@@ -50,7 +51,7 @@ describe('Server Prompts Tests', () => {
     const mockSessionManager = createMockSessionManager(mockDependencies.adapterRegistry);
     vi.mocked(SessionManager).mockImplementation(function() { return mockSessionManager as any; });
 
-    debugServer = new DebugMcpServer();
+    debugServer = createDebugServerWithFacade();
   });
 
   afterEach(() => {

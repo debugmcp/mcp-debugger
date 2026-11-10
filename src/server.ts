@@ -5,7 +5,7 @@
  * the sibling directory src/server/ (NodeNext resolves ./server.js and
  * ./server/x.js without conflict).
  */
-import { Server, ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
+import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import { buildServerInstructions } from './skill-content.js';
 import { getVersion } from './cli/version.js';
 import {
@@ -29,6 +29,7 @@ import {
     isSessionTerminated,
     SessionState,
     IEnvironment,
+    IFileSystem,
     ILogger,
     ExceptionBreakMode
 } from '@debugmcp/shared';
@@ -49,15 +50,14 @@ import {
 import { isRedactionEnabled } from './utils/redaction-mode.js';
 import { getVariableAccessMode } from './utils/variable-access.js';
 import { assertLineContent, resolveStatement, stripTrailingComment } from './utils/breakpoint-resolver.js';
-import { OutputResourceNotifier, registerResourceHandlers } from './server/output-resources.js';
-import { registerPromptHandlers } from './server/prompts.js';
+import { outputResourceUri } from './server/output-resources.js';
+import { NotificationHub } from './server/notification-hub.js';
 import {
   discoverSupportedLanguages,
   buildLanguageMetadata,
   LanguageMetadata
 } from './server/language-discovery.js';
 import type { ToolContext, SetBreakpointRequest } from './server/tool-context.js';
-import { registerToolHandlers } from './server/tool-dispatch.js';
 
 export { coerceToolArguments } from './server/tool-arguments.js';
 export type { SetBreakpointRequest };
@@ -79,10 +79,13 @@ export interface DebugMcpServerOptions {
 }
 
 /**
- * Main Debug MCP Server class
+ * The debug core (issue #1025, step 2): the dependency container, the
+ * SessionManager, the per-process services and the notification hub, shared by
+ * every protocol facade in the process. It owns no SDK Server: the CLI
+ * commands build one per connection or request with
+ * `createProtocolServer(core, …)` (src/server/protocol-facade.ts).
  */
 export class DebugMcpServer implements ToolContext {
-  public server: Server;
   /** @internal ToolContext dependency; read live by the tool handlers. */
   public readonly sessionManager: SessionManager;
   /** @internal ToolContext dependency; read live by the tool handlers. */
@@ -97,10 +100,20 @@ export class DebugMcpServer implements ToolContext {
   public readonly buildStaleness: BuildStalenessChecker;
   /** @internal ToolContext dependency; read live by the tool handlers. */
   public readonly environment: IEnvironment;
+  /** The file system the resource handlers read proxy-log tails through. */
+  public readonly fileSystem: IFileSystem;
+  /**
+   * The MCP `instructions` every facade advertises. Mode-gated (issue #271):
+   * the handshake must not teach restricted addressing features. Env is
+   * process-stable, so construction time is fine. Redaction state rides along
+   * (issue #237) so agents aren't surprised by <redacted:...> placeholders.
+   */
+  public readonly instructions: string;
 
-  // Debuggee-output resource subscriptions (issue #218).
+  // Debuggee-output resource notifications (issue #218), fanned out to every
+  // facade's sink by the one hub (issue #1025, step 2).
   /** @internal ToolContext dependency; read live by the tool handlers. */
-  public readonly outputResources: OutputResourceNotifier;
+  public readonly notifications: NotificationHub;
   /** @internal ToolContext dependency; read live by the tool handlers. */
   public readonly validationCache = new ValidationResultCache();
 
@@ -731,53 +744,20 @@ export class DebugMcpServer implements ToolContext {
       this.logger
     );
 
-    // The release version, not a literal: clients and the MCP Registry show this
-    // string, and the Docker bundle reads it baked in (issue #1054).
-    this.server = new Server(
-      { name: 'debug-mcp-server', version: getVersion() },
-      {
-        capabilities: { tools: {}, resources: { subscribe: true, listChanged: true }, prompts: {} },
-        // Mode-gated (issue #271): the handshake must not teach restricted
-        // addressing features. Env is process-stable, so constructor-time is fine.
-        // Redaction state rides along (issue #237) so agents aren't surprised
-        // by <redacted:...> placeholders.
-        instructions: buildServerInstructions(getBpAddressingMode(this.environment), {
-          redactionEnabled: isRedactionEnabled(this.environment),
-          variableAccessMode: getVariableAccessMode(this.environment)
-        })
-      }
-    );
-    // The protocol version each client negotiates, so the move to the
-    // 2026-07-28 revision can be timed from real traffic (issue #1025).
-    this.server.oninitialized = () => {
-      const client = this.server.getClientVersion();
-      this.logger.info('[MCP Server] Client initialized', {
-        protocolVersion: this.server.getNegotiatedProtocolVersion(),
-        client: client ? `${client.name} ${client.version}` : undefined
-      });
-    };
+    this.fileSystem = dependencies.fileSystem;
+    this.instructions = buildServerInstructions(getBpAddressingMode(this.environment), {
+      redactionEnabled: isRedactionEnabled(this.environment),
+      variableAccessMode: getVariableAccessMode(this.environment)
+    });
 
     const sessionManagerConfig: SessionManagerConfig = {
       logDirBase: containerConfig.sessionLogDirBase
     };
-    
-    this.sessionManager = new SessionManager(sessionManagerConfig, dependencies);
-    this.outputResources = new OutputResourceNotifier(this.server, this.logger);
 
-    registerToolHandlers(this.server, this);
-    // Tool handlers read every dependency live through `ctx` (=== this) at call
-    // time; the resource and prompt layers capture `sessionManager` and
-    // `environment` here instead. Both fields are readonly, so production never
-    // observes the difference — but a test that swaps `sessionManager` after
-    // construction sees the swap in tool handlers only, not in resource handlers.
-    registerResourceHandlers(
-      this.server,
-      this.sessionManager,
-      this.outputResources,
-      dependencies.fileSystem
-    );
-    registerPromptHandlers(this.server, this.environment);
-    this.sessionManager.on('output-captured', this.outputResources.handleOutputCaptured);
+    this.sessionManager = new SessionManager(sessionManagerConfig, dependencies);
+    this.notifications = new NotificationHub(this.logger);
+
+    this.sessionManager.on('output-captured', this.handleOutputCaptured);
     // A child session adopted by the server (the session tree, issue #1081)
     // is a new output resource: subscribed clients learn of it as they do of
     // a session created or closed through the tools.
@@ -785,19 +765,20 @@ export class DebugMcpServer implements ToolContext {
     // Removals also happen during relaunch and terminating detach, outside
     // close_debug_session. Clean up each resource at the removal itself.
     this.sessionManager.on('session-removed', this.handleSessionRemoved);
-    this.server.onerror = (error) => {
-      this.logger.error('Server error', { error });
-    };
   }
 
-  /** One listener instance, so stop() can remove exactly what start wired (issue #1081). */
+  /** One listener instance each, so stop() can remove exactly what the constructor wired (issue #1081). */
+  private readonly handleOutputCaptured = (sessionId: string): void => {
+    this.notifications.resourceUpdated(outputResourceUri(sessionId));
+  };
+
   private readonly handleChildSessionAdopted = (): void => {
-    this.outputResources.notifyListChanged();
+    this.notifications.resourcesChanged();
   };
 
   private readonly handleSessionRemoved = (sessionId: string): void => {
-    this.outputResources.forgetSession(sessionId);
-    this.outputResources.notifyListChanged();
+    this.notifications.forgetUri(outputResourceUri(sessionId));
+    this.notifications.resourcesChanged();
   };
 
   /**
@@ -833,11 +814,11 @@ export class DebugMcpServer implements ToolContext {
 
   public async stop(): Promise<void> {
     await this.sessionManager.closeAllSessions();
-    // Tear down output-resource bookkeeping (issue #218): pending debounce
-    // timers and the SessionManager listener must not outlive the server
-    // (the test suite runs with a strict leak guard).
-    this.outputResources.dispose();
-    this.sessionManager.removeListener('output-captured', this.outputResources.handleOutputCaptured);
+    // Tear down notification bookkeeping (issue #218): pending debounce
+    // timers, the sinks and the SessionManager listeners must not outlive the
+    // core (the test suite runs with a strict leak guard).
+    this.notifications.dispose();
+    this.sessionManager.removeListener('output-captured', this.handleOutputCaptured);
     this.sessionManager.removeListener('child-session-adopted', this.handleChildSessionAdopted);
     this.sessionManager.removeListener('session-removed', this.handleSessionRemoved);
     this.logger.info('Debug MCP Server stopped');

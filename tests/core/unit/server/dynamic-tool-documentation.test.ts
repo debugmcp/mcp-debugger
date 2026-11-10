@@ -68,29 +68,19 @@ async function getToolsFromServer(server: DebugMcpServer): Promise<Array<{
     required?: string[];
   };
 }>> {
-  // Tool registration lives in src/server/tool-dispatch.ts; re-run it against
-  // the live server to capture the tools/list handler it registers
+  // Tool registration lives in src/server/tool-dispatch.ts. The core owns no
+  // SDK Server (issue #1025, step 2), so register against a bare recorder and
+  // capture the tools/list handler it registers.
   let capturedHandler: unknown = null;
-  
-  // Spy on setRequestHandler. The SDK keys handlers by method string; the
-  // cast narrows its overloads to the two-argument form this spy forwards.
-  type Registration = [method: string, handler: unknown];
-  const originalSetRequestHandler = server.server.setRequestHandler.bind(server.server) as unknown as
-    (...registration: Registration) => void;
-  server.server.setRequestHandler = vi.fn().mockImplementation(
-    (...registration: Registration) => {
-      const [schema, handler] = registration;
-      // Capture the tools/list registration
-      if (schema === 'tools/list') {
+  const recorder = {
+    setRequestHandler: vi.fn((method: string, handler: unknown) => {
+      if (method === 'tools/list') {
         capturedHandler = handler;
       }
-      return originalSetRequestHandler(...registration);
-    }
-  );
-  
-  // Re-register tools to capture them
-  registerToolHandlers(server.server, server);
-  
+    })
+  };
+  registerToolHandlers(recorder as unknown as Parameters<typeof registerToolHandlers>[0], server);
+
   // Check if we captured the handler
   if (!capturedHandler) {
     throw new Error('tools/list handler not found');
@@ -99,9 +89,6 @@ async function getToolsFromServer(server: DebugMcpServer): Promise<Array<{
   // Call the handler to get tools
   const listToolsHandler = capturedHandler as (request: unknown) => Promise<unknown>;
   const result = await listToolsHandler({ jsonrpc: '2.0', method: 'tools/list' }) as { tools: Array<unknown> };
-  
-  // Restore original
-  server.server.setRequestHandler = originalSetRequestHandler;
   
   return result.tools as Array<{
     name: string;
