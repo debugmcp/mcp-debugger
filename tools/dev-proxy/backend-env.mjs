@@ -81,16 +81,3 @@ export function buildBackendEnvironment(inherited, overrides, forced = {}) {
   return { ...inherited, ...overrides, ...forced };
 }
 
-/**
- * The proxy's defaults for its backend, under the inherited environment so the
- * user's own setting always wins (issue #1025, step 2): one client, and the
- * proxy's lifetime is the backend's, so the per-debug-session idle policy
- * (30 min on http) is off unless the environment says otherwise — it would
- * close a developer's paused session under them.
- *
- * @param {Record<string, string | undefined>} inherited
- * @returns {Record<string, string | undefined>}
- */
-export function withBackendDefaults(inherited) {
-  return { MCP_DEBUG_SESSION_IDLE_MS: '0', ...inherited };
-}

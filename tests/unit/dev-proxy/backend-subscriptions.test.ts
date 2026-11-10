@@ -63,6 +63,94 @@ describe('dev-proxy backend subscription relay', () => {
     });
   });
 
+  // A backend restart is the proxy's whole purpose, and it kills every debug
+  // session: each subscription a client named before it now points at nothing.
+  // A 2025 backend refuses those one by one. The relay used to rethrow the first
+  // refusal — aborting the re-expression and keeping the dead URI, so every
+  // later reopen failed at the same place.
+  describe('re-expressing to a 2025 backend that refuses a URI', () => {
+    const A = 'debug://sessions/a/output';
+    const B = 'debug://sessions/b/output';
+    const PROXY_LOG = 'debug://sessions/b/proxy-log';
+    const refusal = (uri: string) => Object.assign(new Error(`Unknown resource: ${uri}`), { code: -32602 });
+
+    it('drops a subscription the client named once the backend refuses it, says so once, and still sends the rest', async () => {
+      const { client } = fakeClient('legacy');
+      const log = vi.fn();
+      const relay = createSubscriptionRelay({ getClient: () => client, log });
+      await relay.subscribe(A);
+      await relay.subscribe(B);
+      client.subscribeResource.mockClear();
+      client.subscribeResource.mockImplementation(async ({ uri }: { uri: string }) => {
+        if (uri === A) throw refusal(uri);
+        return {};
+      });
+
+      await expect(relay.reopen()).resolves.toBeUndefined();
+      await relay.reopen();
+
+      expect(relay.uris()).toEqual([B]);
+      // A was asked once and never again; B was re-sent on both reopens.
+      expect(client.subscribeResource.mock.calls.map(([params]) => params.uri)).toEqual([A, B, B]);
+      expect(log.mock.calls.filter(([line]) => String(line).includes(A))).toHaveLength(1);
+      expect(String(log.mock.calls.find(([line]) => String(line).includes(A))![0])).toContain('Dropped');
+    });
+
+    it('asks for a listed resource the backend will not subscribe once, not on every reopen', async () => {
+      const { client } = fakeClient('legacy', [B, PROXY_LOG]);
+      const log = vi.fn();
+      const relay = createSubscriptionRelay({ getClient: () => client, log });
+      relay.trackAll(true);
+      client.subscribeResource.mockImplementation(async ({ uri }: { uri: string }) => {
+        if (uri === PROXY_LOG) throw refusal(uri);
+        return {};
+      });
+
+      await relay.reopen();
+      await relay.refreshKnown();
+      await relay.reopen();
+
+      const asked = client.subscribeResource.mock.calls.map(([params]) => params.uri);
+      expect(asked.filter((uri) => uri === PROXY_LOG)).toHaveLength(1);
+      expect(log.mock.calls.filter(([line]) => String(line).includes(PROXY_LOG))).toHaveLength(1);
+    });
+
+    it('asks again for a refused resource once the backend has stopped and started listing it', async () => {
+      const { client } = fakeClient('legacy', [PROXY_LOG]);
+      const relay = createSubscriptionRelay({ getClient: () => client });
+      relay.trackAll(true);
+      client.subscribeResource.mockRejectedValueOnce(refusal(PROXY_LOG));
+      await relay.reopen();
+
+      client.listResources.mockResolvedValueOnce({ resources: [] });
+      await relay.refreshKnown();
+      await relay.refreshKnown();
+
+      expect(client.subscribeResource.mock.calls.map(([params]) => params.uri)).toEqual([PROXY_LOG, PROXY_LOG]);
+    });
+
+    it('does not mistake a broken connection for a refusal: that failure surfaces and nothing is dropped', async () => {
+      const { client } = fakeClient('legacy');
+      const relay = createSubscriptionRelay({ getClient: () => client });
+      await relay.subscribe(A);
+      client.subscribeResource.mockRejectedValue(new Error('Not connected'));
+
+      await expect(relay.reopen()).rejects.toThrow('Not connected');
+
+      expect(relay.uris()).toEqual([A]);
+    });
+
+    it('still gives the client its own refusal when it subscribes to a resource that is not there', async () => {
+      const { client } = fakeClient('legacy');
+      const relay = createSubscriptionRelay({ getClient: () => client });
+      client.subscribeResource.mockRejectedValue(refusal(A));
+
+      await expect(relay.subscribe(A)).rejects.toThrow('Unknown resource');
+
+      expect(relay.uris()).toEqual([]);
+    });
+  });
+
   describe('against a 2026-07-28 backend', () => {
     it('opens one listen for the set plus the list-changed flags, and re-opens it when the set changes', async () => {
       const { client, closes } = fakeClient('modern');
@@ -212,7 +300,7 @@ describe('dev-proxy backend subscription relay', () => {
     it('against a 2025 backend subscribes each listed resource, and a refusal is logged rather than thrown', async () => {
       const { client } = fakeClient('legacy', ['debug://sessions/a/output', 'debug://sessions/a/proxy-log']);
       client.subscribeResource.mockImplementation(async ({ uri }: { uri: string }) => {
-        if (uri.endsWith('proxy-log')) throw new Error('Unknown resource: ' + uri);
+        if (uri.endsWith('proxy-log')) throw Object.assign(new Error('Unknown resource: ' + uri), { code: -32602 });
         return {};
       });
       const log = vi.fn();

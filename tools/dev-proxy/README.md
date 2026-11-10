@@ -16,9 +16,12 @@ The proxy speaks both MCP protocol eras to its client (issue #1025): it is serve
 SDK's stdio entry, so a client that probes with `server/discover` — Claude Code's v2 runtime does —
 lands on the current 2026-07-28 revision (sessionless; resource notifications over
 `subscriptions/listen`), and a client that opens with `initialize` gets the 2025 era as before.
-Towards an `http` backend the proxy negotiates the same way and lands on 2026-07-28 when that
-backend's dist serves it (an older dist answers the 2025 era; `dev_server_status` says which
-under `protocolEra`/`protocolVersion`); a stdio backend stays on the 2025 era. Resource
+Towards its backend the proxy negotiates the same way, on either transport, and lands on
+2026-07-28 when that backend serves it (an older build answers the 2025 era; `dev_server_status`
+says which under `protocolEra`/`protocolVersion`). Over stdio it probes on the backend's own
+pipe — its transport is a subclass of the SDK's, which is what keeps the SDK from probing on a
+second backend process — and a 2025 backend falls back to `initialize` on the same pipe
+(measured against the published 0.26.0 npx bundle and Docker image). Resource
 subscriptions are translated across eras: the set is expressed to the backend in the era it
 speaks (one `subscriptions/listen` for a 2026 backend, one `resources/subscribe` per URI for a
 2025 one) and re-expressed after every backend restart, so a `dev_rebuild_and_restart` no longer
@@ -26,7 +29,10 @@ loses them. A 2025 client names what it wants through `resources/subscribe`. A 2
 listen set is served by the SDK entry and never reaches the proxy, so while such a client is
 connected the proxy subscribes the backend to every resource it lists (re-read on each
 `resources/list_changed`) and the proxy's own router delivers the client only what it listened
-for. That router also drops a `tools/list_changed` a 2026 client did not opt into
+for. A 2025 backend can refuse a URI: after a restart every debug session is gone, so a
+subscription a client named before it is dropped (logged once) and the rest are still sent, and
+a listed resource the backend will not subscribe (its proxy-log tails) is asked once, not on
+every reconnect. That router also drops a `tools/list_changed` a 2026 client did not opt into
 (`toolsListChanged: true` on its listen): after a restart that changes the inventory, such a
 client keeps its tool list until it lists again.
 
@@ -108,7 +114,7 @@ Once connected, three additional tools are available:
 |------|-------------|
 | `dev_restart_debugger` | Kill and restart the backend. Pass `rebuild: true` to build first, and optionally replace backend environment overrides with `env`. |
 | `dev_rebuild_and_restart` | Run `npm run build` then restart the backend; also accepts replacement backend `env` overrides. |
-| `dev_server_status` | Check backend state, PID, uptime, build progress, transport, project root, port, and display-safe environment overrides. |
+| `dev_server_status` | Check backend state, PID, uptime, build progress, transport, protocol era and version, project root, port, and display-safe environment overrides. Before the first start it reports `stopped` with a `note` that the backend starts on the first request that needs it. |
 
 All regular mcp-debugger tools (create_debug_session, set_breakpoint, etc.) are forwarded transparently to the backend.
 A forwarded call carries the caller's cancellation signal and is given 660 s before the proxy gives up on it — above the
@@ -182,11 +188,6 @@ or `DEBUG_MCP_LOG_LEVEL=debug`. Supplying `env` replaces the persistent override
 preserves the current set, and passing `{}` clears it. Overrides are merged into every subsequent
 backend spawn but are not passed to the build command. Proxy-controlled values required for clean
 shutdown take precedence.
-
-One default sits under everything else: the backend runs with `MCP_DEBUG_SESSION_IDLE_MS=0`
-(the per-debug-session idle policy off) unless your environment or an override sets the variable
-— one client, and the proxy's lifetime is the backend's, so a 30-minute window would close a
-paused session under you.
 
 Each request's overrides are applied when its queued restart begins, after any build succeeds.
 An omitted `env` inherits the preceding applied settings. Concurrent requests cannot overwrite one

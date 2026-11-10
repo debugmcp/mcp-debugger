@@ -144,3 +144,24 @@ export function assertBackendAvailable(backend) {
     );
   }
 }
+
+/**
+ * What the proxy logs when its deferred first backend start does not happen.
+ * A request that lands while the proxy is shutting down asks for a start that
+ * is refused on purpose: that is said as it is, without the retry hint a real
+ * failure gets — there is nothing to retry and nobody left to retry it.
+ *
+ * @param {unknown} err
+ * @param {boolean} shuttingDown
+ * @returns {string[]}
+ */
+export function initialStartFailureLines(err, shuttingDown) {
+  if (shuttingDown) {
+    return ['Not starting the backend: the proxy is shutting down'];
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return [
+    `Initial backend start failed: ${message}`,
+    'Dev tools are still available — use dev_restart_debugger to retry',
+  ];
+}

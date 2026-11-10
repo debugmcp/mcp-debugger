@@ -23,6 +23,15 @@
  * Every expression against the backend is serialized: two subscribes arriving
  * back-to-back must not both open a listen and leak the first one.
  *
+ * A 2025 backend can refuse a URI, and re-expression has to survive that. A
+ * restart ends every debug session, so each subscription a client named before
+ * it points at nothing afterwards: a refused named URI is dropped, said once,
+ * and the rest are still sent. A listed resource the backend will not
+ * subscribe (its proxy-log tails) is asked once and remembered until the
+ * backend stops listing it. Only a JSON-RPC error answer counts as a refusal;
+ * a failed connection still surfaces. (A 2026 backend's listen takes any URI,
+ * so a dead one named there simply never fires.)
+ *
  * The notifications themselves arrive through the client's
  * `fallbackNotificationHandler` exactly as before (the v2 client passes
  * listen-stream change notifications through to its registered handlers); the
@@ -47,6 +56,8 @@ export function createSubscriptionRelay({ getClient, log = () => {} }) {
   /** What the backend lists, while a 2026 front client is pinned. @type {string[]} */
   let known = [];
   let trackingAll = false;
+  /** Listed resources the backend refused to subscribe; asked once each. @type {Set<string>} */
+  const refused = new Set();
   /** The modern-era listen currently open, if any. @type {{ close(): Promise<void> } | null} */
   let open = null;
   /** Serializes every expression against the backend. @type {Promise<void>} */
@@ -90,15 +101,34 @@ export function createSubscriptionRelay({ getClient, log = () => {} }) {
     known = (listed?.resources ?? [])
       .map((resource) => resource?.uri)
       .filter((uri) => typeof uri === 'string');
+    // A refusal is remembered only while the backend still lists the resource.
+    for (const uri of refused) {
+      if (!known.includes(uri)) refused.delete(uri);
+    }
   };
 
-  /** One tracked URI the backend refuses is logged, not fatal; a named one is the client's answer. */
+  /** The backend answered no (a JSON-RPC error), as opposed to the connection failing. */
+  const isRefusal = (err) => typeof err?.code === 'number';
+
+  /**
+   * Re-express one URI to a 2025 backend. A refusal never stops the others: a
+   * URI the client named is dropped (the resource is gone), a listed one is
+   * remembered so it is not asked again. A failed connection is thrown.
+   */
   const subscribeOne = async (client, uri) => {
+    const named = uris.has(uri);
+    if (!named && refused.has(uri)) return;
     try {
       await client.subscribeResource({ uri });
     } catch (err) {
-      if (uris.has(uri)) throw err;
-      log(`Backend refused a tracked subscription for ${uri}: ${err?.message ?? err}`);
+      if (!isRefusal(err)) throw err;
+      if (named) {
+        uris.delete(uri);
+        log(`Dropped the subscription to ${uri}: the backend no longer has it (${err?.message ?? err})`);
+      } else {
+        refused.add(uri);
+        log(`Backend refused a tracked subscription for ${uri}: ${err?.message ?? err}`);
+      }
     }
   };
 
@@ -127,7 +157,10 @@ export function createSubscriptionRelay({ getClient, log = () => {} }) {
      */
     trackAll(enabled) {
       trackingAll = Boolean(enabled);
-      if (!trackingAll) known = [];
+      if (!trackingAll) {
+        known = [];
+        refused.clear();
+      }
     },
 
     /** @param {string} uri */

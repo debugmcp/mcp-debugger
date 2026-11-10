@@ -4,7 +4,6 @@ import {
   resolveBackendPort,
   resolveBackendTransport,
   updateBackendEnvOverrides,
-  withBackendDefaults,
 } from '../../../tools/dev-proxy/backend-env.mjs';
 
 describe('dev-proxy backend port (issue #689)', () => {
@@ -82,18 +81,3 @@ describe('dev-proxy backend environment overrides', () => {
   });
 });
 
-describe('dev-proxy backend defaults (issue #1025, step 2)', () => {
-  // One client, and the proxy's own lifetime is the backend's: the per-debug-session
-  // idle policy (30 min on http) would close a developer's paused session under them.
-  it('turns the backend idle policy off unless the environment already says otherwise', () => {
-    expect(withBackendDefaults({ PATH: '/bin' })).toEqual({ MCP_DEBUG_SESSION_IDLE_MS: '0', PATH: '/bin' });
-    expect(withBackendDefaults({ MCP_DEBUG_SESSION_IDLE_MS: '60000' })).toEqual({ MCP_DEBUG_SESSION_IDLE_MS: '60000' });
-    // An explicitly empty value is the user's too: the server treats it as unset, not ours to rewrite.
-    expect(withBackendDefaults({ MCP_DEBUG_SESSION_IDLE_MS: '' })).toEqual({ MCP_DEBUG_SESSION_IDLE_MS: '' });
-  });
-
-  it('lets a tool-call override win over the default', () => {
-    const env = buildBackendEnvironment(withBackendDefaults({}), { MCP_DEBUG_SESSION_IDLE_MS: '5000' });
-    expect(env.MCP_DEBUG_SESSION_IDLE_MS).toBe('5000');
-  });
-});

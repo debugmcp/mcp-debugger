@@ -73,7 +73,12 @@ describe('dev-proxy protocol eras (issue #1025, step 2)', () => {
 
     const status = await client.callTool({ name: 'dev_server_status', arguments: {} });
     const text = (status.content as Array<{ text: string }>)[0].text;
-    expect(JSON.parse(text)).toMatchObject({ state: 'stopped', protocolEra: null });
+    // "stopped" alone reads like a crash; before the first start the status says why.
+    expect(JSON.parse(text)).toMatchObject({
+      state: 'stopped',
+      protocolEra: null,
+      note: expect.stringContaining('starts on the first request that needs it'),
+    });
     expect(await backendStarts()).toBe(0);
 
     const listed = await client.listTools();
@@ -82,9 +87,9 @@ describe('dev-proxy protocol eras (issue #1025, step 2)', () => {
 
     // The fixture backend is a 2025 server: the status says which era the backend speaks.
     const after = await client.callTool({ name: 'dev_server_status', arguments: {} });
-    expect(JSON.parse((after.content as Array<{ text: string }>)[0].text)).toMatchObject({
-      state: 'running', protocolEra: 'legacy', protocolVersion: '2025-11-25',
-    });
+    const running = JSON.parse((after.content as Array<{ text: string }>)[0].text);
+    expect(running).toMatchObject({ state: 'running', protocolEra: 'legacy', protocolVersion: '2025-11-25' });
+    expect(running).not.toHaveProperty('note');
   });
 
   it('a 2025 client keeps working unchanged', async () => {
@@ -94,6 +99,28 @@ describe('dev-proxy protocol eras (issue #1025, step 2)', () => {
     expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(['fixture_tool', ...devTools]);
     expect(await backendStarts()).toBe(1);
   });
+
+  // The proxy is itself a v2 client of its backend. Over stdio the SDK's `auto`
+  // mode probes on a disposable sibling process for its base transport — a second
+  // backend — so the proxy used to pin a stdio backend to the 2025 era and never
+  // exercise the server's modern stdio leg. A subclassed transport probes in place
+  // (documented SDK behaviour): one process, and a legacy server falls back to
+  // `initialize` on the same pipe, which the first case above pins (the fixture
+  // is a 2025 server: one start, era legacy).
+  it('negotiates with a stdio backend in place: the real server lands on 2026-07-28, started once', async () => {
+    const { client, backendStarts } = await connect('legacy', {
+      DEV_PROXY_BACKEND_CMD: `"${process.execPath}" "${path.join(root, 'tests/fixtures/dev-proxy/real-backend.mjs')}"`,
+    });
+
+    const listed = await client.listTools();
+    expect(listed.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(['create_debug_session', ...devTools]));
+
+    const status = await client.callTool({ name: 'dev_server_status', arguments: {} });
+    expect(JSON.parse((status.content as Array<{ text: string }>)[0].text)).toMatchObject({
+      state: 'running', backendTransport: 'stdio', protocolEra: 'modern', protocolVersion: '2026-07-28',
+    });
+    expect(await backendStarts()).toBe(1);
+  }, 60_000);
 
   it('a 2026-07-28 client hears a backend resources/updated on its listen stream through the relay', async () => {
     const { client } = await connect({ pin: '2026-07-28' });

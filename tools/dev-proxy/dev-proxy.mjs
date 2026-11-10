@@ -48,12 +48,14 @@ import {
   resolveBackendPort,
   resolveBackendTransport,
   updateBackendEnvOverrides,
-  withBackendDefaults,
 } from './backend-env.mjs';
 import { LifecycleQueue, queueGenerationCleanup } from './lifecycle-queue.mjs';
 import { runBuild } from './build-runner.mjs';
 import { ensurePortFree, forceKillPid } from './process-cleanup.mjs';
-import { backendCallOptions } from './tool-error.mjs';
+import {
+  backendCallOptions,
+  initialStartFailureLines,
+} from './tool-error.mjs';
 import { createFront, ObservedStdioServerTransport } from './front-server.mjs';
 import { createSubscriptionRelay } from './backend-subscriptions.mjs';
 
@@ -154,6 +156,18 @@ function parseCommandString(cmdStr) {
 // BackendManager — manages the mcp-debugger child process lifecycle
 // ---------------------------------------------------------------------------
 
+/**
+ * The stdio transport to the backend. It adds nothing; being a subclass is the
+ * point. Under `auto` negotiation the SDK probes server/discover on a
+ * disposable SIBLING process spawned from the same parameters, but only for
+ * its exact base StdioClientTransport — "subclasses probe in place", on the
+ * connection itself. A sibling here would be a second backend; in place, the
+ * backend starts once, a 2026-07-28 server pins the modern era, and a 2025
+ * server answers the probe with "method not found" and gets `initialize` on
+ * the same pipe (issue #1025, step 2).
+ */
+class BackendStdioTransport extends StdioClientTransport {}
+
 class BackendManager {
   constructor() {
     /** @type {'stopped' | 'starting' | 'running' | 'restarting'} */
@@ -216,7 +230,7 @@ class BackendManager {
 
   _buildBackendEnv({ forceStdinClose = false } = {}) {
     return buildBackendEnvironment(
-      withBackendDefaults(process.env),
+      process.env,
       this.backendEnvOverrides,
       forceStdinClose ? { MCP_EXIT_ON_STDIN_CLOSE: '1' } : {}
     );
@@ -246,8 +260,7 @@ class BackendManager {
         return true;
       },
       (err) => {
-        log(`Initial backend start failed: ${err.message}`);
-        log('Dev tools are still available — use dev_restart_debugger to retry');
+        for (const line of initialStartFailureLines(err, this.shutdownController.signal.aborted)) log(line);
         return false;
       }
     );
@@ -523,6 +536,11 @@ class BackendManager {
       backendCmd: BACKEND_CMD || null,
       backendEnvOverrides: sanitizedEnv.values,
       backendEnvRedaction: sanitizedEnv.redaction,
+      // "stopped" alone reads like a crash. Before the first start it is the
+      // normal state: the backend starts on the first request that needs it.
+      ...(this.initialStart
+        ? {}
+        : { note: 'The backend has not been started yet: it starts on the first request that needs it (any listing or tool call other than the dev_* tools).' }),
     };
   }
 
@@ -574,11 +592,12 @@ class BackendManager {
   async _connectClient(command, args) {
     const closeState = { expected: false };
     this.transportCloseState = closeState;
-    // The http backend speaks both eras (issue #1025): negotiate. A stdio backend
-    // stays legacy — `auto` over stdio would probe on a sibling of the backend.
+    // The backend speaks both eras on both transports (issue #1025): negotiate.
+    // Over stdio that takes BackendStdioTransport below, so the probe runs on
+    // the backend's own pipe rather than on a second backend process.
     this.mcpClient = new Client(
       { name: 'dev-proxy', version: '1.0.0' },
-      { versionNegotiation: { mode: this.backendTransport === 'http' ? 'auto' : 'legacy' } }
+      { versionNegotiation: { mode: 'auto' } }
     );
 
     // Relay backend resource notifications (resources/updated, list_changed)
@@ -595,7 +614,7 @@ class BackendManager {
 
     if (this.backendTransport === 'stdio') {
       // Stdio mode: StdioClientTransport spawns the child
-      const transport = new StdioClientTransport({
+      const transport = new BackendStdioTransport({
         command,
         args,
         cwd: PROJECT_ROOT,
