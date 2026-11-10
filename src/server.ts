@@ -68,14 +68,6 @@ export type { SetBreakpointRequest };
 export interface DebugMcpServerOptions {
   logLevel?: string;
   logFile?: string;
-  /**
-   * Explains a debug session id this server does not hold when another server
-   * in the same process does — Streamable HTTP runs one DebugMcpServer per MCP
-   * client session (issue #939). Answers the sentence the tool call should
-   * carry, or undefined when the id is simply unknown. Consulted by the
-   * tools/call dispatch before any handler runs; absent for stdio.
-   */
-  describeForeignSession?: (sessionId: string) => string | undefined;
 }
 
 /**
@@ -259,7 +251,7 @@ export class DebugMcpServer implements ToolContext {
 
   // Core business logic methods — delegated to by the MCP tool dispatch handler
   // (CallToolRequestSchema); public so they are also accessible for testing/external use
-  public async createDebugSession(params: { language: DebugLanguage; name?: string; executablePath?: string; }): Promise<DebugSessionInfo> {
+  public async createDebugSession(params: { language: DebugLanguage; name?: string; executablePath?: string; ownerKey?: string; }): Promise<DebugSessionInfo> {
     // Validate language support using dynamic discovery
     const supported = await this.getSupportedLanguagesAsync();
     const requested = params.language as unknown as string;
@@ -285,7 +277,9 @@ export class DebugMcpServer implements ToolContext {
       const sessionInfo: DebugSessionInfo = await this.sessionManager.createSession({
         language: params.language as DebugLanguage,
         name: name,
-        executablePath: params.executablePath  // Use executablePath for consistency
+        executablePath: params.executablePath,  // Use executablePath for consistency
+        // The caller's scope (issue #1025, step 2); absent for the shared anonymous scope.
+        ...(params.ownerKey !== undefined ? { ownerKey: params.ownerKey } : {})
       });
       return sessionInfo;
     } catch (error) {
@@ -713,11 +707,7 @@ export class DebugMcpServer implements ToolContext {
     return this.sessionManager.waitForStop(sessionId, timeoutMs, signal);
   }
 
-  /** @internal ToolContext service; see DebugMcpServerOptions.describeForeignSession. */
-  public readonly describeForeignSession?: (sessionId: string) => string | undefined;
-
   constructor(options: DebugMcpServerOptions = {}) {
-    this.describeForeignSession = options.describeForeignSession;
     const containerConfig: ContainerConfig = {
       logLevel: options.logLevel,
       logFile: options.logFile,

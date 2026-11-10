@@ -117,9 +117,25 @@ export function createMockSessionManager(mockAdapterRegistry: IAdapterRegistry) 
   ): ReturnType<SessionManager['getVariablesDetailed']> {
     return { variables: (await manager.getVariables(...args)) ?? [] };
   }
+  // The owner-key seam's defaults (issue #1025, step 2): the anonymous
+  // single-tenant view — visibility follows existence, the listing is the
+  // whole list. Hoisted declarations with explicit return types, like
+  // delegateToGetVariables, so the self-reference is not a TS7022 circularity.
+  function sessionVisible(...args: Parameters<SessionManager['isSessionVisibleTo']>): ReturnType<SessionManager['isSessionVisibleTo']> {
+    return manager.getSession(args[0]) !== undefined;
+  }
+  function visibleSessions(..._args: Parameters<SessionManager['getSessionsVisibleTo']>): ReturnType<SessionManager['getSessionsVisibleTo']> {
+    return manager.getAllSessions() ?? [];
+  }
   const manager = {
     createSession: vi.fn(),
     getAllSessions: vi.fn(),
+    // The owner-key seam (issue #1025, step 2): the default is the anonymous
+    // single-tenant view, every session visible, the listing = getAllSessions.
+    isSessionVisibleTo: vi.fn<SessionManager['isSessionVisibleTo']>(sessionVisible),
+    getSessionsVisibleTo: vi.fn<SessionManager['getSessionsVisibleTo']>(visibleSessions),
+    touchActivity: vi.fn(),
+    idleMsOf: vi.fn<SessionManager['idleMsOf']>(() => undefined),
     getSession: vi.fn(),
     closeSession: vi.fn(),
     closeSessionReporting: vi.fn(),

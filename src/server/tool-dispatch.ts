@@ -5,7 +5,8 @@
  * name produces the same tool:error log line as a failing handler.
  */
 import { Server, ProtocolError, ProtocolErrorCode, type CallToolResult } from '@modelcontextprotocol/server';
-import { toWireError } from '../errors/debug-errors.js';
+import { SessionNotFoundError, toWireError } from '../errors/debug-errors.js';
+import { ownerKeyOf } from './owner-key.js';
 import { coerceToolArguments, ToolArguments } from './tool-arguments.js';
 import { extractPayloadSuccess, failureResult, sanitizeRequest, type ToolResult } from './tool-result.js';
 import { buildToolDefinitions, isToolName, TOOL_ALIASES, type ToolDefinition } from './tool-schemas.js';
@@ -14,31 +15,28 @@ import type { ToolContext } from './tool-context.js';
 import { TOOL_HANDLERS } from './handlers/index.js';
 
 /**
- * A session id that another server in this process owns answers with that
- * fact instead of the tool's own "not found" (Streamable HTTP: one
- * DebugMcpServer per MCP client session, issue #939). Decided here, in front
- * of every handler, so all tools say it the same way — the per-tool wordings
- * (`Session not found`, `Failed to close debug session`, hot_reload'
- * protocol error) stay for an id nobody holds. Ownership is terminal, which is
- * why it outranks a handler's own argument gates: no argument fix can make the
- * call succeed on this server. Only tools whose schema takes a `sessionId` are
- * gated — the SDK does not validate arguments against the schema, and a stale
- * id an agent carries across MCP sessions must never refuse
- * `create_debug_session`. Only the HTTP layer provides the lookup; without it
- * nothing changes.
+ * The owner-key gate (issue #1025, step 2). A `sessionId` argument naming a
+ * session outside the caller's scope is answered exactly as an unknown id
+ * would be — the same sentence `SessionNotFoundError` carries — so nothing
+ * about its existence leaks, and it is decided here, in front of every
+ * handler, so all tools say it the same way. Only tools whose schema takes a
+ * `sessionId` are gated: the SDK does not validate arguments against the
+ * schema, and a stale id an agent carries along must never refuse
+ * `create_debug_session`. An id nobody holds passes through to the handler's
+ * own not-found answer. With no authentication configured every caller is in
+ * the shared anonymous scope and sees everything, as before.
  */
-function foreignSessionResult(ctx: ToolContext, definition: ToolDefinition, sessionId: unknown): ToolResult | undefined {
-  if (typeof sessionId !== 'string' || !ctx.describeForeignSession) {
+function outOfScopeResult(ctx: ToolContext, definition: ToolDefinition, sessionId: unknown, callerKey: string | undefined): ToolResult | undefined {
+  if (typeof sessionId !== 'string') {
     return undefined;
   }
   if (!Object.prototype.hasOwnProperty.call(definition.inputSchema.properties ?? {}, 'sessionId')) {
     return undefined;
   }
-  if (ctx.sessionManager.getSession(sessionId)) {
+  if (!ctx.sessionManager.getSession(sessionId) || ctx.sessionManager.isSessionVisibleTo(sessionId, callerKey)) {
     return undefined;
   }
-  const explanation = ctx.describeForeignSession(sessionId);
-  return explanation ? failureResult(explanation) : undefined;
+  return failureResult(new SessionNotFoundError(sessionId).message);
 }
 
 /**
@@ -103,9 +101,15 @@ export function registerToolHandlers(server: Server, ctx: ToolContext): void {
           throw new ProtocolError(ProtocolErrorCode.MethodNotFound, `Unknown tool: ${toolName}`);
         }
         assertRequiredToolArguments(definition, args as unknown as Record<string, unknown>);
+        const callerKey = ownerKeyOf(callCtx);
+        const refused = outOfScopeResult(ctx, definition, args.sessionId, callerKey);
+        if (!refused && typeof args.sessionId === 'string') {
+          // A tool call naming a session is activity for the idle policy (issue #1025, step 2).
+          ctx.sessionManager.touchActivity(args.sessionId);
+        }
         const result =
-          foreignSessionResult(ctx, definition, args.sessionId) ??
-          await TOOL_HANDLERS[toolName](ctx, args, requestedName, { signal: callCtx?.mcpReq.signal });
+          refused ??
+          await TOOL_HANDLERS[toolName](ctx, args, requestedName, { signal: callCtx?.mcpReq.signal, callerKey });
         
         // Log tool response; success mirrors the payload's own success flag (issue #397)
         ctx.logger.info('tool:response', {

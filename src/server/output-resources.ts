@@ -16,6 +16,7 @@ import type { SessionManager } from '../session/session-manager.js';
 import { proxyLogPathFor } from '../proxy/session-log-layout.js';
 import { readProxyLogTail } from '../session/launch/proxy-failure-diagnostics.js';
 import { outputOnNote } from './handlers/output-tools.js';
+import { ownerKeyOf } from './owner-key.js';
 import {
   outputResourceUri,
   parseOutputResourceUri,
@@ -73,8 +74,9 @@ export function registerResourceHandlers(
   subscriptions: ResourceSubscriptions,
   fileSystem: Pick<IFileSystem, 'readTail'>
 ): void {
-  server.setRequestHandler('resources/list', async () => {
-    const sessions = sessionManager.getAllSessions();
+  server.setRequestHandler('resources/list', async (_request, callCtx) => {
+    // The caller's scope (issue #1025, step 2); anonymous sees anonymous.
+    const sessions = sessionManager.getSessionsVisibleTo(ownerKeyOf(callCtx));
     return {
       resources: sessions.flatMap(session => {
         const resources = [{
@@ -96,12 +98,15 @@ export function registerResourceHandlers(
     };
   });
 
-  server.setRequestHandler('resources/read', async (request) => {
+  server.setRequestHandler('resources/read', async (request, callCtx) => {
     const uri = request.params.uri;
     const outputSessionId = parseOutputResourceUri(uri);
     const proxyLogSessionId = parseProxyLogResourceUri(uri);
     const sessionId = outputSessionId ?? proxyLogSessionId;
-    const session = sessionId ? sessionManager.getSession(sessionId) : undefined;
+    // A session outside the caller's scope is an unknown resource (issue #1025, step 2).
+    const session = sessionId && sessionManager.isSessionVisibleTo(sessionId, ownerKeyOf(callCtx))
+      ? sessionManager.getSession(sessionId)
+      : undefined;
     if (!session) {
       throw new WireMcpError(ProtocolErrorCode.InvalidParams, `Unknown resource: ${uri}`);
     }
@@ -133,10 +138,10 @@ export function registerResourceHandlers(
     };
   });
 
-  server.setRequestHandler('resources/subscribe', async (request) => {
+  server.setRequestHandler('resources/subscribe', async (request, callCtx) => {
     const uri = request.params.uri;
     const sessionId = parseOutputResourceUri(uri);
-    if (!sessionId || !sessionManager.getSession(sessionId)) {
+    if (!sessionId || !sessionManager.isSessionVisibleTo(sessionId, ownerKeyOf(callCtx))) {
       throw new WireMcpError(ProtocolErrorCode.InvalidParams, `Unknown resource: ${uri}`);
     }
     subscriptions.subscribe(uri);

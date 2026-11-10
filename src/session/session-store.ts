@@ -31,6 +31,12 @@ export interface CreateSessionParams {
   executablePath?: string;  // Language-agnostic executable path
   /** The session that spawned this one (the session tree, issue #1081); child sessions only. */
   parentSessionId?: string;
+  /**
+   * The scope the session belongs to (issue #1025, step 2): the authenticated
+   * principal that created it, or absent for the shared anonymous scope. A
+   * child inherits its root's. Never projected into DebugSessionInfo.
+   */
+  ownerKey?: string;
 }
 
 import type { DebugProtocol } from '@vscode/debugprotocol';
@@ -103,6 +109,8 @@ export interface SessionExposure {
  */
 export interface ManagedSession extends DebugSessionInfo {
   executablePath?: string;  // Language-agnostic executable path
+  /** The scope the session belongs to (issue #1025, step 2); see CreateSessionParams.ownerKey. */
+  ownerKey?: string;
   proxyManager?: IProxyManager;
   // In-flight proxy teardown started by a terminal event handler (which
   // clears proxyManager before its fire-and-forget stop()); closeSession
@@ -260,7 +268,7 @@ export class SessionStore {
    * Creates a new debug session
    */
   createSession(params: CreateSessionParams): DebugSessionInfo {
-    const { language, name, executablePath, parentSessionId } = params;
+    const { language, name, executablePath, parentSessionId, ownerKey } = params;
     const sessionId = uuidv4();
     const sessionName = name || `session-${sessionId.substring(0, 8)}`;
     
@@ -288,6 +296,7 @@ export class SessionStore {
       sessionLifecycle: SessionLifecycleState.CREATED,
       executionState: undefined,
       ...(parentSessionId ? { parentSessionId } : {}),
+      ...(ownerKey !== undefined ? { ownerKey } : {}),
     };
 
     this.sessions.set(sessionId, session);

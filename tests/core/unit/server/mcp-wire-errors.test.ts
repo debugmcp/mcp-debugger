@@ -119,7 +119,9 @@ describe('protocol errors reach SDK clients as the bare reason, with the code be
   it('an unknown resource (read and subscribe)', async () => {
     const sessionManager = {
       getAllSessions: () => [],
-      getSession: () => undefined
+      getSessionsVisibleTo: () => [],
+      getSession: () => undefined,
+      isSessionVisibleTo: () => false
     } as unknown as SessionManager;
     const notifier: ResourceSubscriptions = { subscribe: vi.fn(), unsubscribe: vi.fn() };
     registerResourceHandlers(server, sessionManager, notifier, { readTail: vi.fn() });

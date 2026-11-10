@@ -13,7 +13,7 @@ import { attachRequestFromArgs, carriesLastStop, emittableStopInfo, hoistStopLan
 import { namesAttachTarget } from '../../session/attach/attach-addressing.js';
 import { failureResult, jsonResult, rethrowAsMcpError, type ToolResult } from '../tool-result.js';
 
-export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
+export const createDebugSessionTool: ToolHandler = async (ctx, args, _toolName, extra) => {
   // Validate before creating the session so a bad argument does
   // not leave an orphan session behind (issue #336).
   assertPlainObjectArg(args.adapterConfig, 'adapterConfig');
@@ -79,7 +79,9 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
   const sessionInfo = await ctx.createDebugSession({
     language: lang,
     name: args.name,
-    executablePath: args.executablePath
+    executablePath: args.executablePath,
+    // The caller's scope (issue #1025, step 2); absent for the shared anonymous scope.
+    ...(extra?.callerKey !== undefined ? { ownerKey: extra.callerKey } : {})
   });
 
   // Log session creation
@@ -155,9 +157,11 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
   }
 };
 
-export async function handleListDebugSessions(ctx: ToolContext): Promise<ToolResult> {
+export async function handleListDebugSessions(ctx: ToolContext, callerKey?: string): Promise<ToolResult> {
   try {
-    const sessionsInfo: DebugSessionInfo[] = ctx.sessionManager.getAllSessions();
+    // The whole process's list, in the caller's scope (issue #1025, step 2):
+    // with no authentication every caller is anonymous and sees everything.
+    const sessionsInfo: DebugSessionInfo[] = ctx.sessionManager.getSessionsVisibleTo(callerKey);
     const sessionData = sessionsInfo.map((session: DebugSessionInfo) => {
       const mappedSession: Record<string, unknown> = { 
           id: session.id, 
@@ -213,8 +217,8 @@ export async function handleListDebugSessions(ctx: ToolContext): Promise<ToolRes
   }
 }
 
-export const listDebugSessionsTool: ToolHandler = async (ctx) => {
-  return handleListDebugSessions(ctx);
+export const listDebugSessionsTool: ToolHandler = async (ctx, _args, _toolName, extra) => {
+  return handleListDebugSessions(ctx, extra?.callerKey);
 };
 
 export const closeDebugSessionTool: ToolHandler = async (ctx, args) => {

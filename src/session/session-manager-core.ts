@@ -3,6 +3,7 @@
  * and event handling.
  */
 import { EventEmitter } from 'events';
+import { visibleTo } from '../server/owner-key.js';
 import {
   SessionState, SessionLifecycleState, DebugLanguage, DebugSessionInfo, mapLegacyState,
   isTerminalSessionState, AdapterPolicy, SessionOutputEntry, redactSecretsInString
@@ -400,6 +401,13 @@ export abstract class SessionManagerCore extends EventEmitter {
   protected launchValidationCache = new ValidationResultCache();
 
   /**
+   * The idle policy's clocks (issue #1025, step 2): last activity per ROOT
+   * session id — a tool call naming any session in a tree refreshes its root,
+   * and only roots expire. Cleared when the root is removed.
+   */
+  private readonly lastActivityAt = new Map<string, number>();
+
+  /**
    * Constructor with full dependency injection
    */
   constructor(
@@ -460,15 +468,56 @@ export abstract class SessionManagerCore extends EventEmitter {
     return result.redacted ? { text: result.value, redacted: true } : { text, redacted: false };
   }
 
-  async createSession(params: { language: DebugLanguage; name?: string; executablePath?: string; }): Promise<DebugSessionInfo> {
+  async createSession(params: { language: DebugLanguage; name?: string; executablePath?: string; ownerKey?: string; }): Promise<DebugSessionInfo> {
     const createParams = {
       language: params.language,
       name: params.name,
-      executablePath: params.executablePath
+      executablePath: params.executablePath,
+      // The caller's scope (issue #1025, step 2); absent = the shared anonymous scope.
+      ...(params.ownerKey !== undefined ? { ownerKey: params.ownerKey } : {})
     };
     const sessionInfo = this.sessionStore.createSession(createParams);
+    this.touchActivity(sessionInfo.id);
     this.logger.info(`[SessionManager] Created new session: ${sessionInfo.name} (ID: ${sessionInfo.id}), state: ${sessionInfo.state}`);
     return sessionInfo;
+  }
+
+  /**
+   * Whether a caller in `callerKey`'s scope may see and drive this session
+   * (issue #1025, step 2). An unknown id is visible to nobody. The key lives on
+   * the managed row only, so the public listing never carries it.
+   */
+  isSessionVisibleTo(sessionId: string, callerKey: string | undefined): boolean {
+    const session = this.sessionStore.get(sessionId);
+    return session !== undefined && visibleTo(session.ownerKey, callerKey);
+  }
+
+  /** The public listing, filtered to the caller's scope (issue #1025, step 2). */
+  getSessionsVisibleTo(callerKey: string | undefined): DebugSessionInfo[] {
+    return this.sessionStore.getAll().filter((info) => visibleTo(this.sessionStore.get(info.id)?.ownerKey, callerKey));
+  }
+
+  /**
+   * Activity for the idle policy (issue #1025, step 2): a tool call naming any
+   * session in a tree refreshes the tree's root; only roots have a clock. An
+   * unknown id is a no-op.
+   */
+  touchActivity(sessionId: string): void {
+    const session = this.sessionStore.get(sessionId);
+    if (!session) {
+      return;
+    }
+    this.lastActivityAt.set(this.rootOf(session).id, Date.now());
+  }
+
+  /** How long a root's tree has been idle, in ms; a child reports its root's. Undefined for an unknown id. */
+  idleMsOf(sessionId: string, now = Date.now()): number | undefined {
+    const session = this.sessionStore.get(sessionId);
+    if (!session) {
+      return undefined;
+    }
+    const last = this.lastActivityAt.get(this.rootOf(session).id);
+    return last === undefined ? undefined : Math.max(0, now - last);
   }
 
   protected async findFreePort(): Promise<number> {
@@ -804,6 +853,7 @@ export abstract class SessionManagerCore extends EventEmitter {
 
     this.logger.info(`Session ${sessionId} marked as STOPPED/TERMINATED.`);
     this.sessionStore.remove(sessionId);
+    this.lastActivityAt.delete(sessionId);
     this.emit('session-removed', sessionId);
     // Anything still waiting on this session learns it is gone (issue #849),
     // and a wait on an ancestor's tree sees one descendant fewer (issue #1081).
@@ -1104,7 +1154,9 @@ export abstract class SessionManagerCore extends EventEmitter {
         language: parent.language,
         name: reported.name,
         executablePath: parent.executablePath,
-        parentSessionId: parent.id
+        parentSessionId: parent.id,
+        // A child lives in its root's scope (issue #1025, step 2).
+        ...(parent.ownerKey !== undefined ? { ownerKey: parent.ownerKey } : {})
       });
       child = this.sessionStore.getOrThrow(info.id);
       child.logDir = parent.logDir;
