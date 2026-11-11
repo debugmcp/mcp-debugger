@@ -280,7 +280,7 @@
       },
       {
         "name": "restart_debugging",
-        "description": "Restart the debuggee: terminate the current program (if still running) and relaunch it with the same configuration as the last start_debugging. All current breakpoints are re-applied automatically. The get_output buffer starts fresh — read from since=0 after a restart. Works while running, paused, or after the program has exited. Not available for attach sessions or sessions never launched. Answers like start_debugging, including \"running\" with pending:true when the relaunch has not stopped within the same short hold (then call wait_for_stop)",
+        "description": "Restart the debuggee: terminate the current program (if still running) and relaunch it with the same configuration as the last start_debugging. All current breakpoints are re-applied automatically. The get_output buffer starts fresh — read from since=0 after a restart. A Flutter session hot-restarts in place instead, an attached one included: same process, output buffer kept, and the answer carries hotRestart: true. Works while running, paused, or after the program has exited. Not available for sessions never launched, or for attach sessions of the other adapters (detach and re-attach). Answers like start_debugging, including \"running\" with pending:true when the relaunch has not stopped within the same short hold (then call wait_for_stop)",
         "inputSchema": {
           "type": "object",
           "properties": {
