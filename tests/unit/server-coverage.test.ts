@@ -12,7 +12,8 @@ import { SessionManager } from '../../src/session/session-manager.js';
 import {
   createMockDependencies,
   createMockServer,
-  getResourceHandlers
+  getResourceHandlers,
+  createDebugServerWithFacade
 } from '../core/unit/server/server-test-helpers.js';
 
 // The same preamble the sibling suites under tests/core/unit/server/ use.
@@ -93,7 +94,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
     // No logFile: with the container mocked the option is inert, and naming a
     // path here is what made this suite write one.
-    server = new DebugMcpServer({ logLevel: 'info' });
+    server = createDebugServerWithFacade({ logLevel: 'info' });
     (server as any).logger = mockLogger;
   });
 

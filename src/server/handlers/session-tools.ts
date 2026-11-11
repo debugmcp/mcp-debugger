@@ -91,8 +91,8 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
     timestamp: Date.now()
   });
 
-  // A new output resource is now listable (issue #218)
-  ctx.outputResources.notifyListChanged();
+  // A new output resource is now listable (issue #218), for every connected client
+  ctx.notifications.resourcesChanged();
 
   if (attachRequest) {
     // Attach mode: immediately attach to the running process

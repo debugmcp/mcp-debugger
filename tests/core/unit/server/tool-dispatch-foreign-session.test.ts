@@ -38,7 +38,7 @@ function fakeContext(overrides: Partial<ToolContext> = {}): ToolContext {
       throw new SessionNotFoundError(sessionId);
     },
     closeDebugSession: vi.fn(async () => ({ closed: false, closedSessionIds: [] })),
-    outputResources: { forgetSession: vi.fn(), notifyListChanged: vi.fn() },
+    notifications: { forgetUri: vi.fn(), resourcesChanged: vi.fn() },
     ...overrides
   } as unknown as ToolContext;
 }

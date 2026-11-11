@@ -7,6 +7,7 @@ import { FakeCurrentProcess } from '../../test-utils/mocks/fake-current-process.
 import { invokeMiddleware } from '../../test-utils/mocks/express-stubs.js';
 import type { Logger as WinstonLoggerType } from 'winston';
 import { DebugMcpServer } from '../../../src/server.js';
+import type { createProtocolServer } from '../../../src/server/protocol-facade.js';
 
 vi.mock('../../../src/server.js');
 vi.mock('@modelcontextprotocol/node');
@@ -38,6 +39,8 @@ describe('HTTP Command Handler', () => {
   let mockExitProcess: Mock<(code: number) => void>;
   let mockServer: DebugMcpServer;
   let mockTransport: any;
+  let mockFacade: { connect: Mock<() => Promise<void>> };
+  let mockProtocolServerFactory: Mock<typeof createProtocolServer>;
   let fakeProc: FakeCurrentProcess;
   let mockApp: any;
 
@@ -54,17 +57,18 @@ describe('HTTP Command Handler', () => {
       level: 'info',
     } as any;
 
+    // The core (issue #1025, step 2): it owns no SDK Server; the app builds a
+    // protocol facade per MCP session and connects THAT to the transport.
     mockServer = {
       start: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn().mockResolvedValue(undefined),
-      server: {
-        connect: vi.fn().mockResolvedValue(undefined),
-      },
       sessionManager: {
         getAllSessions: vi.fn().mockReturnValue([]),
         getSession: vi.fn().mockReturnValue(undefined),
       },
     } as any;
+    mockFacade = { connect: vi.fn<() => Promise<void>>().mockResolvedValue(undefined) };
+    mockProtocolServerFactory = vi.fn<typeof createProtocolServer>(() => mockFacade as any);
 
     mockServerFactory = vi.fn<(options: ServerFactoryOptions) => DebugMcpServer>().mockReturnValue(mockServer);
     mockExitProcess = vi.fn<(code: number) => void>();
@@ -124,7 +128,7 @@ describe('HTTP Command Handler', () => {
 
   describe('createHttpApp', () => {
     it('builds the app itself: Host allowlist first, then CORS, then a single 10 MB JSON parser (issues #667, #670)', () => {
-      createHttpApp({ port: '3001' }, { logger: mockLogger, serverFactory: mockServerFactory });
+      createHttpApp({ port: '3001' }, { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory });
 
       expect(expressMock.express).toHaveBeenCalledTimes(1);
       const uses = mockApp.use.mock.calls.map((c: any[]) => c[0]);
@@ -143,7 +147,7 @@ describe('HTTP Command Handler', () => {
     });
 
     it('answers body-parser failures in the JSON-RPC shape and passes every other error on (issue #670)', () => {
-      createHttpApp({ port: '3001' }, { logger: mockLogger, serverFactory: mockServerFactory });
+      createHttpApp({ port: '3001' }, { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory });
       const errorHandler = mockApp.use.mock.calls[3][0] as (err: unknown, req: any, res: any, next: any) => void;
       const run = (err: unknown, headersSent = false) => {
         const json = vi.fn();
@@ -192,7 +196,7 @@ describe('HTTP Command Handler', () => {
     });
 
     it('accepts only the loopback trio by default', () => {
-      createHttpApp({ port: '3001' }, { logger: mockLogger, serverFactory: mockServerFactory });
+      createHttpApp({ port: '3001' }, { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory });
       const hostMiddleware = mockApp.use.mock.calls[0][0];
       for (const host of ['localhost', '127.0.0.1:3001', '[::1]:3001']) {
         expect(runHost(hostMiddleware, host).next, host).toHaveBeenCalledTimes(1);
@@ -204,7 +208,7 @@ describe('HTTP Command Handler', () => {
       fakeProc.env.MCP_HTTP_ALLOWED_HOSTS = 'from-env.example';
       createHttpApp(
         { port: '3001', allowedHost: ['from-flag.example'] },
-        { logger: mockLogger, serverFactory: mockServerFactory, proc: fakeProc }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, proc: fakeProc }
       );
       const hostMiddleware = mockApp.use.mock.calls[0][0];
       expect(runHost(hostMiddleware, 'from-flag.example:3000').next).toHaveBeenCalledTimes(1);
@@ -218,25 +222,25 @@ describe('HTTP Command Handler', () => {
     it('exposes the per-session transport map for graceful shutdown', () => {
       const app = createHttpApp(
         { port: '3001' },
-        { logger: mockLogger, serverFactory: mockServerFactory }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory }
       );
       expect((app as any).httpSessions).toBeInstanceOf(Map);
     });
 
     it('registers /mcp on POST, GET, and DELETE', () => {
-      createHttpApp({ port: '3001' }, { logger: mockLogger, serverFactory: mockServerFactory });
+      createHttpApp({ port: '3001' }, { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory });
       expect(mockApp.post).toHaveBeenCalledWith('/mcp', expect.any(Function));
       expect(mockApp.get).toHaveBeenCalledWith('/mcp', expect.any(Function));
       expect(mockApp.delete).toHaveBeenCalledWith('/mcp', expect.any(Function));
     });
 
     it('registers a /health endpoint', () => {
-      createHttpApp({ port: '3001' }, { logger: mockLogger, serverFactory: mockServerFactory });
+      createHttpApp({ port: '3001' }, { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory });
       expect(mockApp.get).toHaveBeenCalledWith('/health', expect.any(Function));
     });
 
     it('installs a CORS middleware that exposes Mcp-Session-Id and related headers', () => {
-      createHttpApp({ port: '3001' }, { logger: mockLogger, serverFactory: mockServerFactory });
+      createHttpApp({ port: '3001' }, { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory });
 
       // CORS is the second use() call, after the Host allowlist
       const corsMiddleware = mockApp.use.mock.calls[1][0];
@@ -275,7 +279,7 @@ describe('HTTP Command Handler', () => {
     function getHandler() {
       const app = createHttpApp(
         { port: '3001' },
-        { logger: mockLogger, serverFactory: mockServerFactory }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory }
       );
       const postCall = mockApp.post.mock.calls.find((c: any) => c[0] === '/mcp');
       return { app, handler: postCall![1] as (req: any, res: any) => Promise<void> };
@@ -314,7 +318,8 @@ describe('HTTP Command Handler', () => {
 
       expect(mockServerFactory).toHaveBeenCalledTimes(1);
       expect(MockedStreamableHTTPServerTransport).toHaveBeenCalledTimes(1);
-      expect(mockServer.server.connect).toHaveBeenCalledWith(mockTransport);
+      expect(mockProtocolServerFactory).toHaveBeenCalledWith(mockServer, { era: 'legacy', deliver: 'instance' });
+      expect(mockFacade.connect).toHaveBeenCalledWith(mockTransport);
       expect(typeof lastTransportOptions.sessionIdGenerator).toBe('function');
       expect(typeof lastTransportOptions.onsessioninitialized).toBe('function');
       expect(mockTransport.handleRequest).toHaveBeenCalledWith(req, res, req.body);
@@ -487,7 +492,7 @@ describe('HTTP Command Handler', () => {
     it('reports the address and port the server listens on (issue #680)', () => {
       createHttpApp(
         { port: '3001', bind: '0.0.0.0' },
-        { logger: mockLogger, serverFactory: mockServerFactory }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory }
       );
       const healthCall = mockApp.get.mock.calls.find((c: any) => c[0] === '/health');
       const res = { json: vi.fn() };
@@ -498,7 +503,7 @@ describe('HTTP Command Handler', () => {
     it('reports mode http and the active session count', async () => {
       const app = createHttpApp(
         { port: '3001' },
-        { logger: mockLogger, serverFactory: mockServerFactory }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory }
       );
       const healthCall = mockApp.get.mock.calls.find((c: any) => c[0] === '/health');
       const healthHandler = healthCall![1];
@@ -536,7 +541,7 @@ describe('HTTP Command Handler', () => {
       vi.setSystemTime(100_000);
       const app = createHttpApp(
         { port: '3001' },
-        { logger: mockLogger, serverFactory: mockServerFactory }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory }
       );
       const healthHandler = mockApp.get.mock.calls.find((c: any) => c[0] === '/health')![1];
       (mockServer as any).sessionManager.getAllSessions.mockReturnValue([
@@ -592,7 +597,7 @@ describe('HTTP Command Handler', () => {
       }
       const app = createHttpApp(
         { port: '3001' },
-        { logger: mockLogger, serverFactory: mockServerFactory, proc: fakeProc }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, proc: fakeProc }
       );
       const postCall = mockApp.post.mock.calls.find((c: any) => c[0] === '/mcp');
       return { app, handler: postCall![1] as (req: any, res: any) => Promise<void> };
@@ -862,7 +867,7 @@ describe('HTTP Command Handler', () => {
       Object.assign(fakeProc.env, env);
       const app = createHttpApp(
         { port: '3001' },
-        { logger: mockLogger, serverFactory: mockServerFactory, proc: fakeProc }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, proc: fakeProc }
       );
       const handler = mockApp.post.mock.calls.find((c: any) => c[0] === '/mcp')![1];
       await handler(
@@ -913,7 +918,7 @@ describe('HTTP Command Handler', () => {
     it('refuses to start on an unusable --allowed-host value, naming it (issue #667)', async () => {
       await handleHttpCommand(
         { port: '3001', allowedHost: ['http://bad.example'] },
-        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
 
       expect(mockExitProcess).toHaveBeenCalledWith(1);
@@ -946,7 +951,7 @@ describe('HTTP Command Handler', () => {
 
       await handleHttpCommand(
         { port: '4000', bind: '0.0.0.0' },
-        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
 
       expect(listen).toHaveBeenCalledWith(4000, '0.0.0.0');
@@ -968,7 +973,7 @@ describe('HTTP Command Handler', () => {
 
       await handleHttpCommand(
         { port: '4000' },
-        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
       expect(listen).toHaveBeenCalledWith(4000, '10.0.0.5');
       expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('(from MCP_HTTP_BIND)'));
@@ -977,7 +982,7 @@ describe('HTTP Command Handler', () => {
 
       await handleHttpCommand(
         { port: '4001', bind: '127.0.0.1' },
-        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
       expect(listen).toHaveBeenCalledWith(4001, '127.0.0.1');
     });
@@ -988,7 +993,7 @@ describe('HTTP Command Handler', () => {
 
       await handleHttpCommand(
         { port: '4000', bind: 'localhost' },
-        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
 
       expect(listen).toHaveBeenCalledWith(4000, '127.0.0.1');
@@ -1004,7 +1009,7 @@ describe('HTTP Command Handler', () => {
 
       await handleHttpCommand(
         { port: '3001' },
-        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
 
       expect(listen).toHaveBeenCalledWith(3001, '0.0.0.0');
@@ -1024,7 +1029,7 @@ describe('HTTP Command Handler', () => {
 
       await handleHttpCommand(
         { port: '3001', bind: '10.255.255.9' },
-        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
       handlers.error(Object.assign(new Error('listen EADDRNOTAVAIL'), { code: 'EADDRNOTAVAIL' }));
 
@@ -1049,7 +1054,7 @@ describe('HTTP Command Handler', () => {
 
       await handleHttpCommand(
         { port: '0' },
-        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
       const healthCall = mockApp.get.mock.calls.find((c: any) => c[0] === '/health');
       const before = { json: vi.fn() };
@@ -1065,7 +1070,7 @@ describe('HTTP Command Handler', () => {
     it.each(['abc', '3001x'])("refuses to start on an unusable --port value '%s', naming it (issue #689)", async (port) => {
       await handleHttpCommand(
         { port },
-        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
 
       expect(mockExitProcess).toHaveBeenCalledWith(1);
@@ -1096,7 +1101,7 @@ describe('HTTP Command Handler', () => {
 
       await handleHttpCommand(
         { port: '0' },
-        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
       // Not announced until the socket is bound: the requested port is not the bound one.
       expect(mockLogger.info).not.toHaveBeenCalledWith(expect.stringContaining('listening on'));
@@ -1115,7 +1120,7 @@ describe('HTTP Command Handler', () => {
     it('refuses to start on an unusable --bind value, naming it (issue #680)', async () => {
       await handleHttpCommand(
         { port: '3001', bind: 'myhost' },
-        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
 
       expect(mockExitProcess).toHaveBeenCalledWith(1);
@@ -1135,7 +1140,7 @@ describe('HTTP Command Handler', () => {
 
       await handleHttpCommand(
         { port: '4000', logLevel: 'debug' },
-        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
 
       expect(mockLogger.level).toBe('debug');
@@ -1159,7 +1164,7 @@ describe('HTTP Command Handler', () => {
       // must swallow that (best-effort) and startup must proceed normally.
       await handleHttpCommand(
         { port: '4001', logLevel: 'debug', logFile: path.join(os.tmpdir(), 'http-cmd-502-test.log') },
-        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
 
       expect(listen).toHaveBeenCalledWith(4001, '127.0.0.1');
@@ -1174,7 +1179,7 @@ describe('HTTP Command Handler', () => {
 
       await handleHttpCommand(
         { port: '3001' },
-        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
 
       expect(mockLogger.error).toHaveBeenCalledWith('Failed to start server in HTTP mode', { error });
@@ -1194,7 +1199,7 @@ describe('HTTP Command Handler', () => {
 
       await handleHttpCommand(
         { port: '3001' },
-        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
       handlers.error(Object.assign(new Error('listen EADDRINUSE'), { code: 'EADDRINUSE' }));
 
@@ -1209,7 +1214,7 @@ describe('HTTP Command Handler', () => {
 
       await handleHttpCommand(
         { port: '3001' },
-        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
 
       // gracefulShutdown is async — grab the registered listener so it can be awaited
@@ -1240,7 +1245,7 @@ describe('HTTP Command Handler', () => {
 
       await handleHttpCommand(
         { port: '3001' },
-        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
 
       const sigintHandler = fakeProc.lastListener('SIGINT');
@@ -1269,7 +1274,7 @@ describe('HTTP Command Handler', () => {
 
       await handleHttpCommand(
         { port: '3001' },
-        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
 
       const sigintHandler = fakeProc.lastListener('SIGINT');
@@ -1302,7 +1307,7 @@ describe('HTTP Command Handler', () => {
 
         await handleHttpCommand(
           { port: '3001' },
-          { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, stdin, proc: fakeProc }
+          { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, exitProcess: mockExitProcess, stdin, proc: fakeProc }
         );
 
         // The watchdog must resume stdin so EOF is actually observed
@@ -1327,7 +1332,7 @@ describe('HTTP Command Handler', () => {
 
         await handleHttpCommand(
           { port: '3001' },
-          { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, stdin, proc: fakeProc }
+          { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, exitProcess: mockExitProcess, stdin, proc: fakeProc }
         );
 
         stdin.emit('end');
@@ -1343,7 +1348,7 @@ describe('HTTP Command Handler', () => {
 
         await handleHttpCommand(
           { port: '3001' },
-          { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, stdin, proc: fakeProc }
+          { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, exitProcess: mockExitProcess, stdin, proc: fakeProc }
         );
 
         expect(stdin.resume).not.toHaveBeenCalled();
@@ -1365,7 +1370,7 @@ describe('HTTP Command Handler', () => {
 
       await handleHttpCommand(
         { port: '3001' },
-        { logger: mockLogger, serverFactory: mockServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
       );
 
       const err = Object.assign(new Error('addr in use'), { code: 'EADDRINUSE' });

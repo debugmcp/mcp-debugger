@@ -16,7 +16,8 @@ import {
   createMockSessionManager,
   createMockStdioTransport,
   getToolHandlers,
-  type CallToolHandler
+  type CallToolHandler,
+  createDebugServerWithFacade
 } from './server-test-helpers.js';
 
 vi.mock('@modelcontextprotocol/server', async () =>
@@ -39,7 +40,7 @@ describe('tool aliases (issue #876)', () => {
     vi.mocked(StdioServerTransport).mockImplementation(function() { return createMockStdioTransport() as never; });
     manager = createMockSessionManager(mockDependencies.adapterRegistry);
     vi.mocked(SessionManager).mockImplementation(function() { return manager as never; });
-    new DebugMcpServer();
+    createDebugServerWithFacade();
     callToolHandler = getToolHandlers(mockServer).callToolHandler;
   });
 

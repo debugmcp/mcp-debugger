@@ -4,7 +4,8 @@
 import { vi } from 'vitest';
 import type { EmptyResult, GetPromptResult, ListPromptsResult, ListResourcesResult, ReadResourceResult, Tool } from '@modelcontextprotocol/server';
 import type { IAdapterRegistry } from '@debugmcp/shared';
-import { DebugMcpServer } from '../../../../src/server.js';
+import { DebugMcpServer, type DebugMcpServerOptions } from '../../../../src/server.js';
+import { createProtocolServer } from '../../../../src/server/protocol-facade.js';
 import type { SessionManager } from '../../../../src/session/session-manager.js';
 import type { ToolResult } from '../../../../src/server/tool-result.js';
 import {
@@ -56,8 +57,24 @@ export function createMockServer() {
     close: vi.fn(),
     sendResourceUpdated: vi.fn().mockResolvedValue(undefined),
     sendResourceListChanged: vi.fn().mockResolvedValue(undefined),
-    onerror: undefined as ((error: Error) => void) | undefined
+    getClientVersion: vi.fn(),
+    getNegotiatedProtocolVersion: vi.fn(),
+    onerror: undefined as ((error: Error) => void) | undefined,
+    onclose: undefined as (() => void) | undefined,
+    oninitialized: undefined as (() => void) | undefined
   };
+}
+
+/**
+ * The core plus one legacy-era facade over it, which is what every suite that
+ * reads handlers off the mocked SDK Server needs (issue #1025, step 2): the
+ * core itself constructs no Server, so `new DebugMcpServer()` alone registers
+ * nothing on `createMockServer()`.
+ */
+export function createDebugServerWithFacade(options?: DebugMcpServerOptions): DebugMcpServer {
+  const core = new DebugMcpServer(options);
+  createProtocolServer(core, { era: 'legacy', deliver: 'instance' });
+  return core;
 }
 
 export type MockServer = ReturnType<typeof createMockServer>;

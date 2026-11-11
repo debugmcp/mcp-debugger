@@ -19,7 +19,8 @@ import {
   createMockSessionManager,
   createMockStdioTransport,
   findTool,
-  getToolHandlers
+  getToolHandlers,
+  createDebugServerWithFacade
 } from './server-test-helpers.js';
 
 vi.mock('@modelcontextprotocol/server', async () =>
@@ -45,7 +46,7 @@ function createServer(envOverrides: Record<string, string>) {
   const mockSessionManager = createMockSessionManager(mockDependencies.adapterRegistry);
   vi.mocked(SessionManager).mockImplementation(function() { return mockSessionManager as any; });
 
-  new DebugMcpServer();
+  createDebugServerWithFacade();
   mockSessionManager.getSession.mockReturnValue({ id: 'test-session', sessionLifecycle: 'ACTIVE' });
 
   return { ...getToolHandlers(mockServer), mockSessionManager };

@@ -18,7 +18,8 @@ import {
   type CallToolHandler,
   type ListToolsHandler,
   type MockServer,
-  type MockSessionManager
+  type MockSessionManager,
+  createDebugServerWithFacade
 } from './server-test-helpers.js';
 
 // Mock dependencies
@@ -48,7 +49,7 @@ describe('Server Breakpoint Management Tools', () => {
     mockSessionManager = createMockSessionManager(mockDependencies.adapterRegistry);
     vi.mocked(SessionManager).mockImplementation(function() { return mockSessionManager as any; });
 
-    new DebugMcpServer();
+    createDebugServerWithFacade();
     const handlers = getToolHandlers(mockServer);
     callToolHandler = handlers.callToolHandler;
     listToolsHandler = handlers.listToolsHandler;

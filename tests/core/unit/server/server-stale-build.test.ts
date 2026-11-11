@@ -25,7 +25,8 @@ import {
   getToolHandlers,
   type CallToolHandler,
   type MockServer,
-  type MockSessionManager
+  type MockSessionManager,
+  createDebugServerWithFacade
 } from './server-test-helpers.js';
 
 vi.mock('@modelcontextprotocol/server', async () =>
@@ -88,7 +89,7 @@ describe('set_breakpoint stale-build warning (#938)', () => {
     mockSessionManager = createMockSessionManager(mockDependencies.adapterRegistry);
     vi.mocked(SessionManager).mockImplementation(function() { return mockSessionManager as any; });
 
-    new DebugMcpServer();
+    createDebugServerWithFacade();
     callToolHandler = getToolHandlers(mockServer).callToolHandler;
 
     // A pre-launch session: no lastLaunch, so nothing says the program runs from .ts.

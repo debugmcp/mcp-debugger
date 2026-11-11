@@ -17,7 +17,7 @@ import { registerPromptHandlers } from '../../../../src/server/prompts.js';
 import { registerResourceHandlers } from '../../../../src/server/output-resources.js';
 import type { ToolContext } from '../../../../src/server/tool-context.js';
 import type { SessionManager } from '../../../../src/session/session-manager.js';
-import type { OutputResourceNotifier } from '../../../../src/server/output-resources.js';
+import type { ResourceSubscriptions } from '../../../../src/server/output-resources.js';
 import { SessionNotFoundError } from '../../../../src/errors/debug-errors.js';
 
 const logger = { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() };
@@ -121,7 +121,7 @@ describe('protocol errors reach SDK clients as the bare reason, with the code be
       getAllSessions: () => [],
       getSession: () => undefined
     } as unknown as SessionManager;
-    const notifier = { subscribe: vi.fn(), unsubscribe: vi.fn() } as unknown as OutputResourceNotifier;
+    const notifier: ResourceSubscriptions = { subscribe: vi.fn(), unsubscribe: vi.fn() };
     registerResourceHandlers(server, sessionManager, notifier, { readTail: vi.fn() });
     client = await connect(server);
 

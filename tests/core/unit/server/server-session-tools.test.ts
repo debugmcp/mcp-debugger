@@ -16,7 +16,8 @@ import {
   getToolHandlers,
   type CallToolHandler,
   type MockServer,
-  type MockSessionManager
+  type MockSessionManager,
+  createDebugServerWithFacade
 } from './server-test-helpers.js';
 
 // Mock dependencies
@@ -52,7 +53,7 @@ describe('Server Session Tools Tests', () => {
     });
     vi.mocked(SessionManager).mockImplementation(function() { return mockSessionManager as any; });
     
-    server = new DebugMcpServer();
+    server = createDebugServerWithFacade();
     callToolHandler = getToolHandlers(mockServer).callToolHandler;
   });
 
@@ -248,8 +249,6 @@ describe('Server Session Tools Tests', () => {
   });
 
   describe('close_debug_session', () => {
-    const outputResources = () =>
-      (server as unknown as { outputResources: { forgetSession: (id: string) => void; notifyListChanged: () => void } }).outputResources;
 
     it('should close session successfully', async () => {
       mockSessionManager.closeSessionReporting.mockResolvedValue({ closed: true, closedSessionIds: ['test-session'] });
@@ -272,8 +271,8 @@ describe('Server Session Tools Tests', () => {
         closedSessionIds.forEach(sessionRemovedListener);
         return { closed: true, closedSessionIds, childrenClosed: 2, released: true };
       });
-      const forget = vi.spyOn(outputResources(), 'forgetSession');
-      const announce = vi.spyOn(outputResources(), 'notifyListChanged');
+      const forget = vi.spyOn(server.notifications, 'forgetUri');
+      const announce = vi.spyOn(server.notifications, 'resourcesChanged');
 
       const result = await callToolHandler({
         method: 'tools/call',
@@ -282,7 +281,11 @@ describe('Server Session Tools Tests', () => {
 
       const content = JSON.parse(result.content[0].text);
       expect(content).toEqual({ success: true, message: 'Closed debug session: test-session', childrenClosed: 2, released: true });
-      expect(forget.mock.calls.map(([id]) => id)).toEqual(['grandchild', 'child', 'test-session']);
+      expect(forget.mock.calls.map(([uri]) => uri)).toEqual([
+        'debug://sessions/grandchild/output',
+        'debug://sessions/child/output',
+        'debug://sessions/test-session/output'
+      ]);
       // Once per removal, with no duplicate notification from the handler.
       expect(announce).toHaveBeenCalledTimes(3);
     });

@@ -41,14 +41,29 @@ function foreignSessionResult(ctx: ToolContext, definition: ToolDefinition, sess
   return explanation ? failureResult(explanation) : undefined;
 }
 
+/**
+ * Required fields do not depend on language discovery, so the dispatch index
+ * is immutable per core and built once per core, not per facade: the modern
+ * HTTP leg constructs a facade per request (issue #1025, step 2). tools/list
+ * still rebuilds descriptions with the dynamically discovered language enum
+ * for each request.
+ */
+const DISPATCH_INDEX = new WeakMap<ToolContext, ReadonlyMap<string, ToolDefinition>>();
+
+function dispatchIndexFor(ctx: ToolContext): ReadonlyMap<string, ToolDefinition> {
+  let index = DISPATCH_INDEX.get(ctx);
+  if (!index) {
+    index = new Map(
+      buildToolDefinitions({ supportedLanguages: [], environment: ctx.environment })
+        .map((definition) => [definition.name, definition] as const)
+    );
+    DISPATCH_INDEX.set(ctx, index);
+  }
+  return index;
+}
+
 export function registerToolHandlers(server: Server, ctx: ToolContext): void {
-  // Required fields do not depend on language discovery. Build this immutable
-  // dispatch index once; tools/list can still rebuild descriptions with the
-  // dynamically discovered language enum for each request.
-  const dispatchDefinitions = new Map(
-    buildToolDefinitions({ supportedLanguages: [], environment: ctx.environment })
-      .map((definition) => [definition.name, definition] as const)
-  );
+  const dispatchDefinitions = dispatchIndexFor(ctx);
 
   server.setRequestHandler('tools/list', async () => {
     ctx.logger.debug('Handling ListToolsRequest');

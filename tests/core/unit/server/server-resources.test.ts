@@ -19,7 +19,8 @@ import {
   createMockStdioTransport,
   getResourceHandlers,
   type MockServer,
-  type MockSessionManager
+  type MockSessionManager,
+  createDebugServerWithFacade
 } from './server-test-helpers.js';
 
 vi.mock('@modelcontextprotocol/server', async () =>
@@ -72,7 +73,7 @@ describe('Server Output Resources Tests', () => {
     });
     vi.mocked(SessionManager).mockImplementation(function() { return mockSessionManager as any; });
 
-    debugServer = new DebugMcpServer();
+    debugServer = createDebugServerWithFacade();
   });
 
   afterEach(() => {
@@ -342,7 +343,7 @@ describe('Server Output Resources Tests', () => {
       await expect(subscribe('debug://sessions/sess-1/proxy-log')).rejects.toBeInstanceOf(ProtocolError);
     });
 
-    it('stops pinging after unsubscribe, cancelling any pending timer', async () => {
+    it('stops pinging after unsubscribe: a pending ping fires into the facade filter and is dropped', async () => {
       mockSessionManager.getSession.mockReturnValue(mockSession());
       await subscribe('debug://sessions/sess-1/output');
 
