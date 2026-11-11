@@ -17,6 +17,14 @@ export function resolveBackendPort(raw: string | undefined): number;
 export function resolveBackendTransport(raw: string | undefined): 'http' | 'stdio';
 
 /**
+ * The era the proxy speaks to its backend, from DEV_PROXY_BACKEND_ERA: unset,
+ * empty or `auto` negotiates; `legacy` opens with `initialize` (2025-11-25).
+ * Anything else throws an Error naming the variable and the accepted values,
+ * never the value.
+ */
+export function resolveBackendEra(raw: string | undefined): 'auto' | 'legacy';
+
+/**
  * Replace backend overrides only when a tool call explicitly supplies `env`.
  * Omission returns `current` unchanged (by identity); an empty `env` clears it.
  *

@@ -9,7 +9,7 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { buildDockerImage, createDockerMcpClient, hostToContainerPath, getDockerLogs } from './docker-test-utils.js';
-import { parseSdkToolResult } from '../smoke-test-utils.js';
+import { expectModernEraDebugCycle, parseSdkToolResult } from '../smoke-test-utils.js';
 import type { Client } from '@modelcontextprotocol/client';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -292,6 +292,31 @@ describe.skipIf(SKIP_DOCKER)('Docker: Python Debugging Smoke Tests', () => {
 
     console.log('[Docker Python] ✅ All checks passed');
   }, 120000);  // Increased timeout for Docker operations
+
+  // The cases around this one speak 2025-11-25 (the SDK client's default). The
+  // image serves both eras, and #1025 is not done until the packaged artifact
+  // is seen doing so: a second container, a client pinned to 2026-07-28.
+  it('serves the 2026-07-28 era from the image: discover, the full tool list, one Python breakpoint cycle', async () => {
+    const modernContainer = `mcp-debugger-py-era2026-${Date.now()}`;
+    const modern = await createDockerMcpClient({
+      imageName: 'mcp-debugger:test',
+      containerName: modernContainer,
+      logLevel: 'debug',
+      protocol: 'modern'
+    });
+    try {
+      await expectModernEraDebugCycle(
+        modern.client,
+        hostToContainerPath(path.join(ROOT, 'examples', 'python', 'simple_test.py'))
+      );
+    } catch (error) {
+      console.log('[Docker Python] 2026-era container logs at failure:');
+      console.log(await getDockerLogs(modernContainer));
+      throw error;
+    } finally {
+      await modern.cleanup();
+    }
+  }, 120000);
 
   it('should handle multiple breakpoints in Docker', async () => {
     const hostScriptPath = path.join(ROOT, 'examples', 'python', 'simple_test.py');

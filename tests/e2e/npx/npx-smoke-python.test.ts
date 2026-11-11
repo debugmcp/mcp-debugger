@@ -8,7 +8,7 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { buildAndPackNpmPackage, installPackageGlobally, createNpxMcpClient, cleanupGlobalInstall, getPackageSize, verifyPackageContents } from './npx-test-utils.js';
-import { parseSdkToolResult } from '../smoke-test-utils.js';
+import { expectModernEraDebugCycle, parseSdkToolResult } from '../smoke-test-utils.js';
 import type { Client } from '@modelcontextprotocol/client';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -246,5 +246,17 @@ describe.sequential('NPX: Python Debugging Smoke Tests', () => {
     console.log('[NPX Python] ✓ Session closed');
 
     console.log('[NPX Python] ✅ All checks passed');
+  }, 120000);
+
+  // The cases above speak 2025-11-25 (the SDK client's default). The installed
+  // bundle serves both eras, and #1025 is not done until the packaged artifact
+  // is seen doing so: a second server process, a client pinned to 2026-07-28.
+  it('serves the 2026-07-28 era from the installed bundle: discover, the full tool list, one Python breakpoint cycle', async () => {
+    const modern = await createNpxMcpClient({ logLevel: 'debug', protocol: 'modern' });
+    try {
+      await expectModernEraDebugCycle(modern.client, path.join(ROOT, 'examples', 'python', 'simple_test.py'));
+    } finally {
+      await modern.cleanup();
+    }
   }, 120000);
 });

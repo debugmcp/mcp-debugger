@@ -44,6 +44,7 @@ import {
 } from './docker-backend.mjs';
 import {
   buildBackendEnvironment,
+  resolveBackendEra,
   resolveBackendPort,
   resolveBackendTransport,
   updateBackendEnvOverrides,
@@ -73,6 +74,9 @@ const PROJECT_ROOT = process.env.DEV_PROXY_ROOT || path.resolve(__dirname, '..',
 // since-removed legacy transport's client silently. A throw here exits the
 // proxy with the message on stderr.
 const BACKEND_TRANSPORT = resolveBackendTransport(process.env.DEV_PROXY_BACKEND_TRANSPORT);
+// `auto` negotiates the era with the backend; `legacy` opens with `initialize`,
+// for exercising the 2025 era against a backend that serves both.
+const BACKEND_ERA = resolveBackendEra(process.env.DEV_PROXY_BACKEND_ERA);
 const BACKEND_CMD = process.env.DEV_PROXY_BACKEND_CMD || null;
 
 const parsedTimeout = parseInt(process.env.DEV_PROXY_BUILD_TIMEOUT_MS || '', 10);
@@ -583,13 +587,14 @@ class BackendManager {
   async _connectClient(command, args) {
     const closeState = { expected: false };
     this.transportCloseState = closeState;
-    // The backend speaks both eras on both transports (issue #1025): negotiate.
-    // Over stdio that takes BackendStdioTransport (backend-stdio-transport.mjs),
-    // so the probe runs on the backend's own pipe rather than on a second
-    // backend process.
+    // The backend speaks both eras on both transports (issue #1025): negotiate,
+    // unless DEV_PROXY_BACKEND_ERA=legacy asked for the 2025 era outright.
+    // Over stdio negotiating takes BackendStdioTransport
+    // (backend-stdio-transport.mjs), so the probe runs on the backend's own
+    // pipe rather than on a second backend process.
     this.mcpClient = new Client(
       { name: 'dev-proxy', version: '1.0.0' },
-      { versionNegotiation: { mode: 'auto' } }
+      { versionNegotiation: { mode: BACKEND_ERA } }
     );
 
     // Relay backend resource notifications (resources/updated, list_changed)

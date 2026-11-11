@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildBackendEnvironment,
+  resolveBackendEra,
   resolveBackendPort,
   resolveBackendTransport,
   updateBackendEnvOverrides,
@@ -36,6 +37,37 @@ describe('dev-proxy backend transport (issue #1078)', () => {
     (raw) => {
       expect(() => resolveBackendTransport(raw)).toThrow(/DEV_PROXY_BACKEND_TRANSPORT/);
       expect(() => resolveBackendTransport(raw)).toThrow(raw);
+    }
+  );
+});
+
+// The proxy negotiates the era with its backend, so against a current backend
+// it always lands on 2026-07-28 — and then nothing driven through the proxy
+// exercises the 2025 era that most clients still speak. DEV_PROXY_BACKEND_ERA
+// is the switch for that.
+describe('dev-proxy backend era (issue #1025)', () => {
+  it('negotiates by default, and when DEV_PROXY_BACKEND_ERA says auto', () => {
+    expect(resolveBackendEra(undefined)).toBe('auto');
+    expect(resolveBackendEra('')).toBe('auto');
+    expect(resolveBackendEra('auto')).toBe('auto');
+  });
+
+  it('speaks the 2025 era to the backend when asked for legacy', () => {
+    expect(resolveBackendEra('legacy')).toBe('legacy');
+  });
+
+  it.each(['modern', '2025-11-25', 'Legacy', ' auto', 'synthetic-secret-value\nforged-log-entry'])(
+    'refuses %j by naming the variable and its accepted values, not the value',
+    (raw) => {
+      expect(() => resolveBackendEra(raw)).toThrow("DEV_PROXY_BACKEND_ERA is not a backend era; give 'auto' (default) or 'legacy'");
+      let message = '';
+      try {
+        resolveBackendEra(raw);
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).not.toContain('synthetic-secret-value');
+      expect(message.includes('\n')).toBe(false);
     }
   );
 });

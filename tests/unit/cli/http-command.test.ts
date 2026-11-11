@@ -1206,6 +1206,25 @@ describe('HTTP Command Handler', () => {
         expect(transport.close).toHaveBeenCalled();
       }
     });
+
+    // The rule the idle-policy parser follows: name the setting, never copy the
+    // environment's contents into the log (a secret pasted into the wrong
+    // variable, or a newline that forges a log entry).
+    it.each([
+      ['MCP_HTTP_STALE_SESSION_MS', 30 * 60_000],
+      ['MCP_HTTP_STREAM_LOST_SESSION_MS', 2 * 60_000],
+      ['MCP_HTTP_STALE_SWEEP_INTERVAL_MS', 60_000]
+    ] as const)('names a rejected %s without logging its value', async (name, fallback) => {
+      vi.useFakeTimers();
+      fakeProc.env[name] = 'synthetic-secret-value\nforged-log-entry';
+      const { handler } = createAppAndHandler();
+      await initSession(handler);
+
+      const warnings = vi.mocked(mockLogger.warn).mock.calls.map((call) => call.map(String).join(' '));
+      expect(warnings).toContain(`Ignoring invalid ${name}; using default ${fallback}ms.`);
+      expect(warnings.join(' ')).not.toContain('synthetic-secret-value');
+      expect(warnings.join(' ')).not.toContain('forged-log-entry');
+    });
   });
 
   describe('handleHttpCommand', () => {

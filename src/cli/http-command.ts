@@ -127,7 +127,8 @@ function parseNonNegativeMs(
   }
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < 0) {
-    logger.warn(`Ignoring invalid ${name} value "${raw}"; using default ${fallback}ms.`);
+    // Name the rejected setting without copying untrusted environment contents into logs.
+    logger.warn(`Ignoring invalid ${name}; using default ${fallback}ms.`);
     return fallback;
   }
   return parsed;
@@ -180,7 +181,7 @@ function parseSweepIntervalMs(raw: string | undefined, logger: WinstonLoggerType
   }
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed <= 0) {
-    logger.warn(`Ignoring invalid MCP_HTTP_STALE_SWEEP_INTERVAL_MS value "${raw}"; using default ${DEFAULT_STALE_SWEEP_INTERVAL_MS}ms.`);
+    logger.warn(`Ignoring invalid MCP_HTTP_STALE_SWEEP_INTERVAL_MS; using default ${DEFAULT_STALE_SWEEP_INTERVAL_MS}ms.`);
     return DEFAULT_STALE_SWEEP_INTERVAL_MS;
   }
   return parsed;

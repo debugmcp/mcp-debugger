@@ -22,6 +22,15 @@
  *
  * Exit codes: 0 pass, 1 cycle/assertion failure, 2 usage or spawn error.
  *
+ * Protocol era (issue #1025): by default the cycle opens with `initialize`,
+ * the 2025 era every release speaks. `--era 2026-07-28` runs the same cycle
+ * in the modern era instead: it opens with `server/discover` and every request
+ * carries the per-request envelope in `params._meta`, with no session behind
+ * it. Releases before 0.27.0 cannot speak it, so pass the artifact's own
+ * version with `--artifact-version`: an older artifact is skipped with a
+ * notice, 0.27.0 and later (prereleases included) are held to it. Without
+ * `--artifact-version` the modern cycle is strict.
+ *
  * The server command comes after `--` (so its own flags pass through), e.g.:
  *   node scripts/canary-smoke.mjs \
  *     --lang python --program examples/python/simple_test.py --line 11 \
@@ -37,7 +46,15 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { parseArgs } from 'util';
+import { FIRST_MODERN_ERA_RELEASE, servesModernEra } from './canary-era-gate.mjs';
 
+const MODERN_ERA = '2026-07-28';
+/** What a 2026-07-28 request carries in `params._meta`: there is no handshake to have said it once. */
+const MODERN_ENVELOPE = {
+  'io.modelcontextprotocol/protocolVersion': MODERN_ERA,
+  'io.modelcontextprotocol/clientInfo': { name: 'canary-smoke', version: '1.0.0' },
+  'io.modelcontextprotocol/clientCapabilities': {}
+};
 const POLL_INTERVAL_MS = 250;
 const REQUEST_TIMEOUT_MS = 30000;
 const KILL_GRACE_MS = 5000;
@@ -54,6 +71,7 @@ function usage(message) {
     '  [--program <path>] [--break-file <path>] [--line <n>]\n' +
     '  [--adapter-config <json>] [--expect-var <name>]... [--expect-line]\n' +
     '  [--list-only] [--skip-if-missing] [--timeout <ms>] [--transcript <file>]\n' +
+    `  [--era legacy|${MODERN_ERA}] [--artifact-version <x.y.z>]\n` +
     '  -- <server command> [server args...]'
   );
   process.exit(2);
@@ -75,7 +93,9 @@ try {
       'list-only': { type: 'boolean' },
       'skip-if-missing': { type: 'boolean' },
       timeout: { type: 'string' },
-      transcript: { type: 'string' }
+      transcript: { type: 'string' },
+      era: { type: 'string' },
+      'artifact-version': { type: 'string' }
     }
   });
   options = parsed.values;
@@ -86,6 +106,20 @@ try {
 
 if (!serverCommand || serverCommand.length === 0) usage('server command after -- is required');
 if (!options.lang) usage('--lang is required');
+const era = options.era ?? 'legacy';
+if (era !== 'legacy' && era !== MODERN_ERA) usage(`--era must be 'legacy' or '${MODERN_ERA}'`);
+const modernEra = era === MODERN_ERA;
+if (options['artifact-version'] !== undefined && !modernEra) usage(`--artifact-version only applies with --era ${MODERN_ERA}`);
+// Decided before anything is spawned. An unreadable version is a usage error,
+// never a silent skip.
+let eraOwed = true;
+if (modernEra && options['artifact-version'] !== undefined) {
+  try {
+    eraOwed = servesModernEra(options['artifact-version']);
+  } catch (err) {
+    usage(`--artifact-version: ${err.message}`);
+  }
+}
 if (!options['list-only']) {
   if (!options.program) usage('--program is required (unless --list-only)');
   if (!options.line) usage('--line is required (unless --list-only)');
@@ -122,7 +156,8 @@ function transcribe(dir, data) {
 /* ---------- raw stdio MCP client ---------- */
 
 class McpStdioClient {
-  constructor(command, args) {
+  constructor(command, args, { modern = false } = {}) {
+    this.modern = modern;
     this.nextId = 1;
     this.pending = new Map(); // id -> { resolve, reject, timer }
     this.exited = false;
@@ -199,13 +234,15 @@ class McpStdioClient {
   request(method, params, timeoutMs = REQUEST_TIMEOUT_MS) {
     if (this.exited || this.disposed) return Promise.reject(new Error('server already exited'));
     const id = this.nextId++;
+    // In the modern era every request states its protocol version and client itself.
+    const sent = this.modern ? { ...params, _meta: { ...params?._meta, ...MODERN_ENVELOPE } } : params;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`request '${method}' timed out after ${timeoutMs}ms`));
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
-      this.send({ jsonrpc: '2.0', id, method, params });
+      this.send({ jsonrpc: '2.0', id, method, params: sent });
     });
   }
 
@@ -213,16 +250,29 @@ class McpStdioClient {
     this.send({ jsonrpc: '2.0', method, ...(params ? { params } : {}) });
   }
 
-  async initialize() {
+  /**
+   * Open the connection in the client's era and say how. Legacy: the
+   * `initialize` handshake. Modern: one `server/discover`, which must name
+   * 2026-07-28 — the opening message is also what pins a stdio server's era.
+   */
+  async open() {
     const spawnErr = await this.spawnError;
     if (spawnErr) throw Object.assign(new Error(`failed to spawn server: ${spawnErr.message}`), { usageError: true });
-    const result = await this.request('initialize', {
+    if (this.modern) {
+      const discovered = await this.request('server/discover', {});
+      const supported = discovered?.supportedVersions ?? [];
+      if (!supported.includes(MODERN_ERA)) {
+        throw new Error(`server/discover does not name ${MODERN_ERA}: supportedVersions=${JSON.stringify(supported)}`);
+      }
+      return `server/discover ok: ${MODERN_ERA} among ${JSON.stringify(supported)}`;
+    }
+    await this.request('initialize', {
       protocolVersion: '2024-11-05',
       capabilities: {},
       clientInfo: { name: 'canary-smoke', version: '1.0.0' }
     });
     this.notify('notifications/initialized');
-    return result;
+    return 'initialize ok';
   }
 
   /**
@@ -398,7 +448,14 @@ async function runCycle(client) {
 /* ---------- main ---------- */
 
 async function main() {
-  const client = new McpStdioClient(serverCommand[0], serverCommand.slice(1));
+  if (!eraOwed) {
+    // An era gate, like --skip-if-missing: an artifact from before the era shipped is not a failure.
+    console.log(`::notice::${options['artifact-version']} predates ${FIRST_MODERN_ERA_RELEASE}, the first release that serves protocol ${MODERN_ERA} — ${MODERN_ERA} cycle skipped`);
+    step(`era ${MODERN_ERA}`, `not owed by ${options['artifact-version']}, cycle skipped`);
+    if (transcriptStream) await new Promise((resolve) => transcriptStream.end(resolve));
+    return;
+  }
+  const client = new McpStdioClient(serverCommand[0], serverCommand.slice(1), { modern: modernEra });
   const watchdog = setTimeout(() => {
     console.error(`[canary] FAIL: overall timeout of ${overallTimeoutMs}ms exceeded`);
     printFailureTail();
@@ -406,10 +463,9 @@ async function main() {
   }, overallTimeoutMs);
 
   try {
-    await client.initialize();
-    step('initialize ok');
+    step(await client.open());
     await runCycle(client);
-    console.log(`[canary] PASS (${options.lang}, ${Date.now() - startedAt}ms)`);
+    console.log(`[canary] PASS (${options.lang}, era ${era}, ${Date.now() - startedAt}ms)`);
   } catch (err) {
     console.error(`[canary] FAIL: ${err.message}`);
     printFailureTail();

@@ -16,6 +16,7 @@ import { DebugMcpServer } from '../../../../src/server.js';
 import { registerToolHandlers } from '../../../../src/server/tool-dispatch.js';
 import { createProductionDependencies, type Dependencies } from '../../../../src/container/dependencies.js';
 import { createMockDependencies } from '../session/session-manager-test-utils.js';
+import { describeIdleExpiry, type IdleExpiryRecord } from '../../../../src/session/idle-policy.js';
 
 vi.mock('../../../../src/container/dependencies.js');
 
@@ -84,8 +85,38 @@ describe('what an agent sees of the idle policy (issue #1025, step 2)', () => {
         error:
           `Session ${id} was closed by the idle policy at 2026-11-10T12:06:00.000Z: ` +
           'no tool call named it or its tree for 6 min (the window is 5 min, MCP_DEBUG_SESSION_IDLE_MS=300000). ' +
-          'Its program was ended. Create a new session to continue.',
+          // The session was never launched: the answer does not claim a program was ended.
+          'It had no running program by then. Create a new session to continue.',
         closedBy: 'idle-policy'
+      });
+    });
+
+    describe('the sentence', () => {
+      const record = (patch: Partial<IdleExpiryRecord>): IdleExpiryRecord => ({
+        sessionId: 's1',
+        rootId: 's1',
+        closedAt: Date.parse('2026-11-10T12:06:00.000Z'),
+        idleMs: 360_000,
+        windowMs: 300_000,
+        outcome: 'ended',
+        ...patch
+      });
+
+      it('says what the close did to the program, one sentence per outcome', () => {
+        expect(describeIdleExpiry(record({ outcome: 'ended' }))).toContain(' Its program was ended. ');
+        expect(describeIdleExpiry(record({ outcome: 'released' }))).toContain(' The process it was attached to was released and keeps running. ');
+        expect(describeIdleExpiry(record({ outcome: 'closed' }))).toContain(' It had no running program by then. ');
+      });
+
+      it('states the idle time in the unit of the window, never a mix', () => {
+        // A window in whole minutes: the idle time is minutes too (390 s is not "390 s").
+        expect(describeIdleExpiry(record({ idleMs: 390_000 }))).toContain('for 6 min (the window is 5 min,');
+        // A window in seconds: so is the idle time.
+        expect(describeIdleExpiry(record({ idleMs: 100_400, windowMs: 90_000 }))).toContain('for 100 s (the window is 90 s,');
+      });
+
+      it('names the root for a child the expiry took with it', () => {
+        expect(describeIdleExpiry(record({ sessionId: 'c1', rootId: 's1' }))).toContain('Session c1 (in the tree of s1) was closed by the idle policy');
       });
     });
 

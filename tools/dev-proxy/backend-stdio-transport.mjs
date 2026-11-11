@@ -19,7 +19,10 @@
  * would outlive the proxy (Linux CI caught exactly that). This class does what
  * the SDK does in `legacy` mode: it closes itself on that abort, which ends
  * the child and fails the pending negotiation at once, so the start's own
- * failure path can clean up.
+ * failure path can clean up. Upstream knows: modelcontextprotocol/typescript-sdk
+ * issue #3133 ("Client.connect(): signal is ignored during the server/discover
+ * probe"), with a fix in review. Once a release carries it, the abort handling
+ * here can go; the subclass stays, for the in-place probe.
  *
  * Kept in its own module so unit tests can import it without executing the
  * dev-proxy entry point (dev-proxy.mjs runs main() at module top level).
