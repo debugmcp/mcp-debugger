@@ -1567,6 +1567,34 @@ describe('HTTP Command Handler', () => {
       expect(mockExitProcess).toHaveBeenCalledWith(0);
     });
 
+    it('completes shutdown after the modern handler fails to close', async () => {
+      mockApp.listen = vi.fn(() => mockHttpServer);
+      const error = new Error('modern close failed');
+      mockModernHandler.close.mockRejectedValueOnce(error);
+      const detachModernSink = vi.fn();
+      vi.mocked(mockServer.notifications.addSink).mockReturnValue(detachModernSink);
+
+      await handleHttpCommand(
+        { port: '3001' },
+        { logger: mockLogger, serverFactory: mockServerFactory, protocolServerFactory: mockProtocolServerFactory, exitProcess: mockExitProcess, proc: fakeProc }
+      );
+      const transport = { close: vi.fn().mockResolvedValue(undefined) };
+      const sessions = mockApp.httpSessions as Map<string, { transport: typeof transport }>;
+      sessions.set('legacy', { transport });
+
+      await fakeProc.lastListener('SIGINT')();
+
+      expect(mockLogger.error).toHaveBeenCalledWith('Error closing the modern-era handler during shutdown', { error });
+      expect(detachModernSink).toHaveBeenCalledTimes(1);
+      expect(detachModernSink.mock.invocationCallOrder[0]).toBeLessThan(mockModernHandler.close.mock.invocationCallOrder[0]);
+      expect(transport.close).toHaveBeenCalledTimes(1);
+      expect(mockServer.stop).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(mockServer.stop).mock.invocationCallOrder[0]).toBeGreaterThan(transport.close.mock.invocationCallOrder[0]);
+      expect(sessions.size).toBe(0);
+      expect(mockHttpServer.close).toHaveBeenCalledTimes(1);
+      expect(mockExitProcess).toHaveBeenCalledExactlyOnceWith(0);
+    });
+
     it('proceeds past a hung session stop after the guard and still exits 0 (issue #337)', async () => {
       const listen = vi.fn(() => mockHttpServer);
       mockApp.listen = listen;
