@@ -261,8 +261,8 @@ importers:
         specifier: ^4.10.2
         version: 4.10.2
       glob:
-        specifier: ^13.0.6
-        version: 13.0.6
+        specifier: ^14.0.3
+        version: 14.0.4
       globals:
         specifier: ^17.14.0
         version: 17.14.0
