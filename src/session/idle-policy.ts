@@ -40,7 +40,8 @@ function parseMs(
   }
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < minimum) {
-    warn(`Ignoring invalid ${name} value "${raw}"; using default ${fallback}ms.`);
+    // Name the rejected setting without copying untrusted environment contents into logs.
+    warn(`Ignoring invalid ${name}; using default ${fallback}ms.`);
     return fallback;
   }
   return parsed;
