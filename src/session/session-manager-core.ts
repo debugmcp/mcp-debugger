@@ -589,11 +589,29 @@ export abstract class SessionManagerCore extends EventEmitter {
         `no tool call named it or its tree for ${Math.round(windowMs / 1000)}s`
       );
       const ownerKey = root.ownerKey;
+      // Which sessions of the tree had no running program when the policy came
+      // for it: never launched, or already over. Read now, at the decision —
+      // the close removes the rows, and a child that ends during the cascade
+      // was running when the policy decided. A child an earlier detach
+      // released is not one of them: its row is stopped, its process runs on.
+      const withoutProgram = new Set(
+        [root, ...this.descendantsDeepestFirst(root.id)]
+          .filter((session) =>
+            (session.state === SessionState.CREATED || isTerminalSessionState(session.state)) &&
+            session.programEndExplanation?.data?.released !== true)
+          .map((session) => session.id)
+      );
       const report = await this.closeSessionReporting(root.id);
       closed.push(root.id);
       if (report.closed) {
-        // An attach root's close releases its targets; a launch root's ends its program.
-        const outcome = report.released ? 'released' : 'ended';
+        // An attach root's close releases its targets; a launch root's ends its
+        // program; a session with nothing running had nothing done to it.
+        const outcomeOf = (sessionId: string): IdleExpiryRecord['outcome'] => {
+          if (withoutProgram.has(sessionId)) {
+            return 'closed';
+          }
+          return report.released || report.releasedSessionIds?.includes(sessionId) ? 'released' : 'ended';
+        };
         for (const sessionId of report.closedSessionIds) {
           this.recordIdleExpiry({
             sessionId,
@@ -602,13 +620,17 @@ export abstract class SessionManagerCore extends EventEmitter {
             closedAt: now,
             idleMs,
             windowMs,
-            outcome: report.released || report.releasedSessionIds?.includes(sessionId) ? 'released' : 'ended'
+            outcome: outcomeOf(sessionId)
           });
         }
         const others = report.closedSessionIds.length - 1;
+        const did = {
+          ended: 'its program was ended',
+          released: 'its target was released and keeps running',
+          closed: 'it had no running program'
+        }[outcomeOf(root.id)];
         this.logger.info(
-          `Idle debug session ${root.id} closed: ` +
-          (outcome === 'released' ? 'its target was released and keeps running' : 'its program was ended') +
+          `Idle debug session ${root.id} closed: ${did}` +
           (others > 0 ? ` (with ${others} child session${others === 1 ? '' : 's'})` : '')
         );
       }

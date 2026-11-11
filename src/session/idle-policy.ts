@@ -71,9 +71,19 @@ export interface IdleExpiryRecord {
   /** How long the tree had gone without a tool call when it was closed. */
   readonly idleMs: number;
   readonly windowMs: number;
-  /** What the close did to the program: a launched one is ended, an attached one released. */
-  readonly outcome: 'ended' | 'released';
+  /**
+   * What the close did to the program: a launched one is `ended`, an attached
+   * one `released`. `closed` when there was none to act on — the session never
+   * launched, or its program was already over when the policy came for it.
+   */
+  readonly outcome: 'ended' | 'released' | 'closed';
 }
+
+const OUTCOME_SENTENCE: Record<IdleExpiryRecord['outcome'], string> = {
+  ended: 'Its program was ended.',
+  released: 'The process it was attached to was released and keeps running.',
+  closed: 'It had no running program by then.'
+};
 
 /** How many expiry records the core keeps; the oldest go first. */
 export const IDLE_EXPIRY_RECORD_LIMIT = 200;
@@ -83,13 +93,14 @@ export function describeIdleExpiry(record: IdleExpiryRecord): string {
   const who = record.sessionId === record.rootId
     ? `Session ${record.sessionId}`
     : `Session ${record.sessionId} (in the tree of ${record.rootId})`;
-  const program = record.outcome === 'released'
-    ? 'The process it was attached to was released and keeps running.'
-    : 'Its program was ended.';
+  // The idle time in the unit the window is stated in, so the two read together.
+  const idle = record.windowMs % 60_000 === 0
+    ? `${Math.floor(record.idleMs / 60_000)} min`
+    : `${Math.round(record.idleMs / 1000)} s`;
   return `${who} was closed by the idle policy at ${new Date(record.closedAt).toISOString()}: ` +
-    `no tool call named it or its tree for ${describeIdleWindow(record.idleMs)} ` +
+    `no tool call named it or its tree for ${idle} ` +
     `(the window is ${describeIdleWindow(record.windowMs)}, ${DEBUG_SESSION_IDLE_ENV}=${record.windowMs}). ` +
-    `${program} Create a new session to continue.`;
+    `${OUTCOME_SENTENCE[record.outcome]} Create a new session to continue.`;
 }
 
 /** How long a window is, in the unit a reader thinks in. */

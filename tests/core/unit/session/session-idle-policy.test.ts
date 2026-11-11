@@ -9,7 +9,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
-import { DebugLanguage, JsDebugAdapterPolicy } from '@debugmcp/shared';
+import { DebugLanguage, JsDebugAdapterPolicy, SessionState } from '@debugmcp/shared';
 import { createMockDependencies, overridePolicy } from './session-manager-test-utils.js';
 
 const report = (reportId: string, pid = 4242) => ({
@@ -227,15 +227,81 @@ describe('SessionManager idle policy (issue #1025, step 2)', () => {
       });
     });
 
-    it('says an attach root was released: its target keeps running', async () => {
-      const session = await sessionManager.createSession({ language: DebugLanguage.MOCK });
-      // An attach root, the way attach_to_process marks the row.
+    /** Mark a row an attach root, the way attach_to_process does. */
+    const markAttached = (id: string): void =>
       (sessionManager as unknown as { sessionStore: { update(id: string, patch: object): void } })
-        .sessionStore.update(session.id, { attachMode: true });
+        .sessionStore.update(id, { attachMode: true });
+
+    it('says an attach root was released: its target keeps running', async () => {
+      // A live session (the mock launch stands in for a connected target).
+      const rootId = await startRoot();
+      markAttached(rootId);
 
       await sessionManager.sweepIdle(WINDOW, { now: now() + WINDOW + 1 });
 
-      expect(sessionManager.idleExpiryOf(session.id, undefined)?.outcome).toBe('released');
+      expect(sessionManager.idleExpiryOf(rootId, undefined)?.outcome).toBe('released');
+    });
+
+    // "Its program was ended" is only true when there was one. A session the
+    // policy removes with nothing running in it says so instead.
+    it('says a session that never launched had no program: nothing was ended', async () => {
+      const session = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+
+      await sessionManager.sweepIdle(WINDOW, { now: now() + WINDOW + 1 });
+
+      expect(sessionManager.idleExpiryOf(session.id, undefined)?.outcome).toBe('closed');
+    });
+
+    it('says a root whose program had already ended had none left to end', async () => {
+      const rootId = await startRoot();
+      dependencies.mockProxyManager.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+      expect(sessionManager.getSession(rootId)!.state).toBe(SessionState.STOPPED);
+
+      await sessionManager.sweepIdle(WINDOW, { now: now() + WINDOW + 1 });
+
+      expect(sessionManager.idleExpiryOf(rootId, undefined)?.outcome).toBe('closed');
+    });
+
+    it('does not call an attach root\'s target released when the target was already gone', async () => {
+      const rootId = await startRoot();
+      markAttached(rootId);
+      dependencies.mockProxyManager.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+      expect(sessionManager.getSession(rootId)!.state).toBe(SessionState.STOPPED);
+
+      await sessionManager.sweepIdle(WINDOW, { now: now() + WINDOW + 1 });
+
+      expect(sessionManager.idleExpiryOf(rootId, undefined)?.outcome).toBe('closed');
+    });
+
+    it('under a live attach root, a child that had already ended is not called released', async () => {
+      const rootId = await startRoot();
+      markAttached(rootId);
+      const childId = await adoptChild(rootId);
+      dependencies.mockProxyManager.childViews.get(childId)!.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+      expect(sessionManager.getSession(childId)!.state).toBe(SessionState.STOPPED);
+
+      await sessionManager.sweepIdle(WINDOW, { now: now() + WINDOW + 1 });
+
+      expect(sessionManager.idleExpiryOf(childId, undefined)?.outcome).toBe('closed');
+      expect(sessionManager.idleExpiryOf(rootId, undefined)?.outcome).toBe('released');
+    });
+
+    it('a child released by an earlier detach is still recorded as released: its process runs on', async () => {
+      const rootId = await startRoot();
+      const childId = await adoptChild(rootId);
+      // What the detach cascade leaves on a released child's retained row.
+      (sessionManager as unknown as { sessionStore: { update(id: string, patch: object): void } })
+        .sessionStore.update(childId, { programEndExplanation: { note: 'Released', data: { released: true } } });
+      dependencies.mockProxyManager.childViews.get(childId)!.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+      expect(sessionManager.getSession(childId)!.state).toBe(SessionState.STOPPED);
+
+      await sessionManager.sweepIdle(WINDOW, { now: now() + WINDOW + 1 });
+
+      expect(sessionManager.idleExpiryOf(childId, undefined)?.outcome).toBe('released');
     });
 
     it('records a released JavaScript child separately from its ended launch root', async () => {
@@ -335,6 +401,16 @@ describe('SessionManager idle policy (issue #1025, step 2)', () => {
 
       expect(dependencies.mockLogger.info).toHaveBeenCalledWith(
         expect.stringContaining(`Idle debug session ${rootId} closed: its program was ended`)
+      );
+    });
+
+    it('the log does not claim a program was ended when none was running', async () => {
+      const session = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+
+      await sessionManager.sweepIdle(WINDOW, { now: now() + WINDOW + 1 });
+
+      expect(dependencies.mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining(`Idle debug session ${session.id} closed: it had no running program`)
       );
     });
   });
