@@ -12,6 +12,37 @@ session. The proxy keeps the client-facing stdio process stable while it replace
 The backend is a restartable Streamable HTTP child process by default. A stdio
 backend is also supported through `DEV_PROXY_BACKEND_TRANSPORT`.
 
+The proxy speaks both MCP protocol eras to its client (issue #1025): it is served through the
+SDK's stdio entry, so a client that probes with `server/discover` — Claude Code's v2 runtime does —
+lands on the current 2026-07-28 revision (sessionless; resource notifications over
+`subscriptions/listen`), and a client that opens with `initialize` gets the 2025 era as before.
+Towards its backend the proxy negotiates the same way, on either transport, and lands on
+2026-07-28 when that backend serves it (an older build answers the 2025 era; `dev_server_status`
+says which under `protocolEra`/`protocolVersion`). Over stdio it probes on the backend's own
+pipe — its transport is a subclass of the SDK's, which is what keeps the SDK from probing on a
+second backend process — and a 2025 backend falls back to `initialize` on the same pipe
+(measured against the published 0.26.0 npx bundle and Docker image). Resource
+subscriptions are translated across eras: the set is expressed to the backend in the era it
+speaks (one `subscriptions/listen` for a 2026 backend, one `resources/subscribe` per URI for a
+2025 one) and re-expressed after every backend restart, so a `dev_rebuild_and_restart` no longer
+loses them. A 2025 client names what it wants through `resources/subscribe`. A 2026 client's
+listen set is served by the SDK entry and never reaches the proxy, so while such a client is
+connected the proxy subscribes the backend to every resource it lists (re-read on each
+`resources/list_changed`) and the proxy's own router delivers the client only what it listened
+for. A 2025 backend can refuse a URI: after a restart every debug session is gone, so a
+subscription a client named before it is dropped (logged once) and the rest are still sent, and
+a listed resource the backend will not subscribe (its proxy-log tails) is asked once, not on
+every reconnect. That router also drops a `tools/list_changed` a 2026 client did not opt into
+(`toolsListChanged: true` on its listen): after a restart that changes the inventory, such a
+client keeps its tool list until it lists again.
+
+The backend starts on the first request that needs it, not when the proxy process starts. A v2
+client's `auto` negotiation over stdio probes `server/discover` on a disposable sibling process
+spawned from the same command line; the SDK entry answers that probe itself, so the sibling never
+reaches a request handler and never spawns a backend of its own to race the real proxy for
+`DEV_PROXY_PORT` (measured before this change: two backends per connect). The first
+`tools/list` still waits for the start to settle (`DEV_PROXY_DISCOVERY_WAIT_MS`).
+
 ## Architecture
 
 ```
@@ -83,7 +114,7 @@ Once connected, three additional tools are available:
 |------|-------------|
 | `dev_restart_debugger` | Kill and restart the backend. Pass `rebuild: true` to build first, and optionally replace backend environment overrides with `env`. |
 | `dev_rebuild_and_restart` | Run `npm run build` then restart the backend; also accepts replacement backend `env` overrides. |
-| `dev_server_status` | Check backend state, PID, uptime, build progress, transport, project root, port, and display-safe environment overrides. |
+| `dev_server_status` | Check backend state, PID, uptime, build progress, transport, protocol era and version, project root, port, and display-safe environment overrides. Before the first start it reports `stopped` with a `note` that the backend starts on the first request that needs it. |
 
 All regular mcp-debugger tools (create_debug_session, set_breakpoint, etc.) are forwarded transparently to the backend.
 A forwarded call carries the caller's cancellation signal and is given 660 s before the proxy gives up on it — above the

@@ -13,6 +13,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
+  initialStartFailureLines,
   isBackendUnavailableError,
   dedupeMcpErrorPrefix,
   assertBackendAvailable,
@@ -184,5 +185,22 @@ describe('dev-proxy backendFailureHint (issue #854)', () => {
     const wrapped = Object.assign(new Error('call failed'), { cause: timeout });
     const hint = backendFailureHint(wrapped, { state: 'running', needsRestart: false, discoveryWaitMs: 15000 });
     expect(hint).toMatch(/did not answer this call/);
+  });
+});
+
+describe('what the proxy logs when its first backend start does not happen (issue #1025)', () => {
+  it('names the failure and the way to retry it', () => {
+    expect(initialStartFailureLines(new Error('port 3001 is in use'), false)).toEqual([
+      'Initial backend start failed: port 3001 is in use',
+      'Dev tools are still available — use dev_restart_debugger to retry',
+    ]);
+  });
+
+  // A request that lands while the proxy is going away asks for a start that is
+  // refused on purpose. There is nothing to retry and nobody to retry it.
+  it('says the proxy is shutting down, with no retry hint, when that is why', () => {
+    expect(initialStartFailureLines(new Error('Proxy is shutting down'), true)).toEqual([
+      'Not starting the backend: the proxy is shutting down',
+    ]);
   });
 });

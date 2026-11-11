@@ -45,16 +45,10 @@ export interface StoppableBackend {
   stop(): Promise<void>;
 }
 
-/** The MCP `Server` whose `onclose` is chained — never `transport.onclose`. */
-export interface CloseableServer {
-  onclose?: (() => void) | undefined;
-}
-
 /** Dependencies of {@link installShutdownHandlers}. */
 export interface ShutdownDeps {
   stdin: ShutdownStdin;
   backend: StoppableBackend;
-  server?: CloseableServer;
   log?: (msg: string) => void;
   /** Injectable for tests; defaults to `process`. */
   proc?: ShutdownProcess;

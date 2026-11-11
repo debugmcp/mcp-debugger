@@ -2,16 +2,16 @@
  * Shutdown wiring for dev-proxy — exit when the MCP client (Claude Code) goes away.
  *
  * Why this exists (issue #122): on Windows, a dying parent process never delivers
- * SIGINT/SIGTERM to its children, and the MCP SDK's StdioServerTransport only
- * attaches 'data'/'error' listeners to stdin — it never notices EOF, and its
- * onclose fires only on programmatic close(). So a dev-proxy whose client died
- * kept the event loop alive forever, and its backend child along with it.
+ * SIGINT/SIGTERM to its children, so a dev-proxy whose client died kept the
+ * event loop alive forever, and its backend child along with it.
  *
  * The reliable cross-platform signal is the proxy's own stdin: when the client
  * process dies, the OS closes the pipe and stdin emits 'end' (or 'error' for a
- * broken pipe) followed by 'close'. Any of those — plus protocol-level server
- * close and SIGINT/SIGTERM — means "client is gone": stop the backend child,
- * then exit.
+ * broken pipe) followed by 'close'. Any of those — plus SIGINT/SIGTERM — means
+ * "client is gone": stop the backend child, then exit. The stdio wire closing
+ * by itself (a stdout error, an oversized frame) is the proxy's other signal;
+ * the entry point hears that through its observed transport and calls the
+ * shutdown function this module returns (issue #1025).
  *
  * Kept in its own module so unit tests can import it without executing the
  * dev-proxy entry point (dev-proxy.mjs runs main() at module top level).
@@ -50,16 +50,11 @@ export function isIntentionalTransportAbort(err) {
  *
  * @param {object} deps
  * @param {NodeJS.ReadableStream} deps.stdin
- *   The proxy's inbound stdin from the MCP client. Safe to listen on: the SDK's
- *   StdioServerTransport only attaches 'data'/'error' listeners, and its 'data'
- *   listener keeps the stream flowing so 'end' fires at EOF.
+ *   The proxy's inbound stdin from the MCP client. Safe to listen on beside the
+ *   SDK's StdioServerTransport: Node delivers each event to every listener.
  * @param {{ stop(): Promise<void> }} deps.backend
  *   Backend manager to stop before exit. stop() handles both transport
  *   modes (http/stdio) including a backend that is still starting.
- * @param {{ onclose?: (() => void) | undefined }} [deps.server]
- *   MCP Server whose onclose is chained (not replaced). Note: hook the SERVER,
- *   never transport.onclose — Protocol.connect() owns transport.onclose and
- *   overwriting it breaks the SDK's close chain.
  * @param {(msg: string) => void} [deps.log]
  * @param {Pick<NodeJS.Process, 'on' | 'exit'>} [deps.proc] Injectable for tests.
  * @param {number} [deps.stopTimeoutMs]
@@ -69,7 +64,6 @@ export function isIntentionalTransportAbort(err) {
 export function installShutdownHandlers({
   stdin,
   backend,
-  server,
   log = () => {},
   proc = process,
   stopTimeoutMs = STOP_TIMEOUT_MS,
@@ -115,19 +109,6 @@ export function installShutdownHandlers({
   stdin.on('error', (err) =>
     void shutdown(`stdin error (${err?.message ?? err}) — treating as client disconnect`)
   );
-
-  // Secondary trigger: protocol-level close (client sent a proper shutdown).
-  if (server) {
-    const previousOnClose = server.onclose;
-    server.onclose = () => {
-      try {
-        previousOnClose?.();
-      } catch (err) {
-        log(`Ignoring server onclose handler error: ${err?.message ?? err}`);
-      }
-      void shutdown('MCP server connection closed');
-    };
-  }
 
   // Signals route through the same idempotent path (parity with prior behavior).
   proc.on('SIGINT', () => void shutdown('SIGINT received'));

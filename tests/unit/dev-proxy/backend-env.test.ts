@@ -80,3 +80,4 @@ describe('dev-proxy backend environment overrides', () => {
     expect(result.MCP_EXIT_ON_STDIN_CLOSE).toBe('1');
   });
 });
+

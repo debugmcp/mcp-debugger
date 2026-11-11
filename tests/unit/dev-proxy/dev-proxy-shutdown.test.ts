@@ -132,20 +132,6 @@ describe('dev-proxy installShutdownHandlers', () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining('kill failed'));
   });
 
-  it('chains server.onclose instead of replacing it, and shuts down on server close', async () => {
-    const { stdin, proc, backend, log } = makeDeps();
-    const previousOnClose = vi.fn();
-    const server: { onclose?: () => void } = { onclose: previousOnClose };
-    installShutdownHandlers({ stdin, backend, server, log, proc });
-
-    expect(server.onclose).not.toBe(previousOnClose);
-    server.onclose!();
-
-    await vi.waitFor(() => expect(proc.exit).toHaveBeenCalledWith(0));
-    expect(previousOnClose).toHaveBeenCalledTimes(1);
-    expect(backend.stop).toHaveBeenCalledTimes(1);
-  });
-
   it('returns an idempotent shutdown function usable directly', async () => {
     const { stdin, proc, backend, log } = makeDeps();
     const shutdown = installShutdownHandlers({ stdin, backend, log, proc });

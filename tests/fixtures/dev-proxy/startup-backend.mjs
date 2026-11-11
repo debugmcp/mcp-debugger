@@ -31,7 +31,7 @@ if (releaseFile) {
   }
 }
 
-const server = new Server({ name: 'startup-fixture', version: '1.0.0' }, { capabilities: { tools: {}, resources: {} } });
+const server = new Server({ name: 'startup-fixture', version: '1.0.0' }, { capabilities: { tools: {}, resources: { subscribe: true } } });
 server.setRequestHandler('tools/list', async () => ({
   tools: [{
     name: process.env.DEV_PROXY_FIXTURE_TOOL || 'fixture_tool',
@@ -42,6 +42,18 @@ server.setRequestHandler('tools/list', async () => ({
 // Answering at all is the point: it proves the proxy forwarded the call rather
 // than refusing it while the backend was still starting.
 server.setRequestHandler('tools/call', async (request) => {
+  // `touch: <uri>` makes this 2025 backend send resources/updated for a URI —
+  // only one the proxy has subscribed, like the real server's per-connection
+  // subscribe set (issue #1025, step 2: the proxy's subscription relay across
+  // eras). An unsubscribed touch is refused, so a test cannot pass on a ping
+  // nobody asked for.
+  const touch = request.params.arguments?.touch;
+  if (typeof touch === 'string') {
+    if (!subscribed.has(touch)) {
+      return { content: [{ type: 'text', text: `not subscribed: ${touch}` }], isError: true };
+    }
+    await server.sendResourceUpdated({ uri: touch });
+  }
   if (request.params.arguments?.floodStderr) {
     // More than a pipe's capacity: answering proves the proxy drained stderr
     // while a build was running, rather than leaving this write blocked.
@@ -57,5 +69,16 @@ server.setRequestHandler('resources/list', async () => ({
 server.setRequestHandler('resources/read', async () => ({
   contents: [{ uri: 'fixture://status', text: process.env.DEV_PROXY_FIXTURE_TOOL || 'fixture_tool' }],
 }));
+// A 2025 backend's subscriptions: the per-connection set the real server keeps
+// (lost with the process, which is why the proxy re-sends them after a restart).
+const subscribed = new Set();
+server.setRequestHandler('resources/subscribe', async (request) => {
+  subscribed.add(request.params.uri);
+  return {};
+});
+server.setRequestHandler('resources/unsubscribe', async (request) => {
+  subscribed.delete(request.params.uri);
+  return {};
+});
 process.stdin.on('end', () => process.exit(0));
 await server.connect(new StdioServerTransport());

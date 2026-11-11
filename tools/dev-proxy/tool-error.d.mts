@@ -65,3 +65,10 @@ export function backendFailureHint(
   err: unknown,
   backend: { state: string; needsRestart: boolean; discoveryWaitMs: number }
 ): string | undefined;
+
+/**
+ * The log lines for a deferred first backend start that did not happen: the
+ * failure and how to retry it, or — while the proxy is shutting down — only
+ * that it is.
+ */
+export function initialStartFailureLines(err: unknown, shuttingDown: boolean): string[];
