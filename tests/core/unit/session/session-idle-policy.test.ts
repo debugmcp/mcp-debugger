@@ -9,8 +9,8 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
-import { DebugLanguage } from '@debugmcp/shared';
-import { createMockDependencies } from './session-manager-test-utils.js';
+import { DebugLanguage, JsDebugAdapterPolicy } from '@debugmcp/shared';
+import { createMockDependencies, overridePolicy } from './session-manager-test-utils.js';
 
 const report = (reportId: string, pid = 4242) => ({
   reportId,
@@ -238,6 +238,56 @@ describe('SessionManager idle policy (issue #1025, step 2)', () => {
       expect(sessionManager.idleExpiryOf(session.id, undefined)?.outcome).toBe('released');
     });
 
+    it('records a released JavaScript child separately from its ended launch root', async () => {
+      const rootId = await startRoot();
+      const childId = await adoptChild(rootId);
+      const childView = dependencies.mockProxyManager.childViews.get(childId)!;
+      // Adopt through the mock fixture, then use js-debug's measured close
+      // semantics: disconnecting a fork releases it, even under a launch root.
+      overridePolicy(sessionManager, { childAdoption: JsDebugAdapterPolicy.childAdoption });
+
+      await sessionManager.sweepIdle(WINDOW, { now: now() + WINDOW + 1 });
+
+      expect(childView.stopOptions[0]).toEqual({ terminateDebuggee: false });
+      expect(sessionManager.idleExpiryOf(rootId, undefined)?.outcome).toBe('ended');
+      expect(sessionManager.idleExpiryOf(childId, undefined)?.outcome).toBe('released');
+    });
+
+    it('records a later child as ended when it terminates while an earlier close waits', async () => {
+      const rootId = await startRoot();
+      const firstId = await adoptChild(rootId);
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r2', 4343));
+      await vi.runAllTimersAsync();
+      const secondId = sessionManager.getAllSessions()
+        .find((session) => session.parentSessionId === rootId && session.id !== firstId)!.id;
+      const firstView = dependencies.mockProxyManager.childViews.get(firstId)!;
+      const secondView = dependencies.mockProxyManager.childViews.get(secondId)!;
+      overridePolicy(sessionManager, { childAdoption: JsDebugAdapterPolicy.childAdoption });
+
+      let finishFirst!: () => void;
+      let firstStarted!: () => void;
+      const started = new Promise<void>((resolve) => { firstStarted = resolve; });
+      const stopFirst = firstView.stop.bind(firstView);
+      vi.spyOn(firstView, 'stop').mockImplementation(async (options) => {
+        firstStarted();
+        await new Promise<void>((resolve) => { finishFirst = resolve; });
+        await stopFirst(options);
+      });
+
+      const closing = sessionManager.sweepIdle(WINDOW, { now: now() + WINDOW + 1 });
+      await started;
+      // This event's real handler clears the later child's connection before
+      // the cascade reaches it; it was not released by the idle close.
+      secondView.simulateEvent('terminated');
+      expect(sessionManager.getSession(secondId)!.proxyManager).toBeUndefined();
+      finishFirst();
+      await closing;
+
+      expect(sessionManager.idleExpiryOf(firstId, undefined)?.outcome).toBe('released');
+      expect(sessionManager.idleExpiryOf(secondId, undefined)?.outcome).toBe('ended');
+      expect(sessionManager.idleExpiryOf(rootId, undefined)?.outcome).toBe('ended');
+    });
+
     it('records every session the expiry took with its root', async () => {
       const rootId = await startRoot();
       const childId = await adoptChild(rootId);
@@ -289,3 +339,4 @@ describe('SessionManager idle policy (issue #1025, step 2)', () => {
     });
   });
 });
+
