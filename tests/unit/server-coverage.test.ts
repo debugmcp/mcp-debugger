@@ -50,6 +50,10 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       closeSessionReporting: vi.fn(),
       closeAllSessions: vi.fn(),
       getAllSessions: vi.fn(),
+      // The owner-key seam (issue #1025, step 2): anonymous view = the whole list.
+      getSessionsVisibleTo: vi.fn((..._: unknown[]) => mockSessionManager.getAllSessions()),
+      isSessionVisibleTo: vi.fn((sessionId: string) => mockSessionManager.getSession(sessionId) !== undefined),
+      touchActivity: vi.fn(),
       setBreakpoint: vi.fn(),
       startDebugging: vi.fn(),
       getVariables: vi.fn(),

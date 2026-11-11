@@ -31,6 +31,12 @@ export interface CreateSessionParams {
   executablePath?: string;  // Language-agnostic executable path
   /** The session that spawned this one (the session tree, issue #1081); child sessions only. */
   parentSessionId?: string;
+  /**
+   * The scope the session belongs to (issue #1025, step 2): the authenticated
+   * principal that created it, or absent for the shared anonymous scope. A
+   * child inherits its root's. Never projected into DebugSessionInfo.
+   */
+  ownerKey?: string;
 }
 
 import type { DebugProtocol } from '@vscode/debugprotocol';
@@ -39,6 +45,7 @@ import { OutputRingBuffer } from './output-buffer.js';
 import { isDebuggerOff } from './debugger-off.js';
 import type { PauseIntent } from './execution/pause-intent.js';
 import type { ProxyFailureDiagnostics } from './launch/proxy-failure-diagnostics.js';
+import { isSessionHidden } from './session-scope.js';
 
 export interface ToolchainValidationState {
   compatible: boolean;
@@ -103,6 +110,8 @@ export interface SessionExposure {
  */
 export interface ManagedSession extends DebugSessionInfo {
   executablePath?: string;  // Language-agnostic executable path
+  /** The scope the session belongs to (issue #1025, step 2); see CreateSessionParams.ownerKey. */
+  ownerKey?: string;
   proxyManager?: IProxyManager;
   // In-flight proxy teardown started by a terminal event handler (which
   // clears proxyManager before its fire-and-forget stop()); closeSession
@@ -260,7 +269,7 @@ export class SessionStore {
    * Creates a new debug session
    */
   createSession(params: CreateSessionParams): DebugSessionInfo {
-    const { language, name, executablePath, parentSessionId } = params;
+    const { language, name, executablePath, parentSessionId, ownerKey } = params;
     const sessionId = uuidv4();
     const sessionName = name || `session-${sessionId.substring(0, 8)}`;
     
@@ -288,6 +297,7 @@ export class SessionStore {
       sessionLifecycle: SessionLifecycleState.CREATED,
       executionState: undefined,
       ...(parentSessionId ? { parentSessionId } : {}),
+      ...(ownerKey !== undefined ? { ownerKey } : {}),
     };
 
     this.sessions.set(sessionId, session);
@@ -307,14 +317,15 @@ export class SessionStore {
    * Retrieves a session by ID
    */
   get(sessionId: string): ManagedSession | undefined {
-    return this.sessions.get(sessionId);
+    // A session outside the calling tool call's owner scope is absent (issue #1025).
+    return isSessionHidden(sessionId) ? undefined : this.sessions.get(sessionId);
   }
 
   /**
    * Retrieves a session by ID, throwing if not found
    */
   getOrThrow(sessionId: string): ManagedSession {
-    const session = this.sessions.get(sessionId);
+    const session = this.get(sessionId);
     if (!session) {
       throw new SessionNotFoundError(sessionId);
     }
@@ -406,7 +417,7 @@ export class SessionStore {
    * Checks if a session exists
    */
   has(sessionId: string): boolean {
-    return this.sessions.has(sessionId);
+    return !isSessionHidden(sessionId) && this.sessions.has(sessionId);
   }
 
   /**

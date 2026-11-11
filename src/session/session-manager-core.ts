@@ -3,6 +3,8 @@
  * and event handling.
  */
 import { EventEmitter } from 'events';
+import { visibleTo } from '../server/owner-key.js';
+import { IDLE_EXPIRY_RECORD_LIMIT, type IdleExpiryRecord } from './idle-policy.js';
 import {
   SessionState, SessionLifecycleState, DebugLanguage, DebugSessionInfo, mapLegacyState,
   isTerminalSessionState, AdapterPolicy, SessionOutputEntry, redactSecretsInString
@@ -302,6 +304,8 @@ export interface CloseSessionOutcome {
   closed: boolean;
   /** Every id removed, deepest first then the named session. */
   closedSessionIds: string[];
+  /** Closed ids whose targets were released, captured as each session was closed. */
+  releasedSessionIds?: string[];
   /** Descendants closed with the named session, when any. */
   childrenClosed?: number;
   /** The named session is a child whose process this close ended (the policy's `closeChild: 'terminate'`). */
@@ -400,6 +404,17 @@ export abstract class SessionManagerCore extends EventEmitter {
   protected launchValidationCache = new ValidationResultCache();
 
   /**
+   * The idle policy's clocks (issue #1025, step 2): last activity per ROOT
+   * session id — a tool call naming any session in a tree refreshes its root,
+   * and only roots expire. Cleared when the root is removed.
+   */
+  private readonly lastActivityAt = new Map<string, number>();
+  /** Roots an in-flight wait_for_stop protects from idle expiry, with the number of holds. */
+  private readonly idleHolds = new Map<string, number>();
+  /** What the idle sweep closed, by session id, oldest first and bounded (issue #1025). */
+  private readonly idleExpired = new Map<string, IdleExpiryRecord>();
+
+  /**
    * Constructor with full dependency injection
    */
   constructor(
@@ -460,15 +475,175 @@ export abstract class SessionManagerCore extends EventEmitter {
     return result.redacted ? { text: result.value, redacted: true } : { text, redacted: false };
   }
 
-  async createSession(params: { language: DebugLanguage; name?: string; executablePath?: string; }): Promise<DebugSessionInfo> {
+  async createSession(params: { language: DebugLanguage; name?: string; executablePath?: string; ownerKey?: string; }): Promise<DebugSessionInfo> {
     const createParams = {
       language: params.language,
       name: params.name,
-      executablePath: params.executablePath
+      executablePath: params.executablePath,
+      // The caller's scope (issue #1025, step 2); absent = the shared anonymous scope.
+      ...(params.ownerKey !== undefined ? { ownerKey: params.ownerKey } : {})
     };
     const sessionInfo = this.sessionStore.createSession(createParams);
+    this.touchActivity(sessionInfo.id);
     this.logger.info(`[SessionManager] Created new session: ${sessionInfo.name} (ID: ${sessionInfo.id}), state: ${sessionInfo.state}`);
     return sessionInfo;
+  }
+
+  /**
+   * Whether a caller in `callerKey`'s scope may see and drive this session
+   * (issue #1025, step 2). An unknown id is visible to nobody. The key lives on
+   * the managed row only, so the public listing never carries it.
+   */
+  isSessionVisibleTo(sessionId: string, callerKey: string | undefined): boolean {
+    const session = this.sessionStore.get(sessionId);
+    return session !== undefined && visibleTo(session.ownerKey, callerKey);
+  }
+
+  /**
+   * The public listing, filtered to the caller's scope (issue #1025, step 2).
+   * The owner keys are read off the managed rows themselves, never through a
+   * lookup by id: a lookup can be hidden for the current call (session-scope),
+   * and a session whose key cannot be read must not pass for an anonymous one.
+   */
+  getSessionsVisibleTo(callerKey: string | undefined): DebugSessionInfo[] {
+    const visible = new Set(
+      this.sessionStore.getAllManaged()
+        .filter((session) => visibleTo(session.ownerKey, callerKey))
+        .map((session) => session.id)
+    );
+    return this.sessionStore.getAll().filter((info) => visible.has(info.id));
+  }
+
+  /**
+   * Activity for the idle policy (issue #1025, step 2): a tool call naming any
+   * session in a tree refreshes the tree's root; only roots have a clock. An
+   * unknown id is a no-op.
+   */
+  touchActivity(sessionId: string): void {
+    const session = this.sessionStore.get(sessionId);
+    if (!session) {
+      return;
+    }
+    this.lastActivityAt.set(this.rootOf(session).id, Date.now());
+  }
+
+  /**
+   * Protect a session's tree from idle expiry for the duration of a blocking
+   * call (wait_for_stop, issue #1025, step 2). Returns the release; releasing
+   * twice is harmless, and an unknown id yields a no-op pair.
+   */
+  holdIdle(sessionId: string): () => void {
+    const session = this.sessionStore.get(sessionId);
+    if (!session) {
+      return () => undefined;
+    }
+    const rootId = this.rootOf(session).id;
+    this.idleHolds.set(rootId, (this.idleHolds.get(rootId) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const remaining = (this.idleHolds.get(rootId) ?? 1) - 1;
+      if (remaining > 0) {
+        this.idleHolds.set(rootId, remaining);
+      } else {
+        this.idleHolds.delete(rootId);
+      }
+    };
+  }
+
+  /**
+   * The idle policy's sweep (issue #1025, step 2): close every root whose tree
+   * has seen no tool call for `windowMs` and is not held, through the normal
+   * close cascade (a launch root closes its subtree, an attach root releases
+   * its targets). Skipped entirely while a client is attending the process,
+   * and when the window is 0 (the policy is off). Answers the closed root ids.
+   */
+  async sweepIdle(windowMs: number, options: { now?: number; attended?: boolean | (() => boolean) } = {}): Promise<string[]> {
+    const attended = (): boolean =>
+      typeof options.attended === 'function' ? options.attended() : options.attended === true;
+    if (windowMs <= 0 || attended()) {
+      return [];
+    }
+    const now = options.now ?? Date.now();
+    const closed: string[] = [];
+    const roots = this.sessionStore.getAllManaged().filter((session) => !session.parentSessionId);
+    for (const root of roots) {
+      const last = this.lastActivityAt.get(root.id);
+      if (last === undefined) {
+        // A root with no clock yet (not created through createSession): start it now.
+        this.lastActivityAt.set(root.id, now);
+        continue;
+      }
+      const idleMs = now - last;
+      if (idleMs <= windowMs || this.idleHolds.has(root.id)) {
+        continue;
+      }
+      // Asked again right before each close: a client that arrived while an
+      // earlier close in this sweep ran stops the rest.
+      if (attended()) {
+        break;
+      }
+      this.logger.info(
+        `Closing idle debug session ${root.id} (idle ${Math.round(idleMs / 1000)}s): ` +
+        `no tool call named it or its tree for ${Math.round(windowMs / 1000)}s`
+      );
+      const ownerKey = root.ownerKey;
+      const report = await this.closeSessionReporting(root.id);
+      closed.push(root.id);
+      if (report.closed) {
+        // An attach root's close releases its targets; a launch root's ends its program.
+        const outcome = report.released ? 'released' : 'ended';
+        for (const sessionId of report.closedSessionIds) {
+          this.recordIdleExpiry({
+            sessionId,
+            rootId: root.id,
+            ...(ownerKey !== undefined ? { ownerKey } : {}),
+            closedAt: now,
+            idleMs,
+            windowMs,
+            outcome: report.released || report.releasedSessionIds?.includes(sessionId) ? 'released' : 'ended'
+          });
+        }
+        const others = report.closedSessionIds.length - 1;
+        this.logger.info(
+          `Idle debug session ${root.id} closed: ` +
+          (outcome === 'released' ? 'its target was released and keeps running' : 'its program was ended') +
+          (others > 0 ? ` (with ${others} child session${others === 1 ? '' : 's'})` : '')
+        );
+      }
+    }
+    return closed;
+  }
+
+  private recordIdleExpiry(record: IdleExpiryRecord): void {
+    this.idleExpired.delete(record.sessionId);
+    this.idleExpired.set(record.sessionId, record);
+    while (this.idleExpired.size > IDLE_EXPIRY_RECORD_LIMIT) {
+      const oldest = this.idleExpired.keys().next().value;
+      if (oldest === undefined) break;
+      this.idleExpired.delete(oldest);
+    }
+  }
+
+  /**
+   * What the idle policy did to a session that is gone (issue #1025), for a
+   * caller in the scope the session was in; undefined for everyone else and
+   * for a session that ended any other way.
+   */
+  idleExpiryOf(sessionId: string, callerKey: string | undefined): IdleExpiryRecord | undefined {
+    const record = this.idleExpired.get(sessionId);
+    return record && visibleTo(record.ownerKey, callerKey) ? record : undefined;
+  }
+
+  /** How long a root's tree has been idle, in ms; a child reports its root's. Undefined for an unknown id. */
+  idleMsOf(sessionId: string, now = Date.now()): number | undefined {
+    const session = this.sessionStore.get(sessionId);
+    if (!session) {
+      return undefined;
+    }
+    const last = this.lastActivityAt.get(this.rootOf(session).id);
+    return last === undefined ? undefined : Math.max(0, now - last);
   }
 
   protected async findFreePort(): Promise<number> {
@@ -619,23 +794,31 @@ export abstract class SessionManagerCore extends EventEmitter {
     // An attach root's close preserves its external targets, descendants
     // included: their connections are closed without ending them.
     const releaseDescendants = !options.terminateDebuggee && !session.parentSessionId && session.attachMode === true;
-    // Closing a retained row after its connection ended cannot terminate
-    // its process. In particular, released children keep running after a
-    // plain detach, even if their rows are explicitly closed later.
-    const childEnd = session.parentSessionId && session.proxyManager ? this.childCloseSemantics(session) : undefined;
-    const alreadyReleased = session.parentSessionId && session.programEndExplanation?.data?.released === true;
     const closedSessionIds: string[] = [];
+    const releasedSessionIds: string[] = [];
     const finishClose = this.beginSubtreeClose(sessionId);
     try {
       for (const descendant of this.descendantsDeepestFirst(sessionId)) {
         // A child whose adapter can only release it (js-debug, issue #1082)
         // is closed with its target kept, whatever the cascade.
         const releaseChild = releaseDescendants || (descendant.proxyManager !== undefined && this.childCloseSemantics(descendant) === 'release');
+        // Capture each outcome at its own close, not before the cascade: a
+        // later child can end naturally while an earlier close is awaited.
+        const released = releaseChild || descendant.programEndExplanation?.data?.released === true;
         if (await this.closeSingleSession(descendant.id, { releaseChild })) {
           closedSessionIds.push(descendant.id);
+          if (released) {
+            releasedSessionIds.push(descendant.id);
+          }
         }
       }
       const childrenClosed = closedSessionIds.length;
+      // Read the named session's outcome after its descendants close, but
+      // before a terminating disconnect can clear its connection. A retained
+      // released child still runs on when only its row is being removed.
+      const childEnd = session.parentSessionId && session.proxyManager ? this.childCloseSemantics(session) : undefined;
+      const alreadyReleased = session.parentSessionId && session.programEndExplanation?.data?.released === true;
+      const released = childEnd === 'release' || releaseDescendants || alreadyReleased;
       // An explicit terminating detach ends every child before the root's
       // disconnect can tear down their shared adapter/worker connection.
       if (options.terminateDebuggee && session.proxyManager) {
@@ -648,13 +831,17 @@ export abstract class SessionManagerCore extends EventEmitter {
       const closed = await this.closeSingleSession(sessionId, { releaseChild: childEnd === 'release' });
       if (closed) {
         closedSessionIds.push(sessionId);
+        if (released) {
+          releasedSessionIds.push(sessionId);
+        }
       }
       return {
         closed,
         closedSessionIds,
+        ...(releasedSessionIds.length > 0 ? { releasedSessionIds } : {}),
         ...(childrenClosed > 0 ? { childrenClosed } : {}),
         ...(closed && childEnd === 'terminate' ? { processEnded: true as const } : {}),
-        ...(closed && (childEnd === 'release' || releaseDescendants || alreadyReleased) ? { released: true as const } : {})
+        ...(closed && released ? { released: true as const } : {})
       };
     } finally {
       finishClose();
@@ -804,6 +991,8 @@ export abstract class SessionManagerCore extends EventEmitter {
 
     this.logger.info(`Session ${sessionId} marked as STOPPED/TERMINATED.`);
     this.sessionStore.remove(sessionId);
+    this.lastActivityAt.delete(sessionId);
+    this.idleHolds.delete(sessionId);
     this.emit('session-removed', sessionId);
     // Anything still waiting on this session learns it is gone (issue #849),
     // and a wait on an ancestor's tree sees one descendant fewer (issue #1081).
@@ -1104,8 +1293,12 @@ export abstract class SessionManagerCore extends EventEmitter {
         language: parent.language,
         name: reported.name,
         executablePath: parent.executablePath,
-        parentSessionId: parent.id
+        parentSessionId: parent.id,
+        // A child lives in its root's scope (issue #1025, step 2).
+        ...(parent.ownerKey !== undefined ? { ownerKey: parent.ownerKey } : {})
       });
+      // The tree is alive: an adoption refreshes its root's idle clock.
+      this.touchActivity(parent.id);
       child = this.sessionStore.getOrThrow(info.id);
       child.logDir = parent.logDir;
       child.effectiveBreakOnExceptions = parent.effectiveBreakOnExceptions;
@@ -2493,3 +2686,4 @@ export abstract class SessionManagerCore extends EventEmitter {
    */
   protected abstract handleAutoContinue(sessionId: string): Promise<void>;
 }
+

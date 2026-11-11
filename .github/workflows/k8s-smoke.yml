@@ -145,7 +145,7 @@ jobs:
           echo "CPP_POD=$POD" >> "$GITHUB_ENV"
           kubectl debug "$POD" --image="debugmcp/mcp-debugger:${K8S_SMOKE_VERSION}" \
             --target=app --profile=general --container=debugger \
-            --env=MCP_HTTP_STALE_SESSION_MS=300000 \
+            --env=MCP_DEBUG_SESSION_IDLE_MS=300000 --env=MCP_HTTP_STALE_SESSION_MS=300000 \
             -- /app/entry.sh http -p 3001
           # kubectl debug returns before the image is pulled — wait for the
           # ephemeral container to actually run.

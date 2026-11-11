@@ -35,6 +35,7 @@ import type { NotificationHub } from './notification-hub.js';
 import type { LanguageMetadata } from './language-discovery.js';
 import type { ToolArguments } from './tool-arguments.js';
 import type { ToolResult } from './tool-result.js';
+import type { IdlePolicy } from '../session/idle-policy.js';
 
 /**
  * Request shape for DebugMcpServer.setBreakpoint (issue #271).
@@ -58,6 +59,8 @@ export interface SetBreakpointRequest {
 export interface ToolContext {
   // ---- live dependencies ----
   readonly sessionManager: SessionManager;
+  /** The idle policy in force (issue #1025); `idleMs` 0 = off, which is the default. */
+  readonly idlePolicy: IdlePolicy;
   readonly logger: ILogger;
   readonly fileChecker: SimpleFileChecker;
   readonly lineReader: LineReader;
@@ -72,12 +75,6 @@ export interface ToolContext {
   getAdapterRegistry(): IAdapterRegistry;
   getSessionName(sessionId: string): string;
   validateSession(sessionId: string): void;
-  /**
-   * The sentence to answer with when a session id belongs to another server in
-   * this process (one DebugMcpServer per Streamable HTTP client, issue #939),
-   * or undefined when the id is simply unknown. Absent for stdio.
-   */
-  describeForeignSession?(sessionId: string): string | undefined;
   fileNotFoundError(label: string, originalPath: string, fileCheck: FileExistenceResult): ProtocolError;
   getSupportedLanguagesAsync(): Promise<string[]>;
   getLanguageMetadata(): Promise<LanguageMetadata[]>;
@@ -87,7 +84,7 @@ export interface ToolContext {
   validateFunctionBreakpointSupport(sessionId: string): { warning?: string };
 
   // ---- public facade (unchanged signatures) ----
-  createDebugSession(params: { language: DebugLanguage; name?: string; executablePath?: string; }): Promise<DebugSessionInfo>;
+  createDebugSession(params: { language: DebugLanguage; name?: string; executablePath?: string; ownerKey?: string; }): Promise<DebugSessionInfo>;
   startDebugging(
     sessionId: string,
     scriptPath: string,
@@ -138,6 +135,12 @@ export interface ToolContext {
  */
 export interface ToolCallExtra {
   signal?: AbortSignal;
+  /**
+   * The caller's scope (issue #1025, step 2): the authenticated principal, or
+   * undefined for the shared anonymous scope. `create_debug_session` stamps it
+   * on the new session; the dispatch has already refused sessions outside it.
+   */
+  callerKey?: string;
 }
 
 /**

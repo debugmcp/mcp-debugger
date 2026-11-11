@@ -122,13 +122,14 @@ The mcp-debugger image must be reachable by the cluster (`kind load docker-image
 POD=$(kubectl get pods -l app=pricer -o jsonpath='{.items[0].metadata.name}')
 kubectl debug "$POD" --image=debugmcp/mcp-debugger:latest \
   --target=app --profile=general --container=debugger \
+  --env=MCP_DEBUG_SESSION_IDLE_MS=300000 --env=MCP_HTTP_STALE_SESSION_MS=300000 \
   -- /app/entry.sh http -p 3001
 kubectl port-forward "pod/$POD" 3001:3001 &
 ```
 
 Register the endpoint with your agent (e.g. `claude mcp add-json sick-pod '{"type":"http","url":"http://127.0.0.1:3001/mcp"}'`).
 
-The HTTP server reaps MCP sessions abandoned by a crashed client, closing their debug sessions and releasing any ptrace claim on the target: a client whose SSE stream dropped and never returned (any MCP SDK client that crashed or exited without `DELETE`) is reaped after 2 minutes idle (`MCP_HTTP_STREAM_LOST_SESSION_MS`), one that never opened a stream after 30 (`MCP_HTTP_STALE_SESSION_MS`). For a short-lived diagnostic sidecar a tighter stale window is safer — add `--env=MCP_HTTP_STALE_SESSION_MS=300000` (5 minutes; `0` disables) to the `kubectl debug` command. `GET /health` on the sidecar lists what each MCP session is holding.
+The HTTP server closes nothing on a timer by default, so a debug session abandoned by a crashed client would keep its ptrace claim on the target until the sidecar exits. The command above therefore turns the per-debug-session idle policy on (`--env=MCP_DEBUG_SESSION_IDLE_MS=300000`, 5 minutes): a session tree no tool call has named for that long is closed, releasing the claim, unless a client is attending the process. The abandoned MCP sessions themselves are reaped separately: a client whose SSE stream dropped and never returned (any MCP SDK client that crashed or exited without `DELETE`) is reaped after 2 minutes idle (`MCP_HTTP_STREAM_LOST_SESSION_MS`), one that never opened a stream after 30 (`MCP_HTTP_STALE_SESSION_MS`). For a short-lived diagnostic sidecar a tighter stale window is safer, so the command above sets `--env=MCP_HTTP_STALE_SESSION_MS=300000` too (5 minutes; `0` disables). `GET /health` on the sidecar lists the process's debug sessions with their idle time, and whether a client is attending.
 
 Facts that will save you an afternoon (all observed, not assumed):
 

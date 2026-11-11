@@ -3,7 +3,7 @@ import type { Express, Request, Response, NextFunction } from 'express';
 import express from 'express';
 import { randomUUID } from 'crypto';
 import { IncomingMessage, ServerResponse } from 'http';
-import { isInitializeRequest, ProtocolErrorCode, type Server } from '@modelcontextprotocol/server';
+import { isInitializeRequest, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
 import { DebugMcpServer, type DebugMcpServerOptions } from '../server.js';
 import { createProtocolServer } from '../server/protocol-facade.js';
@@ -33,39 +33,6 @@ import type { ProcessLike } from '../interfaces/process-interfaces.js';
 
 export type ServerFactoryOptions = DebugMcpServerOptions;
 
-/** How long an idle window is, in the unit a reader thinks in. */
-function describeWindow(ms: number): string {
-  return ms % 60_000 === 0 ? `${ms / 60_000} min` : `${Math.round(ms / 1000)} s`;
-}
-
-/**
- * @internal The answer a tool call gets for a debug session id that another
- * HTTP session's server holds (issue #939): whose it is, and how it ends —
- * worded from the reaper windows actually in force, so it never promises a
- * reaper that is switched off. "About": the sweep runs every
- * MCP_HTTP_STALE_SWEEP_INTERVAL_MS, so a close lands up to one interval after
- * the window. An SDK client's close() is not a DELETE (only terminateSession()
- * sends one), so a plain disconnect leaves the session to the reaper.
- */
-export function describeForeignDebugSession(
-  debugSessionId: string,
-  windows: { staleMs: number; streamLostMs: number }
-): string {
-  const reaped = [
-    windows.streamLostMs > 0
-      ? `after about ${describeWindow(windows.streamLostMs)} with that client's SSE stream lost and no reconnect (MCP_HTTP_STREAM_LOST_SESSION_MS=${windows.streamLostMs})`
-      : undefined,
-    windows.staleMs > 0
-      ? `after about ${describeWindow(windows.staleMs)} idle without a stream (MCP_HTTP_STALE_SESSION_MS=${windows.staleMs})`
-      : undefined,
-  ].filter((part): part is string => part !== undefined);
-  const disconnect = reaped.length > 0 ? 'a plain disconnect leaves it to the idle reaper' : 'a plain disconnect leaves it running';
-  const reaper = reaped.length > 0
-    ? `the idle reaper closes it ${reaped.join(', or ')}`
-    : 'no idle reaper is configured (MCP_HTTP_STALE_SESSION_MS and MCP_HTTP_STREAM_LOST_SESSION_MS are 0), so nothing else ends it';
-  return `Session ${debugSessionId} belongs to another MCP client session: each Streamable HTTP client sees only the debug sessions it created. Only that client can close it or end its MCP session with an explicit DELETE /mcp (${disconnect}); ${reaper}.`;
-}
-
 export interface HttpCommandDependencies {
   logger: WinstonLoggerType;
   serverFactory: (options: ServerFactoryOptions) => DebugMcpServer;
@@ -78,11 +45,14 @@ export interface HttpCommandDependencies {
   proc?: ProcessLike;
 }
 
+/**
+ * One MCP (protocol-level) session of the 2025 era: a connection, not an
+ * owner. Its SDK Server facade lives in the transport's onmessage closure and
+ * leaves with it; the debug sessions it created belong to the one core
+ * (issue #1025, step 2).
+ */
 interface SessionData {
   transport: NodeStreamableHTTPServerTransport;
-  server: DebugMcpServer;
-  /** The SDK Server facade connected to this session's transport (issue #1025, step 2). */
-  facade: Server;
   /** Timestamp of the last routed request (or stream close) for this session. */
   lastActivity: number;
   /** Open SSE (GET) streams; a session with a live stream is never idle. */
@@ -225,38 +195,43 @@ export function createHttpApp(
 
   const httpSessions = new Map<string, SessionData>();
 
-  // Reap crash-abandoned sessions (issue #337): a client that dies without
+  // One core for the process (issue #1025, step 2): the dependency container,
+  // the SessionManager and every debug session, shared by every MCP session's
+  // facade. Built here, after the refusal gates above, so a refused flag never
+  // constructs one; handleHttpCommand starts it before listening.
+  const core = serverFactory({
+    logLevel: options.logLevel,
+    logFile: options.logFile,
+  });
+  // While any client holds an open SSE stream the process is attended and the
+  // idle policy closes nothing; the modern era's listen streams join this
+  // count when they are served. One predicate for the supplier and /health.
+  const attended = (): boolean => {
+    for (const session of httpSessions.values()) {
+      if (session.openStreams > 0) {
+        return true;
+      }
+    }
+    return false;
+  };
+  core.setAttendedSupplier(attended);
+
+  // Reap crash-abandoned MCP sessions (issue #337): a client that dies without
   // DELETE leaves its transport registered forever — transport.onclose only
-  // fires on explicit close — so its DebugMcpServer and every proxy chain
-  // (including lldb-server's ptrace claim on an attach target, or a paused
-  // attach target itself) stay alive, invisible to the reconnecting client's
-  // fresh session. Sessions holding a live SSE stream are never reaped. A
-  // session whose stream dropped and never came back is reaped after
+  // fires on explicit close — so its SSE stream bookkeeping and its SDK Server
+  // facade would stay alive. Sessions holding a live SSE stream are never
+  // reaped. A session whose stream dropped and never came back is reaped after
   // MCP_HTTP_STREAM_LOST_SESSION_MS (default 2 min; issue #658) — the SDK
   // client keeps a GET stream open, so its death is observed the moment the
   // socket closes and need not wait out the long window. A pure-POST client,
   // whose liveness is unobservable, is reaped only after
   // MCP_HTTP_STALE_SESSION_MS (default 30 min). 0 disables either path. Both
-  // close the transport through the normal onclose path, which stops its
-  // server and debug sessions.
+  // close the transport through the normal onclose path. The debug sessions
+  // such a client created are the core's and answer to the per-debug-session
+  // idle policy (MCP_DEBUG_SESSION_IDLE_MS), not to this sweep (issue #1025).
   const staleSessionMs = parseStaleSessionMs(proc.env.MCP_HTTP_STALE_SESSION_MS, logger);
   const streamLostSessionMs = parseStreamLostSessionMs(proc.env.MCP_HTTP_STREAM_LOST_SESSION_MS, logger);
   const staleSweepIntervalMs = parseSweepIntervalMs(proc.env.MCP_HTTP_STALE_SWEEP_INTERVAL_MS, logger);
-
-  // A debug session id that another HTTP session's server holds answers with
-  // whose it is (issue #939): every tool call runs against the calling
-  // client's own server, which cannot see the others, so each new server is
-  // handed this lookup (in handleMcpRequest below). It walks the live map at
-  // call time — nothing to keep in sync, and the asking server, which has
-  // already missed, is harmlessly among the entries.
-  const describeForeignSession = (debugSessionId: string): string | undefined => {
-    for (const session of httpSessions.values()) {
-      if (session.server.sessionManager.getSession(debugSessionId)) {
-        return describeForeignDebugSession(debugSessionId, { staleMs: staleSessionMs, streamLostMs: streamLostSessionMs });
-      }
-    }
-    return undefined;
-  };
 
   let staleSweepTimer: NodeJS.Timeout | undefined;
   if (staleSessionMs > 0 || streamLostSessionMs > 0) {
@@ -269,15 +244,12 @@ export function createHttpApp(
           continue;
         }
         const idleSeconds = Math.round((now - session.lastActivity) / 1000);
-        const held = session.server.sessionManager.getAllSessions()
-          .map((debugSession) => `${debugSession.id} (${debugSession.language}, ${debugSession.state})`);
-        const holding = held.length > 0 ? `; holding debug session(s) ${held.join(', ')}` : '';
         if (verdict === 'stream-lost') {
           logger.warn(
-            `Reaping HTTP session ${sid}: its SSE stream closed ${idleSeconds}s ago and the client neither reconnected nor sent a request (MCP_HTTP_STREAM_LOST_SESSION_MS=${streamLostSessionMs})${holding}.`
+            `Reaping HTTP session ${sid}: its SSE stream closed ${idleSeconds}s ago and the client neither reconnected nor sent a request (MCP_HTTP_STREAM_LOST_SESSION_MS=${streamLostSessionMs}).`
           );
         } else {
-          logger.warn(`Reaping stale HTTP session ${sid} (idle ${idleSeconds}s, no open streams)${holding}.`);
+          logger.warn(`Reaping stale HTTP session ${sid} (idle ${idleSeconds}s, no open streams).`);
         }
         try {
           void session.transport.close();
@@ -320,6 +292,10 @@ export function createHttpApp(
   app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
   const handleMcpRequest = async (req: Request, res: Response): Promise<void> => {
+    // Set when this request opens a new MCP session, so a handshake the SDK
+    // refuses — or a transport fault during it — does not leave its transport
+    // and facade behind (issue #1025).
+    let opening: NodeStreamableHTTPServerTransport | undefined;
     try {
       const sessionIdHeader = req.headers['mcp-session-id'];
       const sessionId = Array.isArray(sessionIdHeader) ? sessionIdHeader[0] : sessionIdHeader;
@@ -345,16 +321,9 @@ export function createHttpApp(
         }
         transport = session.transport;
       } else if (!sessionId && req.method === 'POST' && isInitializeRequest(req.body)) {
-        // New session — spin up an isolated DebugMcpServer + transport
-        const newDebugServer = serverFactory({
-          logLevel: options.logLevel,
-          logFile: options.logFile,
-          describeForeignSession,
-        });
-        await newDebugServer.start();
-        // The SDK Server this session speaks through: a legacy-era facade over
-        // the core (issue #1025, step 2).
-        const facade = protocolServerFactory(newDebugServer, { era: 'legacy', deliver: 'instance' });
+        // New MCP session: a legacy-era SDK Server facade over the one core
+        // (issue #1025, step 2), connected to its own sessionful transport.
+        const facade = protocolServerFactory(core, { era: 'legacy', deliver: 'instance' });
 
         // Forward declarations so the closures below can refer to the transport.
         // The SDK assigns its own internal sessionId before invoking onsessioninitialized.
@@ -366,8 +335,6 @@ export function createHttpApp(
             if (createdTransport) {
               httpSessions.set(sid, {
                 transport: createdTransport,
-                server: newDebugServer,
-                facade,
                 lastActivity: Date.now(),
                 openStreams: 0,
                 hadStream: false,
@@ -382,16 +349,13 @@ export function createHttpApp(
         // is already in place and then runs its own teardown, which is what
         // reaches server.onclose and detaches the facade's notification sink.
         // Assigning after connect() would replace that wrapper (issue #1025).
+        // The debug sessions this client created live on in the core under the
+        // idle policy where the operator set one; the MCP session was only a connection.
         newTransport.onclose = () => {
           const sid = newTransport.sessionId;
           if (!sid) return;
-          const session = httpSessions.get(sid);
-          if (!session) return;
-          httpSessions.delete(sid);
+          if (!httpSessions.delete(sid)) return;
           logger.info(`HTTP session closed: ${sid}`);
-          session.server.stop().catch((err) => {
-            logger.error(`Error stopping debug server for session ${sid}:`, err);
-          });
         };
 
         newTransport.onerror = (error: Error) => {
@@ -401,6 +365,7 @@ export function createHttpApp(
 
         await facade.connect(newTransport);
         transport = newTransport;
+        opening = newTransport;
       } else if (sessionId) {
         logger.warn('Rejecting MCP request: unknown session ID', { method: req.method });
         res.status(404).json(jsonRpcErrorBody(-32001, 'Session not found'));
@@ -428,6 +393,17 @@ export function createHttpApp(
           jsonRpcErrorBody(ProtocolErrorCode.InternalError, 'Internal error', error instanceof Error ? error.message : 'Unknown error')
         );
       }
+    } finally {
+      if (opening && !opening.sessionId) {
+        // The handshake did not complete (the SDK refused it, or the transport
+        // threw): nothing registered this transport, so nothing would ever close
+        // it. Closing it runs the facade's onclose chain and detaches its
+        // notification sink from the process-wide hub.
+        logger.debug('Closing the transport of an initialize that did not complete');
+        await opening.close().catch((err: unknown) => {
+          logger.debug('Error closing an uninitialized transport', { error: err });
+        });
+      }
     }
   };
 
@@ -435,29 +411,37 @@ export function createHttpApp(
   app.get('/mcp', handleMcpRequest);
   app.delete('/mcp', handleMcpRequest);
 
-  // /health names what each HTTP session holds (issue #658): an orphaned
-  // session's debug sessions are invisible to every other MCP client, so
-  // this is the operator's only view of a paused attach target short of ps.
+  // /health names every MCP session (a connection) and every debug session of
+  // the process (issues #658, #1025): the operator's view of a paused attach
+  // target short of ps, and of whether a client is attending.
   app.get('/health', (_req: Request, res: Response) => {
     const now = Date.now();
+    const sessions = Array.from(httpSessions, ([id, session]) => ({
+      id,
+      openStreams: session.openStreams,
+      streamLost: session.hadStream && session.openStreams === 0,
+      idleMs: now - session.lastActivity,
+    }));
     res.json({
       status: 'ok',
       mode: 'http',
       listening: { ...listening },
       connections: httpSessions.size,
+      attended: attended(),
+      listenStreams: 0,
       sessions: Array.from(httpSessions.keys()),
-      details: Array.from(httpSessions, ([id, session]) => ({
-        id,
-        openStreams: session.openStreams,
-        streamLost: session.hadStream && session.openStreams === 0,
-        idleMs: now - session.lastActivity,
-        debugSessions: session.server.sessionManager.getAllSessions().map((debugSession) => ({
+      details: sessions,
+      debugSessions: core.sessionManager.getAllSessions().map((debugSession) => {
+        const idleMs = core.sessionManager.idleMsOf(debugSession.id, now);
+        return {
           id: debugSession.id,
           name: debugSession.name,
           language: debugSession.language,
           state: debugSession.state,
-        })),
-      })),
+          ...(debugSession.parentSessionId ? { parentSessionId: debugSession.parentSessionId } : {}),
+          ...(idleMs !== undefined ? { idleMs } : {}),
+        };
+      }),
     });
   });
 
@@ -481,6 +465,8 @@ export function createHttpApp(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (app as any).httpSessions = httpSessions;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (app as any).core = core;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (app as any).bindAddress = bind;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -538,6 +524,11 @@ export async function handleHttpCommand(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const httpSessions = (app as any).httpSessions as Map<string, SessionData>;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const core = (app as any).core as DebugMcpServer;
+    // The one core (issue #1025, step 2): started once, before anything can
+    // reach it; its idle sweep is armed here.
+    await core.start();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const bind = (app as any).bindAddress as ResolvedBindAddress;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const listening = (app as any).listening as ListeningEndpoint;
@@ -590,20 +581,21 @@ export async function handleHttpCommand(
       }, 15000);
       hardExit.unref?.();
 
-      // Close every active transport and stop its DebugMcpServer, bounded
-      // so one wedged session cannot stall the whole shutdown.
+      // Close every active transport, then stop the one core (every debug
+      // session with it), bounded so one wedged proxy cannot stall the whole
+      // shutdown. Transports first: no request lands on a core that is closing.
       const stopWork = (async () => {
-        for (const { transport, server: debugServer } of httpSessions.values()) {
+        for (const { transport } of httpSessions.values()) {
           try {
             await transport.close();
           } catch (err) {
             logger.error('Error closing transport during shutdown', { error: err });
           }
-          try {
-            await debugServer.stop();
-          } catch (err) {
-            logger.error('Error stopping debug server during shutdown', { error: err });
-          }
+        }
+        try {
+          await core.stop();
+        } catch (err) {
+          logger.error('Error stopping debug server during shutdown', { error: err });
         }
       })();
       const guard = new Promise<void>((resolve) => {

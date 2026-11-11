@@ -258,20 +258,26 @@ may reach it. All are passed through with `-e`:
   (or omit the variable) for detached network-mode containers. It is unrelated to the
   `stdio`-mode exit policy described under
   [Troubleshooting](#common-docker-issues), which is always on and needs no variable.
+- **`MCP_DEBUG_SESSION_IDLE_MS`** (`src/session/idle-policy.ts`) -- opt-in, off by default on
+  every transport (unset or `0`): a debug session then lives until it is closed, its program
+  ends, or the container exits. When set, a debug-session tree that no tool call has named for
+  that long is closed, releasing any ptrace claim on the target, unless a client is attending
+  the process (an open SSE stream). Invalid values log a warning and leave it off.
+  `MCP_DEBUG_SESSION_IDLE_SWEEP_MS` (default 60000) is the sweep cadence. Set it on a
+  long-lived or shared container; a short-lived diagnostic one wants a tight window -- see
+  the [Kubernetes debugging recipe](kubernetes.md), which sets it to 5 minutes (issue #1025).
 - **`MCP_HTTP_STALE_SESSION_MS`** (`src/cli/http-command.ts`) -- idle window before an HTTP
-  MCP session with no open SSE stream is reaped, closing its debug sessions and releasing
-  any ptrace claim on the target. Defaults to 30 minutes (1800000); `0` disables that path;
-  invalid values log a warning and fall back to the default. Read only by `http` mode.
-  A short-lived diagnostic container wants a
-  much tighter window -- see the
-  [Kubernetes debugging recipe](kubernetes.md), which sets it to 5 minutes.
-- **`MCP_HTTP_STREAM_LOST_SESSION_MS`** -- the short window for a session whose SSE stream
+  MCP session with no open SSE stream is reaped. Defaults to 30 minutes (1800000); `0` disables
+  that path; invalid values log a warning and fall back to the default. Read only by `http`
+  mode. Reaping an MCP session closes no debug session: those belong to the process, and only
+  `MCP_DEBUG_SESSION_IDLE_MS`, when set, ends one on a timer.
+- **`MCP_HTTP_STREAM_LOST_SESSION_MS`** -- the short window for an MCP session whose SSE stream
   dropped and never came back (default 2 minutes; `0` falls back to the stale window). An
   MCP SDK client keeps a GET stream open, so when it crashes or exits without `DELETE /mcp`
-  the server sees the socket close and releases its debug sessions -- including a paused
-  attach target -- within this window plus one sweep, instead of holding them for the full
-  stale window (issue #658). Only a client that never opened a stream waits out
-  `MCP_HTTP_STALE_SESSION_MS`. `GET /health` lists what each HTTP session is holding.
+  the server sees the socket close and forgets the connection within this window plus one
+  sweep (issue #658); the moment that stream closes the process is also no longer attended, so
+  the idle policy, when it is set, can end the debug sessions it left behind. `GET /health` lists the MCP
+  sessions, the debug sessions and whether anyone is attending.
 - **`MCP_HTTP_ALLOWED_HOSTS`** (`src/cli/host-allowlist.ts`) -- comma-separated `Host` header
   values to accept in addition to the loopback trio (`localhost`, `127.0.0.1`, `[::1]`); the same
   list as repeating `--allowed-host`. Port-agnostic and case-insensitive; IPv6 literals in

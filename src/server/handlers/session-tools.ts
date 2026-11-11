@@ -13,7 +13,7 @@ import { attachRequestFromArgs, carriesLastStop, emittableStopInfo, hoistStopLan
 import { namesAttachTarget } from '../../session/attach/attach-addressing.js';
 import { failureResult, jsonResult, rethrowAsMcpError, type ToolResult } from '../tool-result.js';
 
-export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
+export const createDebugSessionTool: ToolHandler = async (ctx, args, _toolName, extra) => {
   // Validate before creating the session so a bad argument does
   // not leave an orphan session behind (issue #336).
   assertPlainObjectArg(args.adapterConfig, 'adapterConfig');
@@ -79,7 +79,9 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
   const sessionInfo = await ctx.createDebugSession({
     language: lang,
     name: args.name,
-    executablePath: args.executablePath
+    executablePath: args.executablePath,
+    // The caller's scope (issue #1025, step 2); absent for the shared anonymous scope.
+    ...(extra?.callerKey !== undefined ? { ownerKey: extra.callerKey } : {})
   });
 
   // Log session creation
@@ -155,9 +157,11 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args) => {
   }
 };
 
-export async function handleListDebugSessions(ctx: ToolContext): Promise<ToolResult> {
+export async function handleListDebugSessions(ctx: ToolContext, callerKey?: string): Promise<ToolResult> {
   try {
-    const sessionsInfo: DebugSessionInfo[] = ctx.sessionManager.getAllSessions();
+    // The whole process's list, in the caller's scope (issue #1025, step 2):
+    // with no authentication every caller is anonymous and sees everything.
+    const sessionsInfo: DebugSessionInfo[] = ctx.sessionManager.getSessionsVisibleTo(callerKey);
     const sessionData = sessionsInfo.map((session: DebugSessionInfo) => {
       const mappedSession: Record<string, unknown> = { 
           id: session.id, 
@@ -204,6 +208,16 @@ export async function handleListDebugSessions(ctx: ToolContext): Promise<ToolRes
           // A child session (the session tree, issue #1081): the row names its parent.
           mappedSession.parentSessionId = session.parentSessionId;
       }
+      // How long since a tool call named this session's tree (issue #1025): what
+      // tells a forgotten session from a live one, and — when the operator turned
+      // the idle policy on — how long it has left. A child reports its root's.
+      const idleMs = ctx.sessionManager.idleMsOf(session.id);
+      if (idleMs !== undefined) {
+          mappedSession.idleMs = idleMs;
+          if (ctx.idlePolicy.idleMs > 0) {
+              mappedSession.expiresInMs = Math.max(0, ctx.idlePolicy.idleMs - idleMs);
+          }
+      }
       return mappedSession;
     });
     return jsonResult({ success: true, sessions: sessionData, count: sessionData.length });
@@ -213,8 +227,8 @@ export async function handleListDebugSessions(ctx: ToolContext): Promise<ToolRes
   }
 }
 
-export const listDebugSessionsTool: ToolHandler = async (ctx) => {
-  return handleListDebugSessions(ctx);
+export const listDebugSessionsTool: ToolHandler = async (ctx, _args, _toolName, extra) => {
+  return handleListDebugSessions(ctx, extra?.callerKey);
 };
 
 export const closeDebugSessionTool: ToolHandler = async (ctx, args) => {

@@ -1,14 +1,11 @@
 import type { Logger as WinstonLoggerType } from 'winston';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
-import { DebugMcpServer } from '../server.js';
+import { DebugMcpServer, type DebugMcpServerOptions } from '../server.js';
 import { createProtocolServer } from '../server/protocol-facade.js';
 import type { StdioOptions } from './setup.js';
 import type { ProcessLike } from '../interfaces/process-interfaces.js';
 
-export interface ServerFactoryOptions {
-  logLevel?: string;
-  logFile?: string;
-}
+export type ServerFactoryOptions = DebugMcpServerOptions;
 
 export interface StdioCommandDependencies {
   logger: WinstonLoggerType;

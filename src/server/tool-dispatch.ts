@@ -6,6 +6,9 @@
  */
 import { Server, ProtocolError, ProtocolErrorCode, type CallToolResult } from '@modelcontextprotocol/server';
 import { toWireError } from '../errors/debug-errors.js';
+import { describeIdleExpiry } from '../session/idle-policy.js';
+import { runWithSessionHidden } from '../session/session-scope.js';
+import { ownerKeyOf } from './owner-key.js';
 import { coerceToolArguments, ToolArguments } from './tool-arguments.js';
 import { extractPayloadSuccess, failureResult, sanitizeRequest, type ToolResult } from './tool-result.js';
 import { buildToolDefinitions, isToolName, TOOL_ALIASES, type ToolDefinition } from './tool-schemas.js';
@@ -14,31 +17,43 @@ import type { ToolContext } from './tool-context.js';
 import { TOOL_HANDLERS } from './handlers/index.js';
 
 /**
- * A session id that another server in this process owns answers with that
- * fact instead of the tool's own "not found" (Streamable HTTP: one
- * DebugMcpServer per MCP client session, issue #939). Decided here, in front
- * of every handler, so all tools say it the same way — the per-tool wordings
- * (`Session not found`, `Failed to close debug session`, hot_reload'
- * protocol error) stay for an id nobody holds. Ownership is terminal, which is
- * why it outranks a handler's own argument gates: no argument fix can make the
- * call succeed on this server. Only tools whose schema takes a `sessionId` are
- * gated — the SDK does not validate arguments against the schema, and a stale
- * id an agent carries across MCP sessions must never refuse
- * `create_debug_session`. Only the HTTP layer provides the lookup; without it
- * nothing changes.
+ * The owner-key gate (issue #1025, step 2). For a caller, a session outside
+ * its scope does not exist — so the dispatch gives no answer of its own for
+ * one (any fixed answer differs from some tool's real unknown-id answer, and
+ * the difference says the session is there). A tool that takes a `sessionId`
+ * runs — argument checks, handler and all — with that session hidden from
+ * every lookup (session-scope.ts), and answers as it answers an id nobody
+ * holds. A tool that takes none is not steered by a stray one: it runs as it
+ * always does, and its own scoping (the listings) is what applies. Either way
+ * the operator log names the session as it names an unknown one. With no
+ * authentication configured every caller is in the shared anonymous scope and
+ * sees everything, as before.
  */
-function foreignSessionResult(ctx: ToolContext, definition: ToolDefinition, sessionId: unknown): ToolResult | undefined {
-  if (typeof sessionId !== 'string' || !ctx.describeForeignSession) {
+function takesSessionId(definition: ToolDefinition | undefined): boolean {
+  return definition !== undefined
+    && Object.prototype.hasOwnProperty.call(definition.inputSchema.properties ?? {}, 'sessionId');
+}
+
+/**
+ * A session the idle policy closed (issue #1025): the agent that comes back to
+ * it is told what happened — when, under which window, what became of the
+ * program — where every tool used to answer "Session not found", the words a
+ * mistyped id gets. Told inside the owner scope only; for anyone else the id
+ * is unknown, as the gate above requires.
+ */
+function idleExpiryResult(ctx: ToolContext, definition: ToolDefinition, sessionId: unknown, callerKey: string | undefined): ToolResult | undefined {
+  if (typeof sessionId !== 'string' || !takesSessionId(definition) || ctx.sessionManager.getSession(sessionId)) {
     return undefined;
   }
-  if (!Object.prototype.hasOwnProperty.call(definition.inputSchema.properties ?? {}, 'sessionId')) {
-    return undefined;
-  }
-  if (ctx.sessionManager.getSession(sessionId)) {
-    return undefined;
-  }
-  const explanation = ctx.describeForeignSession(sessionId);
-  return explanation ? failureResult(explanation) : undefined;
+  const expiry = ctx.sessionManager.idleExpiryOf(sessionId, callerKey);
+  return expiry ? failureResult(describeIdleExpiry(expiry), { closedBy: 'idle-policy' }) : undefined;
+}
+
+/** Whether `sessionId` names a session that exists but is not the caller's to see. */
+function isOutOfScope(ctx: ToolContext, sessionId: unknown, callerKey: string | undefined): boolean {
+  return typeof sessionId === 'string'
+    && ctx.sessionManager.getSession(sessionId) !== undefined
+    && !ctx.sessionManager.isSessionVisibleTo(sessionId, callerKey);
 }
 
 /**
@@ -84,59 +99,82 @@ export function registerToolHandlers(server: Server, ctx: ToolContext): void {
       const requestedName = request.params.name;
       const toolName = TOOL_ALIASES[requestedName] ?? requestedName;
       const args = coerceToolArguments((request.params.arguments ?? {}) as Record<string, unknown>) as ToolArguments;
+      const callerKey = ownerKeyOf(callCtx);
+      // Whether the named session exists outside the caller's scope. The scope
+      // itself is entered only for a tool that takes the id (below): hiding a
+      // session from a tool that lists sessions would hide its owner key too.
+      const outOfScope = isOutOfScope(ctx, args.sessionId, callerKey);
+      const takesId = isToolName(toolName) && takesSessionId(dispatchDefinitions.get(toolName));
+      // The log's name for the session, read the way the caller may see it.
+      const sessionNameForLog = (): string | undefined => {
+        const id = args.sessionId;
+        if (!id) return undefined;
+        return outOfScope ? runWithSessionHidden(id, () => ctx.getSessionName(id)) : ctx.getSessionName(id);
+      };
 
-      // Log tool call with structured logging
-      ctx.logger.info('tool:call', {
-        tool: toolName,
-        sessionId: args.sessionId,
-        sessionName: args.sessionId ? ctx.getSessionName(args.sessionId) : undefined,
-        request: sanitizeRequest(args as Record<string, unknown>),
-        timestamp: Date.now()
-      });
-
-      try {
-        if (!isToolName(toolName)) {
-          throw new ProtocolError(ProtocolErrorCode.MethodNotFound, `Unknown tool: ${requestedName}`);
-        }
-        const definition = dispatchDefinitions.get(toolName);
-        if (!definition) {
-          throw new ProtocolError(ProtocolErrorCode.MethodNotFound, `Unknown tool: ${toolName}`);
-        }
-        assertRequiredToolArguments(definition, args as unknown as Record<string, unknown>);
-        const result =
-          foreignSessionResult(ctx, definition, args.sessionId) ??
-          await TOOL_HANDLERS[toolName](ctx, args, requestedName, { signal: callCtx?.mcpReq.signal });
-        
-        // Log tool response; success mirrors the payload's own success flag (issue #397)
-        ctx.logger.info('tool:response', {
+      const handle = async (): Promise<CallToolResult> => {
+        // Log tool call with structured logging
+        ctx.logger.info('tool:call', {
           tool: toolName,
           sessionId: args.sessionId,
-          sessionName: args.sessionId ? ctx.getSessionName(args.sessionId) : undefined,
-          success: extractPayloadSuccess(result),
+          sessionName: sessionNameForLog(),
+          request: sanitizeRequest(args as Record<string, unknown>),
           timestamp: Date.now()
         });
+
+        try {
+          if (!isToolName(toolName)) {
+            throw new ProtocolError(ProtocolErrorCode.MethodNotFound, `Unknown tool: ${requestedName}`);
+          }
+          const definition = dispatchDefinitions.get(toolName);
+          if (!definition) {
+            throw new ProtocolError(ProtocolErrorCode.MethodNotFound, `Unknown tool: ${toolName}`);
+          }
+          assertRequiredToolArguments(definition, args as unknown as Record<string, unknown>);
+          if (!outOfScope && typeof args.sessionId === 'string' && takesSessionId(definition)) {
+            // A tool call naming a session is activity for the idle policy (issue
+            // #1025, step 2) — only through a tool that takes the id, so a stray
+            // argument cannot keep a tree alive, and never for a session the
+            // caller may not see.
+            ctx.sessionManager.touchActivity(args.sessionId);
+          }
+          const result =
+            idleExpiryResult(ctx, definition, args.sessionId, callerKey) ??
+            await TOOL_HANDLERS[toolName](ctx, args, requestedName, { signal: callCtx?.mcpReq.signal, callerKey });
         
-        return result;
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
+          // Log tool response; success mirrors the payload's own success flag (issue #397)
+          ctx.logger.info('tool:response', {
+            tool: toolName,
+            sessionId: args.sessionId,
+            sessionName: sessionNameForLog(),
+            success: extractPayloadSuccess(result),
+            timestamp: Date.now()
+          });
         
-        // Log tool error
-        ctx.logger.error('tool:error', {
-          tool: toolName,
-          sessionId: args.sessionId,
-          sessionName: args.sessionId ? ctx.getSessionName(args.sessionId) : undefined,
-          error: errorMessage,
-          timestamp: Date.now()
-        });
+          return result;
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
         
-        // The JSON-RPC boundary: the SDK copies .message onto the wire and the
-        // client prefixes it again, so send the bare detail (issue #659).
-        throw toWireError(
-          error instanceof ProtocolError
-            ? error
-            : new ProtocolError(ProtocolErrorCode.InternalError, `Failed to execute tool ${toolName}: ${errorMessage}`)
-        );
-      }
+          // Log tool error
+          ctx.logger.error('tool:error', {
+            tool: toolName,
+            sessionId: args.sessionId,
+            sessionName: sessionNameForLog(),
+            error: errorMessage,
+            timestamp: Date.now()
+          });
+        
+          // The JSON-RPC boundary: the SDK copies .message onto the wire and the
+          // client prefixes it again, so send the bare detail (issue #659).
+          throw toWireError(
+            error instanceof ProtocolError
+              ? error
+              : new ProtocolError(ProtocolErrorCode.InternalError, `Failed to execute tool ${toolName}: ${errorMessage}`)
+          );
+        }
+      };
+
+      return outOfScope && takesId ? runWithSessionHidden(args.sessionId as string, handle) : handle();
     }
   );
 }

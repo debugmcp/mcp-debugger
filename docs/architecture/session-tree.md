@@ -444,7 +444,7 @@ One row per measured fact; the "answer" column is what this design adds on top o
 | `detach_from_process` on an attach root with children | each child's `disconnect(terminateDebuggee: false)` resumes it undebugged (row 3) | each child keeps running (row 3) | children detached deepest-first (`released: true`), then the parent; the parent-side order with several children is measured by the M1 suite |
 | `restart_debugging` on a parent | the relaunch ends the previous run's processes (row 6) | same (row 6) | the previous run's children are closed and removed; `childrenClosed: n` |
 | grandchildren | reported on the child's connection, adopted there, `terminated` cascades bottom-up (row 7) | same (row 7) | `parentSessionId` = the child; the cap counts the whole tree |
-| the HTTP client's MCP session ends (stale, stream lost, `DELETE /mcp`) | — | — | that client's server stops and closes all its sessions, trees included, as today |
+| the HTTP client's MCP session ends (stale, stream lost, `DELETE /mcp`) | — | — | that client's SDK Server facade closes; its debug sessions, trees included, live on in the one core until they are closed, their program ends, or the server exits — or, where the operator set it, until the idle policy closes them (`MCP_DEBUG_SESSION_IDLE_MS`, off by default; #1025 step 2) |
 | the parent's worker dies | — | — | every session in the tree goes to `error` with the parent's diagnostics; the adapter process is reaped by the worker's exit path as today |
 
 Per-session machinery that stays per session: the `InFlightGuard` (a child never launches or
@@ -464,23 +464,44 @@ story. Ownership never becomes a tool parameter.
 
 Two guardrails:
 
-1. In the modern era (no protocol-level MCP session) `list_debug_sessions` is the whole process's
-   list; the session `name` is the agent's own namespace hint. Several agents against one `http`
-   process see each other's sessions: that is a single-tenant statement, and one server process
-   per agent is the isolation, as stdio and the dev proxy already give. The legacy era's per-client
-   server and foreign-session refusal ([#939](https://github.com/debugmcp/mcp-debugger/issues/939))
-   are that era's behaviour, not a contract.
-2. Lifetime without an MCP session (today the stale reaper's trigger, `MCP_HTTP_STALE_SESSION_MS`)
-   becomes a **per-debug-session idle policy**: `MCP_DEBUG_SESSION_IDLE_MS`, default thirty minutes,
-   `0` disables. A tool call naming a session refreshes that session and its ancestors, so
-   actively inspecting or stepping a child cannot expire its parent and cascade-close the child.
-   Activity does not refresh siblings or other descendants: each keeps its own clock. An in-flight
-   `wait_for_stop` protects the session, all descendants it observes (including ones adopted while
-   waiting), and its ancestors from idle expiry for the duration of the call; their idle intervals
-   restart when it settles, times out or is cancelled. Closing a parent that is idle under these
-   rules still cascades using the initiating operation's close policy above: idle expiry of an
-   attach root releases all of its external targets. Explicit close and debuggee exit end a
-   session sooner, as today.
+1. `list_debug_sessions` is the whole process's list, in every era; the session `name` is the
+   agent's own namespace hint. Several agents against one `http` process see each other's sessions:
+   that is a single-tenant statement, and one server process per agent is the isolation, as stdio
+   and the dev proxy already give. The legacy era's per-client server and foreign-session refusal
+   ([#939](https://github.com/debugmcp/mcp-debugger/issues/939)) were that era's behaviour, not a
+   contract, and went with the one-core-per-process change (shipped 2026-11, #1025 step 2). The
+   seam for real isolation is in place: a session is created in its caller's scope — the
+   authenticated principal when the request carried one, otherwise the shared anonymous scope —
+   and a session outside the caller's scope does not exist for that caller: the dispatch hides it
+   from the call's lookups, so every tool answers it exactly as it answers an id nobody holds
+   (pinned tool by tool in `owner-scope-contract.test.ts`, for another principal and for an
+   anonymous caller); with no authentication every caller is anonymous. Two things the seam does
+   **not** scope yet, both acceptance criteria of the authenticated-`http` issue: a 2026-07-28
+   `subscriptions/listen` (the SDK's entry serves it and publishes by URI, with no hook that sees
+   the listener — and its acknowledgement echoes the filter it honoured, so dropping a foreign URI
+   at request time would itself tell it from an unknown one), which lets a caller who already
+   holds a foreign session's id learn that it exists and when it prints; and `GET /health`, which
+   lists every debug session to whoever can reach the port.
+2. Lifetime without an MCP session: a debug session ends by its own close, its program ending, or
+   the server exiting. A **per-debug-session idle policy** exists and is **off by default on every
+   transport** (decided with JF 2026-11-10, replacing the thirty-minute `http` default this section
+   first carried: a sessionless client gives the server no sign of life between its calls, so any
+   finite default ends some live agent's program, while a leaked session is visible in
+   `list_debug_sessions` and closable by anyone). An operator of a shared or long-lived server
+   turns it on with `MCP_DEBUG_SESSION_IDLE_MS`; the sweep runs every
+   `MCP_DEBUG_SESSION_IDLE_SWEEP_MS` (60 s). When it is on, a session's row shows `expiresInMs`,
+   and a later call naming a session the policy closed answers what happened, in its owner's scope.
+   Only roots have a clock: a tool call naming any session in a tree refreshes the tree's root, and
+   a child never expires on a clock of its own — the tree goes with its root (decided 2026-11-09,
+   amending the per-descendant clocks this section first proposed: a worker paused under a parent
+   the agent is driving must not be terminated by a timer). An in-flight `wait_for_stop` holds the
+   root for the duration of the call. The sweep is skipped entirely while a client is attending the
+   process — any open legacy SSE stream or modern `subscriptions/listen` stream — so a connected
+   client never loses a paused session to the clock; idle time still accrues from the last tool
+   call, so a vanished client's already-idle sessions end at the first unattended sweep. Expiry
+   cascades using the initiating operation's close policy above: idle expiry of an attach root
+   releases all of its external targets. Explicit close and debuggee exit end a session sooner, as
+   today.
 
 If real authentication ever arrives, the authenticated principal becomes the owner key with no
 schema change.
@@ -554,9 +575,10 @@ Taken by the author of this document, marked so they can be overturned:
 - The child's connection lives in the parent's worker (the constraints above).
 - The per-tree cap defaults to 32 and is named `DEBUG_MCP_MAX_CHILD_SESSIONS`; `0` disables
   child-session adoption, excluding js-debug's mandatory first target.
-- The idle policy knob is named `MCP_DEBUG_SESSION_IDLE_MS`.
-- Activity on a descendant protects its ancestors from idle expiry; a tree-aware wait protects
-  the subtree it observes for the duration of the call.
+- The idle policy knob is named `MCP_DEBUG_SESSION_IDLE_MS` (sweep: `MCP_DEBUG_SESSION_IDLE_SWEEP_MS`); it is off unless set (decided with JF, 2026-11-10).
+- Only roots have an idle clock: activity on any session in a tree refreshes its root, a child never
+  expires alone, a tree-aware wait holds the root for the duration of the call, and the sweep is
+  skipped while a client attends the process (decided with JF, 2026-11-09).
 - The ordering rule for several settles before one wait (parent first, then adoption order).
 - Ended children stay listed until closed, and leave with their parent.
 - Closing any session closes its subtree, including when that session is itself a child.

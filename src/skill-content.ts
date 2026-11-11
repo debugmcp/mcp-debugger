@@ -20,8 +20,14 @@ import {
 
 export function buildServerInstructions(
   mode: BpAddressingMode = DEFAULT_BP_ADDRESSING,
-  opts: { redactionEnabled?: boolean; variableAccessMode?: 'open' | 'explicit' } = {}
+  opts: { redactionEnabled?: boolean; variableAccessMode?: 'open' | 'explicit'; idleWindow?: string } = {}
 ): string {
+  // Only when the operator turned the idle policy on (MCP_DEBUG_SESSION_IDLE_MS;
+  // off by default, issue #1025): it ends programs, so the agent must know.
+  const idleRule = opts.idleWindow
+    ? `
+- This server closes a debug session tree that no tool call has named for ${opts.idleWindow} (a launched program is ended, an attached one released and left running); list_debug_sessions shows each session's expiresInMs, any tool call naming the session resets it, and a wait_for_stop in flight holds it.`
+    : '';
   // Default matches the runtime default: redaction is on unless the server
   // was started with DEBUG_MCP_NO_REDACT=1 (issue #237).
   const redactionRule = (opts.redactionEnabled ?? true)
@@ -55,7 +61,7 @@ Key rules:
 - get_output returns buffered debuggee stdout/stderr with a cursor; pass the returned nextSince back as since to read only new output.
 - attach_to_process connects to running/remote targets (debugpy --listen, rdbg --open, JVM JDWP), including pods via port-forward. Breakpoint paths resolve on the TARGET's filesystem: use debuggee-side paths, function breakpoints, or a mapping (python: adapterConfig.pathMappings; ruby: localfsMap). Kubernetes recipe + per-language attach presets: docs/kubernetes.md in the repo.
 - expose_session {sessionId} returns host/port/token for a read-only IDE mirror of the live session (VS Code launch.json: "debugServer": port + "mirrorToken"); relay these to the human, unexpose_session when done. The IDE observes — execution control stays with you.
-- Launch sessions pause at uncaught exceptions by default (breakOnExceptions "uncaught"; Ruby excepted — rdbg has no uncaught filter). Pass "none" to let crashing scripts run to termination; attach applies no default.${redactionRule}${variableAccessRule}
+- Launch sessions pause at uncaught exceptions by default (breakOnExceptions "uncaught"; Ruby excepted — rdbg has no uncaught filter). Pass "none" to let crashing scripts run to termination; attach applies no default.${redactionRule}${variableAccessRule}${idleRule}
 
 For the full debugging workflow (root-cause discipline, per-language quirks), request the "debugging-workflow" prompt or install the agent skill from skills/debugging/ in the repo.`;
 }

@@ -87,14 +87,14 @@ Creates a new debugging session.
 **Notes:**
 - Session IDs are UUIDs in the format `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
 - Sessions start in `"created"` state
-- **Streamable HTTP: debug sessions are per MCP client session.** Each HTTP client (each `Mcp-Session-Id`) gets its own server, so a debug session is visible only to the client that created it; `list_debug_sessions` lists that client's sessions alone. A tool call from another client naming the id answers `success: false` with `error: "Session <id> belongs to another MCP client session: …"` and says how it ends: only its client can close it or end its MCP session with an explicit `DELETE /mcp` (an SDK client's `close()` is not a DELETE — a plain disconnect leaves it to the idle reaper: `MCP_HTTP_STREAM_LOST_SESSION_MS` for a client that held an SSE stream, `MCP_HTTP_STALE_SESSION_MS` for one that never did; both `0` means nothing else ends it). Drive one debug session from one client and keep that client's MCP session open; a one-shot script that opens a fresh MCP session per call cannot reach the sessions its previous run created (issue #939). stdio has one client per process
+- **One debugger core per process; the id is the capability (issue #1025).** On Streamable HTTP every MCP client of a process sees the same debug sessions: `list_debug_sessions` is the whole process's list, and any client holding an id can drive or close that session — run one `http` process per agent where agents must not see each other's work. A debug session outlives the MCP session that created it, so a one-shot script that opens a fresh MCP session per call reaches the sessions its previous run created, and a client that reconnects can resume or close what it left behind. A session ends by `close_debug_session`, by its program ending, or with the server: nothing expires on a timer by default. An operator can turn on the **idle policy** (`MCP_DEBUG_SESSION_IDLE_MS`, off by default on every transport): a session tree that no tool call has named for that long is then closed through the normal close cascade (a launched program is ended, an attached one released), unless a client is attending the process — while any client holds its SSE stream open, nothing expires; an in-flight `wait_for_stop` holds its tree; children never expire on a clock of their own. `list_debug_sessions` shows each session's `idleMs` and, with a policy on, `expiresInMs`; a later call naming a session the policy closed answers what happened, with `closedBy: "idle-policy"`. The server is built to scope sessions per principal once it verifies callers itself (no authenticated `http` mode ships yet; an authenticating reverse proxy does not identify callers to the server), so today every caller is in the one shared scope
 - When `port`, `processId` or an `adapterConfig` URI/info-file key is provided in `create_debug_session`, the server performs an inline attach (creating the session and immediately attaching). The session exists before the addressing gate can refuse the form (a `port` on C/C++, say), so such a refusal answers `success: false` with a usable `sessionId`. The response then mirrors `attach_to_process`: alongside `sessionId` it carries `state`, the attach `data` payload, an optional `warning`, and — when a requested post-attach pause has not landed yet — `pending: true`, with `message` saying so (`…; post-attach pause pending — the target stops when it next executes code; call wait_for_stop to block until it does (pass stopOnEntry: false to attach without pausing)`)
 
 ---
 
 ### list_debug_sessions
 
-Lists all active debugging sessions — in Streamable HTTP mode, the ones this MCP client session created (see the note under `create_debug_session`).
+Lists all active debugging sessions — the whole process's list, whichever MCP client created them (see the note under `create_debug_session`).
 
 **Parameters:** None (empty object `{}`)
 
@@ -109,7 +109,8 @@ Lists all active debugging sessions — in Streamable HTTP mode, the ones this M
       "language": "python",
       "state": "created",
       "createdAt": "2025-06-11T04:53:14.762Z",
-      "updatedAt": "2025-06-11T04:53:14.762Z"
+      "updatedAt": "2025-06-11T04:53:14.762Z",
+      "idleMs": 4210
     }
   ],
   "count": 1
@@ -130,6 +131,8 @@ Lists all active debugging sessions — in Streamable HTTP mode, the ones this M
 **`debuggerDisabled`:** present (`true`) while the current launch runs with the debugger off — `dapLaunchArgs.noDebug: true` on an adapter that honours it (see `start_debugging`) — and the launch is live (`initializing`, `running` or `paused`). Cleared by the next launch or attach, and by a `stopped` event only a live debugger produces: a breakpoint the adapter itself reports (or names in `hitBreakpointIds`), an exception stop, or an entry stop — not a pause, a step, or a `debugger;` statement js-debug relabels as a breakpoint. Omitted otherwise (issue #749).
 
 Errored sessions include optional `diagnostics` with the current launch attempt's server-host `proxyLogPath` and remote-safe `proxyLogResource`. The record is retained for proxy initialization failures and for proxy/adapter deaths after initialization, and is cleared when a new launch or attach attempt begins.
+
+**`idleMs`:** milliseconds since a tool call last named this session or any session in its tree (a child reports its root's) — what tells a forgotten session from a live one. **`expiresInMs`:** present only when the operator turned the idle policy on (`MCP_DEBUG_SESSION_IDLE_MS`): how long the tree has before the policy closes it; any tool call naming the session resets it, a `wait_for_stop` in flight holds it, and nothing expires while a client is attending the process.
 
 **`parentSessionId`:** present on child rows only. A child session is created by the server, never by `create_debug_session`, when the adapter reports a process the debuggee started: a Python launch or attach — debugpy's sub-process debugging is on by default; `dapLaunchArgs: { subProcess: false }` opts a launch out and an attach target decides for itself with `--configure-subProcess` — where debugpy reports each child, or a JavaScript launch or verified-local attach — js-debug's `autoAttachChildProcesses` is on by default for launch or an inspector target that can read both a temporary server-side probe file and the installed js-debug bootloader files; other attaches default it off with a warning; `dapLaunchArgs: { autoAttachChildProcesses: false }` opts a launch out, `adapterConfig: { autoAttachChildProcesses: false }` an attach — where js-debug reports every Node process the program forks or spawns, `cluster` workers and grandchildren included (see [the session tree](./architecture/session-tree.md)). The child inherits the parent's `language`, its `name` is the adapter's own label for the process (debugpy: `Subprocess <pid>`; js-debug: `<script> [<pid>]`), it has its own breakpoints, `get_output` and `close_debug_session`, and it carries no `exitCode` (it ends with the adapter's `terminated` event). The parent's [`wait_for_stop`](#wait_for_stop) reports the child's stop with `sessionId` naming the child and `children` listing the tree; a child can still be waited on by its own id (that wait answers for the child and its own descendants only). `start_debugging`, `restart_debugging`, `attach_to_process`, `detach_from_process`, `expose_session` and `unexpose_session` refuse a child id by name. Closing the parent closes its children first (`childrenClosed` in the answer). `DEBUG_MCP_MAX_CHILD_SESSIONS` caps the live children of one tree (default 32; `0` turns adoption off): a child reported beyond the cap is released and runs undebugged, and the parent's next `wait_for_stop`, `start_debugging` or `restart_debugging` answer counts the run's released children in `childrenReleased`.
 
@@ -169,7 +172,7 @@ A session with child sessions, a child session or an attach root says what the c
 
 **Notes:**
 - Sessions may close automatically on errors
-- Closing a non-existent session returns `success: false` (`message: "Failed to close debug session: <id>"`); in Streamable HTTP mode a session another MCP client created answers `error: "Session <id> belongs to another MCP client session: …"` instead, and stays open (issue #939)
+- Closing a non-existent session returns `success: false` (`message: "Failed to close debug session: <id>"`); a session another MCP client of the same process created closes like any other — the id is the capability (issue #1025)
 - On a launch session the debuggee is terminated. Adapters that need a DAP `terminate` ahead of the
   disconnect to do so (the Dart and Flutter SDK adapters) receive one first (#885); an attached
   process is detached, not terminated
@@ -1439,7 +1442,7 @@ Each session also exposes its captured output as an MCP resource:
 - **URI:** `debug://sessions/{sessionId}/output` (`text/plain`) — the verbatim console transcript (all categories interleaved in arrival order).
 - **`resources/list`** enumerates one output resource per session; the list changes on session create/close (`notifications/resources/list_changed`).
 - **`resources/subscribe`** to a session's URI to receive `notifications/resources/updated` pings as output arrives. Pings are coalesced (~150 ms), so notification volume is independent of how fast the debuggee prints — on a ping, re-read the resource or call `get_output` with your cursor.
-- Subscriptions are tracked per server instance and cleaned up when the session closes.
+- Subscriptions are tracked per MCP connection and cleaned up when the connection closes or the session is removed; the coalesced pings are fanned out to every connection that subscribed.
 
 After a launch or attach creates its run directory, `resources/list` also includes `debug://sessions/{sessionId}/proxy-log`. Reading it returns at most the final 64 KiB, sanitized and trimmed to 80 lines. It is a point-in-time diagnostic resource and is intentionally not subscribable; output remains the only resource that emits update notifications.
 
@@ -1821,7 +1824,7 @@ Session-lifecycle failures (unknown/terminated session, proxy not running) are a
 ```
 
 ### Common Error Scenarios
-1. **Session not found**: Occurs when a session terminates unexpectedly. In Streamable HTTP mode an id that exists under *another* MCP client session is not reported as not found: every tool answers `error: "Session <id> belongs to another MCP client session: …"` (issue #939)
+1. **Session not found**: Occurs when a session terminates unexpectedly or was closed. A session the idle policy closed (`MCP_DEBUG_SESSION_IDLE_MS`, see `create_debug_session`) says so instead: `{ "success": false, "error": "Session … was closed by the idle policy at … Its program was ended. Create a new session to continue.", "closedBy": "idle-policy" }`. An id created by another MCP client of the same process is found like any other; one outside the caller's scope (a future authenticated `http` mode; today every caller shares one scope) does not exist for that caller — every tool answers it exactly as it answers an id nobody holds (issue #1025)
 2. **Invalid language**: Language must be one of the supported languages (discovered dynamically from installed adapters)
 3. **File not found**: When setting breakpoints in non-existent files
 4. **Invalid scope**: When passing wrong variablesReference to get_variables

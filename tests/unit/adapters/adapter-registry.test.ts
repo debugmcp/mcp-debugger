@@ -143,6 +143,11 @@ describe('AdapterRegistry', () => {
     expect(registry.getActiveAdapterCount()).toBe(1);
 
     await expect(registry.create('mock', adapterConfig)).rejects.toThrow(/Maximum adapter instances/);
+    // The limit is per process, so the message says how to get under it (issue #1025):
+    // with no idle expiry by default, forgotten sessions are what fill it.
+    await expect(registry.create('mock', adapterConfig)).rejects.toThrow(
+      /list_debug_sessions shows them.*close_debug_session.*the ones no longer needed/
+    );
 
     await adapter.dispose();
     expect(adapterStub.dispose).toHaveBeenCalled();

@@ -52,6 +52,7 @@ import { getVariableAccessMode } from './utils/variable-access.js';
 import { assertLineContent, resolveStatement, stripTrailingComment } from './utils/breakpoint-resolver.js';
 import { outputResourceUri } from './server/output-resources.js';
 import { NotificationHub } from './server/notification-hub.js';
+import { describeIdleWindow, resolveIdlePolicy, type IdlePolicy } from './session/idle-policy.js';
 import {
   discoverSupportedLanguages,
   buildLanguageMetadata,
@@ -68,14 +69,6 @@ export type { SetBreakpointRequest };
 export interface DebugMcpServerOptions {
   logLevel?: string;
   logFile?: string;
-  /**
-   * Explains a debug session id this server does not hold when another server
-   * in the same process does — Streamable HTTP runs one DebugMcpServer per MCP
-   * client session (issue #939). Answers the sentence the tool call should
-   * carry, or undefined when the id is simply unknown. Consulted by the
-   * tools/call dispatch before any handler runs; absent for stdio.
-   */
-  describeForeignSession?: (sessionId: string) => string | undefined;
 }
 
 /**
@@ -122,6 +115,17 @@ export class DebugMcpServer implements ToolContext {
   public readonly notifications: NotificationHub;
   /** @internal ToolContext dependency; read live by the tool handlers. */
   public readonly validationCache = new ValidationResultCache();
+
+  /** The idle policy in force (issue #1025, step 2); `idleMs` 0 = off. */
+  public readonly idlePolicy: IdlePolicy;
+  private idleSweepTimer?: NodeJS.Timeout;
+  private idleSweepInFlight = false;
+  /**
+   * Whether a client is attending the process right now (an open legacy SSE
+   * stream or a modern subscriptions/listen stream): while one is, the sweep
+   * closes nothing. The transport layer supplies it; the default says nobody is.
+   */
+  private attendedSupplier: () => boolean = () => false;
 
   /** @internal Language discovery is a ToolContext service; see src/server/language-discovery.ts. */
   public async getSupportedLanguagesAsync(): Promise<string[]> {
@@ -259,7 +263,7 @@ export class DebugMcpServer implements ToolContext {
 
   // Core business logic methods — delegated to by the MCP tool dispatch handler
   // (CallToolRequestSchema); public so they are also accessible for testing/external use
-  public async createDebugSession(params: { language: DebugLanguage; name?: string; executablePath?: string; }): Promise<DebugSessionInfo> {
+  public async createDebugSession(params: { language: DebugLanguage; name?: string; executablePath?: string; ownerKey?: string; }): Promise<DebugSessionInfo> {
     // Validate language support using dynamic discovery
     const supported = await this.getSupportedLanguagesAsync();
     const requested = params.language as unknown as string;
@@ -285,7 +289,9 @@ export class DebugMcpServer implements ToolContext {
       const sessionInfo: DebugSessionInfo = await this.sessionManager.createSession({
         language: params.language as DebugLanguage,
         name: name,
-        executablePath: params.executablePath  // Use executablePath for consistency
+        executablePath: params.executablePath,  // Use executablePath for consistency
+        // The caller's scope (issue #1025, step 2); absent for the shared anonymous scope.
+        ...(params.ownerKey !== undefined ? { ownerKey: params.ownerKey } : {})
       });
       return sessionInfo;
     } catch (error) {
@@ -713,11 +719,7 @@ export class DebugMcpServer implements ToolContext {
     return this.sessionManager.waitForStop(sessionId, timeoutMs, signal);
   }
 
-  /** @internal ToolContext service; see DebugMcpServerOptions.describeForeignSession. */
-  public readonly describeForeignSession?: (sessionId: string) => string | undefined;
-
   constructor(options: DebugMcpServerOptions = {}) {
-    this.describeForeignSession = options.describeForeignSession;
     const containerConfig: ContainerConfig = {
       logLevel: options.logLevel,
       logFile: options.logFile,
@@ -752,9 +754,11 @@ export class DebugMcpServer implements ToolContext {
 
     this.fileSystem = dependencies.fileSystem;
     this.version = getVersion();
+    this.idlePolicy = resolveIdlePolicy(this.environment, (message) => this.logger.warn(message));
     this.instructions = buildServerInstructions(getBpAddressingMode(this.environment), {
       redactionEnabled: isRedactionEnabled(this.environment),
-      variableAccessMode: getVariableAccessMode(this.environment)
+      variableAccessMode: getVariableAccessMode(this.environment),
+      ...(this.idlePolicy.idleMs > 0 ? { idleWindow: describeIdleWindow(this.idlePolicy.idleMs) } : {})
     });
 
     const sessionManagerConfig: SessionManagerConfig = {
@@ -817,9 +821,53 @@ export class DebugMcpServer implements ToolContext {
     // For MCP servers, start is handled by transport
     const buildTime = new Date().toISOString();
     this.logger.info(`[MCP Server] Started at ${buildTime}, version: ${this.version}`);
+    // The idle policy (issue #1025, step 2) is the operator's choice and off
+    // otherwise; either way the log says which rule this process runs under.
+    if (this.idlePolicy.idleMs <= 0) {
+      this.logger.info(
+        '[MCP Server] Debug-session idle policy: off (MCP_DEBUG_SESSION_IDLE_MS is not set): ' +
+        'a debug session lives until it is closed, its program ends, or the server exits'
+      );
+    }
+    // The sweep is armed once per process, unref'd so it never holds the event
+    // loop open on its own.
+    if (this.idlePolicy.idleMs > 0 && !this.idleSweepTimer) {
+      this.idleSweepTimer = setInterval(() => {
+        void this.runIdleSweep();
+      }, this.idlePolicy.sweepMs);
+      this.idleSweepTimer.unref?.();
+      this.logger.info(
+        `[MCP Server] Debug-session idle policy: a tree with no tool call for ${describeIdleWindow(this.idlePolicy.idleMs)} ` +
+        `is closed (sweep every ${describeIdleWindow(this.idlePolicy.sweepMs)}; MCP_DEBUG_SESSION_IDLE_MS, MCP_DEBUG_SESSION_IDLE_SWEEP_MS)`
+      );
+    }
+  }
+
+  /** Who decides whether a client is attending the process; see attendedSupplier. */
+  public setAttendedSupplier(supplier: () => boolean): void {
+    this.attendedSupplier = supplier;
+  }
+
+  private async runIdleSweep(): Promise<void> {
+    if (this.idleSweepInFlight) {
+      return;
+    }
+    this.idleSweepInFlight = true;
+    try {
+      // The supplier itself travels, so the sweep can ask again before each close.
+      await this.sessionManager.sweepIdle(this.idlePolicy.idleMs, { attended: this.attendedSupplier });
+    } catch (error) {
+      this.logger.error('Idle sweep failed', { error });
+    } finally {
+      this.idleSweepInFlight = false;
+    }
   }
 
   public async stop(): Promise<void> {
+    if (this.idleSweepTimer) {
+      clearInterval(this.idleSweepTimer);
+      this.idleSweepTimer = undefined;
+    }
     await this.sessionManager.closeAllSessions();
     // Tear down notification bookkeeping (issue #218): pending debounce
     // timers, the sinks and the SessionManager listeners must not outlive the
@@ -829,8 +877,8 @@ export class DebugMcpServer implements ToolContext {
     this.sessionManager.removeListener('child-session-adopted', this.handleChildSessionAdopted);
     this.sessionManager.removeListener('session-removed', this.handleSessionRemoved);
     this.logger.info('Debug MCP Server stopped');
-    // Last: detach this server's logger from the shared file transport so
-    // per-session servers in HTTP mode don't accumulate on it (issue #404).
+    // Last: detach this core's logger from the shared file transport (issue
+    // #404; one core per process now, so this runs once, at shutdown).
     // After this line the logger no longer writes to the shared file.
     this.disposeLogger?.();
   }
