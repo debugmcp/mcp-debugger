@@ -243,6 +243,22 @@ jobs:
             --transcript "$TRANSCRIPTS/python.jsonl" \
             -- node "$CLI" stdio
 
+      - name: Smoke cycle (python, protocol 2026-07-28)
+        # Every other cycle opens with `initialize`: the 2025 era, which stays
+        # covered. From 0.27.0 the bundle serves 2026-07-28 too (issue #1025):
+        # the same cycle, opened with server/discover, each request carrying
+        # its own envelope. The driver decides from the installed package's
+        # own version — skipped with a notice before 0.27.0, strict from it,
+        # prereleases included (scripts/canary-era-gate.mjs).
+        run: |
+          ARTIFACT_VERSION="$(node -p "require(process.argv[1]).version" "$(npm root -g)/@debugmcp/mcp-debugger/package.json")"
+          echo "ARTIFACT_VERSION=$ARTIFACT_VERSION" >> "$GITHUB_ENV"
+          node scripts/canary-smoke.mjs --lang python --era 2026-07-28 --artifact-version "$ARTIFACT_VERSION" \
+            --program "$GITHUB_WORKSPACE/examples/python/simple_test.py" --line 11 \
+            --expect-line --expect-var a --expect-var b \
+            --transcript "$TRANSCRIPTS/python-2026.jsonl" \
+            -- node "$CLI" stdio
+
       - name: Smoke cycle (rust — CodeLLDB engine proof)
         env:
           LEG: ${{ matrix.leg }}
@@ -422,6 +438,21 @@ jobs:
             --program examples/python/simple_test.py --line 11 \
             --expect-line --expect-var a --expect-var b \
             --transcript "$TRANSCRIPTS/python.jsonl" \
+            -- docker run -i --rm -v "$GITHUB_WORKSPACE:/workspace" "$IMAGE" stdio
+
+      - name: Smoke cycle (python, protocol 2026-07-28)
+        # The image's 2026-07-28 leg (issue #1025), beside the 2025-era cycles
+        # above. The image carries no version label, and it ships at the npm
+        # package's version, so the registry says which version the tag under
+        # test is — `latest` included. Before 0.27.0 the driver skips with a
+        # notice; from 0.27.0, prereleases included, the cycle is strict.
+        run: |
+          ARTIFACT_VERSION="$(npm view "@debugmcp/mcp-debugger@${CANARY_VERSION}" version)"
+          echo "ARTIFACT_VERSION=$ARTIFACT_VERSION" >> "$GITHUB_ENV"
+          node scripts/canary-smoke.mjs --lang python --era 2026-07-28 --artifact-version "$ARTIFACT_VERSION" \
+            --program examples/python/simple_test.py --line 11 \
+            --expect-line --expect-var a --expect-var b \
+            --transcript "$TRANSCRIPTS/python-2026.jsonl" \
             -- docker run -i --rm -v "$GITHUB_WORKSPACE:/workspace" "$IMAGE" stdio
 
       - name: Smoke cycle (rust — CodeLLDB engine proof)

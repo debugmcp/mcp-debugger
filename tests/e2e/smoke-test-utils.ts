@@ -2,6 +2,9 @@
  * Shared utilities for smoke tests
  */
 import { Client, ServerResult } from '@modelcontextprotocol/client';
+import { expect } from 'vitest';
+import { TOOL_NAMES } from '../../src/server/tool-schemas.js';
+import { MODERN_PROTOCOL_VERSION } from '../test-utils/helpers/smoke-protocol.js';
 
 /**
  * Parse SDK tool results
@@ -187,5 +190,48 @@ export async function pollUntil<T>(
     if (value !== undefined) return value;
     if (Date.now() > deadline) return undefined;
     await new Promise(resolve => setTimeout(resolve, intervalMs));
+  }
+}
+
+/**
+ * The 2026-07-28 leg of a packaged-artifact smoke (issue #1025): the client was
+ * connected pinned to the modern era, so being here at all means the artifact
+ * answered `server/discover`. This asserts what was negotiated, that the whole
+ * tool surface is listed, and that one Python breakpoint cycle runs with no
+ * MCP session behind it — every request stands alone in this era.
+ */
+export async function expectModernEraDebugCycle(client: Client, scriptPath: string): Promise<void> {
+  expect(client.getProtocolEra()).toBe('modern');
+  expect(client.getNegotiatedProtocolVersion()).toBe(MODERN_PROTOCOL_VERSION);
+  expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([...TOOL_NAMES]);
+
+  const created = parseSdkToolResult(await client.callTool({
+    name: 'create_debug_session',
+    arguments: { language: 'python', name: 'era-2026-smoke' }
+  }));
+  const sessionId = created.sessionId as string;
+  expect(typeof sessionId).toBe('string');
+  try {
+    const breakpoint = parseSdkToolResult(await client.callTool({
+      name: 'set_breakpoint',
+      arguments: { sessionId, file: scriptPath, line: 11 }
+    }));
+    expect(breakpoint.success).toBe(true);
+
+    const started = parseSdkToolResult(await client.callTool({
+      name: 'start_debugging',
+      arguments: { sessionId, scriptPath, args: [], dapLaunchArgs: { stopOnEntry: false, justMyCode: true } }
+    }));
+    expect(String(started.state)).toContain('paused');
+
+    const locals = parseSdkToolResult(await client.callTool({
+      name: 'get_local_variables',
+      arguments: { sessionId, includeSpecial: false }
+    }));
+    const variables = locals.variables as Array<{ name: string; value: string }>;
+    expect(variables.find((variable) => variable.name === 'a')?.value).toBe('1');
+    expect(variables.find((variable) => variable.name === 'b')?.value).toBe('2');
+  } finally {
+    await client.callTool({ name: 'close_debug_session', arguments: { sessionId } }).catch(() => undefined);
   }
 }

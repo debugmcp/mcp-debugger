@@ -10,6 +10,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { Client } from '@modelcontextprotocol/client';
+import { clientOptionsFor, stdioTransportFor, type SmokeProtocol } from '../../test-utils/helpers/smoke-protocol.js';
 import fs from 'fs/promises';
 import { appendFile, mkdir, writeFile } from 'fs/promises';
 import { createHash } from 'crypto';
@@ -161,6 +162,8 @@ async function getCachedTarballPath(fingerprint: string): Promise<string | null>
 
 export interface NpxTestConfig {
   logLevel?: string;
+  /** The MCP protocol era the client speaks: `legacy` (default, 2025-11-25) or `modern` (pinned 2026-07-28). */
+  protocol?: SmokeProtocol;
 }
 
 /**
@@ -316,7 +319,7 @@ export async function createNpxMcpClient(config: NpxTestConfig = {}): Promise<{
   // Resolve the globally-installed CLI entry and run it directly via process.execPath.
   // This bypasses npx.cmd → cmd.exe resolution which fails on Windows with ENOENT.
   const cliEntry = await resolveGlobalCliEntry();
-  const transport = new StdioClientTransport({
+  const transport = stdioTransportFor(config.protocol, {
     command: process.execPath,
     args: [
       cliEntry,
@@ -359,9 +362,7 @@ export async function createNpxMcpClient(config: NpxTestConfig = {}): Promise<{
   const client = new Client({
     name: 'npx-test-client',
     version: '1.0.0'
-  }, {
-    capabilities: {}
-  });
+  }, clientOptionsFor(config.protocol));
 
   const randomOffset = Math.floor(Math.random() * 1000000);
   (client as unknown as { _requestMessageId: number })._requestMessageId = randomOffset;

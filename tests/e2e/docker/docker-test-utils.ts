@@ -11,6 +11,7 @@ import { fileURLToPath } from 'url';
 import { mkdirSync } from 'node:fs';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { Client } from '@modelcontextprotocol/client';
+import { clientOptionsFor, stdioTransportFor, type SmokeProtocol } from '../../test-utils/helpers/smoke-protocol.js';
 
 const execAsync = promisify(exec);
 
@@ -30,6 +31,8 @@ export interface DockerTestConfig {
   forceRebuild?: boolean;
   /** Extra `docker run` arguments (e.g. ['--network', 'my-net']) */
   extraRunArgs?: string[];
+  /** The MCP protocol era the client speaks: `legacy` (default, 2025-11-25) or `modern` (pinned 2026-07-28). */
+  protocol?: SmokeProtocol;
 }
 
 /**
@@ -162,7 +165,7 @@ export async function createDockerMcpClient(config: DockerTestConfig = {}): Prom
     '--log-file', '/tmp/docker-test.log'
   );
 
-  const transport = new StdioClientTransport({
+  const transport = stdioTransportFor(config.protocol, {
     command: 'docker',
     args: dockerArgs,
     env: {
@@ -170,13 +173,11 @@ export async function createDockerMcpClient(config: DockerTestConfig = {}): Prom
       NODE_ENV: 'test'
     }
   });
-  
+
   const client = new Client({
     name: 'docker-test-client',
     version: '1.0.0'
-  }, {
-    capabilities: {}
-  });
+  }, clientOptionsFor(config.protocol));
   
   try {
     await client.connect(transport);

@@ -43,3 +43,36 @@ describe('canary.yml strict language legs (issue #1053)', () => {
     expect(env![1]).toContain("inputs.allow_missing_languages == true && '--skip-if-missing' || ''");
   });
 });
+
+/**
+ * Every leg above opens with `initialize`: the 2025 era. From 0.27.0 the published artifacts
+ * serve protocol 2026-07-28 too (issue #1025), and the release is not done until the canary
+ * has seen the published npm bundle and the published image do it. So each job runs one more
+ * cycle in that era — added beside the 2025-era legs, never instead of them: most clients
+ * still speak 2025-11-25 to a new release. The driver skips the leg for an artifact older
+ * than 0.27.0 and holds everything from 0.27.0 (prereleases included) to it, deciding from
+ * the artifact's own version (scripts/canary-era-gate.mjs).
+ */
+describe('canary.yml 2026-07-28 legs (issue #1025)', () => {
+  const modern = smokeInvocations.filter((line) => line.includes('--era 2026-07-28'));
+
+  it('runs one 2026-07-28 cycle in the npm job and one in the docker job', () => {
+    expect(modern).toHaveLength(2);
+  });
+
+  it('keeps every 2025-era leg: the 2026 cycles are additions', () => {
+    expect(smokeInvocations.length - modern.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it('gates each 2026 cycle on the version of the artifact under test', () => {
+    for (const line of modern) {
+      expect(line).toContain('--artifact-version "$ARTIFACT_VERSION"');
+    }
+  });
+
+  it('reads that version from the installed package in the npm job and from the registry in the docker job', () => {
+    expect(yml).toContain('ARTIFACT_VERSION="$(node -p "require(process.argv[1]).version" "$(npm root -g)/@debugmcp/mcp-debugger/package.json")"');
+    expect(yml).toContain('ARTIFACT_VERSION="$(npm view "@debugmcp/mcp-debugger@${CANARY_VERSION}" version)"');
+    expect(yml.split('\n').filter((line) => line.includes('echo "ARTIFACT_VERSION=$ARTIFACT_VERSION" >> "$GITHUB_ENV"'))).toHaveLength(2);
+  });
+});
