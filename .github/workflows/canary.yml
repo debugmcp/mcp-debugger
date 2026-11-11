@@ -446,6 +446,10 @@ jobs:
         # package's version, so the registry says which version the tag under
         # test is — `latest` included. Before 0.27.0 the driver skips with a
         # notice; from 0.27.0, prereleases included, the cycle is strict.
+        # One false red is possible: a scheduled run that lands between a
+        # release's npm publish and the move of the Docker `latest` tag reads
+        # the new version for the old image. The release-gate run comes after
+        # both publishes and names an exact version, so it cannot.
         run: |
           ARTIFACT_VERSION="$(npm view "@debugmcp/mcp-debugger@${CANARY_VERSION}" version)"
           echo "ARTIFACT_VERSION=$ARTIFACT_VERSION" >> "$GITHUB_ENV"

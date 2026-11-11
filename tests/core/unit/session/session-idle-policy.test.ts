@@ -289,6 +289,21 @@ describe('SessionManager idle policy (issue #1025, step 2)', () => {
       expect(sessionManager.idleExpiryOf(rootId, undefined)?.outcome).toBe('released');
     });
 
+    it('a launch root that had already ended, with a child still running: the root had no program, the child\'s was ended', async () => {
+      const rootId = await startRoot();
+      const childId = await adoptChild(rootId);
+      dependencies.mockProxyManager.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+      expect(sessionManager.getSession(rootId)!.state).toBe(SessionState.STOPPED);
+      // The parent's end does not end the child: it is still a live session.
+      expect(sessionManager.getSession(childId)!.state).not.toBe(SessionState.STOPPED);
+
+      await sessionManager.sweepIdle(WINDOW, { now: now() + WINDOW + 1 });
+
+      expect(sessionManager.idleExpiryOf(rootId, undefined)?.outcome).toBe('closed');
+      expect(sessionManager.idleExpiryOf(childId, undefined)?.outcome).toBe('ended');
+    });
+
     it('a child released by an earlier detach is still recorded as released: its process runs on', async () => {
       const rootId = await startRoot();
       const childId = await adoptChild(rootId);

@@ -594,6 +594,8 @@ export abstract class SessionManagerCore extends EventEmitter {
       // the close removes the rows, and a child that ends during the cascade
       // was running when the policy decided. A child an earlier detach
       // released is not one of them: its row is stopped, its process runs on.
+      // (The attach root that detach left behind is: nothing is attached to
+      // it any more, so it reads "closed" beside its children's "released".)
       const withoutProgram = new Set(
         [root, ...this.descendantsDeepestFirst(root.id)]
           .filter((session) =>
