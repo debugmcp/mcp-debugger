@@ -177,6 +177,7 @@ Environment variables (all optional):
 | `DEV_PROXY_BUILD_TIMEOUT_MS` | `120000` | Build timeout in milliseconds; must be positive (invalid values use the default; values above 2147483647, about 24.8 days, are capped there) |
 | `DEV_PROXY_ROOT` | Auto-detected | Project root directory |
 | `DEV_PROXY_BACKEND_TRANSPORT` | `http` | Backend transport: `http` (default) or `stdio`; any other value refuses to start, naming the variable |
+| `DEV_PROXY_BACKEND_ERA` | `auto` | The protocol era spoken to the backend: `auto` negotiates (a current backend lands on 2026-07-28, an older one on 2025-11-25); `legacy` opens with `initialize`, so a backend that serves both eras is exercised in the 2025 one. Any other value refuses to start, naming the variable. `dev_server_status` shows the era in force |
 | `DEV_PROXY_BACKEND_CMD` | Source CLI | Custom backend command, including `docker run ...` commands |
 | `DEV_PROXY_DISCOVERY_WAIT_MS` | `15000` | How long a request waits for a backend start or restart to settle. Keep it below the client's MCP startup timeout (30s in Claude Code); `0` disables the wait |
 | `DEBUG_MCP_NO_REDACT` | unset | Set on the stable proxy process to `1` or `true` to disable status-value redaction |

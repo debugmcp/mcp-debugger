@@ -528,6 +528,7 @@ The dev proxy (`tools/dev-proxy/dev-proxy.mjs`) is a lightweight MCP proxy that 
 - `DEV_PROXY_BUILD_TIMEOUT_MS` — Build timeout in milliseconds (default: 120000)
 - `DEV_PROXY_ROOT` — Project root (default: auto-detected)
 - `DEV_PROXY_BACKEND_TRANSPORT` — `http` (default) or `stdio`; any other value refuses to start, naming the variable
+- `DEV_PROXY_BACKEND_ERA` — `auto` (default: negotiate the era with the backend) or `legacy` (speak 2025-11-25 to it — the way to exercise the 2025 era through the proxy, which otherwise lands on 2026-07-28 with every current backend); any other value refuses to start, naming the variable
 - `DEV_PROXY_BACKEND_CMD` — Custom backend command override (e.g. `docker run ...`)
 - `DEV_PROXY_DISCOVERY_WAIT_MS` — How long a request waits for a backend start or restart to settle (default: 15000; keep it under the client's MCP startup timeout, `0` disables the wait)
 

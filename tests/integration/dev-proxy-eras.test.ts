@@ -10,6 +10,7 @@
  * never is.
  */
 import { afterEach, describe, expect, it } from 'vitest';
+import { spawnSync } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -136,6 +137,39 @@ describe('dev-proxy protocol eras (issue #1025, step 2)', () => {
     });
     expect(await backendStarts()).toBe(1);
   }, 60_000);
+
+  // With negotiation on, nothing driven through the proxy speaks the 2025 era
+  // to a current backend any more. DEV_PROXY_BACKEND_ERA=legacy is how a sweep
+  // exercises it: same real server, no probe, `initialize` as the opening.
+  it('speaks the 2025 era to the same real server when DEV_PROXY_BACKEND_ERA=legacy', async () => {
+    const { client, backendStarts } = await connect('legacy', {
+      DEV_PROXY_BACKEND_CMD: `"${process.execPath}" "${path.join(root, 'tests/fixtures/dev-proxy/real-backend.mjs')}"`,
+      DEV_PROXY_BACKEND_ERA: 'legacy',
+    });
+
+    const listed = await client.listTools();
+    expect(listed.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(['create_debug_session', ...devTools]));
+
+    const status = await client.callTool({ name: 'dev_server_status', arguments: {} });
+    expect(JSON.parse((status.content as Array<{ text: string }>)[0].text)).toMatchObject({
+      state: 'running', backendTransport: 'stdio', protocolEra: 'legacy', protocolVersion: '2025-11-25',
+    });
+    expect(await backendStarts()).toBe(1);
+  }, 60_000);
+
+  it('refuses to start on an unknown DEV_PROXY_BACKEND_ERA, naming the variable on stderr', () => {
+    const run = spawnSync(process.execPath, [path.join(root, 'tools/dev-proxy/dev-proxy.mjs')], {
+      cwd: root,
+      env: { ...process.env, DEV_PROXY_ROOT: root, DEV_PROXY_BACKEND_ERA: 'modern' },
+      input: '',
+      encoding: 'utf8',
+      timeout: 20_000,
+      windowsHide: true,
+    });
+
+    expect(run.status).not.toBe(0);
+    expect(run.stderr).toContain("DEV_PROXY_BACKEND_ERA is not a backend era; give 'auto' (default) or 'legacy'");
+  });
 
   it('a 2026-07-28 client hears a backend resources/updated on its listen stream through the relay', async () => {
     const { client } = await connect({ pin: '2026-07-28' });

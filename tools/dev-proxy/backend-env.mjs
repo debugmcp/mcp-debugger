@@ -58,6 +58,24 @@ export function resolveBackendTransport(raw) {
 }
 
 /**
+ * The era the proxy speaks to its backend, from DEV_PROXY_BACKEND_ERA (issue
+ * #1025): unset, empty or `auto` negotiates — a current backend lands on
+ * 2026-07-28, an older one falls back to 2025-11-25. `legacy` skips the probe
+ * and opens with `initialize`: against a backend that serves both eras it is
+ * the only way anything driven through the proxy exercises the 2025 one.
+ * Anything else throws, naming the variable and the accepted values — not the
+ * value, so environment contents never reach a log.
+ *
+ * @param {string | undefined} raw
+ * @returns {'auto' | 'legacy'}
+ */
+export function resolveBackendEra(raw) {
+  if (raw === undefined || raw === '' || raw === 'auto') return 'auto';
+  if (raw === 'legacy') return 'legacy';
+  throw new Error("DEV_PROXY_BACKEND_ERA is not a backend era; give 'auto' (default) or 'legacy'");
+}
+
+/**
  * Replace backend overrides only when a tool call explicitly supplies `env`.
  * Omission preserves the prior map; an empty object clears it.
  *
