@@ -132,6 +132,9 @@ describe('protocol errors reach SDK clients as the bare reason, with the code be
       const error = await caught(request);
       expect(error.code).toBe(ProtocolErrorCode.InvalidParams);
       expect(error.message).toBe(`Unknown resource: ${uri}`);
+      // SEP-2164: the error names the URI that was asked for, in its data
+      // (a SHOULD; the conformance suite's sep-2164-data-uri check).
+      expect(error.data).toEqual({ uri });
     }
   });
 });

@@ -185,6 +185,16 @@ describe('Server Output Resources Tests', () => {
     });
   });
 
+  describe('resources/templates/list', () => {
+    it('answers an empty list: this server exposes no resource templates, and a resources capability must answer the method (issue #1025)', async () => {
+      const { listResourceTemplatesHandler } = getResourceHandlers(mockServer);
+
+      const result = await listResourceTemplatesHandler({ method: 'resources/templates/list', params: {} });
+
+      expect(result).toEqual({ resourceTemplates: [] });
+    });
+  });
+
   describe('resources/read', () => {
     it('returns the verbatim transcript', async () => {
       const session = mockSession();

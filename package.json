@@ -54,6 +54,7 @@
     "bench:mem:docker": "node scripts/mem-bench.mjs --target docker --scenario all",
     "test:integration": "vitest run --project integration",
     "test:conformance": "node scripts/mcp-conformance.mjs",
+    "test:conformance:2026": "node scripts/mcp-conformance.mjs --era 2026-07-28",
     "posttest:integration": "node scripts/cleanup-test-processes.js",
     "test:e2e": "pnpm run pretest:docker && vitest run --project e2e",
     "pretest:e2e": "pnpm run build",

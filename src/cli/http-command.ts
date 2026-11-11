@@ -3,10 +3,11 @@ import type { Express, Request, Response, NextFunction } from 'express';
 import express from 'express';
 import { randomUUID } from 'crypto';
 import { IncomingMessage, ServerResponse } from 'http';
-import { isInitializeRequest, ProtocolErrorCode } from '@modelcontextprotocol/server';
-import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
+import { createMcpHandler, isInitializeRequest, isLegacyRequest, ProtocolErrorCode, ProtocolError } from '@modelcontextprotocol/server';
+import { NodeStreamableHTTPServerTransport, toNodeHandler, toWebRequest } from '@modelcontextprotocol/node';
 import { DebugMcpServer, type DebugMcpServerOptions } from '../server.js';
 import { createProtocolServer } from '../server/protocol-facade.js';
+import { handlerSink } from '../server/notification-hub.js';
 import { attachSharedFileTransport } from '../utils/logger.js';
 import type { HttpOptions } from './setup.js';
 import {
@@ -67,6 +68,40 @@ interface SessionData {
 
 /** Largest JSON-RPC request body accepted; also named in the 413 the parser answers with (issue #670). */
 const JSON_BODY_LIMIT = '10mb';
+
+/**
+ * What the SDK's modern handler says when it refuses a request it was sent (as
+ * opposed to failing on its own): the messages it builds at its rejection
+ * points. Matched by their openings because the SDK reports them as plain
+ * Errors; a wording it changes falls back to the error level, never the reverse.
+ */
+const SDK_REFUSAL = /^(Rejected |Unsupported Media Type)/;
+
+/**
+ * Whether an error the modern handler reported is a refusal of the caller's
+ * request rather than a fault. Besides the plain-Error refusals above, the SDK
+ * reports some as typed protocol errors — an unsupported protocol revision
+ * (-32022), a missing client capability — which are the caller's doing by
+ * definition; only an internal error is the server's.
+ */
+function isRefusedRequest(error: Error): boolean {
+  if (error instanceof ProtocolError) {
+    return error.code !== ProtocolErrorCode.InternalError;
+  }
+  return SDK_REFUSAL.test(error.message);
+}
+
+/** The Node adapter's body-limit error (its class is not exported): the client sent too much. */
+function isBodyTooLarge(error: unknown): error is Error & { status: 413 } {
+  return error instanceof Error && (error as { status?: unknown }).status === 413;
+}
+/** The same limit in bytes, for the SDK's classifier and modern handler (their default is 4 MiB). */
+const JSON_BODY_LIMIT_BYTES = 10 * 1024 * 1024;
+
+/** A modern-era `subscriptions/listen` request: its response is a long-lived stream, so the process is attended while it is open. */
+function isListenRequest(body: unknown): boolean {
+  return typeof body === 'object' && body !== null && (body as { method?: unknown }).method === 'subscriptions/listen';
+}
 
 /** Idle window before a streamless HTTP session is reaped (issue #337). */
 const DEFAULT_STALE_SESSION_MS = 30 * 60 * 1000;
@@ -203,10 +238,52 @@ export function createHttpApp(
     logLevel: options.logLevel,
     logFile: options.logFile,
   });
-  // While any client holds an open SSE stream the process is attended and the
-  // idle policy closes nothing; the modern era's listen streams join this
-  // count when they are served. One predicate for the supplier and /health.
+  // The 2026-07-28 leg (issue #1025, step 2): the SDK's sessionless handler,
+  // strict — a 2025-era request that reaches it is refused with the supported
+  // versions — behind the request classifier in handleMcpRequest, which sends
+  // 2025-shaped traffic to the sessionful app below. One facade per request,
+  // delivering nothing itself: the handler's notifier is this leg's hub sink,
+  // routing to the open subscriptions/listen streams. Host/Origin stay ours
+  // (the allowlist middleware runs first); the body limit matches the parser's.
+  const modern = createMcpHandler(
+    ({ era }) => protocolServerFactory(core, { era, deliver: 'external' }),
+    {
+      legacy: 'reject',
+      maxRequestBodySize: JSON_BODY_LIMIT_BYTES,
+      onerror: (error: Error) => {
+        // The SDK reports every request it refuses through the same hook as its
+        // own faults, as a plain Error. A refusal is the caller's doing — a junk
+        // body, a missing header, a wrong content type — and anyone who can reach
+        // the port can cause one, so it is a warning; only a real fault is an error.
+        if (isRefusedRequest(error)) {
+          logger.warn('Modern-era MCP request refused', { reason: error.message });
+        } else {
+          logger.error('Modern-era MCP handler error', { error });
+        }
+      },
+    }
+  );
+  const detachModernSink = core.notifications.addSink(handlerSink(modern.notify));
+  const modernNode = toNodeHandler(modern, {
+    // The same limit as express.json, the classifier and the handler: a body between two
+    // different limits would pass one entry and die in the next.
+    maxRequestBodySize: JSON_BODY_LIMIT_BYTES,
+    onerror: (error: Error) => {
+      logger.error('Modern-era MCP request failed', { error });
+    },
+  });
+  /** Requests served per era since start, for /health and the #1025 telemetry. */
+  const requests = { legacy: 0, modern: 0 };
+  /** Open modern subscriptions/listen streams (their responses are long-lived). */
+  let modernListenStreams = 0;
+
+  // While any client holds an open SSE stream — a 2025 session's GET stream or
+  // a 2026 subscriptions/listen stream — the process is attended and the idle
+  // policy closes nothing. One predicate for the supplier and /health.
   const attended = (): boolean => {
+    if (modernListenStreams > 0) {
+      return true;
+    }
     for (const session of httpSessions.values()) {
       if (session.openStreams > 0) {
         return true;
@@ -264,7 +341,10 @@ export function createHttpApp(
   (app as any).staleSweepTimer = staleSweepTimer;
 
   // CORS — Mcp-Session-Id and last-event-id must be exposed for the MCP Inspector
-  // and for clients to read the session ID from the Initialize response.
+  // and for clients to read the session ID from the Initialize response. The
+  // 2026-07-28 revision requires Mcp-Method and Mcp-Name on every POST and
+  // mirrors tool parameters into Mcp-Param-* headers, so a browser preflight's
+  // own requested headers are echoed back as allowed.
   app.use((req: Request, res: Response, next: NextFunction) => {
     // A request carrying an Origin has already passed the allowlist above:
     // echo that origin (and Vary on it) instead of granting every origin.
@@ -274,9 +354,12 @@ export function createHttpApp(
       res.header('Vary', 'Origin');
     }
     res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    const requestedHeaders = req.headers['access-control-request-headers'];
+    const requested = Array.isArray(requestedHeaders) ? requestedHeaders.join(', ') : requestedHeaders;
     res.header(
       'Access-Control-Allow-Headers',
-      'Content-Type, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id'
+      'Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Mcp-Method, Mcp-Name, Last-Event-Id' +
+        (requested ? `, ${requested}` : '')
     );
     res.header(
       'Access-Control-Expose-Headers',
@@ -299,6 +382,27 @@ export function createHttpApp(
     try {
       const sessionIdHeader = req.headers['mcp-session-id'];
       const sessionId = Array.isArray(sessionIdHeader) ? sessionIdHeader[0] : sessionIdHeader;
+
+      // Which era is this request? The SDK's own classifier decides (issue
+      // #1025, step 2): a POST carrying the 2026 per-request envelope — or a
+      // modern protocol header the strict handler must refuse — is the modern
+      // leg's; anything 2025-shaped (initialize, a session id, GET, DELETE, a
+      // claim-less POST) stays with the sessionful app below, unchanged. The
+      // body Express already parsed is handed on so nothing re-reads the stream.
+      const body = req.method === 'POST' ? req.body : undefined;
+      const probe = await toWebRequest(req, body, { maxRequestBodySize: JSON_BODY_LIMIT_BYTES });
+      if (!(await isLegacyRequest(probe, body, { maxRequestBodySize: JSON_BODY_LIMIT_BYTES }))) {
+        requests.modern++;
+        if (isListenRequest(body)) {
+          modernListenStreams++;
+          res.once('close', () => {
+            modernListenStreams = Math.max(0, modernListenStreams - 1);
+          });
+        }
+        await modernNode(req, res, body);
+        return;
+      }
+      requests.legacy++;
 
       let transport: NodeStreamableHTTPServerTransport;
 
@@ -387,6 +491,17 @@ export function createHttpApp(
 
       await transport.handleRequest(req as IncomingMessage, res as ServerResponse, req.body);
     } catch (error) {
+      if (isBodyTooLarge(error)) {
+        // Classifying reads a body Express did not parse (a non-JSON content
+        // type). Over the limit is the caller's error, answered as the JSON
+        // parser answers it — not an "Internal error" and not an error log.
+        if (!res.headersSent) {
+          res.status(413).json(
+            jsonRpcErrorBody(ProtocolErrorCode.InvalidRequest, `Request body too large (limit ${JSON_BODY_LIMIT})`, error.message)
+          );
+        }
+        return;
+      }
       logger.error('Error handling MCP request', { error });
       if (!res.headersSent) {
         res.status(500).json(
@@ -428,7 +543,8 @@ export function createHttpApp(
       listening: { ...listening },
       connections: httpSessions.size,
       attended: attended(),
-      listenStreams: 0,
+      listenStreams: modernListenStreams,
+      requests: { ...requests },
       sessions: Array.from(httpSessions.keys()),
       details: sessions,
       debugSessions: core.sessionManager.getAllSessions().map((debugSession) => {
@@ -467,6 +583,15 @@ export function createHttpApp(
   (app as any).httpSessions = httpSessions;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (app as any).core = core;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (app as any).modernHandler = {
+    close: async (): Promise<void> => {
+      // The sink first: the core closes its sessions after this, and each close
+      // fires a resource change that a closed handler has no stream for.
+      detachModernSink();
+      await modern.close();
+    },
+  };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (app as any).bindAddress = bind;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -525,6 +650,8 @@ export async function handleHttpCommand(
     const httpSessions = (app as any).httpSessions as Map<string, SessionData>;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const core = (app as any).core as DebugMcpServer;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const modernHandler = (app as any).modernHandler as { close: () => Promise<void> };
     // The one core (issue #1025, step 2): started once, before anything can
     // reach it; its idle sweep is armed here.
     await core.start();
@@ -581,10 +708,16 @@ export async function handleHttpCommand(
       }, 15000);
       hardExit.unref?.();
 
-      // Close every active transport, then stop the one core (every debug
-      // session with it), bounded so one wedged proxy cannot stall the whole
-      // shutdown. Transports first: no request lands on a core that is closing.
+      // Close the modern handler (its listen streams end gracefully), then every
+      // active transport, then the one core (every debug session with it),
+      // bounded so one wedged proxy cannot stall the whole shutdown. Transports
+      // before the core: no request lands on a core that is closing.
       const stopWork = (async () => {
+        try {
+          await modernHandler.close();
+        } catch (err) {
+          logger.error('Error closing the modern-era handler during shutdown', { error: err });
+        }
         for (const { transport } of httpSessions.values()) {
           try {
             await transport.close();

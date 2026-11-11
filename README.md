@@ -70,7 +70,7 @@ If your agent runs in a terminal, a pipeline, or a cloud sandbox — or needs to
 - 💥 **Crash-state debugging by default** – Launch sessions pause on uncaught exceptions with stack and locals live (`breakOnExceptions`; exception class/message surfaced via `lastStop`)
 - 🪞 **Read-only IDE mirror** – `expose_session` opens a loopback, token-gated DAP endpoint so a human's IDE can inspect the agent's live session without taking control
 - ☸️ **Kubernetes debugging** – port-forward attach for interpreted runtimes, `kubectl debug --target` + attach-by-PID for native processes ([recipe](docs/kubernetes.md), [turnkey manifests](examples/kubernetes/))
-- 🔌 **STDIO and Streamable HTTP transports** – Works with any MCP client. `stdio` speaks both protocol eras — the current 2026-07-28 revision (a probing client such as Claude Code's v2 runtime lands on it) and 2025-11-25 and earlier (a client that opens with `initialize`); `http` speaks 2025-11-25 and earlier, with 2026-07-28 next
+- 🔌 **STDIO and Streamable HTTP transports** – Works with any MCP client. Both speak both protocol eras: the current 2026-07-28 revision (a probing client such as Claude Code's v2 runtime lands on it; sessionless on `http`) and 2025-11-25 and earlier (a client that opens with `initialize`)
 - 📦 **Zero-runtime dependencies** – Self-contained bundles via esbuild + tsup
 - ⚡ **npx ready** – Run directly with `npx @debugmcp/mcp-debugger` - no installation needed
 - 🐳 **Docker and npm packages** – Deploy anywhere
@@ -224,6 +224,12 @@ and point the client at it:
 }
 ```
 
+The endpoint speaks both eras of the protocol: a client that probes with `server/discover` (Claude
+Code's v2 runtime does) gets the current 2026-07-28 revision, sessionless — every request stands
+alone, resource notifications flow over `subscriptions/listen` streams — and a client that opens
+with `initialize` gets the 2025 sessionful era, `Mcp-Session-Id` and all, exactly as before.
+`GET /health` counts the requests classified per era under `requests` (refused ones included).
+
 One `http` process is one debugger: every MCP client of it sees the same debug sessions, and a
 session is addressable by whoever holds its id (the handle is the capability — run one process
 per agent if agents must not see each other's work). A debug session outlives the MCP session
@@ -233,8 +239,12 @@ on a timer by default, so a quiet agent never loses a paused program. A server t
 long-lived, or that attaches to something that must not stay paused, can turn the idle policy on:
 with `MCP_DEBUG_SESSION_IDLE_MS` set, a session tree that no tool call has named for that long is
 closed (a launched program is ended, an attached one released), unless a client is attending the
-process — while any client holds its SSE stream open, nothing expires. `list_debug_sessions`
-shows each session's idle time, so a forgotten one is easy to find and close. Abandoned MCP
+process — while any client holds a stream open (a 2025 session's SSE stream, a 2026-07-28
+client's `subscriptions/listen` stream), nothing expires. A 2026 client that only calls tools is
+not attending: with the policy on, its sessions live by tool activity (and an in-flight
+`wait_for_stop`) alone, so choose a window longer than such a client's pauses.
+`list_debug_sessions` shows each session's idle time, so a forgotten one is easy to find and
+close. Abandoned MCP
 sessions themselves are reaped separately (`MCP_HTTP_STREAM_LOST_SESSION_MS`,
 `MCP_HTTP_STALE_SESSION_MS`). `GET /health` lists the MCP sessions, the debug sessions with
 their idle time, and whether anyone is attending.

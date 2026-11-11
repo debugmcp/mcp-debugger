@@ -318,6 +318,37 @@ describe('MCP Server E2E HTTP Smoke Test', () => {
     }
   }, TEST_TIMEOUT);
 
+  it('debugs fibonacci.py over the 2026-07-28 era too: a client pinned to it runs sessionless (issue #1025)', async () => {
+    let debugSessionId: string | undefined;
+
+    try {
+      serverPort = await startHttpServer();
+      expect(await waitForHealthEndpoint(serverPort, TEST_TIMEOUT)).toBe(true);
+
+      // The pin never falls back: this connection is modern or the test fails.
+      mcpSdkClient = new Client(
+        { name: 'e2e-http-smoke-test-client-2026', version: '0.1.0' },
+        { versionNegotiation: { mode: { pin: '2026-07-28' } } }
+      );
+      await mcpSdkClient.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${serverPort}/mcp`)));
+      expect(mcpSdkClient.getProtocolEra()).toBe('modern');
+
+      const fibonacciPath = path.join(projectRoot, 'examples', 'python', 'fibonacci.py');
+      const result = await executeDebugSequence(mcpSdkClient, fibonacciPath, 'E2E HTTP Smoke Test Session (2026-07-28)');
+      expect(result.success).toBe(true);
+      debugSessionId = result.sessionId;
+
+      // No MCP session exists for this client; the debug session is the process's.
+      const health = await (await fetch(`http://127.0.0.1:${serverPort}/health`)).json() as { sessions: string[]; requests: { modern: number } };
+      expect(health.sessions).toEqual([]);
+      expect(health.requests.modern).toBeGreaterThan(0);
+    } finally {
+      if (debugSessionId && mcpSdkClient) {
+        await mcpSdkClient.callTool({ name: 'close_debug_session', arguments: { sessionId: debugSessionId } }).catch(() => undefined);
+      }
+    }
+  }, TEST_TIMEOUT);
+
   // Test spawning the server from a different working directory
   it('should work when the HTTP server is spawned from a different working directory', async () => {
     const tempDir = os.tmpdir();

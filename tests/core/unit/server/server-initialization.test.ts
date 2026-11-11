@@ -97,9 +97,10 @@ describe('Server Initialization Tests', () => {
     it('a facade over the core registers the tool, resource and prompt handlers', () => {
       debugServer = createDebugServerWithFacade();
 
-      // ListTools + CallTool, ListResources/ReadResource/Subscribe/Unsubscribe (issue #218),
+      // ListTools + CallTool, ListResources/ReadResource/Subscribe/Unsubscribe (issue #218)
+      // + ListResourceTemplates (empty; the resources capability must answer it, issue #1025),
       // plus ListPrompts/GetPrompt for the debugging-workflow prompt
-      expect(mockServer.setRequestHandler).toHaveBeenCalledTimes(8);
+      expect(mockServer.setRequestHandler).toHaveBeenCalledTimes(9);
     });
 
     it('a facade routes SDK errors to the core logger', () => {

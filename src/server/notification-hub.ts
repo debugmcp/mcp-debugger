@@ -118,6 +118,25 @@ export class NotificationHub {
   }
 }
 
+/** The slice of the SDK's `ServerNotifier` (an HTTP handler's `notify`) the hub feeds. */
+export interface HandlerNotifier {
+  resourceUpdated(uri: string): void | Promise<void>;
+  resourcesChanged(): void | Promise<void>;
+}
+
+/**
+ * The sink for the 2026-07-28 HTTP leg: its facades serve one request each and
+ * cannot send anything afterwards, so the hub feeds the handler's own notifier,
+ * which routes to the `subscriptions/listen` streams and filters by what each
+ * listen named. Nothing per URI to forget.
+ */
+export function handlerSink(notify: HandlerNotifier): NotificationSink {
+  return {
+    resourceUpdated: (uri: string) => notify.resourceUpdated(uri),
+    resourcesChanged: () => notify.resourcesChanged()
+  };
+}
+
 /**
  * The sink a protocol facade attaches for its own SDK Server. With a filter
  * (a legacy-era facade) only the URIs that facade subscribed to through

@@ -619,8 +619,9 @@ jobs:
   mcp-conformance:
     # The protocol org's own conformance suite (`@modelcontextprotocol/conformance`, pinned in
     # the script) against a local `http` server: the scenarios that apply to a server without
-    # the suite's reference fixtures (issue #1023). Linux only — on Windows the CLI aborts at
-    # exit with a libuv assertion even after every check passed. What the suite does not cover,
+    # the suite's reference fixtures (issue #1023). Linux only — on Windows an affected Node build
+    # aborts inside process.exit after every check passed (nodejs/node#56645, fixed in 24.20.0
+    # and 26.7.0), which is a Node bug and not the suite's. What the suite does not cover,
     # the session-lifecycle clauses this server answers itself, is pinned by
     # tests/integration/cli/http-spec-contract.test.ts in build-and-test.
     name: MCP Conformance (official suite)
@@ -645,9 +646,40 @@ jobs:
     - name: Run the applicable conformance scenarios
       run: node scripts/mcp-conformance.mjs --verbose
 
+  mcp-conformance-2026:
+    # The same suite's 0.2 line (the one the SDKs run) against the 2026-07-28 revision this
+    # server now speaks beside 2025-11-25 (issue #1025, step 2): `--requirements 2026-07-28`,
+    # everything the revision requires of a server, judged by the suite itself against
+    # scripts/conformance/expected-failures-2026-07-28.yaml (`--expected-failures`) — what
+    # cannot be tested without the suite's reference fixtures or an optional feature this
+    # server does not declare. The suite fails on an unlisted failure or warning and on a
+    # listed entry that passes, so the baseline can only shrink; its exit code is the verdict.
+    # Linux, where that exit code is always trustworthy (see the script's header).
+    name: MCP Conformance (2026-07-28)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Setup pnpm
+      uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+    - name: Setup Node.js
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: '22.x'
+        cache: 'pnpm'
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+      env:
+        SKIP_ADAPTER_VENDOR: 'true'
+    - name: Build project
+      run: pnpm run build:ci
+    - name: Run the 2026-07-28 requirements against the baseline, judged by the suite
+      run: node scripts/mcp-conformance.mjs --era 2026-07-28 --verbose
+
   test-summary:
     name: Test Summary
-    needs: [build-and-test, windows-python-integration, lint, container-tests, cobol-host, dart-host, flutter-host, go-current, mcp-conformance]
+    needs: [build-and-test, windows-python-integration, lint, container-tests, cobol-host, dart-host, flutter-host, go-current, mcp-conformance, mcp-conformance-2026]
     runs-on: ubuntu-latest
     if: always()
 
@@ -663,6 +695,7 @@ jobs:
         echo "flutter-host: ${{ needs.flutter-host.result }}"
         echo "go-current: ${{ needs.go-current.result }}"
         echo "mcp-conformance: ${{ needs.mcp-conformance.result }}"
+        echo "mcp-conformance-2026: ${{ needs.mcp-conformance-2026.result }}"
         if [ "${{ needs.build-and-test.result }}" != "success" ] \
           || [ "${{ needs.windows-python-integration.result }}" != "success" ] \
           || [ "${{ needs.lint.result }}" != "success" ] \
@@ -671,7 +704,8 @@ jobs:
           || [ "${{ needs.dart-host.result }}" != "success" ] \
           || [ "${{ needs.flutter-host.result }}" != "success" ] \
           || [ "${{ needs.go-current.result }}" != "success" ] \
-          || [ "${{ needs.mcp-conformance.result }}" != "success" ]; then
+          || [ "${{ needs.mcp-conformance.result }}" != "success" ] \
+          || [ "${{ needs.mcp-conformance-2026.result }}" != "success" ]; then
           echo "❌ One or more required jobs did not succeed"
           exit 1
         fi

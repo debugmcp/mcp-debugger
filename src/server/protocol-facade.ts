@@ -4,7 +4,7 @@
  *
  * The 2026-07-28 serving entries build a Server per HTTP request
  * (`createMcpHandler`) or per stdio connection plus a discarded probe instance
- * (`serveStdio`), so a facade has to be cheap: the eight MCP handlers closing
+ * (`serveStdio`), so a facade has to be cheap: the nine MCP handlers closing
  * over the core, the error and initialized hooks, and one notification sink
  * that lives exactly as long as the facade does. No dependency container, no
  * SessionManager, no logger of its own.

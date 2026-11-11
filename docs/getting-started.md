@@ -99,12 +99,13 @@ Because `stdio` is the default subcommand, bare `mcp-debugger` starts in stdio m
 explicitly in a config file is still worth doing: it documents the intent. Console output is
 silenced in every mode so nothing can corrupt the JSON-RPC stream.
 
-Both eras of the MCP protocol are served on `stdio`: a client that probes with `server/discover`
-(Claude Code's v2 runtime does) gets the current 2026-07-28 revision, and a
-client that opens with `initialize` gets 2025-11-25 or earlier, as before. Claude Code may keep a
-stdio server it once saw answer as legacy pinned that way for up to seven days; restarting Claude
-Code after upgrading the server, or waiting it out, lets it probe again. `http` speaks 2025-11-25
-and earlier today; the 2026-07-28 era follows there.
+Both transports serve both eras of the MCP protocol: a client that probes with `server/discover`
+(Claude Code's v2 runtime does, unless it has a cached verdict for that server) gets the current
+2026-07-28 revision — sessionless on `http`, every request standing alone — and a client that
+opens with `initialize` gets 2025-11-25 or earlier, as before. Claude Code may keep a stdio server
+it once saw answer as legacy pinned that way for up to seven days (its own per-server MCP log
+records the era it chose); restarting Claude Code after upgrading the server, or waiting it out,
+lets it probe again.
 
 ### Claude Desktop, or any client with a JSON config
 
