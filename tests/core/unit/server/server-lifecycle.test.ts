@@ -176,8 +176,22 @@ describe('the debug-session idle policy on the core (issue #1025, step 2)', () =
 
     expect(debugServer.idlePolicy.idleMs).toBe(0);
     expect(mockDependencies.logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('Ignoring invalid MCP_DEBUG_SESSION_IDLE_MS value "soon"')
+      'Ignoring invalid MCP_DEBUG_SESSION_IDLE_MS; using default 0ms.'
     );
+  });
+
+  it.each([
+    ['MCP_DEBUG_SESSION_IDLE_MS', 0],
+    ['MCP_DEBUG_SESSION_IDLE_SWEEP_MS', 60_000]
+  ] as const)('does not log rejected environment contents for %s', (name, fallback) => {
+    vi.stubEnv(name, 'synthetic-secret-value\nforged-log-entry');
+    debugServer = new DebugMcpServer();
+
+    expect(debugServer.idlePolicy).toEqual({ idleMs: 0, sweepMs: 60_000 });
+    const warnings = vi.mocked(mockDependencies.logger.warn).mock.calls;
+    expect(warnings).toEqual([[`Ignoring invalid ${name}; using default ${fallback}ms.`]]);
+    expect(warnings.flat().join(' ')).not.toContain('synthetic-secret-value');
+    expect(warnings.flat().join(' ')).not.toContain('forged-log-entry');
   });
 
   it('MCP_DEBUG_SESSION_IDLE_SWEEP_MS sets the cadence; a non-positive value warns and keeps 60 s', async () => {
@@ -192,7 +206,7 @@ describe('the debug-session idle policy on the core (issue #1025, step 2)', () =
     debugServer = coreWithWindow(30 * 60_000);
     expect(debugServer.idlePolicy.sweepMs).toBe(60_000);
     expect(mockDependencies.logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('Ignoring invalid MCP_DEBUG_SESSION_IDLE_SWEEP_MS value "0"')
+      'Ignoring invalid MCP_DEBUG_SESSION_IDLE_SWEEP_MS; using default 60000ms.'
     );
   });
 
