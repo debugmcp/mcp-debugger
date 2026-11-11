@@ -77,7 +77,7 @@ function dispatchIndexFor(ctx: ToolContext): ReadonlyMap<string, ToolDefinition>
   return index;
 }
 
-export function registerToolHandlers(server: Server, ctx: ToolContext): void {
+export function registerToolHandlers(server: Pick<Server, 'setRequestHandler'>, ctx: ToolContext): void {
   const dispatchDefinitions = dispatchIndexFor(ctx);
 
   server.setRequestHandler('tools/list', async () => {

@@ -10,7 +10,7 @@ import { WireMcpError } from '../errors/debug-errors.js';
 import { buildDebuggingWorkflowPrompt } from '../skill-content.js';
 import { getBpAddressingMode } from '../utils/bp-addressing.js';
 
-export function registerPromptHandlers(server: Server, environment: IEnvironment): void {
+export function registerPromptHandlers(server: Pick<Server, 'setRequestHandler'>, environment: IEnvironment): void {
   const promptDescriptor = {
     name: 'debugging-workflow',
     description:

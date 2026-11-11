@@ -7,6 +7,7 @@ import { FakeCurrentProcess } from '../../test-utils/mocks/fake-current-process.
 import type { Logger as WinstonLoggerType } from 'winston';
 import { DebugMcpServer } from '../../../src/server.js';
 import type { createProtocolServer } from '../../../src/server/protocol-facade.js';
+import { StdioServerTransport, type serveStdio } from '@modelcontextprotocol/server/stdio';
 
 vi.mock('../../../src/server.js');
 
@@ -17,6 +18,8 @@ describe('STDIO Command Handler', () => {
   let mockServer: DebugMcpServer;
   let mockFacade: { connect: Mock<() => Promise<void>> };
   let mockProtocolServerFactory: Mock<typeof createProtocolServer>;
+  let mockHandle: { close: Mock<() => Promise<void>> };
+  let mockServeStdio: Mock<typeof serveStdio>;
   let fakeProc: FakeCurrentProcess;
 
   function makeFakeStdin() {
@@ -46,6 +49,10 @@ describe('STDIO Command Handler', () => {
     } as any;
     mockFacade = { connect: vi.fn().mockResolvedValue(undefined) };
     mockProtocolServerFactory = vi.fn(() => mockFacade as any);
+    // The SDK's serving entry (issue #1025, step 2): it owns the wire and pins
+    // one facade per connection from the factory; its handle is what shutdown closes.
+    mockHandle = { close: vi.fn<() => Promise<void>>().mockResolvedValue(undefined) };
+    mockServeStdio = vi.fn<typeof serveStdio>(() => mockHandle as any);
 
     // Create mock server factory
     mockServerFactory = vi.fn(() => mockServer);
@@ -74,6 +81,7 @@ describe('STDIO Command Handler', () => {
       logger: mockLogger,
       serverFactory: mockServerFactory,
       protocolServerFactory: mockProtocolServerFactory,
+      serveStdio: mockServeStdio,
       exitProcess: mockExitProcess,
       stdin: makeFakeStdin(),
       proc: fakeProc
@@ -96,10 +104,19 @@ describe('STDIO Command Handler', () => {
     // Verify server start was called
     expect(mockServer.start).toHaveBeenCalled();
 
-    // The transport is connected to a legacy-era protocol facade over the core,
-    // never to the core itself (issue #1025, step 2)
-    expect(mockProtocolServerFactory).toHaveBeenCalledWith(mockServer, { era: 'legacy', deliver: 'instance' });
-    expect(mockFacade.connect).toHaveBeenCalledTimes(1);
+    // The SDK's serving entry owns the stdio wire and builds one facade per
+    // connection through the factory, in whichever era the client opens
+    // (issue #1025, step 2); nothing connects the core itself.
+    expect(mockServeStdio).toHaveBeenCalledTimes(1);
+    const [factory, serveOptions] = mockServeStdio.mock.calls[0];
+    expect(serveOptions?.transport).toBeInstanceOf(StdioServerTransport);
+    expect(typeof serveOptions?.onerror).toBe('function');
+    expect(serveOptions?.legacy).toBeUndefined();
+    expect(await factory({ era: 'modern' })).toBe(mockFacade);
+    expect(mockProtocolServerFactory).toHaveBeenLastCalledWith(mockServer, { era: 'modern', deliver: 'instance' });
+    expect(await factory({ era: 'legacy' })).toBe(mockFacade);
+    expect(mockProtocolServerFactory).toHaveBeenLastCalledWith(mockServer, { era: 'legacy', deliver: 'instance' });
+    expect(mockFacade.connect).not.toHaveBeenCalled();
 
     // Verify success log
     expect(mockLogger.info).toHaveBeenCalledWith('Server started successfully in stdio mode');
@@ -113,6 +130,7 @@ describe('STDIO Command Handler', () => {
       logger: mockLogger,
       serverFactory: mockServerFactory,
       protocolServerFactory: mockProtocolServerFactory,
+      serveStdio: mockServeStdio,
       exitProcess: mockExitProcess,
       stdin: makeFakeStdin(),
       proc: fakeProc
@@ -142,6 +160,7 @@ describe('STDIO Command Handler', () => {
       logger: mockLogger,
       serverFactory: mockServerFactory,
       protocolServerFactory: mockProtocolServerFactory,
+      serveStdio: mockServeStdio,
       exitProcess: mockExitProcess,
       stdin: makeFakeStdin(),
       proc: fakeProc
@@ -168,6 +187,7 @@ describe('STDIO Command Handler', () => {
       logger: mockLogger,
       serverFactory: mockServerFactory,
       protocolServerFactory: mockProtocolServerFactory,
+      serveStdio: mockServeStdio,
       exitProcess: mockExitProcess,
       proc: fakeProc
     });
@@ -189,6 +209,7 @@ describe('STDIO Command Handler', () => {
       logger: mockLogger,
       serverFactory: mockServerFactory,
       protocolServerFactory: mockProtocolServerFactory,
+      serveStdio: mockServeStdio,
       proc: fakeProc
     });
 
@@ -206,6 +227,7 @@ describe('STDIO Command Handler', () => {
       logger: mockLogger,
       serverFactory: mockServerFactory,
       protocolServerFactory: mockProtocolServerFactory,
+      serveStdio: mockServeStdio,
       exitProcess: mockExitProcess,
       proc: fakeProc
     });
@@ -225,6 +247,7 @@ describe('STDIO Command Handler', () => {
         logger: mockLogger,
         serverFactory: mockServerFactory,
       protocolServerFactory: mockProtocolServerFactory,
+      serveStdio: mockServeStdio,
         exitProcess: mockExitProcess,
         stdin,
         proc: fakeProc
@@ -252,6 +275,7 @@ describe('STDIO Command Handler', () => {
         logger: mockLogger,
         serverFactory: mockServerFactory,
       protocolServerFactory: mockProtocolServerFactory,
+      serveStdio: mockServeStdio,
         exitProcess: mockExitProcess,
         stdin,
         proc: fakeProc
@@ -275,6 +299,7 @@ describe('STDIO Command Handler', () => {
         logger: mockLogger,
         serverFactory: mockServerFactory,
       protocolServerFactory: mockProtocolServerFactory,
+      serveStdio: mockServeStdio,
         exitProcess: mockExitProcess,
         stdin,
         proc: fakeProc
@@ -331,6 +356,7 @@ describe('STDIO Command Handler', () => {
         logger: mockLogger,
         serverFactory: mockServerFactory,
       protocolServerFactory: mockProtocolServerFactory,
+      serveStdio: mockServeStdio,
         exitProcess: mockExitProcess,
         stdin,
         proc: fakeProc
@@ -352,6 +378,7 @@ describe('STDIO Command Handler', () => {
         logger: mockLogger,
         serverFactory: mockServerFactory,
       protocolServerFactory: mockProtocolServerFactory,
+      serveStdio: mockServeStdio,
         exitProcess: mockExitProcess,
         stdin,
         proc: fakeProc
@@ -359,15 +386,30 @@ describe('STDIO Command Handler', () => {
       return stdin;
     }
 
-    it('stops the debug server before exiting when stdin ends', async () => {
+    it('closes the serving handle and stops the debug server before exiting when stdin ends', async () => {
+      const stdin = await startWithStdin();
+
+      stdin.emit('end');
+
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
+      // The SDK handle first (a graceful end for any open subscriptions/listen
+      // stream), then the core, then exit (issue #1025, step 2).
+      expect(mockHandle.close).toHaveBeenCalledTimes(1);
+      expect(mockServer.stop).toHaveBeenCalled();
+      expect(mockHandle.close.mock.invocationCallOrder[0])
+        .toBeLessThan(vi.mocked(mockServer.stop).mock.invocationCallOrder[0]);
+      expect(vi.mocked(mockServer.stop).mock.invocationCallOrder[0])
+        .toBeLessThan(mockExitProcess.mock.invocationCallOrder[0]);
+    });
+
+    it('still stops the debug server and exits when the serving handle refuses to close', async () => {
+      mockHandle.close = vi.fn<() => Promise<void>>().mockRejectedValue(new Error('wire gone'));
       const stdin = await startWithStdin();
 
       stdin.emit('end');
 
       await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
       expect(mockServer.stop).toHaveBeenCalled();
-      expect(vi.mocked(mockServer.stop).mock.invocationCallOrder[0])
-        .toBeLessThan(mockExitProcess.mock.invocationCallOrder[0]);
     });
 
     it('stops the debug server before exiting on SIGTERM', async () => {
@@ -412,6 +454,121 @@ describe('STDIO Command Handler', () => {
       fakeProc.emit('SIGINT');
 
       await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalled());
+      expect(mockServer.stop).toHaveBeenCalledTimes(1);
+      expect(mockExitProcess).toHaveBeenCalledTimes(1);
+    });
+
+    it('bounds the serving handle close on its own, so a hung close still leaves the debug server its teardown inside the guard', async () => {
+      // Review of PR #1116, Important #1: handle.close() and core.stop() used to share
+      // the one 5 s guard, so a handle that never settled (a listen stream whose
+      // consumer stopped reading) starved closeAllSessions() entirely.
+      mockHandle.close = vi.fn<() => Promise<void>>().mockReturnValue(new Promise(() => {}));
+      const stdin = await startWithStdin();
+      vi.useFakeTimers();
+      try {
+        stdin.emit('end');
+        expect(mockServer.stop).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(1000);
+
+        expect(mockServer.stop).toHaveBeenCalledTimes(1);
+        expect(mockExitProcess).toHaveBeenCalledWith(0);
+        expect(mockLogger.debug).toHaveBeenCalledWith(expect.stringContaining('serving handle did not close'), expect.anything());
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe('the stdio wire closing under the serving entry (issue #1025, step 2)', () => {
+    // The SDK transport closes itself — and tells only its own onclose, which
+    // serveStdio owns — on a stdout error (the client's end of the pipe is gone)
+    // or an oversized frame, with stdin still open: no EOF handler ever fires.
+    // Review of PR #1116, Important #2.
+    function servedTransport(): StdioServerTransport {
+      const [, serveOptions] = mockServeStdio.mock.calls[0];
+      return serveOptions!.transport as StdioServerTransport;
+    }
+
+    async function start(stdin = makeFakeStdin()) {
+      await handleStdioCommand({}, {
+        logger: mockLogger,
+        serverFactory: mockServerFactory,
+        protocolServerFactory: mockProtocolServerFactory,
+        serveStdio: mockServeStdio,
+        exitProcess: mockExitProcess,
+        stdin,
+        proc: fakeProc
+      });
+      return stdin;
+    }
+
+    it('stops the debug server and exits when the transport closes the wire while stdin is still open', async () => {
+      await start();
+
+      await servedTransport().close();
+
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
+      expect(mockServer.stop).toHaveBeenCalledTimes(1);
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('Stdio transport closed'));
+    });
+
+    // The exit line is what an operator reads to learn why the server went
+    // away, so it is worded from what is true, not from which listener ran
+    // first: only a stdin that ended means the client left.
+    const exitLines = () => vi.mocked(mockLogger.warn).mock.calls.map(([line]) => String(line)).join(' | ');
+
+    it('names the transport error and does not blame the client when the wire closes after a stdout error', async () => {
+      await start();
+      const [, serveOptions] = mockServeStdio.mock.calls[0];
+
+      serveOptions!.onerror!(new Error('write EPIPE'));
+      await servedTransport().close();
+
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
+      expect(exitLines()).toContain('Stdio transport closed after an error (write EPIPE)');
+      expect(exitLines()).not.toContain('MCP client disconnected');
+    });
+
+    it('says only that the transport closed when no error was reported and stdin is still open', async () => {
+      await start();
+
+      await servedTransport().close();
+
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
+      expect(exitLines()).toContain('Stdio transport closed —');
+      expect(exitLines()).not.toContain('MCP client disconnected');
+    });
+
+    it('calls a wire close the client leaving when stdin has already ended', async () => {
+      const stdin = makeFakeStdin();
+      (stdin as unknown as { readableEnded: boolean }).readableEnded = true;
+      await start(stdin);
+
+      await servedTransport().close();
+
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
+      expect(exitLines()).toContain('Stdin ended; MCP client disconnected');
+    });
+
+    it('runs the wire close through the same container gate as a stdin EOF: no client ever spoke, so stay alive', async () => {
+      fakeProc.env.MCP_CONTAINER = 'true';
+      await start();
+
+      await servedTransport().close();
+
+      expect(mockExitProcess).not.toHaveBeenCalled();
+      expect(mockServer.stop).not.toHaveBeenCalled();
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('detached container, staying alive'));
+    });
+
+    it('tears down once when the shutdown itself closes the wire (the hook re-enters an idempotent shutdown)', async () => {
+      mockHandle.close = vi.fn<() => Promise<void>>(async () => { await servedTransport().close(); });
+      const stdin = await start();
+
+      stdin.emit('end');
+
+      await vi.waitFor(() => expect(mockExitProcess).toHaveBeenCalledWith(0));
       expect(mockServer.stop).toHaveBeenCalledTimes(1);
       expect(mockExitProcess).toHaveBeenCalledTimes(1);
     });
