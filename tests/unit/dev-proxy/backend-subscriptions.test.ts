@@ -269,6 +269,47 @@ describe('dev-proxy backend subscription relay', () => {
   });
 
   describe('serialization (review of PR #1118, Important #2)', () => {
+    describe.each(['legacy', 'modern'] as const)('opposing operations against a %s backend', (era) => {
+      const URI = 'debug://sessions/a/output';
+
+      it('applies an unsubscribe queued behind a subscribe before the subscribe settles', async () => {
+        const { client } = fakeClient(era);
+        const relay = createSubscriptionRelay({ getClient: () => client });
+
+        // Both requests arrive before the serialized subscribe has changed the set.
+        await Promise.all([relay.subscribe(URI), relay.unsubscribe(URI)]);
+
+        expect(relay.uris()).toEqual([]);
+        if (era === 'legacy') {
+          expect(client.subscribeResource).toHaveBeenCalledWith({ uri: URI });
+          expect(client.unsubscribeResource).toHaveBeenCalledWith({ uri: URI });
+        } else {
+          expect(client.listen).toHaveBeenCalledTimes(2);
+          expect(client.listen).toHaveBeenLastCalledWith(expect.objectContaining({ resourceSubscriptions: [] }));
+        }
+      });
+
+      it('applies a subscribe queued behind an unsubscribe before the unsubscribe settles', async () => {
+        const { client } = fakeClient(era);
+        const relay = createSubscriptionRelay({ getClient: () => client });
+        await relay.subscribe(URI);
+        client.subscribeResource.mockClear();
+        client.listen.mockClear();
+
+        // The second request must see the removal queued before it, not the old set.
+        await Promise.all([relay.unsubscribe(URI), relay.subscribe(URI)]);
+
+        expect(relay.uris()).toEqual([URI]);
+        if (era === 'legacy') {
+          expect(client.unsubscribeResource).toHaveBeenCalledWith({ uri: URI });
+          expect(client.subscribeResource).toHaveBeenCalledWith({ uri: URI });
+        } else {
+          expect(client.listen).toHaveBeenCalledTimes(2);
+          expect(client.listen).toHaveBeenLastCalledWith(expect.objectContaining({ resourceSubscriptions: [URI] }));
+        }
+      });
+    });
+
     it('two subscribes arriving before either listen settles leave exactly one listen open', async () => {
       const { client, closes } = fakeClient('modern');
       const releases: Array<() => void> = [];

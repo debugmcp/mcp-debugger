@@ -176,7 +176,6 @@ export function createSubscriptionRelay({ getClient, log = () => {} }) {
 
     /** @param {string} uri */
     async subscribe(uri) {
-      if (uris.has(uri)) return;
       return serialize(async () => {
         if (uris.has(uri)) return;
         const client = getClient();
@@ -202,7 +201,6 @@ export function createSubscriptionRelay({ getClient, log = () => {} }) {
 
     /** @param {string} uri */
     async unsubscribe(uri) {
-      if (!uris.has(uri)) return;
       return serialize(async () => {
         if (!uris.delete(uri)) return;
         const client = getClient();
