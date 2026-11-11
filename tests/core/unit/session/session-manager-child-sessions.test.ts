@@ -793,7 +793,7 @@ describe('SessionManager child sessions (issue #1081)', () => {
 
       const outcome = await sessionManager.closeSessionReporting(childId);
 
-      expect(outcome).toEqual({ closed: true, closedSessionIds: [grandchildId, childId], childrenClosed: 1, released: true });
+      expect(outcome).toEqual({ closed: true, closedSessionIds: [grandchildId, childId], releasedSessionIds: [grandchildId, childId], childrenClosed: 1, released: true });
       expect(outcome.processEnded).toBeUndefined();
     });
   });
@@ -925,7 +925,7 @@ describe('SessionManager child sessions (issue #1081)', () => {
 
       const outcome = await sessionManager.closeSessionReporting(childId);
 
-      expect(outcome).toEqual({ closed: true, closedSessionIds: [grandchildId, childId], childrenClosed: 1, released: true });
+      expect(outcome).toEqual({ closed: true, closedSessionIds: [grandchildId, childId], releasedSessionIds: [grandchildId, childId], childrenClosed: 1, released: true });
       expect(outcome.processEnded).toBeUndefined();
       expect(childView.stopOptions[0]).toEqual({ terminateDebuggee: false });
       expect(grandchildView.stopOptions[0]).toEqual({ terminateDebuggee: false });
@@ -1294,3 +1294,4 @@ describe('SessionManager child sessions (issue #1081)', () => {
     });
   });
 });
+
