@@ -222,7 +222,16 @@ export async function expectModernEraDebugCycle(client: Client, scriptPath: stri
       name: 'start_debugging',
       arguments: { sessionId, scriptPath, args: [], dapLaunchArgs: { stopOnEntry: false, justMyCode: true } }
     }));
-    expect(String(started.state)).toContain('paused');
+    expect(started.success).toBe(true);
+    // A slow adapter can return before its first stop. That is a valid launch,
+    // not a failed smoke: use the same bounded wait a real client should use.
+    const stopped = started.pending === true
+      ? parseSdkToolResult(await client.callTool({
+        name: 'wait_for_stop',
+        arguments: { sessionId, timeout: 25_000 }
+      }))
+      : started;
+    expect(stopped.state).toBe('paused');
 
     const locals = parseSdkToolResult(await client.callTool({
       name: 'get_local_variables',

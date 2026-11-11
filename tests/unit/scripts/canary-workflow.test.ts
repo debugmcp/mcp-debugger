@@ -70,9 +70,10 @@ describe('canary.yml 2026-07-28 legs (issue #1025)', () => {
     }
   });
 
-  it('reads that version from the installed package in the npm job and from the registry in the docker job', () => {
+  it('reads that version from the installed package in the npm job and from the pulled image in the docker job', () => {
     expect(yml).toContain('ARTIFACT_VERSION="$(node -p "require(process.argv[1]).version" "$(npm root -g)/@debugmcp/mcp-debugger/package.json")"');
-    expect(yml).toContain('ARTIFACT_VERSION="$(npm view "@debugmcp/mcp-debugger@${CANARY_VERSION}" version)"');
+    expect(yml).toContain(`ARTIFACT_VERSION="$(docker run --rm --entrypoint node "$IMAGE" -p "require('/app/node_modules/@debugmcp/shared/package.json').version")"`);
+    expect(yml).not.toContain('npm view');
     expect(yml.split('\n').filter((line) => line.includes('echo "ARTIFACT_VERSION=$ARTIFACT_VERSION" >> "$GITHUB_ENV"'))).toHaveLength(2);
   });
 });

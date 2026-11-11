@@ -441,17 +441,11 @@ jobs:
             -- docker run -i --rm -v "$GITHUB_WORKSPACE:/workspace" "$IMAGE" stdio
 
       - name: Smoke cycle (python, protocol 2026-07-28)
-        # The image's 2026-07-28 leg (issue #1025), beside the 2025-era cycles
-        # above. The image carries no version label, and it ships at the npm
-        # package's version, so the registry says which version the tag under
-        # test is — `latest` included. Before 0.27.0 the driver skips with a
-        # notice; from 0.27.0, prereleases included, the cycle is strict.
-        # One false red is possible: a scheduled run that lands between a
-        # release's npm publish and the move of the Docker `latest` tag reads
-        # the new version for the old image. The release-gate run comes after
-        # both publishes and names an exact version, so it cannot.
+        # Read the version from the pulled image's synchronized shared package.
+        # npm's latest tag can move before Docker's during a release; querying
+        # npm here can apply the new era's requirements to an older image.
         run: |
-          ARTIFACT_VERSION="$(npm view "@debugmcp/mcp-debugger@${CANARY_VERSION}" version)"
+          ARTIFACT_VERSION="$(docker run --rm --entrypoint node "$IMAGE" -p "require('/app/node_modules/@debugmcp/shared/package.json').version")"
           echo "ARTIFACT_VERSION=$ARTIFACT_VERSION" >> "$GITHUB_ENV"
           node scripts/canary-smoke.mjs --lang python --era 2026-07-28 --artifact-version "$ARTIFACT_VERSION" \
             --program examples/python/simple_test.py --line 11 \
