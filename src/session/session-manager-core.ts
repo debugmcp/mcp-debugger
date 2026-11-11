@@ -304,6 +304,8 @@ export interface CloseSessionOutcome {
   closed: boolean;
   /** Every id removed, deepest first then the named session. */
   closedSessionIds: string[];
+  /** Closed ids whose targets were released, captured as each session was closed. */
+  releasedSessionIds?: string[];
   /** Descendants closed with the named session, when any. */
   childrenClosed?: number;
   /** The named session is a child whose process this close ended (the policy's `closeChild: 'terminate'`). */
@@ -600,7 +602,7 @@ export abstract class SessionManagerCore extends EventEmitter {
             closedAt: now,
             idleMs,
             windowMs,
-            outcome
+            outcome: report.released || report.releasedSessionIds?.includes(sessionId) ? 'released' : 'ended'
           });
         }
         const others = report.closedSessionIds.length - 1;
@@ -792,23 +794,31 @@ export abstract class SessionManagerCore extends EventEmitter {
     // An attach root's close preserves its external targets, descendants
     // included: their connections are closed without ending them.
     const releaseDescendants = !options.terminateDebuggee && !session.parentSessionId && session.attachMode === true;
-    // Closing a retained row after its connection ended cannot terminate
-    // its process. In particular, released children keep running after a
-    // plain detach, even if their rows are explicitly closed later.
-    const childEnd = session.parentSessionId && session.proxyManager ? this.childCloseSemantics(session) : undefined;
-    const alreadyReleased = session.parentSessionId && session.programEndExplanation?.data?.released === true;
     const closedSessionIds: string[] = [];
+    const releasedSessionIds: string[] = [];
     const finishClose = this.beginSubtreeClose(sessionId);
     try {
       for (const descendant of this.descendantsDeepestFirst(sessionId)) {
         // A child whose adapter can only release it (js-debug, issue #1082)
         // is closed with its target kept, whatever the cascade.
         const releaseChild = releaseDescendants || (descendant.proxyManager !== undefined && this.childCloseSemantics(descendant) === 'release');
+        // Capture each outcome at its own close, not before the cascade: a
+        // later child can end naturally while an earlier close is awaited.
+        const released = releaseChild || descendant.programEndExplanation?.data?.released === true;
         if (await this.closeSingleSession(descendant.id, { releaseChild })) {
           closedSessionIds.push(descendant.id);
+          if (released) {
+            releasedSessionIds.push(descendant.id);
+          }
         }
       }
       const childrenClosed = closedSessionIds.length;
+      // Read the named session's outcome after its descendants close, but
+      // before a terminating disconnect can clear its connection. A retained
+      // released child still runs on when only its row is being removed.
+      const childEnd = session.parentSessionId && session.proxyManager ? this.childCloseSemantics(session) : undefined;
+      const alreadyReleased = session.parentSessionId && session.programEndExplanation?.data?.released === true;
+      const released = childEnd === 'release' || releaseDescendants || alreadyReleased;
       // An explicit terminating detach ends every child before the root's
       // disconnect can tear down their shared adapter/worker connection.
       if (options.terminateDebuggee && session.proxyManager) {
@@ -821,13 +831,17 @@ export abstract class SessionManagerCore extends EventEmitter {
       const closed = await this.closeSingleSession(sessionId, { releaseChild: childEnd === 'release' });
       if (closed) {
         closedSessionIds.push(sessionId);
+        if (released) {
+          releasedSessionIds.push(sessionId);
+        }
       }
       return {
         closed,
         closedSessionIds,
+        ...(releasedSessionIds.length > 0 ? { releasedSessionIds } : {}),
         ...(childrenClosed > 0 ? { childrenClosed } : {}),
         ...(closed && childEnd === 'terminate' ? { processEnded: true as const } : {}),
-        ...(closed && (childEnd === 'release' || releaseDescendants || alreadyReleased) ? { released: true as const } : {})
+        ...(closed && released ? { released: true as const } : {})
       };
     } finally {
       finishClose();
@@ -2672,3 +2686,4 @@ export abstract class SessionManagerCore extends EventEmitter {
    */
   protected abstract handleAutoContinue(sessionId: string): Promise<void>;
 }
+
