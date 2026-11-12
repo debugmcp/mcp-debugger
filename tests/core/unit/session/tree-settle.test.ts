@@ -88,7 +88,7 @@ describe('describeReleasedChildren (issue #1137)', () => {
 
   it('names the cap that was reached, as a limit rather than as a variable somebody set', () => {
     expect(describeReleasedChildren({ releasedChildReports: 8, releasedChildCauses: { cap: 8 }, releasedChildCap: 32 })).toBe(
-      '8 child processes were released to run undebugged (the tree is at its child-session cap of 32, ' +
+      '8 child processes were released to run undebugged (the tree was at its child-session cap of 32, ' +
       'which DEBUG_MCP_MAX_CHILD_SESSIONS raises): a breakpoint only they reach will not hit.'
     );
   });
@@ -97,7 +97,7 @@ describe('describeReleasedChildren (issue #1137)', () => {
     expect(describeReleasedChildren({ releasedChildReports: 1, releasedChildCauses: { unsupported: 1 } }))
       .toContain('(this session cannot host child sessions)');
     expect(describeReleasedChildren({ releasedChildReports: 1, releasedChildCauses: { 'adoption-failed': 1 } }))
-      .toContain("(its adoption failed; the server log has the adapter's error)");
+      .toContain("(adoption failed, and the server log has the adapter's error)");
   });
 
   it('lists each cause with its count when a run had more than one', () => {
@@ -108,8 +108,8 @@ describe('describeReleasedChildren (issue #1137)', () => {
         releasedChildCap: 4
       })
     ).toBe(
-      '3 child processes were released to run undebugged (2: the tree is at its child-session cap of 4, ' +
-      "which DEBUG_MCP_MAX_CHILD_SESSIONS raises; 1: its adoption failed; the server log has the adapter's error): " +
+      '3 child processes were released to run undebugged (2: the tree was at its child-session cap of 4, ' +
+      "which DEBUG_MCP_MAX_CHILD_SESSIONS raises; 1: adoption failed, and the server log has the adapter's error): " +
       'a breakpoint only they reach will not hit.'
     );
   });

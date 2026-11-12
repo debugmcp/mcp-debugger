@@ -189,6 +189,55 @@ describe('SessionManager idle policy (issue #1025, step 2)', () => {
     expect(sessionManager.idleMsOf(rootId, later)).toBeGreaterThan(WINDOW);
   });
 
+  describe('holdForCall: a tool call on a session (issue #1127)', () => {
+    it('stamps the clock, holds the tree while the call runs, and restarts the clock when it is released', async () => {
+      const rootId = await startRoot();
+      const childId = await adoptChild(rootId);
+      vi.setSystemTime(now() + WINDOW - 1000);
+
+      const release = sessionManager.holdForCall(childId);
+      vi.setSystemTime(now() + WINDOW * 2);
+      expect(sessionManager.idleMsOf(rootId)).toBe(0);
+      expect(await sessionManager.sweepIdle(WINDOW)).toEqual([]);
+
+      release();
+      expect(sessionManager.idleMsOf(rootId)).toBe(0);
+      vi.setSystemTime(now() + WINDOW - 1000);
+      expect(await sessionManager.sweepIdle(WINDOW)).toEqual([]);
+      vi.setSystemTime(now() + 2000);
+      expect(await sessionManager.sweepIdle(WINDOW)).toEqual([rootId]);
+    });
+
+    it("restarts the root's clock even when the call removed the session it named", async () => {
+      const rootId = await startRoot();
+      const childId = await adoptChild(rootId);
+
+      const release = sessionManager.holdForCall(childId);
+      vi.setSystemTime(now() + 60_000);
+      await sessionManager.closeSession(childId);
+      release();
+
+      expect(sessionManager.getSession(childId)).toBeUndefined();
+      expect(sessionManager.idleMsOf(rootId)).toBe(0);
+    });
+
+    it('leaves no clock behind for a root the call itself closed, and releasing twice is harmless', async () => {
+      const rootId = await startRoot();
+
+      const release = sessionManager.holdForCall(rootId);
+      await sessionManager.closeSession(rootId);
+      release();
+      release();
+
+      expect(sessionManager.idleMsOf(rootId)).toBeUndefined();
+      expect(await sessionManager.sweepIdle(WINDOW, { now: now() + WINDOW * 2 })).toEqual([]);
+    });
+
+    it('is a no-op for an unknown session', () => {
+      expect(() => sessionManager.holdForCall('nope')()).not.toThrow();
+    });
+  });
+
   describe('while the sweep is closing a tree (issue #1127)', () => {
     /** A sweep parked inside its close of the root, and the way to let the close finish (or fail). */
     function sweepParkedAtTheClose(fail = false): { sweep: Promise<string[]>; finish: () => void } {
@@ -211,9 +260,9 @@ describe('SessionManager idle policy (issue #1025, step 2)', () => {
       const { sweep, finish } = sweepParkedAtTheClose();
 
       // Read in the same turn the sweep was started in: the mark is synchronous.
-      const closing = sessionManager.idleCloseInFlight(rootId);
+      const closing = sessionManager.idleCloseInFlight(rootId, undefined);
       expect(closing).toBeInstanceOf(Promise);
-      expect(sessionManager.idleCloseInFlight(childId)).toBe(closing);
+      expect(sessionManager.idleCloseInFlight(childId, undefined)).toBe(closing);
       expect(sessionManager.idleExpiryOf(rootId, undefined)).toBeUndefined();
 
       finish();
@@ -222,29 +271,41 @@ describe('SessionManager idle policy (issue #1025, step 2)', () => {
       // Whoever waited on it finds the record, and no mark is left behind.
       expect(sessionManager.idleExpiryOf(rootId, undefined)).toMatchObject({ sessionId: rootId });
       expect(sessionManager.idleExpiryOf(childId, undefined)).toMatchObject({ sessionId: childId, rootId });
-      expect(sessionManager.idleCloseInFlight(rootId)).toBeUndefined();
-      expect(sessionManager.idleCloseInFlight(childId)).toBeUndefined();
+      expect(sessionManager.idleCloseInFlight(rootId, undefined)).toBeUndefined();
+      expect(sessionManager.idleCloseInFlight(childId, undefined)).toBeUndefined();
       expect(await sweep).toEqual([rootId]);
     });
 
     it('a close that fails still settles the mark, without rejecting, and clears it', async () => {
       const rootId = await startRoot();
       const { sweep, finish } = sweepParkedAtTheClose(true);
-      const closing = sessionManager.idleCloseInFlight(rootId);
+      const closing = sessionManager.idleCloseInFlight(rootId, undefined);
 
       finish();
 
       await expect(closing).resolves.toBeUndefined();
       await expect(sweep).rejects.toThrow('the close failed');
-      expect(sessionManager.idleCloseInFlight(rootId)).toBeUndefined();
+      expect(sessionManager.idleCloseInFlight(rootId, undefined)).toBeUndefined();
       expect(sessionManager.idleExpiryOf(rootId, undefined)).toBeUndefined();
+    });
+
+    it('is named only inside the owner scope: for anyone else the session does not exist, closing or not', async () => {
+      const root = await sessionManager.createSession({ language: DebugLanguage.MOCK, ownerKey: 'agent-b' });
+      const { sweep, finish } = sweepParkedAtTheClose();
+
+      expect(sessionManager.idleCloseInFlight(root.id, 'agent-b')).toBeInstanceOf(Promise);
+      expect(sessionManager.idleCloseInFlight(root.id, 'agent-a')).toBeUndefined();
+      expect(sessionManager.idleCloseInFlight(root.id, undefined)).toBeUndefined();
+
+      finish();
+      await sweep;
     });
 
     it('a session that is not being closed names none', async () => {
       const rootId = await startRoot();
 
-      expect(sessionManager.idleCloseInFlight(rootId)).toBeUndefined();
-      expect(sessionManager.idleCloseInFlight('nope')).toBeUndefined();
+      expect(sessionManager.idleCloseInFlight(rootId, undefined)).toBeUndefined();
+      expect(sessionManager.idleCloseInFlight('nope', undefined)).toBeUndefined();
     });
   });
 

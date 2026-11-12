@@ -53,18 +53,22 @@ function idleExpiryResult(ctx: ToolContext, definition: ToolDefinition, sessionI
  * A tool call naming a session is the idle policy's activity (issue #1025,
  * step 2), for as long as it runs (issue #1127): the tree's clock is stamped
  * when the call starts and again when it answers, and the tree is held in
- * between, so a call that outlasts the window — a launch that builds first, a
- * long attach verify — is never closed underneath itself and does not use up
- * the window it was made in. Only through a tool that takes the id, so a stray
- * argument cannot keep a tree alive, and never for a session the caller may
- * not see.
+ * between (SessionManagerCore.holdForCall), so a call that outlasts the window
+ * — a launch that builds first, a long attach verify — is never closed
+ * underneath itself and does not use up the window it was made in. Only
+ * through a tool that takes the id, so a stray argument cannot keep a tree
+ * alive, and never for a session the caller may not see. (create_debug_session
+ * names no session; it takes the same hold itself around its inline attach.)
  *
  * A call that arrives while the policy is already closing the tree waits for
  * that close: afterwards the session is gone and the call is told what
  * happened (idleExpiryResult), where it used to run against a session being
- * torn down. Nothing is awaited unless a close is in flight, and the check,
- * the stamp and the hold then run in one turn — the sweep cannot decide in
- * between.
+ * torn down. Only a caller in the session's scope waits — the mark is read
+ * with the caller's key, because a child's row is gone before its tree's
+ * close is over and `outOfScope` can no longer see it. Nothing is awaited
+ * unless a close is in flight, and the check and the hold then run in one
+ * turn — the sweep cannot decide in between. A close already waited for is
+ * never waited for again, so a mark that outlived its close cannot spin this.
  *
  * Returns the release, which also restarts the clock; undefined when the call
  * holds nothing.
@@ -73,20 +77,22 @@ async function holdForTheCall(
   ctx: ToolContext,
   definition: ToolDefinition,
   sessionId: unknown,
-  outOfScope: boolean
+  outOfScope: boolean,
+  callerKey: string | undefined
 ): Promise<(() => void) | undefined> {
   if (outOfScope || typeof sessionId !== 'string' || !takesSessionId(definition)) {
     return undefined;
   }
-  for (let closing = ctx.sessionManager.idleCloseInFlight(sessionId); closing; closing = ctx.sessionManager.idleCloseInFlight(sessionId)) {
+  let waitedFor: Promise<void> | undefined;
+  for (
+    let closing = ctx.sessionManager.idleCloseInFlight(sessionId, callerKey);
+    closing && closing !== waitedFor;
+    closing = ctx.sessionManager.idleCloseInFlight(sessionId, callerKey)
+  ) {
+    waitedFor = closing;
     await closing;
   }
-  ctx.sessionManager.touchActivity(sessionId);
-  const release = ctx.sessionManager.holdIdle(sessionId);
-  return () => {
-    release();
-    ctx.sessionManager.touchActivity(sessionId);
-  };
+  return ctx.sessionManager.holdForCall(sessionId);
 }
 
 /** Whether `sessionId` names a session that exists but is not the caller's to see. */
@@ -172,7 +178,7 @@ export function registerToolHandlers(server: Pick<Server, 'setRequestHandler'>, 
             throw new ProtocolError(ProtocolErrorCode.MethodNotFound, `Unknown tool: ${toolName}`);
           }
           assertRequiredToolArguments(definition, args as unknown as Record<string, unknown>);
-          releaseIdleHold = await holdForTheCall(ctx, definition, args.sessionId, outOfScope);
+          releaseIdleHold = await holdForTheCall(ctx, definition, args.sessionId, outOfScope, callerKey);
           const result =
             idleExpiryResult(ctx, definition, args.sessionId, callerKey) ??
             await TOOL_HANDLERS[toolName](ctx, args, requestedName, { signal: callCtx?.mcpReq.signal, callerKey });

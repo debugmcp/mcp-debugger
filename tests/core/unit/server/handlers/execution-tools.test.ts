@@ -98,6 +98,7 @@ describe('execution tool handlers', () => {
       await waitForStopTool(ctx, { sessionId: 'test-session' }, 'wait_for_stop');
 
       expect(ctx.sessionManager.holdIdle).not.toHaveBeenCalled();
+      expect(ctx.sessionManager.holdForCall).not.toHaveBeenCalled();
       expect(ctx.sessionManager.touchActivity).not.toHaveBeenCalled();
     });
 

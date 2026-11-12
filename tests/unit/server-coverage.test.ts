@@ -55,6 +55,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       isSessionVisibleTo: vi.fn((sessionId: string) => mockSessionManager.getSession(sessionId) !== undefined),
       touchActivity: vi.fn(),
       holdIdle: vi.fn(() => () => undefined),
+      holdForCall: vi.fn(() => () => undefined),
       idleCloseInFlight: vi.fn(() => undefined),
       setBreakpoint: vi.fn(),
       startDebugging: vi.fn(),

@@ -35,10 +35,14 @@ function hasSensitiveToken(key: string): boolean {
     .some(token => SENSITIVE_TOKENS.has(token.toLowerCase()));
 }
 
-/** `session`, whatever separates it from `id`, `id`, and the letters that follow directly. */
-const SESSION_THEN_ID = /session([^a-zA-Z0-9]*)(id)([a-zA-Z]*)/gi;
-/** The words that, after `session`, make a session id. */
-const SESSION_ID_WORDS = new Set(['id', 'ids', 'identifier', 'identifiers']);
+/**
+ * `session`, whatever separates it from `id`, and `id`; the letters that follow
+ * directly are looked at, not consumed, so a second `session…id` later in the
+ * same name is found too.
+ */
+const SESSION_THEN_ID = /session[^a-zA-Z0-9]*(id)(?=([a-zA-Z]*))/gi;
+/** The words that begin with "id" after `session` and are not an id: the session is idle. */
+const IDLE_WORDS = new Set(['idle', 'idles', 'idled', 'idling']);
 
 const isUpper = (char: string | undefined): boolean => char !== undefined && char >= 'A' && char <= 'Z';
 const isLower = (char: string | undefined): boolean => char !== undefined && char >= 'a' && char <= 'z';
@@ -46,9 +50,8 @@ const isLower = (char: string | undefined): boolean => char !== undefined && cha
 /**
  * How many of the letters that follow `id` belong to the same word: an
  * upper-case `ID` runs on through capitals, stopping before the one that
- * opens the next camelCase word (`IDValue` is ID + Value, `IDLE` is one
- * word); then, in any spelling, through lower-case letters (`Ids`, `IDs`,
- * `Idle`).
+ * opens the next camelCase word (`IDLEMs` is IDLE + Ms); then, in any
+ * spelling, through lower-case letters (`Idle`, `idle`).
  */
 function sameWordLength(id: string, letters: string): number {
   let end = 0;
@@ -67,24 +70,20 @@ function sameWordLength(id: string, letters: string): number {
  * Whether the key names a session id (issue #1129). This was the substring
  * pattern `session[_-]?id`, which also matched `SESSION_IDLE` — so this
  * server's own idle-policy settings (`MCP_DEBUG_SESSION_IDLE_MS`) were
- * displayed as redacted secrets. The word that follows `session` is now read
- * to its end and must be an id word: `SESSION_ID`, `sessionIds`,
- * `SessionIDValue`, `SESSION_IDENTIFIER` are; `SESSION_IDLE`, `sessionIdx`
- * are not.
+ * displayed as redacted secrets.
  *
- * A run-on spelling (`sessionid`, `JSESSIONID`, `SESSIONIDVALUE`) has no
- * boundary to say where its words end, and is masked whatever follows.
+ * It still masks whatever follows `session…id` — `SESSION_ID`, `sessionIds`,
+ * `SESSION_IDHASH`, `JSESSIONID`, and words it has no opinion on such as
+ * `SESSION_IDX` — and knows one exception: the word that starts at `id` is
+ * "idle". A masking rule fails closed: a name it cannot read stays masked,
+ * and a number shown as `[REDACTED]` costs less than a session id shown.
  */
 function namesSessionId(key: string): boolean {
   for (const match of key.matchAll(SESSION_THEN_ID)) {
-    const [, separator, id, letters] = match;
-    const lastOfSession = key[match.index + 'session'.length - 1];
-    const boundary = separator.length > 0 || (isLower(lastOfSession) && isUpper(id[0]));
-    if (!boundary) {
-      return true;
-    }
+    const id = match[1];
+    const letters = match[2] ?? '';
     const word = id + letters.slice(0, sameWordLength(id, letters));
-    if (SESSION_ID_WORDS.has(word.toLowerCase())) {
+    if (!IDLE_WORDS.has(word.toLowerCase())) {
       return true;
     }
   }

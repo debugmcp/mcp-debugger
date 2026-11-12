@@ -867,18 +867,60 @@ describe('SessionManager child sessions (issue #1081)', () => {
         expect(sessionManager.getSession(rootId)).toMatchObject({ releasedChildReports: 1, releasedChildCauses: { 'adoption-failed': 1 } });
       });
 
-      it('a relaunch forgets the causes with the count', async () => {
-        build({ DEBUG_MCP_MAX_CHILD_SESSIONS: '0' });
+      it('a relaunch forgets the causes and the cap with the count', async () => {
+        build({ DEBUG_MCP_MAX_CHILD_SESSIONS: '1' });
         const rootId = await startRoot();
         dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
         await vi.runAllTimersAsync();
+        dependencies.mockProxyManager.simulateEvent('child-reported', report('r2', 4343));
+        await vi.runAllTimersAsync();
+        expect(sessionManager.getSession(rootId)).toMatchObject({ releasedChildCauses: { cap: 1 }, releasedChildCap: 1 });
         vi.spyOn(dependencies.mockProxyManager, 'stop').mockResolvedValue();
 
         await sessionManager.restartDebugging(rootId);
         await vi.runAllTimersAsync();
 
+        expect(sessionManager.getSession(rootId)!.releasedChildReports).toBeUndefined();
         expect(sessionManager.getSession(rootId)!.releasedChildCauses).toBeUndefined();
         expect(sessionManager.getSession(rootId)!.releasedChildCap).toBeUndefined();
+      });
+
+      it("a wait that answers for a child still explains the asked session's count: the number and the sentence are the root's", async () => {
+        build({ DEBUG_MCP_MAX_CHILD_SESSIONS: '1' });
+        const rootId = await startRoot();
+        dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+        await vi.runAllTimersAsync();
+        const child = childOf(rootId)!;
+        dependencies.mockProxyManager.simulateEvent('child-reported', report('r2', 4343));
+        await vi.runAllTimersAsync();
+        dependencies.mockProxyManager.childViews.get(child.id)!.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1, allThreadsStopped: true });
+        await vi.runAllTimersAsync();
+
+        const answer = await sessionManager.waitForStop(rootId, 100);
+
+        expect(answer.state).toBe(SessionState.PAUSED);
+        expect(answer.data?.sessionId).toBe(child.id);
+        expect(answer.data?.childrenReleased).toBe(1);
+        expect(answer.data?.message?.startsWith('Paused (breakpoint)')).toBe(true);
+        expect(answer.data?.message?.endsWith(
+          '1 child process was released to run undebugged (the tree was at its child-session cap of 1, ' +
+          'which DEBUG_MCP_MAX_CHILD_SESSIONS raises): a breakpoint only it reaches will not hit.'
+        )).toBe(true);
+      });
+
+      it('the answer for a session that ended in error says it too', async () => {
+        build({ DEBUG_MCP_MAX_CHILD_SESSIONS: '0' });
+        const rootId = await startRoot();
+        dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+        await vi.runAllTimersAsync();
+        dependencies.mockProxyManager.simulateExit(1);
+        await vi.runAllTimersAsync();
+
+        const answer = await sessionManager.waitForStop(rootId, 100);
+
+        expect(answer.state).toBe(SessionState.ERROR);
+        expect(answer.data?.message).toMatch(/^The debug session ended in an error state/);
+        expect(answer.data?.message?.endsWith(OFF)).toBe(true);
       });
 
       it('the pending wait answer says it, right after the promise it qualifies', async () => {

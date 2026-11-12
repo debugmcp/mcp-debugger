@@ -225,6 +225,84 @@ describe('what an agent sees of the idle policy (issue #1025, step 2)', () => {
       await call;
     });
 
+    // create_debug_session with an attach target runs the attach inside the
+    // call, and the call names no session — the dispatch has nothing to hold.
+    // The same bug on a second path: an 800 ms window closed the new session
+    // under its own attach ("Created session but attach failed: … Proxy exited
+    // during initialization").
+    describe('create_debug_session with an attach target', () => {
+      async function createWithItsAttachInFlight(): Promise<{ id: string; gate: ReturnType<typeof deferred<never>>; call: Promise<Record<string, unknown>> }> {
+        const gate = deferred<never>();
+        const attach = vi.spyOn(core.sessionManager, 'attachToProcess').mockReturnValue(gate.promise);
+        const call = answer('create_debug_session', { language: 'mock', port: 5678 });
+        for (let turns = 0; turns < 50 && attach.mock.calls.length === 0; turns++) {
+          await turn();
+        }
+        expect(attach).toHaveBeenCalled();
+        return { id: attach.mock.calls[0][0], gate, call };
+      }
+      const attached = { success: true, state: 'paused', data: {} } as never;
+
+      it('holds the session it created while the attach runs', async () => {
+        build();
+        const { id, gate, call } = await createWithItsAttachInFlight();
+        vi.setSystemTime(Date.now() + WINDOW + 60_000);
+
+        expect(core.sessionManager.idleMsOf(id)).toBe(0);
+        expect(await core.sessionManager.sweepIdle(WINDOW)).toEqual([]);
+        expect(core.sessionManager.getSession(id)).toBeDefined();
+
+        gate.resolve(attached);
+        expect(await call).toMatchObject({ success: true, sessionId: id });
+      });
+
+      it('restarts the clock when it answers, and lets go of the session', async () => {
+        build();
+        const { id, gate, call } = await createWithItsAttachInFlight();
+        vi.setSystemTime(Date.now() + WINDOW + 60_000);
+        gate.resolve(attached);
+        await call;
+
+        expect(core.sessionManager.idleMsOf(id)).toBe(0);
+        vi.setSystemTime(Date.now() + WINDOW + 1000);
+        expect(await core.sessionManager.sweepIdle(WINDOW)).toEqual([id]);
+      });
+
+      it('lets go of the session when the attach throws', async () => {
+        build();
+        const { id, gate, call } = await createWithItsAttachInFlight();
+        gate.reject(new Error('nothing is listening'));
+        expect(await call).toMatchObject({ success: false, sessionId: id });
+        vi.setSystemTime(Date.now() + WINDOW + 60_000);
+
+        expect(await core.sessionManager.sweepIdle(WINDOW)).toEqual([id]);
+      });
+    });
+
+    it('restarts the clock of the tree when the call closed the session it named: closing a child is activity for its root', async () => {
+      build();
+      const root = await core.sessionManager.createSession({ language: DebugLanguage.MOCK });
+      const child = (core.sessionManager as unknown as {
+        sessionStore: { createSession(params: Record<string, unknown>): { id: string } };
+      }).sessionStore.createSession({ language: DebugLanguage.MOCK, name: 'child', parentSessionId: root.id });
+      const gate = deferred<void>();
+      const close = core.sessionManager.closeSessionReporting.bind(core.sessionManager);
+      vi.spyOn(core.sessionManager, 'closeSessionReporting').mockImplementation(async (sessionId: string) => {
+        await gate.promise;
+        return close(sessionId);
+      });
+
+      const call = answer('close_debug_session', { sessionId: child.id });
+      await turn();
+      vi.setSystemTime(Date.now() + 60_000);
+      gate.resolve();
+      expect(await call).toMatchObject({ success: true });
+
+      expect(core.sessionManager.getSession(child.id)).toBeUndefined();
+      // The slow close just answered: the root has been idle for no time at all.
+      expect(core.sessionManager.idleMsOf(root.id)).toBe(0);
+    });
+
     describe('arriving while the policy is closing its session', () => {
       /** An idle sweep whose close of the session stays in flight until the gate opens. */
       async function sweepHeldAtTheClose(ownerKey?: string): Promise<{ id: string; open: () => void; sweep: Promise<string[]> }> {
@@ -254,6 +332,41 @@ describe('what an agent sees of the idle policy (issue #1025, step 2)', () => {
 
         expect(settledDuringTheClose).toBe(false);
         expect(await call).toMatchObject({ success: false, closedBy: 'idle-policy' });
+      });
+
+      it('does not make a stranger wait on a child whose row the cascade already removed: no timing tells it the id was real', async () => {
+        build();
+        const root = await core.sessionManager.createSession({ language: DebugLanguage.MOCK, ownerKey: 'agent-b' });
+        const child = (core.sessionManager as unknown as {
+          sessionStore: { createSession(params: Record<string, unknown>): { id: string } };
+        }).sessionStore.createSession({ language: DebugLanguage.MOCK, name: 'child', parentSessionId: root.id, ownerKey: 'agent-b' });
+        const gate = deferred<void>();
+        const close = core.sessionManager.closeSessionReporting.bind(core.sessionManager);
+        vi.spyOn(core.sessionManager, 'closeSessionReporting').mockImplementation(async (sessionId: string) => {
+          const report = await close(sessionId);
+          // The rows are gone; the sweep has not finished with the tree yet.
+          await gate.promise;
+          return report;
+        });
+        vi.setSystemTime(Date.now() + WINDOW + 60_000);
+        const sweep = core.sessionManager.sweepIdle(WINDOW);
+        for (let turns = 0; turns < 50 && core.sessionManager.getSession(child.id); turns++) {
+          await turn();
+        }
+        expect(core.sessionManager.getSession(child.id)).toBeUndefined();
+
+        let strangerAnswered = false;
+        const forStranger = answer('get_output', { sessionId: child.id }, 'agent-a').finally(() => { strangerAnswered = true; });
+        let ownerAnswered = false;
+        const forOwner = answer('get_output', { sessionId: child.id }, 'agent-b').finally(() => { ownerAnswered = true; });
+        await turn();
+        const answeredDuringTheClose = { stranger: strangerAnswered, owner: ownerAnswered };
+        gate.resolve();
+        await sweep;
+
+        expect(answeredDuringTheClose).toEqual({ stranger: true, owner: false });
+        expect(await forStranger).toEqual({ success: false, error: `Session not found: ${child.id}` });
+        expect(await forOwner).toMatchObject({ success: false, closedBy: 'idle-policy' });
       });
 
       it('does not make a caller outside the owner scope wait: for it the id is unknown, as before', async () => {

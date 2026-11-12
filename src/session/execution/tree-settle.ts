@@ -59,12 +59,14 @@ function describeReleaseCause(cause: ChildReleaseCause, cap: number | undefined)
     case 'adoption-off':
       return `child sessions are off: ${MAX_CHILD_SESSIONS_ENV}=0`;
     case 'cap':
-      // Worded as a limit, not as `NAME=32`: 32 is the default, and nobody set it.
-      return `the tree is at its child-session cap${cap !== undefined ? ` of ${cap}` : ''}, which ${MAX_CHILD_SESSIONS_ENV} raises`;
+      // Worded as a limit, not as `NAME=32`: 32 is the default, and nobody set
+      // it. Past tense: the answer may come long after the tree was full.
+      return `the tree was at its child-session cap${cap !== undefined ? ` of ${cap}` : ''}, which ${MAX_CHILD_SESSIONS_ENV} raises`;
     case 'unsupported':
       return 'this session cannot host child sessions';
     case 'adoption-failed':
-      return "its adoption failed; the server log has the adapter's error";
+      // No pronoun (the count may be plural) and no semicolon (causes are joined with one).
+      return "adoption failed, and the server log has the adapter's error";
   }
 }
 

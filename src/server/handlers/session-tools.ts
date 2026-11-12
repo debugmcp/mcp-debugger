@@ -106,6 +106,10 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args, _toolName, 
       timestamp: Date.now()
     });
 
+    // The attach runs inside this call, and this call names no session, so
+    // the dispatch holds nothing for it: without a hold of its own the idle
+    // policy closed the new session underneath its attach (issue #1127).
+    const releaseIdleHold = ctx.sessionManager.holdForCall(sessionInfo.id);
     try {
       const attachResult = await ctx.sessionManager.attachToProcess(sessionInfo.id, attachRequest);
 
@@ -146,6 +150,8 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args, _toolName, 
         state: 'error',
         message: `Created session but failed to attach: ${error instanceof Error ? error.message : String(error)}`
       });
+    } finally {
+      releaseIdleHold();
     }
   } else {
     // Launch mode: just create the session

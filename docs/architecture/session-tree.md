@@ -510,8 +510,9 @@ Two guardrails:
    the agent is driving must not be terminated by a timer). A tool call in flight holds the root for
    as long as it runs, whatever the tool, and the clock restarts when it answers (issue #1127:
    the hold was `wait_for_stop`'s alone at first, and a launch slower than the window had its
-   session closed underneath it); a call that arrives while the sweep is closing its tree waits
-   for that close and is told what happened. The sweep is skipped entirely while a client is attending the
+   session closed underneath it; `create_debug_session` with an attach target names no session
+   and holds the one it creates around its inline attach); a call that arrives while the sweep is
+   closing its tree waits for that close and is told what happened. The sweep is skipped entirely while a client is attending the
    process — any open legacy SSE stream or modern `subscriptions/listen` stream — so a connected
    client never loses a paused session to the clock; idle time still accrues from the last tool
    call, so a vanished client's already-idle sessions end at the first unattended sweep. Expiry
@@ -593,8 +594,9 @@ Taken by the author of this document, marked so they can be overturned:
   child-session adoption, excluding js-debug's mandatory first target.
 - The idle policy knob is named `MCP_DEBUG_SESSION_IDLE_MS` (sweep: `MCP_DEBUG_SESSION_IDLE_SWEEP_MS`); it is off unless set (decided with JF, 2026-11-10).
 - Only roots have an idle clock: activity on any session in a tree refreshes its root, a child never
-  expires alone, a tree-aware wait holds the root for the duration of the call, and the sweep is
-  skipped while a client attends the process (decided with JF, 2026-11-09).
+  expires alone, a call in flight holds the root for as long as it runs (the tree-aware wait at
+  first, every tool that names a session since issue #1127), and the sweep is skipped while a
+  client attends the process (decided with JF, 2026-11-09).
 - The ordering rule for several settles before one wait (parent first, then adoption order).
 - Ended children stay listed until closed, and leave with their parent.
 - Closing any session closes its subtree, including when that session is itself a child.

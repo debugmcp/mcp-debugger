@@ -416,8 +416,11 @@ export abstract class SessionManagerCore extends EventEmitter {
    * settles when its close is over and recorded (issue #1127). Set before the
    * close's first await, so a call that names one of them can wait for the
    * outcome instead of running against a session that is being torn down.
+   * The owner scope rides along: a child's row is removed before the tree's
+   * close is over, and a caller outside the scope must not be made to wait
+   * on an id that, for it, does not exist.
    */
-  private readonly idleClosing = new Map<string, Promise<void>>();
+  private readonly idleClosing = new Map<string, { over: Promise<void>; ownerKey: string | undefined }>();
   /** What the idle sweep closed, by session id, oldest first and bounded (issue #1025). */
   private readonly idleExpired = new Map<string, IdleExpiryRecord>();
 
@@ -537,10 +540,41 @@ export abstract class SessionManagerCore extends EventEmitter {
   }
 
   /**
+   * A tool call on a session, for the idle policy (issue #1127): stamps the
+   * tree's clock, holds the tree while the call runs, and hands back the
+   * release — which ends the hold and stamps the clock again, so the window
+   * starts over when the call answers. The root is captured here: a call that
+   * removes the session it named (closing a child) still restarts the clock of
+   * the tree it was working on. The dispatch takes it for every tool that
+   * names a session; create_debug_session takes it around the attach it runs
+   * itself, on the session it just made. Releasing twice is harmless, and an
+   * unknown id yields a no-op.
+   */
+  holdForCall(sessionId: string): () => void {
+    const session = this.sessionStore.get(sessionId);
+    if (!session) {
+      return () => undefined;
+    }
+    const rootId = this.rootOf(session).id;
+    this.lastActivityAt.set(rootId, Date.now());
+    const releaseHold = this.holdIdle(rootId);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      releaseHold();
+      // Only a root that is still there has a clock to restart.
+      if (this.sessionStore.get(rootId)) {
+        this.lastActivityAt.set(rootId, Date.now());
+      }
+    };
+  }
+
+  /**
    * Protect a session's tree from idle expiry while a tool call naming it is
    * in flight (issue #1127; first wait_for_stop alone, issue #1025 step 2).
    * Returns the release; releasing twice is harmless, and an unknown id yields
-   * a no-op pair.
+   * a no-op pair. Callers want holdForCall, which also keeps the clock.
    */
   holdIdle(sessionId: string): () => void {
     const session = this.sessionStore.get(sessionId);
@@ -618,7 +652,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       // idleCloseInFlight — rather than run against a session mid-teardown.
       // Settled only after the records are written, so the waiter finds them.
       let closeIsOver!: () => void;
-      const closing = new Promise<void>((resolve) => { closeIsOver = resolve; });
+      const closing = { over: new Promise<void>((resolve) => { closeIsOver = resolve; }), ownerKey: root.ownerKey };
       for (const session of tree) {
         this.idleClosing.set(session.id, closing);
       }
@@ -682,10 +716,12 @@ export abstract class SessionManagerCore extends EventEmitter {
   /**
    * The idle sweep's close of this session's tree, when one is running right
    * now (issue #1127): a promise that settles — never rejects — once the close
-   * is over and its expiry records are written. Undefined otherwise.
+   * is over and its expiry records are written. Undefined otherwise, and for
+   * a caller outside the scope the session was in, as for idleExpiryOf.
    */
-  idleCloseInFlight(sessionId: string): Promise<void> | undefined {
-    return this.idleClosing.get(sessionId);
+  idleCloseInFlight(sessionId: string, callerKey: string | undefined): Promise<void> | undefined {
+    const closing = this.idleClosing.get(sessionId);
+    return closing && visibleTo(closing.ownerKey, callerKey) ? closing.over : undefined;
   }
 
   private recordIdleExpiry(record: IdleExpiryRecord): void {
