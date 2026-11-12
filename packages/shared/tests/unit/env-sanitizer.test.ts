@@ -85,6 +85,58 @@ describe('sanitizeEnvForLogging', () => {
     const result = sanitizeEnvForLogging(env);
     expect(result).toEqual(env);
   });
+
+  // Issue #1129: the session-id rule was the substring /session[_-]?id/i, and
+  // SESSION_IDLE contains SESSION_ID — so the server's own idle-policy settings
+  // were shown as redacted secrets and the operator could not read back which
+  // window was in force. The rule matches whole tokens now; this table is both
+  // directions of it.
+  describe('the session-id rule matches tokens, not a substring (issue #1129)', () => {
+    it.each([
+      'MCP_DEBUG_SESSION_IDLE_MS',
+      'MCP_DEBUG_SESSION_IDLE_SWEEP_MS',
+      'sessionIdle',
+      'SESSION_IDLE_TIMEOUT',
+      'session-idle-ms',
+      // Other words that merely begin with "id".
+      'SESSION_IDX',
+      'sessionIdp',
+      'SESSION_IDEMPOTENT'
+    ])('shows %s: "idle" is not an id', (key) => {
+      expect(sanitizeEnvForLogging({ [key]: '300000' })).toEqual({ [key]: '300000' });
+    });
+
+    it.each([
+      'SESSION_ID',
+      'sessionId',
+      'SessionID',
+      'session-id',
+      'session_id',
+      'X_SESSION_ID_Y',
+      'SESSION_IDS',
+      'sessionIds',
+      'sessionIdValue',
+      'sessionIdHeader',
+      'SESSION_IDENTIFIER',
+      'sessionIdentifiers',
+      'sessionId2',
+      'SESSION_ID1',
+      // An acronym followed by a word: the boundary is before its last capital.
+      'sessionIDValue',
+      'SessionIDHeader',
+      'SESSION_IDValue',
+      'sessionIDs',
+      'SESSION_IDs',
+      'sessionIdsList',
+      'session.id',
+      'JSESSIONID',
+      'SESSIONID',
+      'SESSIONIDVALUE',
+      'my.sessionid.cookie'
+    ])('still masks %s', (key) => {
+      expect(sanitizeEnvForLogging({ [key]: 'abc123' })).toEqual({ [key]: '[REDACTED]' });
+    });
+  });
 });
 
 describe('sanitizePayloadForLogging', () => {

@@ -14,7 +14,6 @@ const SENSITIVE_PATTERNS = [
   /credential/i,
   /private[_-]?key/i,
   /auth/i,
-  /session[_-]?id/i,
   /access[_-]?key/i,
   /signing/i,
 ];
@@ -36,6 +35,62 @@ function hasSensitiveToken(key: string): boolean {
     .some(token => SENSITIVE_TOKENS.has(token.toLowerCase()));
 }
 
+/** `session`, whatever separates it from `id`, `id`, and the letters that follow directly. */
+const SESSION_THEN_ID = /session([^a-zA-Z0-9]*)(id)([a-zA-Z]*)/gi;
+/** The words that, after `session`, make a session id. */
+const SESSION_ID_WORDS = new Set(['id', 'ids', 'identifier', 'identifiers']);
+
+const isUpper = (char: string | undefined): boolean => char !== undefined && char >= 'A' && char <= 'Z';
+const isLower = (char: string | undefined): boolean => char !== undefined && char >= 'a' && char <= 'z';
+
+/**
+ * How many of the letters that follow `id` belong to the same word: an
+ * upper-case `ID` runs on through capitals, stopping before the one that
+ * opens the next camelCase word (`IDValue` is ID + Value, `IDLE` is one
+ * word); then, in any spelling, through lower-case letters (`Ids`, `IDs`,
+ * `Idle`).
+ */
+function sameWordLength(id: string, letters: string): number {
+  let end = 0;
+  if (id === id.toUpperCase()) {
+    while (isUpper(letters[end]) && !isLower(letters[end + 1])) {
+      end++;
+    }
+  }
+  while (isLower(letters[end])) {
+    end++;
+  }
+  return end;
+}
+
+/**
+ * Whether the key names a session id (issue #1129). This was the substring
+ * pattern `session[_-]?id`, which also matched `SESSION_IDLE` — so this
+ * server's own idle-policy settings (`MCP_DEBUG_SESSION_IDLE_MS`) were
+ * displayed as redacted secrets. The word that follows `session` is now read
+ * to its end and must be an id word: `SESSION_ID`, `sessionIds`,
+ * `SessionIDValue`, `SESSION_IDENTIFIER` are; `SESSION_IDLE`, `sessionIdx`
+ * are not.
+ *
+ * A run-on spelling (`sessionid`, `JSESSIONID`, `SESSIONIDVALUE`) has no
+ * boundary to say where its words end, and is masked whatever follows.
+ */
+function namesSessionId(key: string): boolean {
+  for (const match of key.matchAll(SESSION_THEN_ID)) {
+    const [, separator, id, letters] = match;
+    const lastOfSession = key[match.index + 'session'.length - 1];
+    const boundary = separator.length > 0 || (isLower(lastOfSession) && isUpper(id[0]));
+    if (!boundary) {
+      return true;
+    }
+    const word = id + letters.slice(0, sameWordLength(id, letters));
+    if (SESSION_ID_WORDS.has(word.toLowerCase())) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Assign an own enumerable property even for exotic key names: a plain
  * `obj[key] = value` with key '__proto__' hits the Object.prototype setter
@@ -53,7 +108,7 @@ function setOwnProperty<T>(target: Record<string, T>, key: string, value: T): vo
 export function sanitizeEnvForLogging(env: Record<string, string>): Record<string, string> {
   const sanitized: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
-    if (SENSITIVE_PATTERNS.some(p => p.test(key)) || hasSensitiveToken(key)) {
+    if (SENSITIVE_PATTERNS.some(p => p.test(key)) || hasSensitiveToken(key) || namesSessionId(key)) {
       setOwnProperty(sanitized, key, '[REDACTED]');
     } else {
       setOwnProperty(sanitized, key, value);
