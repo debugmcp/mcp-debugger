@@ -34,7 +34,7 @@ import type { CustomLaunchRequestArguments, DebugResult, LaunchResultData } from
 import type { ManagedSession, ToolchainValidationState } from '../session-store.js';
 import type { LaunchContext } from '../operations-context.js';
 import { describeStopLocation, landingFields, type StopLanding } from '../inspection/stop-location.js';
-import { describeTreeAnswer } from '../execution/tree-settle.js';
+import { describeReleasedChildren, describeTreeAnswer, withReleasedChildren } from '../execution/tree-settle.js';
 import { composeStopSnapshot } from '../inspection/stop-snapshot.js';
 import type { BreakpointController, ResyncOutcome } from '../breakpoints/breakpoint-controller.js';
 import { reresolveAnchors, type AnchorResolution } from '../breakpoints/anchor-resolution.js';
@@ -858,10 +858,15 @@ export class DebugLauncher {
         state: finalState,
         data: {
           ...(launchWarning ? { warning: launchWarning } : {}),
-          message:
+          // With what a released child means, when the run released one
+          // (issue #1137): the pending sentence above promises a pause, and a
+          // breakpoint only that child reaches will not deliver it.
+          message: withReleasedChildren(
             `Debugging started for ${scriptPath}. Current state: ${finalState}` +
             (runToCompletion ? `. ${runToCompletion.summary}` : '') +
             (stillRunning ? `. ${stillRunning}` : ''),
+            describeReleasedChildren(finalSession)
+          ),
           ...(stillRunning ? { pending: true } : {}),
           ...(runToCompletion?.data ?? {}),
           // Prefer the actual DAP stop reason (issue #214) — the first stop is
@@ -1156,10 +1161,12 @@ export class DebugLauncher {
       success: true,
       state: finalState,
       data: {
-        message:
+        message: withReleasedChildren(
           `Restarted ${target} in place (the adapter's hot restart). Current state: ${finalState}` +
           (runToCompletion ? `. ${runToCompletion.summary}` : '') +
           (stillRunning ? `. ${stillRunning}` : ''),
+          describeReleasedChildren(finalSession)
+        ),
         hotRestart: true,
         breakpointsReapplied: finalSession.breakpoints.size,
         ...(anchorResolution ? { anchorResolution } : {}),

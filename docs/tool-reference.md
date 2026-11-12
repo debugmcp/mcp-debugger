@@ -517,7 +517,7 @@ Two things are outside the hold. A `stopOnEntry` launch is answered at its entry
 
 A breakpoint set, removed or cleared while a launch is still starting is delivered to the adapter as soon as the program is launched (issue #851).
 
-**Sessions with children** (the session tree, issues #1081 and #1082): when a child session was adopted during the hold (a Python launch — debugpy's sub-process debugging is on by default; `dapLaunchArgs: { subProcess: false }` opts the launch out — where debugpy reports each process the program starts; a JavaScript launch — js-debug's `autoAttachChildProcesses` is on by default; `dapLaunchArgs: { autoAttachChildProcesses: false }` opts the launch out — where js-debug reports each Node process it forks), the answer carries `children: [{ sessionId, name, state, parentSessionId }]` — every descendant, depth first in adoption order, each with its state and the session that spawned it. `childrenReleased: n` says how many children reported this run were released to run undebugged (beyond `DEBUG_MCP_MAX_CHILD_SESSIONS`, or an adoption that failed), and `childrenClosed: n` that the start tore down a previous live run and closed its children with it. All three sit at the top level beside `pending` and in `data`, and are absent when there is nothing to say, so a session with no children answers as before. The launch answer is about the launched session itself; a child's stop is collected by [`wait_for_stop`](#wait_for_stop), which answers with `sessionId` naming the child.
+**Sessions with children** (the session tree, issues #1081 and #1082): when a child session was adopted during the hold (a Python launch — debugpy's sub-process debugging is on by default; `dapLaunchArgs: { subProcess: false }` opts the launch out — where debugpy reports each process the program starts; a JavaScript launch — js-debug's `autoAttachChildProcesses` is on by default; `dapLaunchArgs: { autoAttachChildProcesses: false }` opts the launch out — where js-debug reports each Node process it forks), the answer carries `children: [{ sessionId, name, state, parentSessionId }]` — every descendant, depth first in adoption order, each with its state and the session that spawned it. `childrenReleased: n` says how many children reported this run were released to run undebugged (beyond `DEBUG_MCP_MAX_CHILD_SESSIONS`, or an adoption that failed) — and the `message` of the same answer says what that means and why (issue #1137), e.g. "1 child process was released to run undebugged (child sessions are off: DEBUG_MCP_MAX_CHILD_SESSIONS=0): a breakpoint only it reaches will not hit.", so a pending answer's "has not reached 1 breakpoint(s) yet" is not read as a promise for a breakpoint only the released child could reach — and `childrenClosed: n` that the start tore down a previous live run and closed its children with it. All three sit at the top level beside `pending` and in `data`, and are absent when there is nothing to say, so a session with no children answers as before. The launch answer is about the launched session itself; a child's stop is collected by [`wait_for_stop`](#wait_for_stop), which answers with `sessionId` naming the child.
 
 **JavaScript launch configuration:** Both launch option objects accept js-debug settings;
 `adapterLaunchConfig` wins when a key appears in both. The effective `stopOnEntry` value controls
@@ -560,6 +560,7 @@ See the [JavaScript configuration guide](javascript/README.md#custom-configurati
 - The sentence distinguishes a clean run (`ran to completion (exit code 0)`), a non-zero exit (`exited with code N`) and a debuggee that reported no code at all (`ended without reporting an exit code` — attach targets, signal-killed debuggees, adapters that send no `exited` event and state the code nowhere else).
 - `data.exitCode` is present only when the debuggee reported one. `data.unhitBreakpoints` lists every line breakpoint the program ran past (`file`, `line` as bound, `requestedLine` when the adapter moved it, `verified`); logpoints the adapter supports are left out, since they log and run on. Verified line and function breakpoints that were never hit are named in the sentence; breakpoints that never bound keep their #467 `warning`.
 - When a stop and the exit arrived in the same tick (a breakpoint hit as the program ended), the breakpoints were not all missed: the list is withheld and the sentence names the stop (`after a stop the launch could not report (last stop: breakpoint)`), which `list_debug_sessions` also shows as `lastStop`.
+- The same holds for the session's tree (issue #1128): when a child session stopped during the run, the run did not "hit nothing" — each child has its own copy of the breakpoints and its own stops. The list is withheld and the sentence counts the tree's stops instead (`The program ran to completion (exit code 0). Its child sessions stopped 2 times during this run.`), whether or not the child is still listed. What remains root-only: when children were adopted but none stopped, `unhitBreakpoints[].verified` is the launched process's own flag, so a breakpoint that bound only in a child reads `verified: false` there.
 - `restart_debugging` returns the same fields for a relaunch that ends the same way.
 
 **Exit code:** when the debuggee terminates, the exit code reported by the adapter is surfaced as `exitCode` in `list_debug_sessions` (and, for a launch that ended before reporting a pause, as `data.exitCode` above), so a crash (non-zero) is distinguishable from a clean exit. Adapters that never send `exited` still get one where the debugger states the code some other way: js-debug through the launch shim's recorded code (#247), rdbg through the adapter process's own exit status (#258), Delve before 1.27 through its `Process N has exited with status S` console line (#753 — in debug mode Delve prints it only in reply to `disconnect`, so the proxy sends the disconnect before forwarding `terminated`; Delve 1.27+ sends `exited` itself). No line, no code: nothing is guessed.
@@ -794,6 +795,9 @@ answer carries the same run-to-completion summary as `start_debugging` (issues #
 message adds "without hitting any breakpoint. Verified but never hit: app.py:3." and
 `unhitBreakpoints` lists every line breakpoint it ran past (`{ file, line, verified }`, plus
 `requestedLine` when the adapter moved it). A program resumed past a stop keeps the plain message.
+So does a session whose child sessions stopped during the run (issue #1128): its message counts
+them — "The program ran to completion (exit code 0). Its child sessions stopped 2 times during this
+run." — and lists no breakpoint as unhit, because a breakpoint a child stopped on was hit.
 
 **Response** (neither happened within `timeout`):
 ```json
@@ -841,7 +845,12 @@ close it to wait past it.
   that spawned it — the pending answer included.
 - `childrenReleased: n` when children reported on that session's connection during this run were
   released to run undebugged (beyond `DEBUG_MCP_MAX_CHILD_SESSIONS`, or an adoption that failed): a
-  running total for the run, reset by a relaunch, never consumed.
+  running total for the run, reset by a relaunch, never consumed. Every answer that carries it —
+  paused, pending, ended or in error — ends its `message` with what the number means and why
+  (issue #1137): "1 child process was released to run undebugged (child sessions are off: DEBUG_MCP_MAX_CHILD_SESSIONS=0): a breakpoint only it reaches will not hit." At the cap
+  it reads "(the tree is at its child-session cap of 32, which DEBUG_MCP_MAX_CHILD_SESSIONS
+  raises)". A pending answer's "what is armed stays armed" is therefore never the last word on a
+  breakpoint that only a released child could reach.
 - A session with no children answers byte-for-byte as before plus `sessionId`. A wait on a child
   answers for the child and its own descendants only.
 

@@ -108,6 +108,13 @@ export interface SessionExposure {
 /**
  * Internal session representation with full details
  */
+/**
+ * Why a reported child was released to run undebugged instead of adopted
+ * (issue #1137): child sessions are off (the cap is 0), the tree is at its
+ * cap, the session's proxy cannot host child sessions, or the adoption failed.
+ */
+export type ChildReleaseCause = 'adoption-off' | 'cap' | 'unsupported' | 'adoption-failed';
+
 export interface ManagedSession extends DebugSessionInfo {
   executablePath?: string;  // Language-agnostic executable path
   /** The scope the session belongs to (issue #1025, step 2); see CreateSessionParams.ownerKey. */
@@ -195,6 +202,23 @@ export interface ManagedSession extends DebugSessionInfo {
    * `childrenReleased`; reset per launch.
    */
   releasedChildReports?: number;
+  /**
+   * Why those children were released, by cause, counted in the same call as
+   * `releasedChildReports` (issue #1137): what lets an answer that carries
+   * the number say what it means. Categories, never the release's free text
+   * — an adoption failure's reason embeds an adapter error. Reset per launch.
+   */
+  releasedChildCauses?: Partial<Record<ChildReleaseCause, number>>;
+  /** The per-tree cap in force when a child was released for reaching it; reset per launch. */
+  releasedChildCap?: number;
+  /**
+   * How many times a descendant of this session stopped during this run (the
+   * session tree, issue #1128): a stop the agent could see, on any child or
+   * grandchild. Kept on every ancestor because a child's own record leaves
+   * with its row at its close; it is what lets the end summary of a session
+   * that never stopped itself say that its tree did. Reset per launch.
+   */
+  descendantStops?: number;
   // The breakOnExceptions mode actually in effect for the current launch or
   // attach — the user's value, or the policy's launch default when unset
   // (issue #244). Previously write-only pass-through; recorded for read-back.

@@ -117,6 +117,11 @@ exists). The agent then uses `sessionId` for inspection, stepping and continuing
   2. otherwise the first live descendant that is paused or in error, in adoption order, depth first;
   3. otherwise the session itself, if it has ended;
   4. otherwise (only descendants have ended and the session still runs) the wait keeps waiting.
+  When rule 3 answers a session's end, the end summary is the tree's (issue #1128): a stop the
+  agent could see on any descendant is counted on every ancestor (`descendantStops`, per run — the
+  child's own record leaves with its row at its close), and a session that never stopped itself
+  but whose tree did says "Its child sessions stopped N times during this run" instead of
+  "without hitting any breakpoint", listing no breakpoint as unhit.
   A paused parent is reported before its paused children: the agent has to deal with it anyway,
   and the `children` list below shows what else is paused. A parent that ended while a child is
   paused reports the child (rule 2 before rule 3), because nothing can be done on the parent. The
@@ -276,6 +281,13 @@ Two bounds keep that sane:
   child-session adoption). It excludes js-debug's mandatory first target, which implements the
   root session and must still be adopted for launch to complete. Beyond the cap the release lever
   runs (the child runs undebugged) and the parent's next answer says so (`childrenReleased: n`).
+  The count is never left unexplained (issue #1137): the cause of each release is recorded with it
+  (`releasedChildCauses`: child sessions off, the cap, a proxy that cannot host children, a failed
+  adoption), and every launch, restart and wait answer that carries the number ends its message
+  with one sentence built from the same record (`describeReleasedChildren`,
+  `src/session/execution/tree-settle.ts`): how many, that they run undebugged, why — naming
+  `DEBUG_MCP_MAX_CHILD_SESSIONS` when it decided — and that a breakpoint only such a child reaches
+  will not hit.
 - Ended children stay listed until closed, as above, and leave with their parent.
 
 ## Every adapter, surveyed

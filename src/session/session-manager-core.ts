@@ -19,7 +19,7 @@ import type { FrameSummary } from './inspection/frame-anchor-resolver.js';
 import { ValidationResultCache } from '../utils/language-availability.js';
 import { SessionStore, ManagedSession } from './session-store.js';
 import type { UnhitBreakpointSummary } from './breakpoints/launch-warnings.js';
-import type { ToolchainValidationState } from './session-store.js';
+import type { ChildReleaseCause, ToolchainValidationState } from './session-store.js';
 import { OutputRingBuffer } from './output-buffer.js';
 import {
   beginProxyGeneration,
@@ -776,6 +776,22 @@ export abstract class SessionManagerCore extends EventEmitter {
     };
   }
 
+  /**
+   * A stop the agent can see, recorded on `session`, counts for every ancestor
+   * (issue #1128): the end summary of a parent that never stopped itself must
+   * not say its run hit nothing when a child session stopped. Auto-continued
+   * entry stops are not recorded and are not counted.
+   */
+  private countStopOnAncestors(session: ManagedSession): void {
+    const seen = new Set<string>([session.id]);
+    let current = session.parentSessionId ? this.sessionStore.get(session.parentSessionId) : undefined;
+    while (current && !seen.has(current.id)) {
+      seen.add(current.id);
+      current.descendantStops = (current.descendantStops ?? 0) + 1;
+      current = current.parentSessionId ? this.sessionStore.get(current.parentSessionId) : undefined;
+    }
+  }
+
   /** Tell the subtree listeners of a session and of each of its ancestors. */
   private notifySubtreeListeners(session: ManagedSession): void {
     const seen = new Set<string>();
@@ -1331,11 +1347,18 @@ export abstract class SessionManagerCore extends EventEmitter {
     parentProxy: IProxyManager,
     reported: ChildReportedEvent
   ): Promise<void> {
-    const release = (reason: string, options: { counted: boolean } = { counted: true }): void => {
-      if (options.counted) {
+    const release = (reason: string, cause: ChildReleaseCause | undefined): void => {
+      if (cause) {
         // The run's count of children that run undebugged (issue #1081): the
-        // parent's next answers carry it as `childrenReleased`.
+        // parent's next answers carry it as `childrenReleased`, with the cause
+        // beside it so they can say what the number means (issue #1137). A
+        // release with no cause is one nobody is told about: the tree was
+        // being closed anyway.
         parent.releasedChildReports = (parent.releasedChildReports ?? 0) + 1;
+        parent.releasedChildCauses = {
+          ...parent.releasedChildCauses,
+          [cause]: (parent.releasedChildCauses?.[cause] ?? 0) + 1
+        };
       }
       parentProxy
         .sendDapRequest(CHILD_RELEASE_COMMAND, { reportId: reported.reportId, reason }, { timeoutMs: 5000 })
@@ -1347,7 +1370,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     };
 
     if (this.sessionStore.get(parent.id) !== parent || parent.proxyManager !== parentProxy || this.isSubtreeClosing(parent)) {
-      release('the parent session is closing or its connection has ended', { counted: false });
+      release('the parent session is closing or its connection has ended', undefined);
       return;
     }
 
@@ -1359,11 +1382,14 @@ export abstract class SessionManagerCore extends EventEmitter {
         ? `child-session adoption is off (${MAX_CHILD_SESSIONS_ENV}=0)`
         : `the tree of session ${root.id} is at its child-session cap (${cap})`;
       this.logger.info(`[SessionManager] Releasing reported child ${reported.name} of session ${parent.id}: ${reason}`);
-      release(reason);
+      if (cap > 0) {
+        parent.releasedChildCap = cap;
+      }
+      release(reason, cap === 0 ? 'adoption-off' : 'cap');
       return;
     }
     if (!parentProxy.createChildView) {
-      release('this session cannot host child sessions');
+      release('this session cannot host child sessions', 'unsupported');
       return;
     }
 
@@ -1431,7 +1457,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       this.logger.warn(
         `[SessionManager] Adopting child ${reported.name} of session ${parent.id} failed: ${message}`
       );
-      release(`adoption failed: ${message}`, { counted: !this.isSubtreeClosing(parent) });
+      release(`adoption failed: ${message}`, this.isSubtreeClosing(parent) ? undefined : 'adoption-failed');
       if (child && this.sessionStore.get(child.id) === child && !this.isSubtreeClosing(child)) {
         // Use the normal subtree teardown: a grandchild may already have
         // been reported, and removing the last child must reap a root whose
@@ -1591,6 +1617,9 @@ export abstract class SessionManagerCore extends EventEmitter {
     session.liveUpdateState = undefined;
     session.programEndExplanation = undefined;
     session.releasedChildReports = undefined;
+    session.releasedChildCauses = undefined;
+    session.releasedChildCap = undefined;
+    session.descendantStops = undefined;
     session.failureDiagnostics = undefined;
     // Adapter degradation notes are per-launch (issue #441).
     session.adapterNotices = [];
@@ -1897,6 +1926,7 @@ export abstract class SessionManagerCore extends EventEmitter {
           ...(body?.description ? { description: exceptionName(body.description) } : {}),
           ...(body?.text ? { text: exceptionName(body.text) } : {})
         };
+        this.countStopOnAncestors(session);
         this._updateSessionState(session, SessionState.PAUSED);
 
         // Best-effort exceptionInfo enrichment (issue #243): fire-and-forget
