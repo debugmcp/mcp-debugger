@@ -495,8 +495,11 @@ Two guardrails:
    Only roots have a clock: a tool call naming any session in a tree refreshes the tree's root, and
    a child never expires on a clock of its own — the tree goes with its root (decided 2026-11-09,
    amending the per-descendant clocks this section first proposed: a worker paused under a parent
-   the agent is driving must not be terminated by a timer). An in-flight `wait_for_stop` holds the
-   root for the duration of the call. The sweep is skipped entirely while a client is attending the
+   the agent is driving must not be terminated by a timer). A tool call in flight holds the root for
+   as long as it runs, whatever the tool, and the clock restarts when it answers (issue #1127:
+   the hold was `wait_for_stop`'s alone at first, and a launch slower than the window had its
+   session closed underneath it); a call that arrives while the sweep is closing its tree waits
+   for that close and is told what happened. The sweep is skipped entirely while a client is attending the
    process — any open legacy SSE stream or modern `subscriptions/listen` stream — so a connected
    client never loses a paused session to the clock; idle time still accrues from the last tool
    call, so a vanished client's already-idle sessions end at the first unattended sweep. Expiry

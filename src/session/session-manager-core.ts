@@ -409,8 +409,15 @@ export abstract class SessionManagerCore extends EventEmitter {
    * and only roots expire. Cleared when the root is removed.
    */
   private readonly lastActivityAt = new Map<string, number>();
-  /** Roots an in-flight wait_for_stop protects from idle expiry, with the number of holds. */
+  /** Roots a tool call in flight protects from idle expiry, with the number of holds (issue #1127). */
   private readonly idleHolds = new Map<string, number>();
+  /**
+   * Sessions the idle sweep is closing right now, each with the promise that
+   * settles when its close is over and recorded (issue #1127). Set before the
+   * close's first await, so a call that names one of them can wait for the
+   * outcome instead of running against a session that is being torn down.
+   */
+  private readonly idleClosing = new Map<string, Promise<void>>();
   /** What the idle sweep closed, by session id, oldest first and bounded (issue #1025). */
   private readonly idleExpired = new Map<string, IdleExpiryRecord>();
 
@@ -517,7 +524,9 @@ export abstract class SessionManagerCore extends EventEmitter {
   /**
    * Activity for the idle policy (issue #1025, step 2): a tool call naming any
    * session in a tree refreshes the tree's root; only roots have a clock. An
-   * unknown id is a no-op.
+   * unknown id is a no-op. The dispatch stamps it when a call starts and again
+   * when it answers, so the clock runs from the END of the last call (issue
+   * #1127): a slow launch does not use up the window it was made in.
    */
   touchActivity(sessionId: string): void {
     const session = this.sessionStore.get(sessionId);
@@ -528,9 +537,10 @@ export abstract class SessionManagerCore extends EventEmitter {
   }
 
   /**
-   * Protect a session's tree from idle expiry for the duration of a blocking
-   * call (wait_for_stop, issue #1025, step 2). Returns the release; releasing
-   * twice is harmless, and an unknown id yields a no-op pair.
+   * Protect a session's tree from idle expiry while a tool call naming it is
+   * in flight (issue #1127; first wait_for_stop alone, issue #1025 step 2).
+   * Returns the release; releasing twice is harmless, and an unknown id yields
+   * a no-op pair.
    */
   holdIdle(sessionId: string): () => void {
     const session = this.sessionStore.get(sessionId);
@@ -588,7 +598,6 @@ export abstract class SessionManagerCore extends EventEmitter {
         `Closing idle debug session ${root.id} (idle ${Math.round(idleMs / 1000)}s): ` +
         `no tool call named it or its tree for ${Math.round(windowMs / 1000)}s`
       );
-      const ownerKey = root.ownerKey;
       // Which sessions of the tree had no running program when the policy came
       // for it: never launched, or already over. Read now, at the decision —
       // the close removes the rows, and a child that ends during the cascade
@@ -596,48 +605,87 @@ export abstract class SessionManagerCore extends EventEmitter {
       // released is not one of them: its row is stopped, its process runs on.
       // (The attach root that detach left behind is: nothing is attached to
       // it any more, so it reads "closed" beside its children's "released".)
+      const tree = [root, ...this.descendantsDeepestFirst(root.id)];
       const withoutProgram = new Set(
-        [root, ...this.descendantsDeepestFirst(root.id)]
+        tree
           .filter((session) =>
             (session.state === SessionState.CREATED || isTerminalSessionState(session.state)) &&
             session.programEndExplanation?.data?.released !== true)
           .map((session) => session.id)
       );
-      const report = await this.closeSessionReporting(root.id);
-      closed.push(root.id);
-      if (report.closed) {
-        // An attach root's close releases its targets; a launch root's ends its
-        // program; a session with nothing running had nothing done to it.
-        const outcomeOf = (sessionId: string): IdleExpiryRecord['outcome'] => {
-          if (withoutProgram.has(sessionId)) {
-            return 'closed';
-          }
-          return report.released || report.releasedSessionIds?.includes(sessionId) ? 'released' : 'ended';
-        };
-        for (const sessionId of report.closedSessionIds) {
-          this.recordIdleExpiry({
-            sessionId,
-            rootId: root.id,
-            ...(ownerKey !== undefined ? { ownerKey } : {}),
-            closedAt: now,
-            idleMs,
-            windowMs,
-            outcome: outcomeOf(sessionId)
-          });
-        }
-        const others = report.closedSessionIds.length - 1;
-        const did = {
-          ended: 'its program was ended',
-          released: 'its target was released and keeps running',
-          closed: 'it had no running program'
-        }[outcomeOf(root.id)];
-        this.logger.info(
-          `Idle debug session ${root.id} closed: ${did}` +
-          (others > 0 ? ` (with ${others} child session${others === 1 ? '' : 's'})` : '')
-        );
+      // Marked before the first await (issue #1127): from here the tree is
+      // being closed, and a call that names it now waits for the outcome —
+      // idleCloseInFlight — rather than run against a session mid-teardown.
+      // Settled only after the records are written, so the waiter finds them.
+      let closeIsOver!: () => void;
+      const closing = new Promise<void>((resolve) => { closeIsOver = resolve; });
+      for (const session of tree) {
+        this.idleClosing.set(session.id, closing);
       }
+      try {
+        await this.closeIdleTree(root, { now, idleMs, windowMs, withoutProgram });
+      } finally {
+        for (const session of tree) {
+          if (this.idleClosing.get(session.id) === closing) {
+            this.idleClosing.delete(session.id);
+          }
+        }
+        closeIsOver();
+      }
+      closed.push(root.id);
     }
     return closed;
+  }
+
+  /** One idle expiry: the close, the record each closed session leaves, and the log line. */
+  private async closeIdleTree(
+    root: ManagedSession,
+    decision: { now: number; idleMs: number; windowMs: number; withoutProgram: ReadonlySet<string> }
+  ): Promise<void> {
+    const { now, idleMs, windowMs, withoutProgram } = decision;
+    const ownerKey = root.ownerKey;
+    const report = await this.closeSessionReporting(root.id);
+    if (!report.closed) {
+      return;
+    }
+    // An attach root's close releases its targets; a launch root's ends its
+    // program; a session with nothing running had nothing done to it.
+    const outcomeOf = (sessionId: string): IdleExpiryRecord['outcome'] => {
+      if (withoutProgram.has(sessionId)) {
+        return 'closed';
+      }
+      return report.released || report.releasedSessionIds?.includes(sessionId) ? 'released' : 'ended';
+    };
+    for (const sessionId of report.closedSessionIds) {
+      this.recordIdleExpiry({
+        sessionId,
+        rootId: root.id,
+        ...(ownerKey !== undefined ? { ownerKey } : {}),
+        closedAt: now,
+        idleMs,
+        windowMs,
+        outcome: outcomeOf(sessionId)
+      });
+    }
+    const others = report.closedSessionIds.length - 1;
+    const did = {
+      ended: 'its program was ended',
+      released: 'its target was released and keeps running',
+      closed: 'it had no running program'
+    }[outcomeOf(root.id)];
+    this.logger.info(
+      `Idle debug session ${root.id} closed: ${did}` +
+      (others > 0 ? ` (with ${others} child session${others === 1 ? '' : 's'})` : '')
+    );
+  }
+
+  /**
+   * The idle sweep's close of this session's tree, when one is running right
+   * now (issue #1127): a promise that settles — never rejects — once the close
+   * is over and its expiry records are written. Undefined otherwise.
+   */
+  idleCloseInFlight(sessionId: string): Promise<void> | undefined {
+    return this.idleClosing.get(sessionId);
   }
 
   private recordIdleExpiry(record: IdleExpiryRecord): void {
@@ -660,14 +708,22 @@ export abstract class SessionManagerCore extends EventEmitter {
     return record && visibleTo(record.ownerKey, callerKey) ? record : undefined;
   }
 
-  /** How long a root's tree has been idle, in ms; a child reports its root's. Undefined for an unknown id. */
+  /**
+   * How long a root's tree has been idle, in ms; a child reports its root's.
+   * Zero while a call naming the tree is in flight (issue #1127): it is being
+   * used, and the sweep will not take it. Undefined for an unknown id.
+   */
   idleMsOf(sessionId: string, now = Date.now()): number | undefined {
     const session = this.sessionStore.get(sessionId);
     if (!session) {
       return undefined;
     }
-    const last = this.lastActivityAt.get(this.rootOf(session).id);
-    return last === undefined ? undefined : Math.max(0, now - last);
+    const rootId = this.rootOf(session).id;
+    const last = this.lastActivityAt.get(rootId);
+    if (last === undefined) {
+      return undefined;
+    }
+    return this.idleHolds.has(rootId) ? 0 : Math.max(0, now - last);
   }
 
   protected async findFreePort(): Promise<number> {

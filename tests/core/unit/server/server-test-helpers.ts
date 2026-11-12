@@ -138,6 +138,7 @@ export function createMockSessionManager(mockAdapterRegistry: IAdapterRegistry) 
     idleMsOf: vi.fn<SessionManager['idleMsOf']>(() => undefined),
     idleExpiryOf: vi.fn<SessionManager['idleExpiryOf']>(() => undefined),
     holdIdle: vi.fn<SessionManager['holdIdle']>(() => () => undefined),
+    idleCloseInFlight: vi.fn<SessionManager['idleCloseInFlight']>(() => undefined),
     sweepIdle: vi.fn<SessionManager['sweepIdle']>(async () => []),
     getSession: vi.fn(),
     closeSession: vi.fn(),

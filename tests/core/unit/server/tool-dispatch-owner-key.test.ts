@@ -30,6 +30,8 @@ const OWN = 'dbg-own';
 const FOREIGN = 'dbg-foreign';
 
 const logger = { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() };
+/** What `holdIdle` hands back: the release the dispatch calls when the call answers (issue #1127). */
+const releaseHold = vi.fn();
 const environment = {
   get: (): string | undefined => undefined,
   getAll: () => ({}),
@@ -51,7 +53,9 @@ function fakeContext(overrides: Partial<ToolContext> = {}): ToolContext {
         id === OWN ? key === 'agent-a' : id === FOREIGN ? key === 'agent-b' : false),
       getSessionsVisibleTo: vi.fn(() => []),
       idleExpiryOf: vi.fn(() => undefined),
-      touchActivity: vi.fn()
+      touchActivity: vi.fn(),
+      holdIdle: vi.fn(() => releaseHold),
+      idleCloseInFlight: vi.fn(() => undefined)
     },
     validateSession: (sessionId: string) => {
       throw new SessionNotFoundError(sessionId);
@@ -126,6 +130,9 @@ describe('tools/call on a session outside the caller scope (issue #1025, step 2)
     await answer(dispatcher(ctx), 'close_debug_session', { sessionId: FOREIGN }, 'agent-a');
 
     expect(ctx.sessionManager.touchActivity).not.toHaveBeenCalled();
+    // Nor does it hold the tree against the idle policy, or wait on a close of it (issue #1127).
+    expect(ctx.sessionManager.holdIdle).not.toHaveBeenCalled();
+    expect(ctx.sessionManager.idleCloseInFlight).not.toHaveBeenCalled();
   });
 
   it('an anonymous caller does not see a keyed session', async () => {
@@ -156,6 +163,37 @@ describe('tools/call on a session outside the caller scope (issue #1025, step 2)
     expect(ctx.sessionManager.touchActivity).toHaveBeenCalledWith(OWN);
   });
 
+  it('a session in the caller scope is held against the idle policy until its call answers, then its clock restarts (issue #1127)', async () => {
+    let heldAtHandler: boolean | undefined;
+    const ctx = fakeContext({
+      closeDebugSession: vi.fn(async (id: string) => {
+        heldAtHandler = vi.mocked(ctx.sessionManager.holdIdle).mock.calls.length === 1 && releaseHold.mock.calls.length === 0;
+        return { closed: true, closedSessionIds: [id] };
+      })
+    } as unknown as Partial<ToolContext>);
+
+    await answer(dispatcher(ctx), 'close_debug_session', { sessionId: OWN }, 'agent-a');
+
+    expect(heldAtHandler).toBe(true);
+    expect(ctx.sessionManager.holdIdle).toHaveBeenCalledWith(OWN);
+    expect(releaseHold).toHaveBeenCalledTimes(1);
+    // Stamped when the call starts and again when it answers.
+    expect(vi.mocked(ctx.sessionManager.touchActivity).mock.calls).toEqual([[OWN], [OWN]]);
+  });
+
+  it('the hold is released when the handler throws', async () => {
+    const ctx = fakeContext({
+      closeDebugSession: vi.fn(async () => {
+        throw new Error('boom');
+      })
+    } as unknown as Partial<ToolContext>);
+
+    await dispatcher(ctx)({ method: 'tools/call', params: { name: 'close_debug_session', arguments: { sessionId: OWN } } }, callCtxFor('agent-a')).catch(() => undefined);
+
+    expect(ctx.sessionManager.holdIdle).toHaveBeenCalledWith(OWN);
+    expect(releaseHold).toHaveBeenCalledTimes(1);
+  });
+
   it('an id nobody holds passes through to the handler, which answers its own not-found', async () => {
     const ctx = fakeContext();
     const call = dispatcher(ctx);
@@ -174,6 +212,7 @@ describe('tools/call on a session outside the caller scope (issue #1025, step 2)
 
     expect(result).toMatchObject({ success: true });
     expect(ctx.sessionManager.touchActivity).not.toHaveBeenCalled();
+    expect(ctx.sessionManager.holdIdle).not.toHaveBeenCalled();
   });
 
   it('create_debug_session is never gated and stamps the caller scope on the new session', async () => {
@@ -201,7 +240,9 @@ describe('tools/call on a session outside the caller scope (issue #1025, step 2)
       sessionManager: {
         getSession: vi.fn(() => ({ id: OWN })),
         isSessionVisibleTo: vi.fn(() => true),
-        touchActivity: vi.fn()
+        touchActivity: vi.fn(),
+        holdIdle: vi.fn(() => releaseHold),
+        idleCloseInFlight: vi.fn(() => undefined)
       } as unknown as ToolContext['sessionManager']
     });
     const call = dispatcher(ctx);
