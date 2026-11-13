@@ -241,8 +241,9 @@ with `MCP_DEBUG_SESSION_IDLE_MS` set, a session tree that no tool call has named
 closed (a launched program is ended, an attached one released), unless a client is attending the
 process — while any client holds a stream open (a 2025 session's SSE stream, a 2026-07-28
 client's `subscriptions/listen` stream), nothing expires. A 2026 client that only calls tools is
-not attending: with the policy on, its sessions live by tool activity (and an in-flight
-`wait_for_stop`) alone, so choose a window longer than such a client's pauses.
+not attending: with the policy on, its sessions live by tool activity alone — a call in flight
+holds its session, and the window starts over when it answers — so choose a window longer than
+such a client's pauses between calls.
 `list_debug_sessions` shows each session's idle time, so a forgotten one is easy to find and
 close. Abandoned MCP
 sessions themselves are reaped separately (`MCP_HTTP_STREAM_LOST_SESSION_MS`,

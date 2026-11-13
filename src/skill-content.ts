@@ -26,7 +26,7 @@ export function buildServerInstructions(
   // off by default, issue #1025): it ends programs, so the agent must know.
   const idleRule = opts.idleWindow
     ? `
-- This server closes a debug session tree that no tool call has named for ${opts.idleWindow} (a launched program is ended, an attached one released and left running); list_debug_sessions shows each session's expiresInMs, any tool call naming the session resets it, and a wait_for_stop in flight holds it.`
+- This server closes a debug session tree that no tool call has named for ${opts.idleWindow} (a launched program is ended, an attached one released and left running); list_debug_sessions shows each session's expiresInMs, any tool call naming the session resets it, and holds it for as long as the call runs.`
     : '';
   // Default matches the runtime default: redaction is on unless the server
   // was started with DEBUG_MCP_NO_REDACT=1 (issue #237).

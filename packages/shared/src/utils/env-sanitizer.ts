@@ -14,7 +14,6 @@ const SENSITIVE_PATTERNS = [
   /credential/i,
   /private[_-]?key/i,
   /auth/i,
-  /session[_-]?id/i,
   /access[_-]?key/i,
   /signing/i,
 ];
@@ -37,6 +36,61 @@ function hasSensitiveToken(key: string): boolean {
 }
 
 /**
+ * `session`, whatever separates it from `id`, and `id`; the letters that follow
+ * directly are looked at, not consumed, so a second `session…id` later in the
+ * same name is found too.
+ */
+const SESSION_THEN_ID = /session[^a-zA-Z0-9]*(id)(?=([a-zA-Z]*))/gi;
+/** The words that begin with "id" after `session` and are not an id: the session is idle. */
+const IDLE_WORDS = new Set(['idle', 'idles', 'idled', 'idling']);
+
+const isUpper = (char: string | undefined): boolean => char !== undefined && char >= 'A' && char <= 'Z';
+const isLower = (char: string | undefined): boolean => char !== undefined && char >= 'a' && char <= 'z';
+
+/**
+ * How many of the letters that follow `id` belong to the same word: an
+ * upper-case `ID` runs on through capitals, stopping before the one that
+ * opens the next camelCase word (`IDLEMs` is IDLE + Ms); then, in any
+ * spelling, through lower-case letters (`Idle`, `idle`).
+ */
+function sameWordLength(id: string, letters: string): number {
+  let end = 0;
+  if (id === id.toUpperCase()) {
+    while (isUpper(letters[end]) && !isLower(letters[end + 1])) {
+      end++;
+    }
+  }
+  while (isLower(letters[end])) {
+    end++;
+  }
+  return end;
+}
+
+/**
+ * Whether the key names a session id (issue #1129). This was the substring
+ * pattern `session[_-]?id`, which also matched `SESSION_IDLE` — so this
+ * server's own idle-policy settings (`MCP_DEBUG_SESSION_IDLE_MS`) were
+ * displayed as redacted secrets.
+ *
+ * It still masks whatever follows `session…id` — `SESSION_ID`, `sessionIds`,
+ * `SESSION_IDHASH`, `JSESSIONID`, and words it has no opinion on such as
+ * `SESSION_IDX` — and knows one exception: the word that starts at `id` is
+ * "idle". A masking rule fails closed: a name it cannot read stays masked,
+ * and a number shown as `[REDACTED]` costs less than a session id shown.
+ */
+function namesSessionId(key: string): boolean {
+  for (const match of key.matchAll(SESSION_THEN_ID)) {
+    const id = match[1];
+    const letters = match[2] ?? '';
+    const word = id + letters.slice(0, sameWordLength(id, letters));
+    if (!IDLE_WORDS.has(word.toLowerCase())) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Assign an own enumerable property even for exotic key names: a plain
  * `obj[key] = value` with key '__proto__' hits the Object.prototype setter
  * instead — the entry silently vanishes (and an object value would replace
@@ -53,7 +107,7 @@ function setOwnProperty<T>(target: Record<string, T>, key: string, value: T): vo
 export function sanitizeEnvForLogging(env: Record<string, string>): Record<string, string> {
   const sanitized: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
-    if (SENSITIVE_PATTERNS.some(p => p.test(key)) || hasSensitiveToken(key)) {
+    if (SENSITIVE_PATTERNS.some(p => p.test(key)) || hasSensitiveToken(key) || namesSessionId(key)) {
       setOwnProperty(sanitized, key, '[REDACTED]');
     } else {
       setOwnProperty(sanitized, key, value);

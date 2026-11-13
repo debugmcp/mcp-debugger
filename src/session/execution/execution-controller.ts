@@ -68,7 +68,7 @@ import { describeStopLocation, landingFields, type StopLanding } from '../inspec
 import { composeStopSnapshot } from '../inspection/stop-snapshot.js';
 import type { PauseCoordinator } from './pause-coordinator.js';
 import { waitForSubtreeSettle } from './session-state-wait.js';
-import { describeTreeAnswer } from './tree-settle.js';
+import { describeReleasedChildren, describeTreeAnswer, withReleasedChildren } from './tree-settle.js';
 import { resolveDapTimeoutOverride } from '../dap-request-helpers.js';
 import { buildRunToCompletionSummary, describeProgramEnd } from '../breakpoints/launch-warnings.js';
 import { describeLaunchArming } from '../launch/launch-arming.js';
@@ -868,6 +868,9 @@ export class ExecutionController {
     }
     const location = landing.location;
     const tree = () => describeTreeAnswer(session, this.ctx.descendantsOf(sessionId));
+    // Every answer that carries the run's `childrenReleased` says what it means
+    // (issue #1137): read from the session asked about, as the count is.
+    const explained = (message: string): string => withReleasedChildren(message, describeReleasedChildren(session));
     // Emit a redacted copy of the stop record (issue #982); the stored record
     // keeps its identity — the exceptionInfo merge and `lastStop !== before`
     // guards depend on it.
@@ -889,7 +892,7 @@ export class ExecutionController {
         state,
         data: {
           sessionId: target.id,
-          message: `Paused (${stopAtLanding.reason})${where}`,
+          message: explained(`Paused (${stopAtLanding.reason})${where}`),
           lastStop: emitStop(stopAtLanding),
           ...landingFields(landing),
           ...(snapshot ? { snapshot } : {}),
@@ -903,7 +906,7 @@ export class ExecutionController {
       return {
         success: true,
         state,
-        data: { sessionId: target.id, message: `${which} ended in an error state${detail}`, ...stopDuringWait, ...tree() }
+        data: { sessionId: target.id, message: explained(`${which} ended in an error state${detail}`), ...stopDuringWait, ...tree() }
       };
     }
     if (state === SessionState.STOPPED) {
@@ -921,9 +924,9 @@ export class ExecutionController {
         state,
         data: {
           sessionId: target.id,
-          message: ranPast
+          message: explained(ranPast
             ? ranPast.summary
-            : `${describeProgramEnd(target.exitCode)}.${target.programEndExplanation?.note ? ` ${target.programEndExplanation.note}` : ''}`,
+            : `${describeProgramEnd(target.exitCode)}.${target.programEndExplanation?.note ? ` ${target.programEndExplanation.note}` : ''}`),
           ...(typeof target.exitCode === 'number' ? { exitCode: target.exitCode } : {}),
           ...(ranPast?.data ?? {}),
           ...(target.programEndExplanation ? { programEnd: target.programEndExplanation } : {}),
@@ -944,7 +947,7 @@ export class ExecutionController {
       state,
       data: {
         sessionId: session.id,
-        message: ErrorMessages.waitForStopPending(
+        message: explained(ErrorMessages.waitForStopPending(
           waitMs / 1000,
           state === SessionState.INITIALIZING ? 'initializing' : 'running',
           {
@@ -953,7 +956,7 @@ export class ExecutionController {
             ...(debuggerOffWhy(session) ? { debuggerOffWhy: debuggerOffWhy(session) } : {}),
             noUncaughtStop: arming.noUncaughtStop
           }
-        ),
+        )),
         pending: true,
         ...tree()
       }

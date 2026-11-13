@@ -10,7 +10,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { SessionState } from '@debugmcp/shared';
-import { selectSettledInTree } from '../../../../src/session/execution/tree-settle.js';
+import { describeReleasedChildren, selectSettledInTree, withReleasedChildren } from '../../../../src/session/execution/tree-settle.js';
 
 const node = (id: string, state: SessionState) => ({ id, state });
 
@@ -66,5 +66,70 @@ describe('selectSettledInTree', () => {
       expect(selectSettledInTree(node('p', state), [node('c', SessionState.RUNNING)])).toBeUndefined();
       expect(selectSettledInTree(node('p', state), [])).toBeUndefined();
     }
+  });
+});
+
+// Issue #1137: an answer said `childrenReleased: 1` and nothing else — not
+// what the number means, not that the child ran undebugged, not which setting
+// caused it — while its message went on promising a pause at a breakpoint only
+// the released child could reach.
+describe('describeReleasedChildren (issue #1137)', () => {
+  it('says nothing for a run that released no child', () => {
+    expect(describeReleasedChildren({})).toBeUndefined();
+    expect(describeReleasedChildren({ releasedChildReports: 0 })).toBeUndefined();
+  });
+
+  it('names the setting when child sessions are off', () => {
+    expect(describeReleasedChildren({ releasedChildReports: 1, releasedChildCauses: { 'adoption-off': 1 } })).toBe(
+      '1 child process was released to run undebugged (child sessions are off: DEBUG_MCP_MAX_CHILD_SESSIONS=0): ' +
+      'a breakpoint only it reaches will not hit.'
+    );
+  });
+
+  it('names the cap that was reached, as a limit rather than as a variable somebody set', () => {
+    expect(describeReleasedChildren({ releasedChildReports: 8, releasedChildCauses: { cap: 8 }, releasedChildCap: 32 })).toBe(
+      '8 child processes were released to run undebugged (the tree was at its child-session cap of 32, ' +
+      'which DEBUG_MCP_MAX_CHILD_SESSIONS raises): a breakpoint only they reach will not hit.'
+    );
+  });
+
+  it('says so when the session cannot host child sessions, or an adoption failed', () => {
+    expect(describeReleasedChildren({ releasedChildReports: 1, releasedChildCauses: { unsupported: 1 } }))
+      .toContain('(this session cannot host child sessions)');
+    expect(describeReleasedChildren({ releasedChildReports: 1, releasedChildCauses: { 'adoption-failed': 1 } }))
+      .toContain("(adoption failed, and the server log has the adapter's error)");
+  });
+
+  it('lists each cause with its count when a run had more than one', () => {
+    expect(
+      describeReleasedChildren({
+        releasedChildReports: 3,
+        releasedChildCauses: { cap: 2, 'adoption-failed': 1 },
+        releasedChildCap: 4
+      })
+    ).toBe(
+      '3 child processes were released to run undebugged (2: the tree was at its child-session cap of 4, ' +
+      "which DEBUG_MCP_MAX_CHILD_SESSIONS raises; 1: adoption failed, and the server log has the adapter's error): " +
+      'a breakpoint only they reach will not hit.'
+    );
+  });
+
+  it('still explains a count whose cause was not recorded', () => {
+    expect(describeReleasedChildren({ releasedChildReports: 2 })).toBe(
+      '2 child processes were released to run undebugged: a breakpoint only they reach will not hit.'
+    );
+  });
+});
+
+describe('withReleasedChildren', () => {
+  const note = '1 child process was released to run undebugged: a breakpoint only it reaches will not hit.';
+
+  it('leaves a message alone when there is nothing to add', () => {
+    expect(withReleasedChildren('Paused (breakpoint) at /w/a.py:3', undefined)).toBe('Paused (breakpoint) at /w/a.py:3');
+  });
+
+  it('adds the sentence after the message, closing an unpunctuated one first', () => {
+    expect(withReleasedChildren('Paused (breakpoint) at /w/a.py:3', note)).toBe(`Paused (breakpoint) at /w/a.py:3. ${note}`);
+    expect(withReleasedChildren('The program exited with code 3.', note)).toBe(`The program exited with code 3. ${note}`);
   });
 });

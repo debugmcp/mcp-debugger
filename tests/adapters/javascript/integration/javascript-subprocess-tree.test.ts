@@ -35,6 +35,7 @@ interface Stop extends ToolAnswer {
   sessionId?: string;
   pending?: boolean;
   exitCode?: number;
+  unhitBreakpoints?: unknown[];
   location?: { file: string; line: number };
   lastStop?: { line?: number };
   children?: ChildSummary[];
@@ -149,6 +150,14 @@ describe('JavaScript forks as child sessions (the session tree, issue #1082)', (
     expect(ended.children, JSON.stringify(ended)).toEqual([
       expect.objectContaining({ sessionId: childId, state: 'stopped', parentSessionId: rootId })
     ]);
+    // The end answer is about the tree (issue #1128): the fork stopped on
+    // child.js:14 three times, so the run did not "hit nothing", and that
+    // breakpoint — never bound in the parent process itself — is not listed
+    // as unhit.
+    expect(ended.message, JSON.stringify(ended)).toBe(
+      'The program ran to completion (exit code 0). Its child sessions stopped 3 times during this run.'
+    );
+    expect(ended.unhitBreakpoints).toBeUndefined();
 
     // The whole tree's output is the launch session's (js-debug delivers it on the root connection only)…
     const rootOutput = await pollUntil(() => outputText(rootId), (text) => text.includes('parent child exit 0'), 5000);
@@ -222,6 +231,11 @@ describe('JavaScript forks as child sessions (the session tree, issue #1082)', (
     const ended = await call<Stop>('wait_for_stop', { sessionId: rootId, timeout: 30000 });
     expect(ended.state, JSON.stringify(ended)).toBe('stopped');
     expect(ended.sessionId).toBe(rootId);
+    // The fork's row is gone, but what the tree did is not (issue #1128): it
+    // stopped once before it was closed.
+    expect(ended.message, JSON.stringify(ended)).toContain('Its child sessions stopped 1 time during this run.');
+    expect(ended.message).not.toContain('without hitting any breakpoint');
+    expect(ended.unhitBreakpoints).toBeUndefined();
     const output = await pollUntil(() => outputText(rootId), (text) => text.includes('parent child exit 0'), 5000);
     expect(output).toContain('child done 3');
   }, 120_000);
@@ -285,6 +299,19 @@ describe('JavaScript forks as child sessions (the session tree, issue #1082)', (
     expect(ended.exitCode ?? (ended as { data?: { exitCode?: number } }).data?.exitCode, JSON.stringify(ended)).toBe(0);
     expect(ended.childrenReleased, JSON.stringify(ended)).toBe(1);
     expect(ended.children).toBeUndefined();
+    // The count is explained where it appears (issue #1137): what it means,
+    // that the fork ran undebugged, and which setting decided it — so "without
+    // hitting any breakpoint" no longer reads as a wrong breakpoint.
+    const RELEASED =
+      '1 child process was released to run undebugged (child sessions are off: DEBUG_MCP_MAX_CHILD_SESSIONS=0): ' +
+      'a breakpoint only it reaches will not hit.';
+    expect(JSON.stringify(ended)).toContain(RELEASED);
+    // A launch that answered while the program was still running promised a
+    // pause at the breakpoint; once the fork has been released, the same answer
+    // says that promise cannot be kept for it.
+    if (started !== ended && (started as Stop).childrenReleased === 1) {
+      expect(JSON.stringify(started)).toContain(RELEASED);
+    }
     expect((await rows()).filter((row) => row.parentSessionId === rootId)).toEqual([]);
     const output = await pollUntil(() => outputText(rootId), (text) => text.includes('parent child exit 0'), 5000);
     expect(output).toContain('child done 3');

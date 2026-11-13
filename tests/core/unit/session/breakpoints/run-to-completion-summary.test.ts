@@ -15,15 +15,74 @@ type BuilderSession = {
   functionBreakpoints?: Map<string, FnBp>;
   exitCode?: number;
   lastStop?: { reason: string };
+  descendantStops?: number;
   adapterCapabilities?: { supportsLogPoints?: boolean };
   programEndExplanation?: { note?: string; data?: Record<string, unknown> };
 };
 
 function build(session: BuilderSession) {
   return buildRunToCompletionSummary(
-    session as unknown as Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'exitCode' | 'lastStop' | 'adapterCapabilities' | 'programEndExplanation'>
+    session as unknown as Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'exitCode' | 'lastStop' | 'descendantStops' | 'adapterCapabilities' | 'programEndExplanation'>
   );
 }
+
+// Issue #1128: the summary was read off the root alone. A child session's
+// stops are recorded on the child, and its breakpoints are copies — so a
+// root whose child stopped on child.py:12 twice ended with "without hitting
+// any breakpoint. Verified but never hit: child.py:12". The rule a single
+// session already has (a stop recorded in the run withholds the list) now
+// covers the session's tree.
+describe('buildRunToCompletionSummary for a session whose child sessions stopped (issue #1128)', () => {
+  const childBreakpoint = (): Map<string, LineBp> =>
+    new Map([['a', { file: '/work/tree/child.py', line: 12, verified: true }]]);
+
+  it('does not say the program hit nothing, and lists no breakpoint as unhit', () => {
+    const result = build({ exitCode: 0, breakpoints: childBreakpoint(), descendantStops: 2 });
+
+    expect(result.summary).toBe('The program ran to completion (exit code 0). Its child sessions stopped 2 times during this run.');
+    expect(result.data).toEqual({ exitCode: 0 });
+  });
+
+  it('counts one stop as one', () => {
+    expect(build({ exitCode: 0, breakpoints: childBreakpoint(), descendantStops: 1 }).summary)
+      .toBe('The program ran to completion (exit code 0). Its child sessions stopped 1 time during this run.');
+  });
+
+  it('covers a breakpoint the root never bound as well: it is not reported as never bound and never hit', () => {
+    const result = build({
+      exitCode: 0,
+      breakpoints: new Map([['a', { file: '/work/tree/child.js', line: 14, verified: false, message: 'Unbound breakpoint' }]]),
+      descendantStops: 2
+    });
+
+    expect(result.summary).not.toContain('without hitting any breakpoint');
+    expect(result.data).not.toHaveProperty('unhitBreakpoints');
+  });
+
+  it("keeps the session's own unreported stop first: that is the more specific fact", () => {
+    const result = build({ exitCode: 0, breakpoints: childBreakpoint(), lastStop: { reason: 'breakpoint' }, descendantStops: 2 });
+
+    expect(result.summary).toBe('The program ran to completion (exit code 0) after a stop the launch could not report (last stop: breakpoint).');
+  });
+
+  it('a tree that never stopped is summarized as before', () => {
+    expect(build({ exitCode: 0, breakpoints: childBreakpoint() }).summary)
+      .toBe('The program ran to completion (exit code 0) without hitting any breakpoint. Verified but never hit: child.py:12.');
+  });
+
+  it("still joins the adapter's reading of the end", () => {
+    const result = build({
+      exitCode: 0,
+      breakpoints: childBreakpoint(),
+      descendantStops: 1,
+      programEndExplanation: { note: 'The device went away.' }
+    });
+
+    expect(result.summary).toBe(
+      'The program ran to completion (exit code 0). Its child sessions stopped 1 time during this run. The device went away.'
+    );
+  });
+});
 
 describe('buildRunToCompletionSummary', () => {
   it('names a non-zero exit as an exit, a zero as a completed run, and a missing code as unreported', () => {

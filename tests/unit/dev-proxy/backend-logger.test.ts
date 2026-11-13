@@ -144,6 +144,20 @@ describe('dev-proxy backend environment status redaction', () => {
     });
   });
 
+  it('shows the idle-policy settings an operator passed: a window in ms is not a session id (issue #1129)', () => {
+    const env = {
+      MCP_DEBUG_SESSION_IDLE_MS: '3000',
+      MCP_DEBUG_SESSION_IDLE_SWEEP_MS: '1000',
+    };
+
+    const result = sanitizeBackendEnvOverrides(env, { redactionDisabled: false });
+
+    // 'shared' is asserted with the values: on the fail-closed path every value
+    // is masked, and this must not pass or fail for that reason.
+    expect(result.redaction).toEqual({ enabled: true, redactedVariables: [], mode: 'shared' });
+    expect(result.values).toEqual(env);
+  });
+
   it('masks sensitive names and secret-shaped values under benign names', () => {
     const env = {
       OPENAI_API_KEY: 'opaque-but-sensitive',

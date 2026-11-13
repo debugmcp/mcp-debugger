@@ -129,9 +129,8 @@ export const continueExecutionTool: ToolHandler = async (ctx, args) => {
 export const waitForStopTool: ToolHandler = async (ctx, args, _toolName, extra) => {
   requireSessionId(args);
 
-  // A wait in flight protects the tree from idle expiry (issue #1025, step 2):
-  // the agent is attending, even though no tool call lands while it blocks.
-  const releaseIdleHold = ctx.sessionManager.holdIdle(args.sessionId);
+  // A wait in flight protects the tree from idle expiry like every other call
+  // naming it: the dispatch holds it for the call (issues #1025 step 2, #1127).
   try {
     const waitResult = await ctx.waitForStop(args.sessionId, args.timeout, extra?.signal);
     if (!waitResult.success) {
@@ -190,10 +189,6 @@ export const waitForStopTool: ToolHandler = async (ctx, args, _toolName, extra) 
       return failureResult(error.message);
     }
     throw error;
-  } finally {
-    releaseIdleHold();
-    // The wait's end is activity too: the idle clock restarts when it settles.
-    ctx.sessionManager.touchActivity(args.sessionId);
   }
 };
 

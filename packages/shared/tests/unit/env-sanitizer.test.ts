@@ -85,6 +85,78 @@ describe('sanitizeEnvForLogging', () => {
     const result = sanitizeEnvForLogging(env);
     expect(result).toEqual(env);
   });
+
+  // Issue #1129: the session-id rule was the substring /session[_-]?id/i, and
+  // SESSION_IDLE contains SESSION_ID — so the server's own idle-policy settings
+  // were shown as redacted secrets and the operator could not read back which
+  // window was in force. The rule still masks whatever follows `session…id`,
+  // with one exception it now knows: the word is "idle". It fails closed — a
+  // name it cannot read stays masked.
+  describe('the session-id rule knows the word "idle" (issue #1129)', () => {
+    it.each([
+      'MCP_DEBUG_SESSION_IDLE_MS',
+      'MCP_DEBUG_SESSION_IDLE_SWEEP_MS',
+      'SESSION_IDLE',
+      'SESSION_IDLE_TIMEOUT',
+      'session-idle-ms',
+      'sessionIdle',
+      'sessionIdleMs',
+      'SessionIdleTimeout',
+      'SESSION_IDLING',
+      'sessionidle'
+    ])('shows %s: "idle" is not an id', (key) => {
+      expect(sanitizeEnvForLogging({ [key]: '300000' })).toEqual({ [key]: '300000' });
+    });
+
+    it.each([
+      // The id itself, in every spelling.
+      'SESSION_ID',
+      'sessionId',
+      'SessionID',
+      'session-id',
+      'session_id',
+      'session.id',
+      'X_SESSION_ID_Y',
+      'SESSION_IDS',
+      'sessionIds',
+      'sessionIDs',
+      'SESSION_IDs',
+      'SESSION_IDENTIFIER',
+      'sessionIdentifiers',
+      'SESSION_IDENTIFIERs',
+      'sessionId2',
+      'SESSION_ID1',
+      'JSESSIONID',
+      'SESSIONID',
+      'my.sessionid.cookie',
+      // The id with something after it, split or glued on.
+      'sessionIdValue',
+      'sessionIdHeader',
+      'sessionIDValue',
+      'SessionIDHeader',
+      'SESSION_IDValue',
+      'SESSION_IDVALUE',
+      'SESSIONIDVALUE',
+      'SESSION_IDSTR',
+      'SESSION_IDHASH',
+      'SESSION_IDCOOKIE',
+      'SESSION_IDv2',
+      'session_idstr',
+      'sessionIdcookie',
+      'sessionIdsList',
+      // Words that are not an id and not "idle": masked as before, on purpose.
+      'SESSION_IDX',
+      'sessionIdp',
+      'SESSION_IDENTITY',
+      'SESSION_IDEMPOTENT',
+      'SESSION_IDLETIMEOUT',
+      // "idle" earlier in the name does not excuse a session id later in it.
+      'SESSION_IDLE_SESSION_ID',
+      'sessionIdleSessionId'
+    ])('still masks %s', (key) => {
+      expect(sanitizeEnvForLogging({ [key]: 'abc123' })).toEqual({ [key]: '[REDACTED]' });
+    });
+  });
 });
 
 describe('sanitizePayloadForLogging', () => {

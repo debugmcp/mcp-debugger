@@ -188,13 +188,17 @@ export function describeProgramEnd(exitCode: number | undefined): string {
  * ones (the unbound warning, #467, names the unbound ones). A stop that was
  * recorded before the exit — a breakpoint hit whose `stopped` and the
  * `exited` arrived in the same tick — means the breakpoints were not all
- * missed, so the list is withheld and the stop is named instead. Logpoints
+ * missed, so the list is withheld and the stop is named instead. The same
+ * holds for the session's tree (issue #1128): when a child session stopped
+ * during the run, the run did not "hit nothing" — the breakpoints are copied
+ * to each child, whose stops are its own — so the list is withheld and the
+ * tree's stops are counted instead. Logpoints
  * the adapter supports are not breakpoints the program "missed" (they log
  * and run on) and are left out; a downgraded logpoint (no adapter support)
  * did pause, so it counts.
  */
 export function buildRunToCompletionSummary(
-  session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'exitCode' | 'lastStop' | 'adapterCapabilities' | 'programEndExplanation'>
+  session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'exitCode' | 'lastStop' | 'descendantStops' | 'adapterCapabilities' | 'programEndExplanation'>
 ): RunToCompletionSummary {
   const base = summarizeProgramEnd(session);
   // What the adapter read into the end (issue #877: the devices a Flutter launch found when
@@ -211,7 +215,7 @@ export function buildRunToCompletionSummary(
 }
 
 function summarizeProgramEnd(
-  session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'exitCode' | 'lastStop' | 'adapterCapabilities'>
+  session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'exitCode' | 'lastStop' | 'descendantStops' | 'adapterCapabilities'>
 ): RunToCompletionSummary {
   const exitCode = session.exitCode;
   const ended = describeProgramEnd(exitCode);
@@ -220,6 +224,18 @@ function summarizeProgramEnd(
   if (session.lastStop) {
     return {
       summary: `${ended} after a stop the launch could not report (last stop: ${session.lastStop.reason}).`,
+      data
+    };
+  }
+
+  // This session never stopped, but its tree did (issue #1128): which of its
+  // breakpoints a child stopped on is the child's record, gone with the
+  // child's row — so nothing is listed as unhit, and nothing is called "never
+  // hit" that a child session stopped on.
+  const treeStops = session.descendantStops ?? 0;
+  if (treeStops > 0) {
+    return {
+      summary: `${ended}. Its child sessions stopped ${treeStops} time${treeStops === 1 ? '' : 's'} during this run.`,
       data
     };
   }

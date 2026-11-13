@@ -812,6 +812,188 @@ describe('SessionManager child sessions (issue #1081)', () => {
       expect(answer.data?.children).toBeUndefined();
     });
 
+    // Issue #1137: the count alone explained nothing, and the pending message
+    // promised a pause only the released child could reach.
+    describe('a released child is explained wherever it is counted (issue #1137)', () => {
+      const OFF =
+        '1 child process was released to run undebugged (child sessions are off: DEBUG_MCP_MAX_CHILD_SESSIONS=0): ' +
+        'a breakpoint only it reaches will not hit.';
+
+      it('records why: child sessions off', async () => {
+        build({ DEBUG_MCP_MAX_CHILD_SESSIONS: '0' });
+        const rootId = await startRoot();
+        dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+        await vi.runAllTimersAsync();
+
+        expect(sessionManager.getSession(rootId)).toMatchObject({ releasedChildReports: 1, releasedChildCauses: { 'adoption-off': 1 } });
+      });
+
+      it('records why: the cap, with the limit that was in force', async () => {
+        build({ DEBUG_MCP_MAX_CHILD_SESSIONS: '1' });
+        const rootId = await startRoot();
+        dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+        await vi.runAllTimersAsync();
+        dependencies.mockProxyManager.simulateEvent('child-reported', report('r2', 4343));
+        dependencies.mockProxyManager.simulateEvent('child-reported', report('r3', 4444));
+        await vi.runAllTimersAsync();
+
+        expect(sessionManager.getSession(rootId)).toMatchObject({
+          releasedChildReports: 2,
+          releasedChildCauses: { cap: 2 },
+          releasedChildCap: 1
+        });
+      });
+
+      it('records why: a session that cannot host child sessions', async () => {
+        const rootId = await startRoot();
+        Object.defineProperty(dependencies.mockProxyManager, 'createChildView', { value: undefined });
+        dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+        await vi.runAllTimersAsync();
+
+        expect(sessionManager.getSession(rootId)).toMatchObject({ releasedChildReports: 1, releasedChildCauses: { unsupported: 1 } });
+      });
+
+      it('records why: an adoption that failed', async () => {
+        const rootId = await startRoot();
+        const originalCreate = dependencies.mockProxyManager.createChildView.bind(dependencies.mockProxyManager);
+        dependencies.mockProxyManager.createChildView = (id: string) => {
+          const view = originalCreate(id);
+          vi.spyOn(view, 'adopt').mockRejectedValue(new Error('the adapter refused'));
+          return view;
+        };
+        dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+        await vi.runAllTimersAsync();
+
+        expect(sessionManager.getSession(rootId)).toMatchObject({ releasedChildReports: 1, releasedChildCauses: { 'adoption-failed': 1 } });
+      });
+
+      it('a relaunch forgets the causes and the cap with the count', async () => {
+        build({ DEBUG_MCP_MAX_CHILD_SESSIONS: '1' });
+        const rootId = await startRoot();
+        dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+        await vi.runAllTimersAsync();
+        dependencies.mockProxyManager.simulateEvent('child-reported', report('r2', 4343));
+        await vi.runAllTimersAsync();
+        expect(sessionManager.getSession(rootId)).toMatchObject({ releasedChildCauses: { cap: 1 }, releasedChildCap: 1 });
+        vi.spyOn(dependencies.mockProxyManager, 'stop').mockResolvedValue();
+
+        await sessionManager.restartDebugging(rootId);
+        await vi.runAllTimersAsync();
+
+        expect(sessionManager.getSession(rootId)!.releasedChildReports).toBeUndefined();
+        expect(sessionManager.getSession(rootId)!.releasedChildCauses).toBeUndefined();
+        expect(sessionManager.getSession(rootId)!.releasedChildCap).toBeUndefined();
+      });
+
+      it("a wait that answers for a child still explains the asked session's count: the number and the sentence are the root's", async () => {
+        build({ DEBUG_MCP_MAX_CHILD_SESSIONS: '1' });
+        const rootId = await startRoot();
+        dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+        await vi.runAllTimersAsync();
+        const child = childOf(rootId)!;
+        dependencies.mockProxyManager.simulateEvent('child-reported', report('r2', 4343));
+        await vi.runAllTimersAsync();
+        dependencies.mockProxyManager.childViews.get(child.id)!.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1, allThreadsStopped: true });
+        await vi.runAllTimersAsync();
+
+        const answer = await sessionManager.waitForStop(rootId, 100);
+
+        expect(answer.state).toBe(SessionState.PAUSED);
+        expect(answer.data?.sessionId).toBe(child.id);
+        expect(answer.data?.childrenReleased).toBe(1);
+        expect(answer.data?.message?.startsWith('Paused (breakpoint)')).toBe(true);
+        expect(answer.data?.message?.endsWith(
+          '1 child process was released to run undebugged (the tree was at its child-session cap of 1, ' +
+          'which DEBUG_MCP_MAX_CHILD_SESSIONS raises): a breakpoint only it reaches will not hit.'
+        )).toBe(true);
+      });
+
+      it('the answer for a session that ended in error says it too', async () => {
+        build({ DEBUG_MCP_MAX_CHILD_SESSIONS: '0' });
+        const rootId = await startRoot();
+        dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+        await vi.runAllTimersAsync();
+        dependencies.mockProxyManager.simulateExit(1);
+        await vi.runAllTimersAsync();
+
+        const answer = await sessionManager.waitForStop(rootId, 100);
+
+        expect(answer.state).toBe(SessionState.ERROR);
+        expect(answer.data?.message).toMatch(/^The debug session ended in an error state/);
+        expect(answer.data?.message?.endsWith(OFF)).toBe(true);
+      });
+
+      it('the pending wait answer says it, right after the promise it qualifies', async () => {
+        build({ DEBUG_MCP_MAX_CHILD_SESSIONS: '0' });
+        const rootId = await startRoot();
+        dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+        await vi.runAllTimersAsync();
+
+        const answer = await sessionManager.waitForStop(rootId, 100);
+
+        expect(answer.data?.pending).toBe(true);
+        expect(answer.data?.childrenReleased).toBe(1);
+        expect(answer.data?.message).toMatch(/Call wait_for_stop again to keep waiting, or pause_execution to interrupt it\. 1 child process was released/);
+        expect(answer.data?.message?.endsWith(OFF)).toBe(true);
+      });
+
+      it('the ended wait answer says it after the end summary', async () => {
+        build({ DEBUG_MCP_MAX_CHILD_SESSIONS: '0' });
+        const rootId = await startRoot();
+        dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+        await vi.runAllTimersAsync();
+        dependencies.mockProxyManager.simulateEvent('terminated');
+        await vi.runAllTimersAsync();
+
+        const answer = await sessionManager.waitForStop(rootId, 100);
+
+        expect(answer.state).toBe(SessionState.STOPPED);
+        expect(answer.data?.message).toBe(
+          `The program ended without reporting an exit code without hitting any breakpoint. ${OFF}`
+        );
+      });
+
+      it('the paused wait answer says it too: the count never appears unexplained', async () => {
+        build({ DEBUG_MCP_MAX_CHILD_SESSIONS: '0' });
+        const rootId = await startRoot();
+        dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+        await vi.runAllTimersAsync();
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+        await vi.runAllTimersAsync();
+
+        const answer = await sessionManager.waitForStop(rootId, 100);
+
+        expect(answer.state).toBe(SessionState.PAUSED);
+        expect(answer.data?.childrenReleased).toBe(1);
+        expect(answer.data?.message?.startsWith('Paused (breakpoint)')).toBe(true);
+        expect(answer.data?.message?.endsWith(OFF)).toBe(true);
+      });
+
+      it('the launch answer says it when the child was released during the launch', async () => {
+        build({ DEBUG_MCP_MAX_CHILD_SESSIONS: '0' });
+        const session = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+        await sessionManager.setBreakpoint(session.id, { file: '/w/child.py', line: 7 });
+        const starting = sessionManager.startDebugging(session.id, 'test.py');
+        await vi.advanceTimersByTimeAsync(100);
+        dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+        await vi.runAllTimersAsync();
+        const started = await starting;
+
+        expect(started.data?.pending).toBe(true);
+        expect(started.data?.childrenReleased).toBe(1);
+        expect(started.data?.message).toContain('has not reached');
+        expect(started.data?.message?.endsWith(OFF)).toBe(true);
+      });
+
+      it('an answer on a session that released nothing reads as before', async () => {
+        const rootId = await startRoot();
+
+        const answer = await sessionManager.waitForStop(rootId, 100);
+
+        expect(answer.data?.message).not.toContain('released');
+      });
+    });
+
     it('a relaunch starts the released count afresh', async () => {
       build({ DEBUG_MCP_MAX_CHILD_SESSIONS: '0' });
       const rootId = await startRoot();
@@ -888,6 +1070,110 @@ describe('SessionManager child sessions (issue #1081)', () => {
       expect(started.data?.children).toEqual([
         { sessionId: child.id, name: 'Subprocess 4242', state: SessionState.RUNNING, parentSessionId: session.id }
       ]);
+    });
+  });
+
+  // Issue #1128: a child's stops are recorded on the child's row, and that row
+  // is gone once the child is closed — so the count a root's end summary needs
+  // is kept on every ancestor, per run.
+  describe("a descendant's stops are counted on its ancestors (issue #1128)", () => {
+    const breakpointStop = { reason: 'breakpoint', threadId: 1, allThreadsStopped: true };
+
+    async function tree(): Promise<{ rootId: string; childId: string; view: MockChildProxyView }> {
+      const rootId = await startRoot();
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+      await vi.runAllTimersAsync();
+      const childId = childOf(rootId)!.id;
+      return { rootId, childId, view: dependencies.mockProxyManager.childViews.get(childId)! };
+    }
+
+    async function stopAt(view: MockChildProxyView): Promise<void> {
+      view.simulateStopped(1, 'breakpoint', breakpointStop);
+      await vi.runAllTimersAsync();
+    }
+
+    it('each stop of a child is counted on its parent, never on the child itself', async () => {
+      const { rootId, childId, view } = await tree();
+
+      await stopAt(view);
+      await sessionManager.continue(childId);
+      await stopAt(view);
+
+      expect(sessionManager.getSession(rootId)!.descendantStops).toBe(2);
+      expect(sessionManager.getSession(childId)!.descendantStops).toBeUndefined();
+      // The root's own record is untouched: it never stopped.
+      expect(sessionManager.getSession(rootId)!.lastStop).toBeUndefined();
+    });
+
+    it("a grandchild's stop is counted on its parent and on the root", async () => {
+      const { rootId, childId, view } = await tree();
+      view.simulateEvent('child-reported', report('r2', 4343));
+      await vi.runAllTimersAsync();
+      const grandchildView = dependencies.mockProxyManager.childViews.get(childOf(childId)!.id)!;
+
+      await stopAt(grandchildView);
+
+      expect(sessionManager.getSession(childId)!.descendantStops).toBe(1);
+      expect(sessionManager.getSession(rootId)!.descendantStops).toBe(1);
+    });
+
+    it('the count outlives the child: closing it removes the row, not what the tree did', async () => {
+      const { rootId, childId, view } = await tree();
+      await stopAt(view);
+
+      await sessionManager.closeSession(childId);
+
+      expect(sessionManager.getSession(childId)).toBeUndefined();
+      expect(sessionManager.getSession(rootId)!.descendantStops).toBe(1);
+    });
+
+    it('a relaunch starts the count afresh', async () => {
+      const { rootId, view } = await tree();
+      await stopAt(view);
+      vi.spyOn(dependencies.mockProxyManager, 'stop').mockResolvedValue();
+
+      await sessionManager.restartDebugging(rootId);
+      await vi.runAllTimersAsync();
+
+      expect(sessionManager.getSession(rootId)!.descendantStops).toBeUndefined();
+    });
+
+    it('a stop the server resumed by itself is not one: the entry stop of a child is never shown', async () => {
+      const { rootId, view } = await tree();
+
+      view.simulateStopped(1, 'entry', { reason: 'entry', threadId: 1, allThreadsStopped: true });
+      await vi.runAllTimersAsync();
+
+      expect(sessionManager.getSession(rootId)!.descendantStops).toBeUndefined();
+    });
+
+    it("the issue's flow: the child stops twice and is closed, then the root ends — its answer no longer says nothing was hit", async () => {
+      const { rootId, childId, view } = await tree();
+      await stopAt(view);
+      await sessionManager.continue(childId);
+      await stopAt(view);
+      await sessionManager.closeSession(childId);
+
+      dependencies.mockProxyManager.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+      const answer = await sessionManager.waitForStop(rootId, 100);
+
+      expect(answer.state).toBe(SessionState.STOPPED);
+      expect(answer.data?.message).toBe('The program ended without reporting an exit code. Its child sessions stopped 2 times during this run.');
+      expect(answer.data).not.toHaveProperty('unhitBreakpoints');
+    });
+
+    it('a root whose children never stopped still says which breakpoints it ran past', async () => {
+      const { rootId, view } = await tree();
+      view.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+
+      dependencies.mockProxyManager.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+      const answer = await sessionManager.waitForStop(rootId, 100);
+
+      expect(answer.data?.message).toContain('without hitting any breakpoint');
+      expect(answer.data?.unhitBreakpoints).toEqual([expect.objectContaining({ file: '/w/child.py', line: 7 })]);
     });
   });
 
@@ -1016,7 +1302,7 @@ describe('SessionManager child sessions (issue #1081)', () => {
     const child = (id: string) => sessionManager.getSession(id)!;
 
     it('reads the line under the stop and resumes a leaked module-entry pause without ever showing the child paused', async () => {
-      const { childId, view, requests } = await jsChild();
+      const { rootId, childId, view, requests } = await jsChild();
       const wait = sessionManager.waitForStop(childId, 1000);
 
       view.simulateStopped(3, 'pause', ENTRY_PAUSE);
@@ -1032,10 +1318,12 @@ describe('SessionManager child sessions (issue #1081)', () => {
       expect(dependencies.mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('Auto-continuing (stopOnEntry=false) [reason=entry'));
       // The wait saw nothing: the hold never entered PAUSED, and the resume ran in the settle's own call stack.
       expect((await wait).data?.pending).toBe(true);
+      // Nor does the root count it as a stop of its tree (issue #1128): nobody saw it.
+      expect(child(rootId).descendantStops).toBeUndefined();
     });
 
     it('keeps a `debugger;` statement at the first statement as the breakpoint it is (#672 still holds)', async () => {
-      const { childId, view, requests } = await jsChild(TOP_FRAME, 'debugger;');
+      const { rootId, childId, view, requests } = await jsChild(TOP_FRAME, 'debugger;');
 
       view.simulateStopped(3, 'pause', ENTRY_PAUSE);
       await vi.runAllTimersAsync();
@@ -1044,6 +1332,8 @@ describe('SessionManager child sessions (issue #1081)', () => {
       expect(requests).not.toContain('continue');
       expect(child(childId).state).toBe(SessionState.PAUSED);
       expect(child(childId).lastStop).toMatchObject({ reason: 'breakpoint', rawReason: 'pause', threadId: 3 });
+      // A stop that is shown counts for the root (issue #1128).
+      expect(child(rootId).descendantStops).toBe(1);
     });
 
     const unreadable: Array<[string, Record<string, unknown> | 'fails']> = [

@@ -117,6 +117,11 @@ exists). The agent then uses `sessionId` for inspection, stepping and continuing
   2. otherwise the first live descendant that is paused or in error, in adoption order, depth first;
   3. otherwise the session itself, if it has ended;
   4. otherwise (only descendants have ended and the session still runs) the wait keeps waiting.
+  When rule 3 answers a session's end, the end summary is the tree's (issue #1128): a stop the
+  agent could see on any descendant is counted on every ancestor (`descendantStops`, per run — the
+  child's own record leaves with its row at its close), and a session that never stopped itself
+  but whose tree did says "Its child sessions stopped N times during this run" instead of
+  "without hitting any breakpoint", listing no breakpoint as unhit.
   A paused parent is reported before its paused children: the agent has to deal with it anyway,
   and the `children` list below shows what else is paused. A parent that ended while a child is
   paused reports the child (rule 2 before rule 3), because nothing can be done on the parent. The
@@ -276,6 +281,13 @@ Two bounds keep that sane:
   child-session adoption). It excludes js-debug's mandatory first target, which implements the
   root session and must still be adopted for launch to complete. Beyond the cap the release lever
   runs (the child runs undebugged) and the parent's next answer says so (`childrenReleased: n`).
+  The count is never left unexplained (issue #1137): the cause of each release is recorded with it
+  (`releasedChildCauses`: child sessions off, the cap, a proxy that cannot host children, a failed
+  adoption), and every launch, restart and wait answer that carries the number ends its message
+  with one sentence built from the same record (`describeReleasedChildren`,
+  `src/session/execution/tree-settle.ts`): how many, that they run undebugged, why — naming
+  `DEBUG_MCP_MAX_CHILD_SESSIONS` when it decided — and that a breakpoint only such a child reaches
+  will not hit.
 - Ended children stay listed until closed, as above, and leave with their parent.
 
 ## Every adapter, surveyed
@@ -495,8 +507,12 @@ Two guardrails:
    Only roots have a clock: a tool call naming any session in a tree refreshes the tree's root, and
    a child never expires on a clock of its own — the tree goes with its root (decided 2026-11-09,
    amending the per-descendant clocks this section first proposed: a worker paused under a parent
-   the agent is driving must not be terminated by a timer). An in-flight `wait_for_stop` holds the
-   root for the duration of the call. The sweep is skipped entirely while a client is attending the
+   the agent is driving must not be terminated by a timer). A tool call in flight holds the root for
+   as long as it runs, whatever the tool, and the clock restarts when it answers (issue #1127:
+   the hold was `wait_for_stop`'s alone at first, and a launch slower than the window had its
+   session closed underneath it; `create_debug_session` with an attach target names no session
+   and holds the one it creates around its inline attach); a call that arrives while the sweep is
+   closing its tree waits for that close and is told what happened. The sweep is skipped entirely while a client is attending the
    process — any open legacy SSE stream or modern `subscriptions/listen` stream — so a connected
    client never loses a paused session to the clock; idle time still accrues from the last tool
    call, so a vanished client's already-idle sessions end at the first unattended sweep. Expiry
@@ -578,8 +594,9 @@ Taken by the author of this document, marked so they can be overturned:
   child-session adoption, excluding js-debug's mandatory first target.
 - The idle policy knob is named `MCP_DEBUG_SESSION_IDLE_MS` (sweep: `MCP_DEBUG_SESSION_IDLE_SWEEP_MS`); it is off unless set (decided with JF, 2026-11-10).
 - Only roots have an idle clock: activity on any session in a tree refreshes its root, a child never
-  expires alone, a tree-aware wait holds the root for the duration of the call, and the sweep is
-  skipped while a client attends the process (decided with JF, 2026-11-09).
+  expires alone, a call in flight holds the root for as long as it runs (the tree-aware wait at
+  first, every tool that names a session since issue #1127), and the sweep is skipped while a
+  client attends the process (decided with JF, 2026-11-09).
 - The ordering rule for several settles before one wait (parent first, then adoption order).
 - Ended children stay listed until closed, and leave with their parent.
 - Closing any session closes its subtree, including when that session is itself a child.

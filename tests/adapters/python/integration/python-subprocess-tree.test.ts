@@ -267,9 +267,64 @@ describe('Python child processes as child sessions (the session tree, issue #108
       expect(ended.children, JSON.stringify(ended)).toEqual([
         expect.objectContaining({ sessionId: childId, state: 'stopped', parentSessionId: rootId })
       ]);
+      // The end answer is about the tree (issue #1128): the child stopped on
+      // child.py:12 three times, so the run did not "hit nothing" and that
+      // breakpoint is not "verified but never hit".
+      expect(ended.message, JSON.stringify(ended)).toBe(
+        'The program ran to completion (exit code 0). Its child sessions stopped 3 times during this run.'
+      );
+      expect(ended.unhitBreakpoints).toBeUndefined();
       const output = await call('get_output', { sessionId: rootId });
       expect(JSON.stringify(output)).toContain('child done 3');
       expect(JSON.stringify(output)).toContain('parent child exit 0');
+    } finally {
+      await call('close_debug_session', { sessionId: rootId });
+    }
+  }, 120000);
+
+  /**
+   * The flow of issue #1128, step for step: a breakpoint in the child's code
+   * only, the child stops there twice and is then CLOSED — its row, and with
+   * it the record of its stops, is gone before the parent ends. The parent's
+   * end answer used to read "without hitting any breakpoint. Verified but
+   * never hit: child.py:12".
+   */
+  it("the parent's end answer counts the stops of a child that was closed before it ended (issue #1128)", async () => {
+    const created = await call('create_debug_session', { language: 'python', name: 'subprocess-tree-closed-child' });
+    expect(created.success).toBe(true);
+    const rootId = created.sessionId as string;
+    try {
+      const childBp = await call('set_breakpoint', { sessionId: rootId, file: childFixture, line: CHILD_BREAKPOINT_LINE });
+      expect(childBp.success, JSON.stringify(childBp)).toBe(true);
+      const started = await call('start_debugging', {
+        sessionId: rootId,
+        scriptPath: parentFixture,
+        breakOnExceptions: 'none',
+        dapLaunchArgs: { stopOnEntry: false }
+      });
+      expect(started.success, JSON.stringify(started)).toBe(true);
+
+      const first = await call('wait_for_stop', { sessionId: rootId, timeout: 30000 });
+      expect(first.state, JSON.stringify(first)).toBe('paused');
+      const childId = first.sessionId as string;
+      expect(childId).not.toBe(rootId);
+      expect((await call('continue_execution', { sessionId: childId })).success).toBe(true);
+      const second = await call('wait_for_stop', { sessionId: rootId, timeout: 30000 });
+      expect(second.state, JSON.stringify(second)).toBe('paused');
+      expect(second.sessionId).toBe(childId);
+
+      const closedChild = await call('close_debug_session', { sessionId: childId });
+      expect(closedChild.success, JSON.stringify(closedChild)).toBe(true);
+      expect(closedChild.processEnded, JSON.stringify(closedChild)).toBe(true);
+
+      const ended = await call('wait_for_stop', { sessionId: rootId, timeout: 30000 });
+      expect(ended.state, JSON.stringify(ended)).toBe('stopped');
+      expect(ended.sessionId, JSON.stringify(ended)).toBe(rootId);
+      expect(ended.message, JSON.stringify(ended)).toBe(
+        'The program ran to completion (exit code 0). Its child sessions stopped 2 times during this run.'
+      );
+      expect(ended.unhitBreakpoints).toBeUndefined();
+      expect(ended.children).toBeUndefined();
     } finally {
       await call('close_debug_session', { sessionId: rootId });
     }

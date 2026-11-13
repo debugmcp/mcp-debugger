@@ -30,6 +30,8 @@ const OWN = 'dbg-own';
 const FOREIGN = 'dbg-foreign';
 
 const logger = { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() };
+/** What `holdForCall` hands back: the release the dispatch calls when the call answers (issue #1127). */
+const releaseHold = vi.fn();
 const environment = {
   get: (): string | undefined => undefined,
   getAll: () => ({}),
@@ -51,7 +53,8 @@ function fakeContext(overrides: Partial<ToolContext> = {}): ToolContext {
         id === OWN ? key === 'agent-a' : id === FOREIGN ? key === 'agent-b' : false),
       getSessionsVisibleTo: vi.fn(() => []),
       idleExpiryOf: vi.fn(() => undefined),
-      touchActivity: vi.fn()
+      holdForCall: vi.fn(() => releaseHold),
+      idleCloseInFlight: vi.fn((): Promise<void> | undefined => undefined)
     },
     validateSession: (sessionId: string) => {
       throw new SessionNotFoundError(sessionId);
@@ -125,7 +128,9 @@ describe('tools/call on a session outside the caller scope (issue #1025, step 2)
 
     await answer(dispatcher(ctx), 'close_debug_session', { sessionId: FOREIGN }, 'agent-a');
 
-    expect(ctx.sessionManager.touchActivity).not.toHaveBeenCalled();
+    // It neither stamps nor holds the tree against the idle policy, nor waits on a close of it (issue #1127).
+    expect(ctx.sessionManager.holdForCall).not.toHaveBeenCalled();
+    expect(ctx.sessionManager.idleCloseInFlight).not.toHaveBeenCalled();
   });
 
   it('an anonymous caller does not see a keyed session', async () => {
@@ -134,7 +139,7 @@ describe('tools/call on a session outside the caller scope (issue #1025, step 2)
     await answer(dispatcher(ctx), 'close_debug_session', { sessionId: OWN });
 
     expect(hiddenAtHandler()).toBe(true);
-    expect(ctx.sessionManager.touchActivity).not.toHaveBeenCalled();
+    expect(ctx.sessionManager.holdForCall).not.toHaveBeenCalled();
   });
 
   it('a session in the caller scope is not hidden from its own call', async () => {
@@ -153,7 +158,67 @@ describe('tools/call on a session outside the caller scope (issue #1025, step 2)
 
     expect(result).toMatchObject({ success: true });
     expect(ctx.closeDebugSession).toHaveBeenCalledWith(OWN);
-    expect(ctx.sessionManager.touchActivity).toHaveBeenCalledWith(OWN);
+    expect(ctx.sessionManager.holdForCall).toHaveBeenCalledWith(OWN);
+  });
+
+  it('a session in the caller scope is held against the idle policy until its call answers, then its clock restarts (issue #1127)', async () => {
+    let heldAtHandler: boolean | undefined;
+    const ctx = fakeContext({
+      closeDebugSession: vi.fn(async (id: string) => {
+        heldAtHandler = vi.mocked(ctx.sessionManager.holdForCall).mock.calls.length === 1 && releaseHold.mock.calls.length === 0;
+        return { closed: true, closedSessionIds: [id] };
+      })
+    } as unknown as Partial<ToolContext>);
+
+    await answer(dispatcher(ctx), 'close_debug_session', { sessionId: OWN }, 'agent-a');
+
+    expect(heldAtHandler).toBe(true);
+    expect(ctx.sessionManager.holdForCall).toHaveBeenCalledWith(OWN);
+    // The release is what restarts the clock (SessionManagerCore.holdForCall).
+    expect(releaseHold).toHaveBeenCalledTimes(1);
+    // A close of the tree in flight is asked about with the caller's key: only its scope waits.
+    expect(ctx.sessionManager.idleCloseInFlight).toHaveBeenCalledWith(OWN, 'agent-a');
+  });
+
+  it('the hold is released when the handler throws', async () => {
+    const ctx = fakeContext({
+      closeDebugSession: vi.fn(async () => {
+        throw new Error('boom');
+      })
+    } as unknown as Partial<ToolContext>);
+
+    await dispatcher(ctx)({ method: 'tools/call', params: { name: 'close_debug_session', arguments: { sessionId: OWN } } }, callCtxFor('agent-a')).catch(() => undefined);
+
+    expect(ctx.sessionManager.holdForCall).toHaveBeenCalledWith(OWN);
+    expect(releaseHold).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits once for a close of the tree that is in flight, then goes on: a mark that outlived its close cannot hang the call', async () => {
+    const over = Promise.resolve();
+    const ctx = fakeContext();
+    // The mark never clears: the dispatch must not wait for the same close twice.
+    vi.mocked(ctx.sessionManager.idleCloseInFlight).mockReturnValue(over);
+
+    const result = await answer(dispatcher(ctx), 'close_debug_session', { sessionId: OWN }, 'agent-a');
+
+    expect(result).toMatchObject({ success: true });
+    expect(ctx.sessionManager.holdForCall).toHaveBeenCalledWith(OWN);
+  });
+
+  it('waits again when a second close of the tree started while it waited for the first', async () => {
+    const first = Promise.resolve();
+    const second = Promise.resolve();
+    const ctx = fakeContext();
+    vi.mocked(ctx.sessionManager.idleCloseInFlight)
+      .mockReturnValueOnce(first)
+      .mockReturnValueOnce(second)
+      .mockReturnValue(undefined);
+
+    await answer(dispatcher(ctx), 'close_debug_session', { sessionId: OWN }, 'agent-a');
+
+    // Asked until no close is in flight: the hold is taken in the turn that saw none.
+    expect(ctx.sessionManager.idleCloseInFlight).toHaveBeenCalledTimes(3);
+    expect(ctx.sessionManager.holdForCall).toHaveBeenCalledTimes(1);
   });
 
   it('an id nobody holds passes through to the handler, which answers its own not-found', async () => {
@@ -173,7 +238,17 @@ describe('tools/call on a session outside the caller scope (issue #1025, step 2)
     const result = await answer(call, 'list_debug_sessions', { sessionId: FOREIGN }, 'agent-a');
 
     expect(result).toMatchObject({ success: true });
-    expect(ctx.sessionManager.touchActivity).not.toHaveBeenCalled();
+    expect(ctx.sessionManager.holdForCall).not.toHaveBeenCalled();
+  });
+
+  it("a stray sessionId the caller DOES own, on a tool that takes none, holds nothing either: the tool's schema decides", async () => {
+    const ctx = fakeContext();
+
+    const result = await answer(dispatcher(ctx), 'list_debug_sessions', { sessionId: OWN }, 'agent-a');
+
+    expect(result).toMatchObject({ success: true });
+    expect(ctx.sessionManager.holdForCall).not.toHaveBeenCalled();
+    expect(ctx.sessionManager.idleCloseInFlight).not.toHaveBeenCalled();
   });
 
   it('create_debug_session is never gated and stamps the caller scope on the new session', async () => {
@@ -201,7 +276,8 @@ describe('tools/call on a session outside the caller scope (issue #1025, step 2)
       sessionManager: {
         getSession: vi.fn(() => ({ id: OWN })),
         isSessionVisibleTo: vi.fn(() => true),
-        touchActivity: vi.fn()
+        holdForCall: vi.fn(() => releaseHold),
+        idleCloseInFlight: vi.fn((): Promise<void> | undefined => undefined)
       } as unknown as ToolContext['sessionManager']
     });
     const call = dispatcher(ctx);
