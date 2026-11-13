@@ -245,8 +245,10 @@ Context:
 >  12 |     return total
    13 |
    14 | def main():
-The file may have changed since you last read it. Pick the correct line from the context above.
+The file may have changed since you last read it. Pick the correct line from the context above. Or address by content: set_breakpoint {statement: "total = sum(prices)"} — that text is on line 11.
 ```
+
+The last sentence is the statement resolver's own answer for the expected text (issue #1142), so following it always works: on one line it names the line; on several it adds `nearLine` (the line you asked for) and lists them — `{statement: "print(a, b)", nearLine: 5} — that text is on lines 4 and 6; nearLine picks the closest (line 4).`; when the resolver would not find the text — it is absent, or it is only where statement matching does not look (a comment line, or past a `//` or `#` on a line) — no statement is offered, and the sentence instead names the lines this same `expectedContent` would pass on (`That expectedContent matches line 12.`) or says `That expectedContent matches no line of the file.`; and text spanning lines gets no such sentence. It is only added where statement anchors are available (`DEBUG_MCP_BP_ADDRESSING=content`, the default).
 
 Relatedly, when a debug adapter *accepts* a breakpoint but binds it to a different line (adapters snap requests on non-executable lines to the nearest valid one), the response reports it prominently instead of silently mutating the line: `message` and `warning` carry `"requested line 12, bound to line 13: \`...\`"`, and the response includes `requestedLine` alongside the bound `line`. Adapters that relocate breakpoints asynchronously (after the response) surface the move in `list_breakpoints`, where `line` ≠ `requestedLine` marks a snapped breakpoint.
 
@@ -435,16 +437,28 @@ crashing state costs zero extra tool calls:
   (`DEBUG_MCP_SNAPSHOT_MAX_LOCALS` / `DEBUG_MCP_SNAPSHOT_MAX_VALUE_CHARS`); `truncation` says what
   was cut. The read is bounded (~2 s): if it expires or fails inside the composer, the answer ships
   without `locals` and `note` says so. A read that comes back empty is shown as no locals — and when
-  unprobed deeper frames exist (the snapshot probes the top 3), `note` says that too; an adapter
-  error the pipeline itself absorbs looks the same as a locals-free frame, and `get_local_variables`
-  on the same stop is the deeper read. The snapshot is orientation, not navigation —
+  unprobed deeper frames exist (the snapshot probes the top 3), `note` says that too; a
+  scopes or variables request that fails is noted as an incomplete locals list, and `get_local_variables`
+  on the same stop can retry the read.
+  The snapshot is orientation, not navigation —
   `get_local_variables` / `get_variables` remain the way to expand structures or fetch everything.
 - **`changedVariables`** replaces `locals` on a repeated stop in the same frame (issue #983) —
   stepping through a function, or a `continue_execution` → `wait_for_stop` loop over one
-  breakpoint: only what changed since the locals were last shown, as
-  `{ "name": { "before": "100.0", "after": "125.0" } }`. A variable new in scope appears with
-  `before: "<undefined>"`; one that left scope simply drops out; an **empty `{}` means nothing
-  visible changed** — that is information. Frame identity is the locals anchor's name + file +
+  breakpoint: only what differs from the locals last shown, one entry per variable (issue #1140):
+  - a changed value — `{ "before": "100.0", "after": "125.0" }`;
+  - a variable that appeared — `{ "after": "30", "new": true }`, with no `before`;
+  - a variable that left scope — `{ "before": "3", "gone": true }`, with no `after`.
+
+  No placeholder ever stands in for a missing side: any text can be a value. An **empty `{}` means
+  nothing visible changed** — that is information. The flags are only set when they are known. The
+  locals a snapshot shows are capped (see `locals` above), so a name missing from a list that was
+  cut may only not have fitted: a variable absent from a previous list that was cut is
+  `{ "after": "30" }` with no `new`, and one absent from a current list that was cut is not listed
+  at all (`truncation` says when a list was cut). A failed scopes or variables request also makes the list
+  incomplete (`note` explains it): missing variables are not called `gone`, and variables that
+  reappear after the failed read are not called `new`. An adapter's own return-value entry — js-debug's
+  `Return value` at a function's return point, debugpy's `(return) fn` after stepping over a call —
+  is a local like any other here and appears as `new`. Frame identity is the locals anchor's name + file +
   visible stack depth: any mismatch (a different function, a recursion depth change) re-emits
   full `locals` and rebases — never a wrong diff. The same stop answered twice (two
   `wait_for_stop` calls without resuming) re-emits full `locals` rather than diffing against
@@ -565,7 +579,7 @@ See the [JavaScript configuration guide](javascript/README.md#custom-configurati
 
 **Exit code:** when the debuggee terminates, the exit code reported by the adapter is surfaced as `exitCode` in `list_debug_sessions` (and, for a launch that ended before reporting a pause, as `data.exitCode` above), so a crash (non-zero) is distinguishable from a clean exit. Adapters that never send `exited` still get one where the debugger states the code some other way: js-debug through the launch shim's recorded code (#247), rdbg through the adapter process's own exit status (#258), Delve before 1.27 through its `Process N has exited with status S` console line (#753 — in debug mode Delve prints it only in reply to `disconnect`, so the proxy sends the disconnect before forwarding `terminated`; Delve 1.27+ sends `exited` itself). No line, no code: nothing is guessed.
 
-**Between launches:** a session whose program has exited is still present, with its breakpoints, its last real launch and, until the next launch, the previous run's output and exit code (a dry run leaves all of it in place). `start_debugging` (a new configuration), `restart_debugging` (the same one), `set_breakpoint`, `list_breakpoints`, `remove_breakpoint`, `clear_breakpoints` and `get_output` all work on it, so "ran to completion without hitting my breakpoint → set an earlier one → `restart_debugging`" needs no new session; each launch starts a fresh output buffer and re-applies the stored breakpoints with their verified state reset. Tools that need a live debuggee — stepping, `continue_execution`, `pause_execution`, `list_threads`, `get_stack_trace`/`get_scopes`/`get_variables`/`get_local_variables`/`evaluate_expression`, `get_source_context`, `expose_session` — answer `Session is terminated: <id>` until the next launch (issues #793, #806).
+**Between launches:** a session whose program has exited is still present, with its breakpoints, its last real launch and, until the next launch, the previous run's output and exit code (a dry run leaves all of it in place). `start_debugging` (a new configuration), `restart_debugging` (the same one), `set_breakpoint`, `list_breakpoints`, `remove_breakpoint`, `clear_breakpoints` and `get_output` all work on it, so "ran to completion without hitting my breakpoint → set an earlier one → `restart_debugging`" needs no new session; each launch starts a fresh output buffer and re-applies the stored breakpoints with their verified state reset. Tools that need a live debuggee — stepping, `continue_execution`, `pause_execution`, `list_threads`, `get_stack_trace`/`get_scopes`/`get_variables`/`get_local_variables`/`evaluate_expression`, `get_source_context`, `expose_session` — answer `Session is terminated: <id>` until the next launch (issues #793, #806). The inspection tools (`get_stack_trace`, `get_scopes`, `get_variables`, `get_local_variables`, `evaluate_expression`) add a `message` beside that error saying what it means and what to do next, worded for what the session is (issue #1141): a launched program — `The program has terminated, so no frames or variables exist. Use restart_debugging to run it again.`; an attach session, which `restart_debugging` refuses — `The debugger is no longer attached to the target (it ended, or was detached), so no frames or variables exist. Use attach_to_process to attach again.`; a child session — that its process ended or was released, and the id of its parent.
 
 ---
 
@@ -633,12 +647,25 @@ Steps over the current line, executing it without entering function calls.
 }
 ```
 
+A step past a declaration, and a step that leaves a block, in the same shape:
+
+```json
+"changedVariables": {
+  "total":   { "before": "0", "after": "2" },
+  "sum":     { "after": "30", "new": true },
+  "doubled": { "before": "2", "gone": true }
+}
+```
+
 `location` and `context` are best-effort: they appear when the post-step stack trace and the source file could both be read.
 
 The [stop snapshot](#the-stop-snapshot) rides on every landed step (issues #982/#983). Stepping within one
-function reports **`changedVariables`** — only what the executed line changed — instead of re-sending the
+function reports **`changedVariables`** — only what the executed line changed: a value that changed, a
+variable that appeared (`new: true`) or one that left scope (`gone: true`) — instead of re-sending the
 full `locals`; stepping into a new frame (or any frame-identity change) shows that frame's full `locals`.
-An empty `changedVariables: {}` says the line changed nothing visible. On an adapter that steps once per
+An empty `changedVariables: {}` says the line changed nothing visible. A stop whose frame shows no locals
+at all carries neither `locals` nor `changedVariables`, so a frame whose every variable left scope says
+nothing on that stop. On an adapter that steps once per
 token position (Dart), the snapshot is composed once, from the final landing of the repeated step.
 
 When the stop that ended the step was recorded as something other than the step — a breakpoint on the landing
@@ -925,7 +952,7 @@ When the pause was reported on a thread with no program frame — on Windows, Co
   "note": "The stop was reported on thread 31208 (5: tid=31208), whose 4 frames are all internal/runtime (top: 'DbgBreakPoint'); showing thread 45324 (1: tid=45324), which is in 'main' (…/pause_test.cpp:20)."
 }
 ```
-When no thread has a program frame — an idle Node server's pause lands on a sourceless `<anonymous>` frame between event-loop dispatches (issue #900) — `location` is that frame and `note` reads `No program frame is active on thread 0: the only frame is internal/runtime (top: '<anonymous>' <unknown_source>:1). The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint; get_stack_trace with includeInternals: true lists the frames.`
+When no thread has a program frame — an idle Node server's pause lands on a sourceless `<anonymous>` frame between event-loop dispatches (issue #900) — `location` is that frame and `note` reads `No program frame is active on thread 0: the only frame is internal/runtime (top: '<anonymous>' <unknown_source>:1). The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint.` When the thread has more frames than the one shown, the sentence ends `…or set a breakpoint; get_stack_trace with includeInternals: true lists the frames.` instead (issue #1141); `get_stack_trace` itself never says that, since it only adds the sentence when it hid nothing.
 
 **Response** (the program had not stopped when the grace window elapsed):
 ```json
@@ -1173,7 +1200,23 @@ Gets local variables for the session's shared inspection anchor. It walks down f
 
 **Size guards:** same caps and `truncation` advisory as [get_variables](#get_variables); additionally, the multi-frame scope fan-out stops issuing DAP requests once the per-call variable budget is spent (`truncation.scopesSkipped` reports scopes never fetched). Top-frame scopes are fetched first, so the locals that matter are unaffected. The `truncation` counts describe only the returned payload — values cut while fetching fan-out scopes the policy then discarded (e.g. Global/Closure) are not reported (issue #438).
 
-If the originally stopped thread has no frames, this tool uses the same user-frame-preferring adopted anchor as `get_stack_trace`. The response's `anchorNote` always names an automatic thread or lower-frame switch.
+If the originally stopped thread has no frames, this tool uses the same user-frame-preferring adopted anchor as `get_stack_trace`. The response's `note` always names an automatic thread or lower-frame switch.
+
+**When no frame is program code** (issue #1135) — a pause on a launched Node program idle between timers, which lands in the timer loop; a `step_out` of `main`, which lands in the C runtime — the answer still carries the variables the adapter reported for `frame`, and says whose they are: `noProgramFrame: true`, and a `note` with the sentence the pause or step answer gave for that stop (`No program frame is active…`) plus one clause naming the frame.
+
+```json
+{
+  "success": true,
+  "variables": [ { "name": "now", "value": "4210", "type": "number", "variablesReference": 0, "expandable": false } ],
+  "count": 1,
+  "frame": { "name": "process.processTimers", "file": "<node_internals>/internal/timers", "line": 527 },
+  "scopeName": "Local: processTimers",
+  "noProgramFrame": true,
+  "note": "No program frame is active on thread 0: the only frame is internal/runtime (top: 'process.processTimers' <node_internals>/internal/timers:527). The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint. The variables shown belong to 'process.processTimers', not to your program."
+}
+```
+
+The clause is left out when the list is empty. The [stop snapshot](#the-stop-snapshot) of such a stop carries no `locals` at all: it is orientation, and a runtime frame's variables are not; this tool is the explicit read.
 
 **Example - Python:**
 ```json
@@ -1289,6 +1332,8 @@ Evaluates an expression in the context of the current debug session.
 ```
 
 `frame` is present when `frameId` was omitted and names the frame the expression ran in (the same shape `get_local_variables` reports).
+
+When `frameId` was omitted and no frame of the stack is program code (issue #1135), the answer also carries `noProgramFrame: true`, and `anchorNote` ends with the sentence the pause or step answer gave for that stop (`No program frame is active…`) and `The expression was evaluated in that frame.` — the expression ran in a runtime frame (Node's timer loop, the C runtime's start-up), where your program's names do not resolve. An explicit `frameId` is the caller's choice and adds nothing.
 
 **Example - Simple Variable:**
 ```json
@@ -1572,7 +1617,7 @@ When the requested pause has not landed by the time the tool answers (an idle No
 
 **Notes:**
 - `state` is `"paused"` only once a stopped event has actually been observed; otherwise the attach reports `"running"`. When a requested post-attach pause is accepted but its stopped event has not arrived within the bounded wait, the response is successful with `state: "running"` and `pending: true` (at the top level and in `data`) and the `message` names the pending pause; the late stopped event is the only transition to `paused` — [`wait_for_stop`](#wait_for_stop) blocks until it arrives — and every paused session has a `lastStop`.
-- An idle Node server may instead answer `paused` at once: js-debug lands the pause on a sourceless `<anonymous>` frame between event-loop dispatches. The attach answer then carries (at the top level and under `data`) `note: "No program frame is active on thread 0: the only frame is internal/runtime (top: '<anonymous>' <unknown_source>:1). The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint; …"`, `get_stack_trace` shows that one frame with `noProgramFrame: true` and the same note, and `get_local_variables` is empty (issue #900). Either way, attach to a live server you still need to use with `stopOnEntry: false`.
+- An idle Node server may instead answer `paused` at once: js-debug lands the pause on a sourceless `<anonymous>` frame between event-loop dispatches. The attach answer then carries (at the top level and under `data`) `note: "No program frame is active on thread 0: the only frame is internal/runtime (top: '<anonymous>' <unknown_source>:1). The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint."`, `get_stack_trace` shows that one frame with `noProgramFrame: true` and the same note, and `get_local_variables` is empty with the same flag and note (issues #900, #1135). Either way, attach to a live server you still need to use with `stopOnEntry: false`.
 - A `paused` attach answer reads where its stop landed through the same resolver read as `get_stack_trace` (issue #904): one `stackTrace` round trip, and on a thread whose stack has not materialised yet (a .NET post-attach pause) the bounded readiness wait `get_stack_trace` used to pay, now on the attach's own clock. On Windows, where CodeLLDB reported the attach stop on the injected break-in thread and the attach anchored on the program's thread instead, the answer's `note` says `The stop was reported on thread X; inspection is anchored on thread Y.`
 - The initial stop of an attach is reported as `lastStop.reason: "pause"` (`stopReason: "pause"` in `get_stack_trace`) by every adapter, whether the debugger paused the target on request or, as CodeLLDB does, stopped it itself. On Windows, CodeLLDB reports that stop as the `DebugBreakProcess` break-in — an `0x80000003` exception on a helper thread — so the adapter's own words stay beside the pause as `lastStop.rawReason: "exception"` and `description: "Exception 0x80000003 encountered at address …"` (issue #817). Only the first stop of an attach that did not pass `stopOnEntry: false` is read this way: a break-in met later, or first by an attach that opted out of the initial stop, is a real `__debugbreak()` and keeps `reason: "exception"`.
 - When `processId` was used, the message reads `Attached to process PID <pid>` instead.

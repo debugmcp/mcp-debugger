@@ -16,7 +16,31 @@ export interface ProxyInitProgress {
   transportConnected: boolean;
   /** The DAP handshake request that was sent and has not been answered. */
   pendingCommand?: string;
+  /**
+   * Present when the worker spawned no adapter and dialed a DAP server that
+   * was already listening — a debugpy or rdbg attach (issue #1139). The
+   * endpoint is the caller's own host and port, so a stall there is not "an
+   * adapter that started": the wording names the endpoint instead.
+   */
+  directConnect?: DirectConnectEndpoint;
 }
+
+/** The endpoint of a direct-connect attach, as the worker dialed it. */
+export interface DirectConnectEndpoint {
+  host: string;
+  port: number;
+  /** The policy's phrase for what should be listening there ("a debugpy listener (…)"). */
+  listener?: string;
+}
+
+/**
+ * The second sentence of every direct-connect failure where the endpoint
+ * never spoke DAP (issue #1139): nothing of ours was started, so the likeliest
+ * cause is the endpoint itself.
+ */
+const notADebugServer = (endpoint: DirectConnectEndpoint): string =>
+  'Nothing was started for this attach: the server connected to what is already listening on that port, ' +
+  `so check that it is ${endpoint.listener ?? "the debugger's own listener"} and not another service.`;
 
 /**
  * Why no uncaught exception will stop a running program (issues #1009, #1032),
@@ -125,11 +149,39 @@ export const ErrorMessages = {
    * when the adapter demonstrably connected and answered events sent agents
    * to verify healthy toolchains with nowhere to go afterwards.
    *
+   *
+   * A direct-connect attach (issue #1139) has its own wording on every
+   * branch: the server started nothing, so "the adapter started", "retrying
+   * usually succeeds" and "check that the adapter is installed" are all
+   * false there. While `initialize` is unanswered the endpoint has not
+   * spoken DAP at all, and the likeliest cause is that it is not a debug
+   * server — the wrong port; once it has answered, it is one, and the stall
+   * is its own.
+   *
    * @param timeout - The timeout duration in seconds
    * @param progress - How far initialization got (issue #493); omit for the generic message
    */
   proxyInitTimeout: (timeout: number, progress?: ProxyInitProgress) => {
     const base = `Debug proxy initialization did not complete within ${timeout}s.`;
+    const direct = progress?.directConnect;
+    if (direct) {
+      const endpoint = `${direct.host}:${direct.port}`;
+      if (!progress.transportConnected) {
+        return `${base} No connection to ${endpoint} was established. Nothing was started for this attach: ` +
+          `check the host and port, and that ${direct.listener ?? 'the debug server'} is listening there and reachable from this machine.`;
+      }
+      if (progress.pendingCommand === 'initialize') {
+        return `${base} ${endpoint} accepted the connection but never answered the DAP "initialize" request. ` +
+          `${notADebugServer(direct)} Retrying the same port stalls the same way.`;
+      }
+      if (progress.pendingCommand) {
+        return `${base} ${endpoint} answered the start of the DAP handshake, but the "${progress.pendingCommand}" request ` +
+          'never received a response. Nothing was started for this attach: this is a stall in the debug server listening ' +
+          'on that port, not a missing install. If it recurs, capture a DAP trace (DAP_TRACE=1) of the failing attach.';
+      }
+      return `${base} Connected to ${endpoint} and the DAP handshake began, but initialization stalled before completing. ` +
+        'Nothing was started for this attach: the debug server listening on that port is what stalled.';
+    }
     if (progress?.transportConnected) {
       const pidNote = progress.adapterPid !== undefined
         ? ` The adapter process is running (PID ${progress.adapterPid}).`
@@ -153,6 +205,20 @@ export const ErrorMessages = {
       `Check that the required debug adapter is installed and accessible.`;
   },
   
+  /**
+   * A direct-connect attach whose endpoint never answered `initialize` and
+   * did not stall either (issue #1139): it hung up, or the request failed on
+   * the wire. What an HTTP server does with a DAP frame — the issue's own
+   * example, the application's port given instead of the debugger's. The
+   * worker's init-failure report used to read "DAP client disconnected
+   * [Executable: python | adapter PID=none exitCode=n/a]".
+   * Used in: src/proxy/dap-proxy-worker.ts (describeInitFailure)
+   * @param endpoint - What the worker dialed
+   * @param detail - The failure as the DAP client reported it
+   */
+  directConnectInitializeUnanswered: (endpoint: DirectConnectEndpoint, detail: string) =>
+    `${endpoint.host}:${endpoint.port} never answered the DAP "initialize" request (${detail}). ${notADebugServer(endpoint)}`,
+
   /**
    * Informational message for step operations still executing after the grace window
    * Occurs when: A step operation (stepOver, stepInto, stepOut) doesn't receive a 'stopped' event
@@ -243,21 +309,30 @@ export const ErrorMessages = {
    * `<anonymous>` frame between event-loop dispatches (issue #900); a Windows
    * pause on a native helper thread that no sibling could replace. Worded
    * for every adapter — what the frame is, the language guide says.
-   * Used in: src/session/inspection/stop-location.ts
+   *
+   * The pointer at the full stack is offered only when the thread has frames
+   * the answer has not shown (issue #1141): `get_stack_trace` says this
+   * sentence exactly when it hid nothing, where "includeInternals: true lists
+   * the frames" told a caller who had passed it to pass it; and a one-frame
+   * stack has no more to list than the frame the sentence already names.
+   * Used in: src/session/inspection/stop-location.ts,
+   *   src/server/handlers/inspection-tools.ts
    * @param threadId - The thread the answer is anchored on, when known
    * @param frameCount - How many frames the thread reported
    * @param top - The frame shown
+   * @param opts.framesUnseen - The thread has frames this answer did not show
    */
   stopWithoutProgramFrame: (
     threadId: number | undefined,
     frameCount: number,
-    top: { name: string; file: string; line: number }
+    top: { name: string; file: string; line: number },
+    opts?: { framesUnseen?: boolean }
   ) =>
     `No program frame is active${typeof threadId === 'number' ? ` on thread ${threadId}` : ''}: ` +
     `${frameCount === 1 ? 'the only frame is' : `all ${frameCount} frames are`} internal/runtime ` +
     `(top: '${top.name}' ${top.file}:${top.line}). The stop landed outside your code: ` +
-    `continue_execution and trigger activity, or set a breakpoint; ` +
-    `get_stack_trace with includeInternals: true lists the frames.`,
+    `continue_execution and trigger activity, or set a breakpoint` +
+    (opts?.framesUnseen ? '; get_stack_trace with includeInternals: true lists the frames.' : '.'),
 
   /**
    * An explicit breakOnExceptions mode the adapter cannot honour (issue #1032):
@@ -469,6 +544,30 @@ export const ErrorMessages = {
    */
   stackTraceNotPaused: (state: string, why?: string) =>
     `Session is not paused (state: ${state}); stack traces are only available while paused${why ? `; ${why}` : ''}.`,
+
+  /**
+   * The `message` an inspection tool puts beside the bare
+   * `Session is terminated: <id>` error (issue #1141), worded by what the
+   * session is, because the remedy differs: a launched program is run again
+   * with restart_debugging; an attach session has no launch to replay and
+   * restart_debugging refuses it, so it is attached again; a child session
+   * was started by its parent and can do neither.
+   * Used in: src/server/handlers/shared.ts (endedSessionExtras)
+   * @param kind - What the ended session is
+   * @param parentSessionId - The parent's id, for a child session
+   */
+  endedSessionNothingToInspect: (kind: 'launch' | 'attach' | 'child', parentSessionId?: string) => {
+    switch (kind) {
+      case 'attach':
+        return 'The debugger is no longer attached to the target (it ended, or was detached), so no frames or variables exist. ' +
+          'Use attach_to_process to attach again.';
+      case 'child':
+        return 'The process this child session debugged has ended or was released, so no frames or variables exist. ' +
+          `A child session cannot be restarted on its own${parentSessionId ? `: its parent is ${parentSessionId}` : ''}.`;
+      case 'launch':
+        return 'The program has terminated, so no frames or variables exist. Use restart_debugging to run it again.';
+    }
+  },
 
   /**
    * get_local_variables with no frame and the session not paused, with the

@@ -161,6 +161,32 @@ export interface SnapshotException {
 }
 
 /**
+ * One entry of a snapshot's `changedVariables` (issue #1140). The side that
+ * does not exist is left out, and a flag says why — no placeholder stands in
+ * for a value, because any text can be a value:
+ *
+ * - `{ before, after }`: the value changed;
+ * - `{ after, new: true }`: the variable was not among the locals last shown;
+ * - `{ before, gone: true }`: it was, and is no longer among the locals.
+ *
+ * A flag is only set when it is known. The locals a snapshot shows are
+ * capped, so a name missing from a list that was cut may simply not have
+ * fitted, and a failed scope read also makes a list incomplete. A variable
+ * absent from an incomplete previous list is `{ after }` with no
+ * `new`, and one absent from an incomplete current list is not listed at all.
+ */
+export interface ChangedVariable {
+  /** The value last shown. Absent for a variable that was not among the locals last shown. */
+  before?: string;
+  /** The value now. Absent for a variable that is no longer among the locals. */
+  after?: string;
+  /** The variable was not there at the previous stop, whose list was complete. */
+  new?: true;
+  /** The variable is no longer among the locals, whose list is complete. */
+  gone?: true;
+}
+
+/**
  * The bounded state snapshot a PAUSED answer carries (issue #982), composed
  * from the landing read's own stack: top visible frames, flat redacted
  * top-frame locals under tight caps, and the exception when the stop is one.
@@ -173,11 +199,12 @@ export interface StopSnapshot {
   locals?: Record<string, string>;
   /**
    * In place of `locals` on a repeated stop in the same frame (issue #983):
-   * only what changed since the last shown locals (new variables appear with
-   * before "<undefined>"; one that left scope simply drops out). An empty
-   * object means nothing visible changed — that is information.
+   * only what differs from the locals last shown, one entry per variable —
+   * a changed value, a variable that appeared, a variable that left scope
+   * (`ChangedVariable`, issue #1140). An empty object means nothing visible
+   * changed — that is information.
    */
-  changedVariables?: Record<string, { before: string; after: string }>;
+  changedVariables?: Record<string, ChangedVariable>;
   /** What was cut, pointing at get_local_variables for the full list. */
   truncation?: string;
   /** What expired or was withheld, and any locals anchor note. */

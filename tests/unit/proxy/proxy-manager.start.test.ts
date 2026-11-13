@@ -599,6 +599,83 @@ describe('ProxyManager.start', () => {
     }
   });
 
+  it('names the endpoint of a direct-connect attach that never answered initialize (issue #1139)', async () => {
+    vi.useFakeTimers();
+    const listener = 'a debugpy listener (python -m debugpy --listen 127.0.0.1:5000 …)';
+    fakeProcess.sendCommand.mockImplementation((cmd: any) => {
+      if (cmd.cmd === 'init') {
+        setTimeout(() => {
+          const emitStatus = (extra: Record<string, unknown>) =>
+            fakeProcess.emit('message', { type: 'status', sessionId: cmd.sessionId, ...extra });
+          emitStatus({ status: 'init_received' });
+          // No adapter_spawned: nothing was spawned. The worker says what it dialed.
+          emitStatus({ status: 'direct_connect', host: '127.0.0.1', port: 5000, listener });
+          emitStatus({ status: 'dap_handshake_stage', stage: 'transport_connected' });
+          emitStatus({ status: 'dap_handshake_stage', stage: 'request_pending', command: 'initialize' });
+        }, 0);
+      }
+    });
+
+    const startPromise = proxyManager.start(baseConfig);
+
+    try {
+      const rejection = expect(startPromise).rejects.toThrow(
+        /Debug proxy initialization did not complete within 30s\. 127\.0\.0\.1:5000 accepted the connection but never answered the DAP "initialize" request\. Nothing was started for this attach/
+      );
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.runOnlyPendingTimersAsync();
+      await Promise.resolve();
+      await rejection;
+
+      const error = await startPromise.catch((e: unknown) => e);
+      expect((error as Error).message).not.toContain('the adapter started');
+      expect((error as Error).message).not.toContain('Retrying usually succeeds');
+      // The structured facts ride on the error object for the tool result.
+      expect((error as { initProgress?: unknown }).initProgress).toEqual({
+        transportConnected: true,
+        pendingCommand: 'initialize',
+        directConnect: { host: '127.0.0.1', port: 5000, listener }
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ['no host', { host: '', port: 5000 }],
+    ['a host that is not text', { host: 5000, port: 5000 }],
+    ['a port that is not a number', { host: '127.0.0.1', port: 'nope' }],
+    ['neither', { host: '', port: 'nope' }]
+  ])('ignores a direct_connect status that names no usable endpoint: %s', async (_what, endpoint) => {
+    vi.useFakeTimers();
+    fakeProcess.sendCommand.mockImplementation((cmd: any) => {
+      if (cmd.cmd === 'init') {
+        setTimeout(() => {
+          const emitStatus = (extra: Record<string, unknown>) =>
+            fakeProcess.emit('message', { type: 'status', sessionId: cmd.sessionId, ...extra });
+          emitStatus({ status: 'init_received' });
+          emitStatus({ status: 'direct_connect', ...endpoint });
+          emitStatus({ status: 'dap_handshake_stage', stage: 'transport_connected' });
+          emitStatus({ status: 'dap_handshake_stage', stage: 'request_pending', command: 'initialize' });
+        }, 0);
+      }
+    });
+
+    const startPromise = proxyManager.start(baseConfig);
+
+    try {
+      const rejection = expect(startPromise).rejects.toThrow(/Connected to the debug adapter, but the "initialize" request never received a response\./);
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.runOnlyPendingTimersAsync();
+      await Promise.resolve();
+      await rejection;
+      const error = await startPromise.catch((e: unknown) => e);
+      expect((error as { initProgress?: unknown }).initProgress).toEqual({ transportConnected: true, pendingCommand: 'initialize' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('an answered handshake request no longer reads as pending when init later times out (issue #493)', async () => {
     vi.useFakeTimers();
     fakeProcess.sendCommand.mockImplementation((cmd: any) => {

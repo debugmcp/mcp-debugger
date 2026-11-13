@@ -8,12 +8,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import { DotnetAdapterPolicy, SessionLifecycleState } from '@debugmcp/shared';
 import {
+  getScopesTool,
   getStackTraceTool,
+  getVariablesTool,
   handleEvaluateExpression,
   handleGetSourceContext,
   handleGetLocalVariables
 } from '../../../../../src/server/handlers/inspection-tools.js';
-import { SessionTerminatedError } from '../../../../../src/errors/debug-errors.js';
+import { SessionNotFoundError, SessionTerminatedError } from '../../../../../src/errors/debug-errors.js';
 import { ErrorMessages } from '../../../../../src/utils/error-messages.js';
 import { createMockToolContext } from '../server-test-helpers.js';
 
@@ -305,6 +307,97 @@ describe('inspection tool handlers', () => {
       expect(payload.frame.name).toBe('main');
       expect(payload.scopeName).toBe('Locals');
       expect(payload.message).toBeUndefined();
+      expect(payload).not.toHaveProperty('noProgramFrame');
+      expect(payload).not.toHaveProperty('note');
+    });
+
+    describe('a stack with no program frame (issue #1135)', () => {
+      const TIMERS = { name: 'process.processTimers', file: '<node_internals>/internal/timers', line: 527 };
+      const SENTENCE =
+        "No program frame is active on thread 0: the only frame is internal/runtime (top: 'process.processTimers' <node_internals>/internal/timers:527). " +
+        'The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint.';
+
+      async function localsOf(result: Record<string, unknown>) {
+        ctx.sessionManager.getLocalVariables.mockResolvedValue(result);
+        return JSON.parse((await handleGetLocalVariables(ctx, { sessionId: 'test-session' })).content[0].text);
+      }
+
+      it('keeps the variables, flags the answer and says whose they are', async () => {
+        const payload = await localsOf({
+          variables: [{ name: 'now', value: '4210', type: 'number' }],
+          frame: TIMERS,
+          scopeName: 'Local: processTimers',
+          noProgramFrame: { threadId: 0, frameCount: 1, top: TIMERS }
+        });
+
+        expect(payload.success).toBe(true);
+        expect(payload.variables).toEqual([{ name: 'now', value: '4210', type: 'number' }]);
+        expect(payload.noProgramFrame).toBe(true);
+        expect(payload.note).toBe(`${SENTENCE} The variables shown belong to 'process.processTimers', not to your program.`);
+      });
+
+      it('points at get_stack_trace when the thread has more frames than this answer names', async () => {
+        const crt = { name: '__tmainCRTStartup', file: '@__tmainCRTStartup', line: 51 };
+        const payload = await localsOf({
+          variables: [{ name: '[return value]', value: '0', type: 'int' }],
+          frame: crt,
+          scopeName: 'Local',
+          noProgramFrame: { threadId: 12952, frameCount: 4, top: crt }
+        });
+
+        expect(payload.note).toBe(
+          "No program frame is active on thread 12952: all 4 frames are internal/runtime (top: '__tmainCRTStartup' @__tmainCRTStartup:51). " +
+          'The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint; ' +
+          'get_stack_trace with includeInternals: true lists the frames. ' +
+          "The variables shown belong to '__tmainCRTStartup', not to your program."
+        );
+      });
+
+      it('names the frame the variables came from when the read walked down from the top', async () => {
+        const lower = { name: 'java.lang.Thread.run', file: 'java/lang/Thread.java', line: 1583 };
+        const top = { name: 'jdk.internal.misc.Unsafe.park', file: 'jdk/internal/misc/Unsafe.java', line: 0 };
+        const payload = await localsOf({
+          variables: [{ name: 'target', value: 'Worker@1f', type: 'Runnable' }],
+          frame: lower,
+          scopeName: 'Local',
+          anchorNote: "Top frame 'jdk.internal.misc.Unsafe.park' has no local variables (runtime/stdlib frame); showing frame #2 'java.lang.Thread.run' instead",
+          noProgramFrame: { threadId: 3, frameCount: 5, top }
+        });
+
+        // The walk-down note first, then the verdict; the clause names the frame that answered, not the top.
+        expect(payload.note).toBe(
+          "Top frame 'jdk.internal.misc.Unsafe.park' has no local variables (runtime/stdlib frame); showing frame #2 'java.lang.Thread.run' instead. " +
+          "No program frame is active on thread 3: all 5 frames are internal/runtime (top: 'jdk.internal.misc.Unsafe.park' jdk/internal/misc/Unsafe.java:0). " +
+          'The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint; ' +
+          'get_stack_trace with includeInternals: true lists the frames. ' +
+          "The variables shown belong to 'java.lang.Thread.run', not to your program."
+        );
+      });
+
+      it('claims no variables when the list is empty', async () => {
+        const payload = await localsOf({
+          variables: [],
+          frame: TIMERS,
+          scopeName: 'Local: processTimers',
+          noProgramFrame: { threadId: 0, frameCount: 1, top: TIMERS }
+        });
+
+        expect(payload.noProgramFrame).toBe(true);
+        expect(payload.note).toBe(SENTENCE);
+        expect(payload.message).toBe('The Local: processTimers scope is empty.');
+      });
+
+      it('keeps a resolver note that already ends its sentence as it is', async () => {
+        const payload = await localsOf({
+          variables: [],
+          frame: TIMERS,
+          scopeName: null,
+          anchorNote: 'The stop was reported on thread 4; inspection is anchored on thread 0.',
+          noProgramFrame: { threadId: 0, frameCount: 1, top: TIMERS }
+        });
+
+        expect(payload.note).toBe(`The stop was reported on thread 4; inspection is anchored on thread 0. ${SENTENCE}`);
+      });
     });
 
     it('shows "not paused" message when no frame available', async () => {
@@ -521,6 +614,99 @@ describe('inspection tool handlers', () => {
       expect(payload.lastStop.text).not.toContain(SECRET);
       expect(payload.stopReason).toBe('exception');
       expect(stored.text).toContain(SECRET);
+    });
+  });
+
+  describe('an ended session is explained by every inspection tool, in terms of what the session is (issue #1141)', () => {
+    const ENDED = 'Session is terminated: test-session';
+    const LAUNCH_SENTENCE =
+      'The program has terminated, so no frames or variables exist. Use restart_debugging to run it again.';
+
+    /** Each inspection tool, called on a session whose gate throws the terminated error. */
+    const TOOLS: Array<[string, () => Promise<{ content: [{ text: string }] }>]> = [
+      ['get_stack_trace', () => getStackTraceTool(ctx, { sessionId: 'test-session' }, 'get_stack_trace')],
+      ['get_scopes', () => getScopesTool(ctx, { sessionId: 'test-session', frameId: 1 }, 'get_scopes')],
+      ['get_variables', () => getVariablesTool(ctx, { sessionId: 'test-session', scope: 7 }, 'get_variables')],
+      ['evaluate_expression', () => handleEvaluateExpression(ctx, { sessionId: 'test-session', expression: 'x' })],
+      ['get_local_variables', () => handleGetLocalVariables(ctx, { sessionId: 'test-session' })]
+    ];
+
+    function endedSession(session: Record<string, unknown>): void {
+      ctx.sessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.TERMINATED,
+        state: 'stopped',
+        ...session
+      });
+      const terminated = () => { throw new SessionTerminatedError('test-session'); };
+      ctx.validateSession = vi.fn().mockImplementation(terminated);
+      ctx.getStackTrace = vi.fn().mockImplementation(async () => terminated());
+      ctx.getScopes = vi.fn().mockImplementation(async () => terminated());
+      ctx.getVariablesDetailed = vi.fn().mockImplementation(async () => terminated());
+      ctx.getLocalVariables = vi.fn().mockImplementation(async () => terminated());
+    }
+
+    it.each(TOOLS)('%s: a launched program that ended points at restart_debugging', async (_name, call) => {
+      endedSession({ lastLaunch: { scriptPath: '/app/main.py' } });
+
+      const payload = JSON.parse((await call()).content[0].text);
+
+      expect(payload.success).toBe(false);
+      // The error text is unchanged: callers and tests match on it.
+      expect(payload.error).toBe(ENDED);
+      expect(payload.message).toBe(LAUNCH_SENTENCE);
+    });
+
+    it.each(TOOLS)('%s: an attach session points at attach_to_process, never at a restart it would be refused', async (_name, call) => {
+      endedSession({ attachMode: true });
+
+      const payload = JSON.parse((await call()).content[0].text);
+
+      expect(payload.error).toBe(ENDED);
+      expect(payload.message).toBe(
+        'The debugger is no longer attached to the target (it ended, or was detached), so no frames or variables exist. ' +
+        'Use attach_to_process to attach again.'
+      );
+      expect(payload.message).not.toContain('restart_debugging');
+    });
+
+    it.each(TOOLS)('%s: a child session names its parent', async (_name, call) => {
+      // A child of an attach root: the child rule wins, whatever else the row carries.
+      endedSession({ parentSessionId: 'parent-1', attachMode: true });
+
+      const payload = JSON.parse((await call()).content[0].text);
+
+      expect(payload.error).toBe(ENDED);
+      expect(payload.message).toBe(
+        'The process this child session debugged has ended or was released, so no frames or variables exist. ' +
+        'A child session cannot be restarted on its own: its parent is parent-1.'
+      );
+    });
+
+    it('keeps the launch wording when the session row cannot be read', async () => {
+      endedSession({});
+      ctx.sessionManager.getSession.mockReturnValue(undefined);
+
+      const payload = JSON.parse((await getStackTraceTool(ctx, { sessionId: 'test-session' }, 'get_stack_trace')).content[0].text);
+
+      expect(payload.message).toBe(LAUNCH_SENTENCE);
+    });
+
+    it('get_stack_trace keeps its failure diagnostics beside the sentence', async () => {
+      endedSession({ failureDiagnostics: { proxyLogPath: '/logs/proxy.log' } });
+
+      const payload = JSON.parse((await getStackTraceTool(ctx, { sessionId: 'test-session' }, 'get_stack_trace')).content[0].text);
+
+      expect(payload.diagnostics).toEqual({ proxyLogPath: '/logs/proxy.log' });
+      expect(payload.message).toBe(LAUNCH_SENTENCE);
+    });
+
+    it('adds nothing for a session that is merely unknown', async () => {
+      ctx.getStackTrace = vi.fn().mockRejectedValue(new SessionNotFoundError('nope'));
+
+      const payload = JSON.parse((await getStackTraceTool(ctx, { sessionId: 'nope' }, 'get_stack_trace')).content[0].text);
+
+      expect(payload).toEqual({ success: false, error: 'Session not found: nope' });
     });
   });
 });

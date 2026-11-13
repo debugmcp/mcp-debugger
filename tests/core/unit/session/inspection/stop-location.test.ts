@@ -106,13 +106,30 @@ describe('describeStopLocation (issue #904)', () => {
 
     expect(landing.noProgramFrame).toBe(true);
     expect(landing.location).toEqual({ file: '<unknown_source>', line: 1, column: 1 });
+    // One frame, and the note names it: there is no fuller stack to point at (issue #1141).
     expect(landing.note).toBe(
       "No program frame is active on thread 0: the only frame is internal/runtime (top: '<anonymous>' <unknown_source>:1). " +
-      'The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint; ' +
-      'get_stack_trace with includeInternals: true lists the frames.'
+      'The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint.'
     );
     // The flag stays internal; the answer carries the sentence.
     expect(landingFields(landing)).toEqual({ location: { file: '<unknown_source>', line: 1, column: 1 }, note: landing.note });
+  });
+
+  it('points at get_stack_trace when the thread has more frames than the one the answer shows (issue #1141)', async () => {
+    const crt = { id: 1027, name: '__tmainCRTStartup', file: '@__tmainCRTStartup', line: 51, column: 0 };
+    const { ctx } = context({
+      reason: 'step',
+      stopThreadId: 12952,
+      read: result({ frames: [crt], threadId: 12952, totalFrameCount: 4, hiddenFrameCount: 3, allFramesInternal: true, noProgramFrame: true })
+    });
+
+    const landing = await describeStopLocation(ctx, 'sid', 'stepOut');
+
+    expect(landing.note).toBe(
+      "No program frame is active on thread 12952: all 4 frames are internal/runtime (top: '__tmainCRTStartup' @__tmainCRTStartup:51). " +
+      'The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint; ' +
+      'get_stack_trace with includeInternals: true lists the frames.'
+    );
   });
 
   it('keeps the resolver note for a frameless landing while the session is still paused', async () => {

@@ -215,6 +215,80 @@ describe('SessionManager.evaluateExpression default-frame resolution', () => {
     expect(result.anchorNote).toMatch(/frameId: 30/);
   });
 
+  describe('default evaluation on a stack with no program frame (issue #1135)', () => {
+    const TIMERS = { id: 7, name: 'process.processTimers', line: 527, column: 5, source: { path: '<node_internals>/internal/timers', sourceReference: 7 } };
+    const NEXT_TICK = { id: 8, name: 'processTicksAndRejections', line: 103, column: 5, source: { path: '<node_internals>/internal/process/task_queues', sourceReference: 9 } };
+
+    async function pausedOutsideTheProgram(frames: unknown[]) {
+      const { sessionManager, dependencies } = makeManager({ stopOnEntry: false });
+      const session = await createRunningSession(sessionManager, dependencies, { paused: false });
+      dependencies.mockProxyManager.simulateStopped(1, 'pause');
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
+      const evaluated: Array<number | undefined> = [];
+      dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: { frameId?: number }) => {
+        if (command === 'stackTrace') {
+          return { body: { stackFrames: frames } };
+        }
+        if (command === 'evaluate') {
+          evaluated.push(args?.frameId);
+          return { body: { result: "'number'", type: 'string', variablesReference: 0 } };
+        }
+        return { success: true, body: {} };
+      });
+      return { sessionManager, session, evaluated };
+    }
+
+    it('evaluates in the runtime frame and says that is what it is', async () => {
+      const { sessionManager, session, evaluated } = await pausedOutsideTheProgram([TIMERS]);
+
+      const result = await sessionManager.evaluateExpression(session.id, 'typeof now');
+
+      expect(result.success).toBe(true);
+      expect(evaluated).toEqual([7]);
+      expect(result.frame).toEqual({ name: 'process.processTimers', file: '<node_internals>/internal/timers', line: 527 });
+      expect(result.noProgramFrame).toBe(true);
+      // One frame, already named: nothing more for get_stack_trace to list (issue #1141).
+      expect(result.anchorNote).toBe(
+        "No program frame is active on thread 1: the only frame is internal/runtime (top: 'process.processTimers' <node_internals>/internal/timers:527). " +
+        'The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint. ' +
+        'The expression was evaluated in that frame.'
+      );
+    });
+
+    it('points at the full stack when the thread has more runtime frames', async () => {
+      const { sessionManager, session } = await pausedOutsideTheProgram([TIMERS, NEXT_TICK]);
+
+      const result = await sessionManager.evaluateExpression(session.id, 'typeof now');
+
+      expect(result.noProgramFrame).toBe(true);
+      expect(result.anchorNote).toContain('all 2 frames are internal/runtime');
+      expect(result.anchorNote).toContain('get_stack_trace with includeInternals: true lists the frames.');
+    });
+
+    it('says nothing for an explicit frameId: the caller chose the frame', async () => {
+      const { sessionManager, session, evaluated } = await pausedOutsideTheProgram([TIMERS]);
+
+      const result = await sessionManager.evaluateExpression(session.id, 'typeof now', 7);
+
+      expect(evaluated).toEqual([7]);
+      expect(result).not.toHaveProperty('noProgramFrame');
+      expect(result).not.toHaveProperty('anchorNote');
+    });
+
+    it('says nothing of the kind when the stack reaches the program, runtime frames below it or not', async () => {
+      const PROGRAM = { id: 3, name: 'tick', line: 12, column: 3, source: { path: '/work/app/server.js' } };
+      const { sessionManager, session, evaluated } = await pausedOutsideTheProgram([PROGRAM, TIMERS, NEXT_TICK]);
+
+      const result = await sessionManager.evaluateExpression(session.id, 'typeof now');
+
+      expect(result.success).toBe(true);
+      expect(evaluated).toEqual([3]);
+      expect(result.frame).toEqual({ name: 'tick', file: '/work/app/server.js', line: 12 });
+      expect(result).not.toHaveProperty('noProgramFrame');
+      expect(result).not.toHaveProperty('anchorNote');
+    });
+  });
+
   it('names the anchor frame when the evaluation itself fails (#672)', async () => {
     const { sessionManager, dependencies } = makeManager();
     const session = await createRunningSession(sessionManager, dependencies);

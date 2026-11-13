@@ -3354,6 +3354,65 @@ describe('SessionManager - DAP Operations', () => {
       expect(result.note).toBeUndefined();
     });
 
+    describe('locals read on a stack with no program frame (issue #1135)', () => {
+      const TIMERS = { id: 1, name: 'process.processTimers', line: 527, column: 5, source: { path: '<node_internals>/internal/timers', sourceReference: 7 } };
+      const NEXT_TICK = { id: 2, name: 'processTicksAndRejections', line: 103, column: 5, source: { path: '<node_internals>/internal/process/task_queues', sourceReference: 9 } };
+      const USER = { id: 3, name: 'tick', line: 4, column: 3, source: { path: '/app/pause_test.js', sourceReference: 0 } };
+
+      /** A paused js session whose one thread reports `frames`, with a Local scope holding `now` on frame 1. */
+      async function pausedWith(frames: unknown[], reason = 'pause') {
+        const session = await pausedInDependency(reason, { 1: frames });
+        dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: { frameId?: number; variablesReference?: number }) => {
+          if (command === 'stackTrace') {
+            return { success: true, body: { stackFrames: frames } };
+          }
+          if (command === 'scopes') {
+            return {
+              success: true,
+              body: { scopes: args?.frameId === 1 ? [{ name: 'Local: processTimers', variablesReference: 11, expensive: false }] : [] }
+            };
+          }
+          if (command === 'variables' && args?.variablesReference === 11) {
+            return { success: true, body: { variables: [{ name: 'now', value: '4210', type: 'number', variablesReference: 0 }] } };
+          }
+          return { success: true, body: {} };
+        });
+        return session;
+      }
+
+      it('still answers the runtime frame\'s variables, and says the stack has no program frame', async () => {
+        const session = await pausedWith([TIMERS]);
+
+        const result = await sessionManager.getLocalVariables(session.id);
+
+        // The adapter's answer is kept: it is what the frame holds.
+        expect(result.variables.map((variable) => [variable.name, variable.value])).toEqual([['now', '4210']]);
+        expect(result.frame).toEqual({ name: 'process.processTimers', file: '<node_internals>/internal/timers', line: 527 });
+        // The resolver's verdict rides along, with what the sentence needs.
+        expect(result.noProgramFrame).toEqual({
+          threadId: 1,
+          frameCount: 1,
+          top: { name: 'process.processTimers', file: '<node_internals>/internal/timers', line: 527 }
+        });
+      });
+
+      it('counts every frame of the thread, not only the one kept visible', async () => {
+        const session = await pausedWith([TIMERS, NEXT_TICK]);
+
+        const result = await sessionManager.getLocalVariables(session.id);
+
+        expect(result.noProgramFrame).toMatchObject({ frameCount: 2, top: { name: 'process.processTimers' } });
+      });
+
+      it('says nothing of the kind when the stack reaches the program', async () => {
+        const session = await pausedWith([TIMERS, USER], 'breakpoint');
+
+        const result = await sessionManager.getLocalVariables(session.id);
+
+        expect(result).not.toHaveProperty('noProgramFrame');
+      });
+    });
+
     it('an all-internal stack on a breakpoint still takes the issue #346 path, not both', async () => {
       const session = await pausedInDependency('breakpoint', { 1: DEPENDENCY_PAUSE.slice(0, 4) });
 

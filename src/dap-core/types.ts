@@ -54,6 +54,8 @@ export type ProxyStatusMessage =
   | { type: 'status'; sessionId: string; status: 'breakpoints_synced'; breakpoints: Array<{ id?: string; file: string; line: number; verified: boolean; adapterId?: number; boundLine?: number; message?: string; refused?: boolean }>; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'adapter_notice'; note: string; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'adapter_spawned'; pid?: number; data?: unknown }
+  /** The worker spawned no adapter: it dials a DAP server that is already listening (issue #1139). `listener` is the policy's phrase for what should be there. */
+  | { type: 'status'; sessionId: string; status: 'direct_connect'; host: string; port: number; listener?: string; data?: unknown }
   | { type: 'status'; sessionId: string; status: 'dap_handshake_stage'; stage: 'transport_connected' | 'request_pending' | 'response_received'; command?: string; data?: unknown }
   /** The worker's pre-detach resume outcome (issue #763): a continue sent ahead of an attach-mode disconnect. */
   | { type: 'status'; sessionId: string; status: 'pre_detach_resume'; trigger: 'detach' | 'close' | 'shutdown'; threadId?: number; resumed: boolean; error?: string; data?: unknown }

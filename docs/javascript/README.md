@@ -410,7 +410,10 @@ open on its port (Node never closes it by itself) — a later attach by PID or b
   freezes on its next request; or `paused` at once on a sourceless `<anonymous>`
   frame between dispatches, with `note` saying no program frame is active and
   `get_local_variables` empty (issue #900) — continue and send a request, or set a
-  breakpoint. Attach to a live server you still need to use with `stopOnEntry: false`
+  breakpoint. A pause that lands in a named runtime frame instead (a launched
+  program idle between timers stops in `process.processTimers`) has variables of
+  its own: `get_local_variables` returns them with `noProgramFrame: true` and a
+  `note` saying they belong to that frame, not to your program (issue #1135). Attach to a live server you still need to use with `stopOnEntry: false`
 - Some advanced DAP features may not be exposed through MCP tools
 - **Source-mapped frames you cannot open.** A package that ships `.js.map` files
   whose `sources` point at `.ts` files it did not ship makes js-debug report those

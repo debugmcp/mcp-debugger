@@ -1237,6 +1237,15 @@ export type AdapterSpawnConfig =
       host: string;
       port: number;
       logDir: string;
+      /**
+       * What should be listening at host:port, as a noun phrase that reads
+       * after "check that it is" (issue #1139): the server starts nothing
+       * for this connection, so when the endpoint does not speak DAP the
+       * likeliest cause is that it is something else — the application's own
+       * port, say — and the failed attach names what the caller meant to
+       * reach, with how such a listener is started.
+       */
+      listener?: string;
     };
 
 /**

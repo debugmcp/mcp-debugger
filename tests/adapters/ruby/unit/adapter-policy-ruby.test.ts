@@ -41,11 +41,14 @@ describe('RubyAdapterPolicy.getAdapterSpawnConfig', () => {
       launchConfig: { request: 'attach', host: '10.0.0.5', port: 12345 }
     });
 
+    // With what should be listening there, for the answer of an attach that
+    // reaches something else (issue #1139).
     expect(config).toEqual({
       mode: 'connect',
       host: '10.0.0.5',
       port: 12345,
-      logDir: '/tmp/logs'
+      logDir: '/tmp/logs',
+      listener: 'an rdbg debug server (rdbg --open --port 12345 …)'
     });
   });
 

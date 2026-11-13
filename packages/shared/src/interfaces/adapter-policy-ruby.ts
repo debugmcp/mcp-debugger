@@ -247,7 +247,9 @@ export const RubyAdapterPolicy = {
         mode: 'connect',
         host,
         port,
-        logDir: payload.logDir
+        logDir: payload.logDir,
+        // For the answer of an attach that reached something else (issue #1139).
+        listener: `an rdbg debug server (rdbg --open --port ${port} …)`
       };
     }
 

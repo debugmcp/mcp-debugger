@@ -75,7 +75,11 @@ export async function describeStopLocation(
     }
     if (result.noProgramFrame && top) {
       landing.noProgramFrame = true;
-      notes.push(ErrorMessages.stopWithoutProgramFrame(result.threadId, result.totalFrameCount, top));
+      // The answer shows one frame, as `location`; the rest of the thread's
+      // stack, when it has one, is get_stack_trace's to list (issue #1141).
+      notes.push(ErrorMessages.stopWithoutProgramFrame(result.threadId, result.totalFrameCount, top, {
+        framesUnseen: result.totalFrameCount > 1
+      }));
     }
     if (notes.length > 0) {
       landing.note = notes.join(' ');

@@ -371,6 +371,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     this.isStopped = false;
     this.lastProxyPid = null;
     this.adapterStderrTail = [];
+    // The init progress describes the worker this start() launches.
+    this.initProgress = { transportConnected: false };
     // The latch tracks the process this start() launches (issue #530)
     this.everInitialized = false;
     this.lastExitDetails = undefined;
@@ -1574,6 +1576,21 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         // event to emit.
         this.initProgress.adapterPid = typeof message.pid === 'number' ? message.pid : undefined;
         this.logger.info(`[ProxyManager] Adapter process spawned (PID ${message.pid ?? 'unknown'})`);
+        break;
+
+      case 'direct_connect':
+        // Progress fact for the init-timeout diagnosis (issue #1139): no
+        // adapter was spawned, the worker dials a listener that is already
+        // there. Recorded only when it names an endpoint the message can
+        // quote; anything else leaves the spawned-adapter wording in force.
+        if (typeof message.host === 'string' && message.host.length > 0 && typeof message.port === 'number') {
+          this.initProgress.directConnect = {
+            host: message.host,
+            port: message.port,
+            ...(typeof message.listener === 'string' && message.listener.length > 0 ? { listener: message.listener } : {})
+          };
+        }
+        this.logger.info(`[ProxyManager] Direct connect to ${message.host}:${message.port} (no adapter process)`);
         break;
 
       case 'pre_detach_resume':

@@ -25,6 +25,7 @@ import type { DebugResult, StopAnswerFields, TreeAnswerFields } from '../../sess
 import type { AttachRequest } from '../../session/attach/attach-controller.js';
 import type { ManagedSession } from '../../session/session-store.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
+import { SessionTerminatedError } from '../../errors/debug-errors.js';
 import { failureResult, type ToolResult } from '../tool-result.js';
 
 /**
@@ -52,6 +53,26 @@ export function childSessionRefusal(
     ErrorMessages.childSessionRefused(toolName, sessionId, session.parentSessionId),
     { state: session.state }
   );
+}
+
+/**
+ * What an inspection tool adds beside the bare `Session is terminated: <id>`
+ * error (issue #1141), or nothing for any other failure. An ended session is
+ * a normal state — the program finished, the debugger was detached — and
+ * the answer says so and names the next step, which depends on what the
+ * session is: the same three cases `restart_debugging` tells apart (a child
+ * first, then an attach, else a launch). A session row that cannot be read
+ * gets the launch wording, the one this sentence always had.
+ */
+export function endedSessionExtras(ctx: ToolContext, error: unknown): { message: string } | undefined {
+  if (!(error instanceof SessionTerminatedError)) {
+    return undefined;
+  }
+  const session = ctx.sessionManager.getSession(error.sessionId);
+  if (session?.parentSessionId) {
+    return { message: ErrorMessages.endedSessionNothingToInspect('child', session.parentSessionId) };
+  }
+  return { message: ErrorMessages.endedSessionNothingToInspect(session?.attachMode === true ? 'attach' : 'launch') };
 }
 
 /**

@@ -44,7 +44,40 @@ export interface LocalVariablesResult {
    * Both notes may apply; they are joined with '; '.
    */
   anchorNote?: string;
+  /**
+   * Present when no frame of the resolved stack is program code (issue
+   * #1135): the resolver's own verdict (`StackTraceResult.noProgramFrame`),
+   * with what the sentence about it needs — the thread, how many frames it
+   * reported, and its top frame. The variables are still the ones the
+   * adapter reported for `frame`; this says whose frame that is.
+   */
+  noProgramFrame?: NoProgramFrameVerdict;
+  /** A scope read failed; an absent variable cannot be treated as absent from the frame. */
+  incomplete?: true;
   truncation?: VariableTruncationSummary;
+}
+
+/** The facts behind `ErrorMessages.stopWithoutProgramFrame` for a resolved stack. */
+export interface NoProgramFrameVerdict {
+  threadId?: number;
+  frameCount: number;
+  top: FrameSummary;
+}
+
+/**
+ * The resolver's "no program frame" verdict as the inspection answers carry
+ * it, or nothing when the stack reaches the program (or has no frame at all).
+ */
+export function noProgramFrameVerdict(stackResult: StackTraceResult): NoProgramFrameVerdict | undefined {
+  const top = stackResult.frames[0];
+  if (!stackResult.noProgramFrame || !top) {
+    return undefined;
+  }
+  return {
+    ...(typeof stackResult.threadId === 'number' ? { threadId: stackResult.threadId } : {}),
+    frameCount: stackResult.totalFrameCount,
+    top: frameSummary(top)
+  };
 }
 
 /**
@@ -135,17 +168,19 @@ export abstract class SessionManagerData extends SessionManagerCore {
   async getVariablesDetailed(sessionId: string, variablesReference: number, names?: string[]): Promise<{
     variables: Variable[];
     truncation?: VariableTruncationSummary;
+    /** Internal observation status: a failed read is not an empty scope. */
+    readFailed?: true;
   }> {
     const session = this._getSessionById(sessionId);
     this.logger.info(`[SM getVariables ${sessionId}] Entered. variablesReference: ${variablesReference}, Current state: ${session.state}`);
     
     if (!session.proxyManager || !session.proxyManager.isRunning()) {
       this.logger.warn(`[SM getVariables ${sessionId}] No active proxy.`);
-      return { variables: [] };
+      return { variables: [], readFailed: true };
     }
     if (session.state !== SessionState.PAUSED) {
       this.logger.warn(`[SM getVariables ${sessionId}] Session not paused. State: ${session.state}.`);
-      return { variables: [] };
+      return { variables: [], readFailed: true };
     }
     
     try {
@@ -155,7 +190,7 @@ export abstract class SessionManagerData extends SessionManagerCore {
       // parsed (post-redaction) values are logged below.
       this.logger.info(`[SM getVariables ${sessionId}] DAP 'variables' response received. ${response?.body?.variables?.length ?? 0} variable(s).`);
 
-      if (response && response.body && response.body.variables) {
+      if (response?.success !== false && response?.body?.variables) {
         let vars = response.body.variables.map((v: DebugProtocol.Variable) => ({
             name: v.name, value: v.value, type: v.type || "<unknown_type>",
             variablesReference: v.variablesReference,
@@ -189,10 +224,10 @@ export abstract class SessionManagerData extends SessionManagerCore {
         return capped;
       }
       this.logger.warn(`[SM getVariables ${sessionId}] No variables in response body for reference ${variablesReference}. Response:`, response);
-      return { variables: [] };
+      return { variables: [], readFailed: true };
     } catch (error) {
       this.logger.error(`[SM getVariables ${sessionId}] Error getting variables:`, error);
-      return { variables: [] };
+      return { variables: [], readFailed: true };
     }
   }
 
@@ -226,11 +261,14 @@ export abstract class SessionManagerData extends SessionManagerCore {
   }
 
   async getScopes(sessionId: string, frameId: number): Promise<DebugProtocol.Scope[]> {
-    return this.readScopes(sessionId, frameId, 'public');
+    return (await this.readScopes(sessionId, frameId, 'public')).scopes;
   }
 
   /** Internal frame-walk probe: an unsupported/frameless candidate is expected. */
-  private async probeScopes(sessionId: string, frameId: number): Promise<DebugProtocol.Scope[]> {
+  private async probeScopes(sessionId: string, frameId: number): Promise<{
+    scopes: DebugProtocol.Scope[];
+    readFailed?: true;
+  }> {
     return this.readScopes(sessionId, frameId, 'probe');
   }
 
@@ -238,18 +276,18 @@ export abstract class SessionManagerData extends SessionManagerCore {
     sessionId: string,
     frameId: number,
     purpose: 'public' | 'probe'
-  ): Promise<DebugProtocol.Scope[]> {
+  ): Promise<{ scopes: DebugProtocol.Scope[]; readFailed?: true }> {
     const session = this._getSessionById(sessionId);
     const prefix = purpose === 'public' ? 'getScopes' : 'scopeProbe';
     this.logger.info(`[SM ${prefix} ${sessionId}] Entered. frameId: ${frameId}, Current state: ${session.state}`);
     
     if (!session.proxyManager || !session.proxyManager.isRunning()) { 
       this.logger.warn(`[SM ${prefix} ${sessionId}] No active proxy.`); 
-      return []; 
+      return { scopes: [], readFailed: true };
     }
     if (session.state !== SessionState.PAUSED) { 
       this.logger.warn(`[SM ${prefix} ${sessionId}] Session not paused. State: ${session.state}.`); 
-      return []; 
+      return { scopes: [], readFailed: true };
     }
     
     try {
@@ -262,11 +300,11 @@ export abstract class SessionManagerData extends SessionManagerCore {
       
       if (response && response.body && response.body.scopes) {
         this.logger.info(`[SM getScopes ${sessionId}] Parsed scopes:`, response.body.scopes.map(s => ({name: s.name, ref: s.variablesReference, expensive: s.expensive })));
-        return response.body.scopes;
+        return { scopes: response.body.scopes };
       }
       const logMissing = purpose === 'public' ? this.logger.warn.bind(this.logger) : this.logger.debug.bind(this.logger);
       logMissing(`[SM ${prefix} ${sessionId}] No scopes in response body for frameId ${frameId}.`, response);
-      return [];
+      return { scopes: [], readFailed: true };
     } catch (error) {
       if (purpose === 'public') {
         this.logger.error(`[SM getScopes ${sessionId}] Error getting scopes:`, error);
@@ -275,7 +313,7 @@ export abstract class SessionManagerData extends SessionManagerCore {
           `[SM scopeProbe ${sessionId}] Frame ${frameId} did not provide scopes: ${error instanceof Error ? error.message : String(error)}`
         );
       }
-      return [];
+      return { scopes: [], readFailed: true };
     }
   }
 
@@ -348,8 +386,11 @@ export abstract class SessionManagerData extends SessionManagerCore {
 
       // Step 2: Collect all scopes for all frames (may need multiple frames for closures)
       const scopesMap: Record<number, DebugProtocol.Scope[]> = {};
+      const failedScopeFrames = new Set<number>();
       for (const frame of stackFrames) {
-        const scopes = await this.probeScopes(sessionId, frame.id);
+        const scopeResult = await this.probeScopes(sessionId, frame.id);
+        if (scopeResult.readFailed) failedScopeFrames.add(frame.id);
+        const scopes = scopeResult.scopes;
         if (scopes && scopes.length > 0) {
           scopesMap[frame.id] = scopes;
         }
@@ -366,10 +407,15 @@ export abstract class SessionManagerData extends SessionManagerCore {
       const truncationByScope = new Map<number, VariableTruncationSummary | undefined>();
       let fetchedCount = 0;
       let scopeFetchesSkipped = 0;
+      let scopeReadFailed = false;
       const fetchBudget = maxVariablesPerCall();
       const policy = this.selectPolicy(session.language);
       for (let frameIndex = 0; frameIndex < stackFrames.length; frameIndex++) {
         const frame = stackFrames[frameIndex];
+        // Discovery probes lower frames up front, but their failures do not
+        // affect locals found above them. Only reads on the traversed path
+        // can make this answer incomplete.
+        scopeReadFailed ||= failedScopeFrames.has(frame.id);
         const scopes = scopesMap[frame.id];
         if (!scopes) continue;
         for (const scope of scopes) {
@@ -379,6 +425,10 @@ export abstract class SessionManagerData extends SessionManagerCore {
             continue;
           }
           const detailed = await this.getVariablesDetailed(sessionId, scope.variablesReference, names);
+          // An empty failed scope may be absent from the policy's selected
+          // refs (e.g. a JS Block beside a readable Local). Keep this status
+          // independently of truncation attributed to contributing scopes.
+          scopeReadFailed ||= detailed.readFailed === true;
           truncationByScope.set(scope.variablesReference, detailed.truncation);
           fetchedCount += detailed.variables.length;
           if (detailed.variables.length > 0) {
@@ -596,12 +646,21 @@ export abstract class SessionManagerData extends SessionManagerCore {
       if (scopeNote) {
         anchorNotes.push(scopeNote);
       }
+      if (scopeReadFailed) {
+        anchorNotes.push('Some variable scopes could not be read; the locals list may be incomplete');
+      }
+
+      // No frame of this stack is program code (issue #1135): the variables
+      // are a runtime frame's, and the answer must be able to say so.
+      const noProgramFrame = noProgramFrameVerdict(stackResult);
 
       return {
         variables: cappedLocals.variables,
         frame: frameSummary(anchorFrame),
         scopeName,
         ...(anchorNotes.length > 0 ? { anchorNote: anchorNotes.join('; ') } : {}),
+        ...(noProgramFrame ? { noProgramFrame } : {}),
+        ...(scopeReadFailed ? { incomplete: true as const } : {}),
         ...(truncation ? { truncation } : {})
       };
       

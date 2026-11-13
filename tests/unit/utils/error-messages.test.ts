@@ -339,3 +339,129 @@ describe('the unarmed launch wording when the adapter cannot, or was not asked t
     expect(text).toMatch(/no pausing breakpoints/);
   });
 });
+
+describe('proxy initialization timeout for a direct-connect attach (issue #1139)', () => {
+  const BASE = 'Debug proxy initialization did not complete within 30s.';
+  const LISTENER = 'a debugpy listener (python -m debugpy --listen 127.0.0.1:5000 …)';
+  const directConnect = { host: '127.0.0.1', port: 5000, listener: LISTENER };
+
+  it('names the endpoint and the likely cause when "initialize" was never answered: nothing of ours started', () => {
+    const message = ErrorMessages.proxyInitTimeout(30, { transportConnected: true, pendingCommand: 'initialize', directConnect });
+
+    expect(message).toBe(
+      `${BASE} 127.0.0.1:5000 accepted the connection but never answered the DAP "initialize" request. ` +
+      'Nothing was started for this attach: the server connected to what is already listening on that port, ' +
+      `so check that it is ${LISTENER} and not another service. Retrying the same port stalls the same way.`
+    );
+    // What the spawned-adapter wording said, and what is false here.
+    expect(message).not.toContain('the adapter started');
+    expect(message).not.toContain('Retrying usually succeeds');
+    expect(message).not.toContain('missing install');
+  });
+
+  it('stays general when the policy has no phrase for what should be listening', () => {
+    const message = ErrorMessages.proxyInitTimeout(30, {
+      transportConnected: true,
+      pendingCommand: 'initialize',
+      directConnect: { host: '10.0.0.5', port: 12345 }
+    });
+
+    expect(message).toContain('10.0.0.5:12345 accepted the connection but never answered the DAP "initialize" request.');
+    expect(message).toContain("so check that it is the debugger's own listener and not another service.");
+  });
+
+  it('does not blame the port once the endpoint has answered "initialize": it does speak DAP', () => {
+    const message = ErrorMessages.proxyInitTimeout(30, { transportConnected: true, pendingCommand: 'attach', directConnect });
+
+    expect(message).toBe(
+      `${BASE} 127.0.0.1:5000 answered the start of the DAP handshake, but the "attach" request never received a response. ` +
+      'Nothing was started for this attach: this is a stall in the debug server listening on that port, not a missing install. ' +
+      'If it recurs, capture a DAP trace (DAP_TRACE=1) of the failing attach.'
+    );
+    expect(message).not.toContain('not another service');
+    expect(message).not.toContain('the adapter started');
+  });
+
+  it('names the endpoint when the handshake began and nothing is pending', () => {
+    const message = ErrorMessages.proxyInitTimeout(30, { transportConnected: true, directConnect });
+
+    expect(message).toBe(
+      `${BASE} Connected to 127.0.0.1:5000 and the DAP handshake began, but initialization stalled before completing. ` +
+      'Nothing was started for this attach: the debug server listening on that port is what stalled.'
+    );
+  });
+
+  it('never tells a direct-connect caller to install an adapter when the connection was never made', () => {
+    const message = ErrorMessages.proxyInitTimeout(30, { transportConnected: false, directConnect });
+
+    expect(message).toBe(
+      `${BASE} No connection to 127.0.0.1:5000 was established. Nothing was started for this attach: ` +
+      `check the host and port, and that ${LISTENER} is listening there and reachable from this machine.`
+    );
+    expect(message).not.toContain('installed and accessible');
+  });
+
+  it('names a plain debug server there when the policy has no phrase for what should be listening', () => {
+    const message = ErrorMessages.proxyInitTimeout(30, {
+      transportConnected: false,
+      directConnect: { host: '10.0.0.5', port: 12345 }
+    });
+
+    expect(message).toBe(
+      `${BASE} No connection to 10.0.0.5:12345 was established. Nothing was started for this attach: ` +
+      'check the host and port, and that the debug server is listening there and reachable from this machine.'
+    );
+  });
+
+  it('leaves every spawned-adapter sentence as it was', () => {
+    expect(ErrorMessages.proxyInitTimeout(30, { transportConnected: true, pendingCommand: 'initialize', adapterPid: 52875 })).toBe(
+      `${BASE} Connected to the debug adapter, but the "initialize" request never received a response. ` +
+      'The adapter process is running (PID 52875). This is an adapter-side protocol stall, not a missing install — ' +
+      'the adapter started and accepted the connection. Retrying usually succeeds; ' +
+      'if it recurs, capture a DAP trace (DAP_TRACE=1) of the failing launch.'
+    );
+    expect(ErrorMessages.proxyInitTimeout(30, { transportConnected: true, adapterPid: 7 })).toBe(
+      `${BASE} Connected to the debug adapter and the DAP handshake began, but initialization stalled before completing. ` +
+      'The adapter process is running (PID 7).'
+    );
+    expect(ErrorMessages.proxyInitTimeout(30, { transportConnected: false, adapterPid: 7 })).toBe(
+      `${BASE} The adapter process spawned (PID 7) but the DAP connection was never established. ` +
+      "Check that the adapter's port is reachable and nothing is blocking loopback TCP connections."
+    );
+    expect(ErrorMessages.proxyInitTimeout(30, { transportConnected: false })).toBe(
+      `${BASE} This may indicate that the debug adapter failed to start or is not properly configured. ` +
+      'Check that the required debug adapter is installed and accessible.'
+    );
+  });
+});
+
+describe('stopWithoutProgramFrame offers the frames only when some are unseen (issue #1141)', () => {
+  const top = { name: 'process.processTimers', file: '<node_internals>/internal/timers', line: 527 };
+  const HINT = 'get_stack_trace with includeInternals: true lists the frames';
+
+  it('ends at the remedy when the answer has shown every frame', () => {
+    const message = ErrorMessages.stopWithoutProgramFrame(0, 1, top);
+    expect(message).toBe(
+      "No program frame is active on thread 0: the only frame is internal/runtime (top: 'process.processTimers' <node_internals>/internal/timers:527). " +
+      'The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint.'
+    );
+    expect(message).not.toContain(HINT);
+  });
+
+  it('points at the full stack when the thread has frames the answer did not show', () => {
+    const message = ErrorMessages.stopWithoutProgramFrame(
+      12952,
+      4,
+      { name: '__tmainCRTStartup', file: '@__tmainCRTStartup', line: 51 },
+      { framesUnseen: true }
+    );
+    expect(message).toBe(
+      "No program frame is active on thread 12952: all 4 frames are internal/runtime (top: '__tmainCRTStartup' @__tmainCRTStartup:51). " +
+      `The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint; ${HINT}.`
+    );
+  });
+
+  it('names no thread when none is known', () => {
+    expect(ErrorMessages.stopWithoutProgramFrame(undefined, 1, top)).toMatch(/^No program frame is active: the only frame is/);
+  });
+});

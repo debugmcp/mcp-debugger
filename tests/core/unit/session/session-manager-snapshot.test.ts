@@ -275,7 +275,8 @@ describe('step answers join the snapshot with changedVariables (issue #983)', ()
 
   /** Deep-stack stub whose variable values and scopes-call count are mutable/observable. */
   function stubSteppable(dependencies: ReturnType<typeof createMockDependencies>) {
-    const state = { x: 1, scopes: 0, autoStopOnNext: false };
+    const state: { x: number; scopes: number; autoStopOnNext: boolean; extra: Array<{ name: string; value: string }> } =
+      { x: 1, scopes: 0, autoStopOnNext: false, extra: [] };
     dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: any) => {
       if (command === 'stackTrace') {
         return {
@@ -301,7 +302,12 @@ describe('step answers join the snapshot with changedVariables (issue #983)', ()
       if (command === 'variables') {
         return {
           success: true,
-          body: { variables: [{ name: 'x', value: String(state.x), type: 'int', variablesReference: 0 }] }
+          body: {
+            variables: [
+              { name: 'x', value: String(state.x), type: 'int', variablesReference: 0 },
+              ...state.extra.map((variable) => ({ ...variable, type: 'int', variablesReference: 0 }))
+            ]
+          }
         };
       }
       if (command === 'next' && state.autoStopOnNext) {
@@ -339,6 +345,30 @@ describe('step answers join the snapshot with changedVariables (issue #983)', ()
     const second = await steppedOnce(sessionManager, dependencies, session.id);
     expect(second.data?.snapshot?.locals).toBeUndefined();
     expect(second.data?.snapshot?.changedVariables).toEqual({ x: { before: '1', after: '2' } });
+  });
+
+  it('a step past a declaration says the variable is new, and a step out of its block says it is gone (issue #1140)', async () => {
+    const { sessionManager, dependencies } = makeManager();
+    const session = await createPausedSession(sessionManager, dependencies);
+    const state = stubSteppable(dependencies);
+
+    await steppedOnce(sessionManager, dependencies, session.id);
+
+    // `int sum = add(x, y);` — sum comes into scope.
+    state.extra = [{ name: 'sum', value: '30' }];
+    const declared = await steppedOnce(sessionManager, dependencies, session.id);
+    expect(declared.data?.snapshot?.changedVariables).toEqual({ sum: { after: '30', new: true } });
+    // No invented value stands in for "it was not there".
+    expect(JSON.stringify(declared.data?.snapshot)).not.toContain('<undefined>');
+
+    // The block ends: sum is no longer among the locals.
+    state.extra = [];
+    const left = await steppedOnce(sessionManager, dependencies, session.id);
+    expect(left.data?.snapshot?.changedVariables).toEqual({ sum: { before: '30', gone: true } });
+
+    // And nothing more to say on the step after that.
+    const quiet = await steppedOnce(sessionManager, dependencies, session.id);
+    expect(quiet.data?.snapshot?.changedVariables).toEqual({});
   });
 
   it('a pending step carries no snapshot', async () => {
