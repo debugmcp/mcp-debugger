@@ -1956,6 +1956,92 @@ describe('DapProxyWorker', () => {
             '(12.6s elapsed, 61 attempts; last error: ECONNREFUSED) [direct connect to 10.0.0.5:12345; no adapter process was started]'
           ]);
         });
+
+        /** The socket-error handler the worker registered on the DAP client. */
+        const socketError = (stubs: ReturnType<typeof makeStubs>) =>
+          (stubs.connectionStub.setupEventHandlers.mock.calls[0][1] as unknown as { onError: (err: Error) => void }).onError;
+        /** An endpoint that answers `initialize` and sends `initialized`: a debug server. */
+        const answersInitialize = async () => {
+          queueMicrotask(() => mockDapClient.emit('initialized'));
+          return {};
+        };
+
+        it('an endpoint that resets the connection before answering initialize gets that same report, once', async () => {
+          // A reset reaches the worker twice: the socket's error event first,
+          // then the pending request's rejection. The parent fails the attach
+          // on the first error it is sent, and that one used to be the bare
+          // "DAP client error: read ECONNRESET" — no endpoint, no word that
+          // nothing was started.
+          const stubs = makeStubs(async () => {
+            socketError(stubs)(new Error('read ECONNRESET'));
+            throw new Error('DAP client disconnected');
+          });
+
+          const errors = await failedAttach(stubs);
+
+          expect(errors).toEqual([
+            'Critical initialization error: 10.0.0.5:12345 never answered the DAP "initialize" request (read ECONNRESET). ' +
+            'Nothing was started for this attach: the server connected to what is already listening on that port, ' +
+            `so check that it is ${LISTENER} and not another service.`
+          ]);
+        });
+
+        it('once initialize was answered, a later failure does not doubt that the endpoint is a debug server', async () => {
+          // rdbg answered `initialize`; the connection then dropped under the attach request.
+          const stubs = makeStubs(answersInitialize);
+          stubs.connectionStub.sendAttachRequest.mockRejectedValue(new Error('DAP client disconnected'));
+
+          const errors = await failedAttach(stubs);
+
+          expect(errors).toEqual([
+            'Critical initialization error: DAP client disconnected [direct connect to 10.0.0.5:12345; no adapter process was started]'
+          ]);
+        });
+
+        it('a reset after initialize was answered names the endpoint, once, without that doubt', async () => {
+          const stubs = makeStubs(answersInitialize);
+          stubs.connectionStub.sendAttachRequest.mockImplementation(async () => {
+            socketError(stubs)(new Error('read ECONNRESET'));
+            throw new Error('DAP client disconnected');
+          });
+
+          const errors = await failedAttach(stubs);
+
+          expect(errors).toEqual([
+            'Critical initialization error: read ECONNRESET [direct connect to 10.0.0.5:12345; no adapter process was started]'
+          ]);
+        });
+
+        it('a socket error on an established direct connection keeps the plain report: it is not an init failure', () => {
+          const stubs = makeStubs(async () => ({}));
+          wireWorker(rubyAttachPayload(), stubs.processStub, stubs.connectionStub, RubyAdapterPolicy);
+          (worker as any).dapClient = mockDapClient;
+          (worker as any).directConnect = { host: '10.0.0.5', port: 12345, listener: LISTENER };
+          (worker as any).setupDapEventHandlers();
+          (worker as any).state = ProxyState.CONNECTED;
+
+          socketError(stubs)(new Error('read ECONNRESET'));
+
+          expect(errorsSent()).toEqual(['DAP client error: read ECONNRESET']);
+        });
+
+        it('a spawned adapter keeps its two reports for a reset during the handshake', async () => {
+          // Not a direct connection: the socket error and the init failure are
+          // reported as they always were.
+          const stubs = makeStubs(async () => {
+            socketError(stubs)(new Error('read ECONNRESET'));
+            throw new Error('DAP client disconnected');
+          });
+          wireWorker(rubyLaunchPayload(), stubs.processStub, stubs.connectionStub, RubyAdapterPolicy);
+          vi.spyOn(worker as unknown as { shutdown: () => Promise<void> }, 'shutdown').mockResolvedValue(undefined);
+
+          await expect((worker as any).startAdapterAndConnect(rubyLaunchPayload())).rejects.toThrow('DAP client disconnected');
+
+          const errors = errorsSent() as string[];
+          expect(errors).toHaveLength(2);
+          expect(errors[0]).toBe('DAP client error: read ECONNRESET');
+          expect(errors[1]).toMatch(/^Critical initialization error: DAP client disconnected \[Adapter command: rdbg /);
+        });
       });
 
       it('a policy without the opt-in still blocks on a missing initialize response', async () => {

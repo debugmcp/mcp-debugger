@@ -949,10 +949,13 @@ export class DapProxyWorker {
       // the adapter's own exit reaches the parent as `adapter_exited`, which
       // fails the launch with a generic "Proxy exited during initialization"
       // and discards the reason sent afterwards — Delve refusing a too-new Go
-      // toolchain read as a bare exit code 0.
-      const report = this.describeInitFailure(payload, error);
-      this.initFailureReported = report;
-      this.sendError(report);
+      // toolchain read as a bare exit code 0. A direct connection whose
+      // socket errored has reported already (describeDapClientError).
+      if (this.initFailureReported === null) {
+        const report = this.describeInitFailure(payload, error);
+        this.initFailureReported = report;
+        this.sendError(report);
+      }
       await this.shutdown();
       throw error;
     }
@@ -963,19 +966,12 @@ export class DapProxyWorker {
    * adapter spawn config (command + args only, NOT env) and its process state.
    */
   private describeInitFailure(payload: ProxyInitPayload, error: unknown): string {
-    const message = error instanceof Error ? error.message : String(error);
     // A direct connection has no adapter command, executable or process to
     // describe: what failed is the endpoint the caller named (issue #1139).
     if (this.directConnect) {
-      const { host, port } = this.directConnect;
-      // The connection was made and `initialize` got no answer in DAP — the
-      // endpoint hung up, or the request died on the wire. A refusal in DAP
-      // (DapResponseError) is an answer: that endpoint is a debug server.
-      if (this.dapClient && !this.initializeAnswered && !(error instanceof DapResponseError)) {
-        return `Critical initialization error: ${ErrorMessages.directConnectInitializeUnanswered(this.directConnect, message)}`;
-      }
-      return `Critical initialization error: ${message} [direct connect to ${host}:${port}; no adapter process was started]`;
+      return this.describeDirectConnectFailure(this.directConnect, error);
     }
+    const message = error instanceof Error ? error.message : String(error);
     const adapterCmd = payload.adapterCommand;
     const spawnInfo = adapterCmd
       ? `Adapter command: ${adapterCmd.command} ${(adapterCmd.args ?? []).join(' ')}`
@@ -984,6 +980,37 @@ export class DapProxyWorker {
     const adapterExitCode = this.adapterProcess?.exitCode;
     const diagnostics = `${spawnInfo} | adapter PID=${adapterPid} exitCode=${adapterExitCode ?? 'n/a'}`;
     return `Critical initialization error: ${message} [${diagnostics}]`;
+  }
+
+  /** A failed direct-connect init, worded by endpoint (issue #1139). */
+  private describeDirectConnectFailure(endpoint: DirectConnectEndpoint, error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error);
+    // The connection was made and `initialize` got no answer in DAP — the
+    // endpoint hung up or reset the connection, or the request died on the
+    // wire. A refusal in DAP (DapResponseError) is an answer: that endpoint
+    // is a debug server.
+    if (this.dapClient && !this.initializeAnswered && !(error instanceof DapResponseError)) {
+      return `Critical initialization error: ${ErrorMessages.directConnectInitializeUnanswered(endpoint, message)}`;
+    }
+    return `Critical initialization error: ${message} [direct connect to ${endpoint.host}:${endpoint.port}; no adapter process was started]`;
+  }
+
+  /**
+   * The report for a socket error on the DAP connection. While a
+   * direct-connect attach is still initializing, that error is the init
+   * failure — the endpoint reset the connection — and it reaches this
+   * handler before the pending request's rejection reaches the init catch.
+   * The parent fails the attach on the first error it is sent, so that one
+   * carries the init-failure report and latches it, and the catch sends
+   * nothing more (issue #1139). Everywhere else the plain report stands.
+   */
+  private describeDapClientError(err: Error): string {
+    if (this.directConnect && this.state === ProxyState.INITIALIZING) {
+      const report = this.describeDirectConnectFailure(this.directConnect, err);
+      this.initFailureReported = report;
+      return report;
+    }
+    return `DAP client error: ${err.message}`;
   }
 
   /**
@@ -1311,7 +1338,7 @@ export class DapProxyWorker {
       },
       onError: (err) => {
         this.logger!.error('[Worker] DAP client error:', err);
-        this.sendError(`DAP client error: ${err.message}`);
+        this.sendError(this.describeDapClientError(err));
       },
       onClose: () => {
         this.logger!.info('[Worker] DAP client connection closed.');
