@@ -117,6 +117,12 @@ describe('assertLineContent', () => {
         expect(afterTheContext(lines, 2, 'total = a + 1  # running sum')).toBe(`${PICK} That expectedContent matches line 3.`);
       });
 
+      it('caps a long list of such lines', () => {
+        const lines = ['x = 0', ...Array.from({ length: 8 }, (_, index) => `step_${index}()  # TODO`)];
+
+        expect(afterTheContext(lines, 1, 'TODO')).toBe(`${PICK} That expectedContent matches lines 2, 3, 4, 5, 6 and 3 more.`);
+      });
+
       it('lists every such line, a comment-only one included', () => {
         const lines = ['x = 1  # TODO', 'y = 2', 'z = 3  # TODO', '# TODO'];
 

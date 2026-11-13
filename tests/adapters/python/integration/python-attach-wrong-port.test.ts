@@ -61,6 +61,52 @@ async function droppingListener(how: 'hangUp' | 'reset'): Promise<{ port: number
   };
 }
 
+/**
+ * A listener that speaks just enough DAP to answer `initialize`, and hangs up
+ * on the request after it: a debug server (or a forwarder to one) that goes
+ * away mid-handshake.
+ */
+async function answersInitializeThenHangsUp(): Promise<{ port: number; received: () => number; close: () => Promise<void> }> {
+  let requests = 0;
+  const sockets = new Set<net.Socket>();
+  const listener = net.createServer((socket) => {
+    sockets.add(socket);
+    let buffer = Buffer.alloc(0);
+    socket.on('data', (chunk: Buffer) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      for (;;) {
+        const headerEnd = buffer.indexOf('\r\n\r\n');
+        const length = headerEnd === -1 ? null : /Content-Length: (\d+)/i.exec(buffer.subarray(0, headerEnd).toString('utf8'));
+        if (headerEnd === -1 || !length || buffer.length < headerEnd + 4 + Number(length[1])) return;
+        const request = JSON.parse(buffer.subarray(headerEnd + 4, headerEnd + 4 + Number(length[1])).toString('utf8'));
+        buffer = buffer.subarray(headerEnd + 4 + Number(length[1]));
+        requests++;
+        if (request.command !== 'initialize') {
+          socket.destroy();
+          return;
+        }
+        const body = Buffer.from(JSON.stringify({
+          seq: 1, type: 'response', request_seq: request.seq, command: 'initialize', success: true,
+          body: { supportsConfigurationDoneRequest: true }
+        }), 'utf8');
+        socket.write(`Content-Length: ${body.length}\r\n\r\n`);
+        socket.write(body);
+      }
+    });
+    socket.on('error', () => undefined);
+    socket.on('close', () => sockets.delete(socket));
+  });
+  await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve));
+  return {
+    port: (listener.address() as net.AddressInfo).port,
+    received: () => requests,
+    close: async () => {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => listener.close(() => resolve()));
+    }
+  };
+}
+
 describe('A Python attach to a port that is not a debug server (issue #1139)', () => {
   let server: StdioClientHandle | undefined;
   let target: Awaited<ReturnType<typeof droppingListener>> | undefined;
@@ -112,5 +158,25 @@ describe('A Python attach to a port that is not a debug server (issue #1139)', (
       )
     );
     expect(answer.message).not.toContain('DAP client error');
+  }, 60_000);
+
+  it('names the endpoint when a debug server answers initialize and then hangs up, without doubting what it is', async () => {
+    // The close reaches the worker before the pending attach request fails,
+    // and the worker's connection-closed status used to reach the parent
+    // first: "Proxy exited during initialization. Code: null, Signal:
+    // undefined", followed by lines of worker stderr.
+    target = await answersInitializeThenHangsUp();
+    server = await startStdioClient({ name: 'attach-dropped-port' });
+    await server.createSession('python', 'attach-dropped-port');
+
+    const answer = await server.call<AttachAnswer>('attach_to_process', { port: target.port });
+
+    expect(answer.success, JSON.stringify(answer)).toBe(false);
+    // initialize, then the attach it hung up on.
+    expect(target.received()).toBe(2);
+    expect(answer.message, JSON.stringify(answer)).toBe(
+      'Failed to attach: Critical initialization error: DAP client disconnected ' +
+      `[direct connect to 127.0.0.1:${target.port}; no adapter process was started]`
+    );
   }, 60_000);
 });

@@ -950,7 +950,7 @@ export class DapProxyWorker {
       // fails the launch with a generic "Proxy exited during initialization"
       // and discards the reason sent afterwards — Delve refusing a too-new Go
       // toolchain read as a bare exit code 0. A direct connection whose
-      // socket errored has reported already (describeDapClientError).
+      // socket died has reported already (reportDirectConnectDrop).
       if (this.initFailureReported === null) {
         const report = this.describeInitFailure(payload, error);
         this.initFailureReported = report;
@@ -995,22 +995,29 @@ export class DapProxyWorker {
     return `Critical initialization error: ${message} [direct connect to ${endpoint.host}:${endpoint.port}; no adapter process was started]`;
   }
 
+  /** A direct-connect attach whose handshake has not completed (issue #1139). */
+  private inDirectConnectHandshake(): boolean {
+    return this.directConnect !== null && this.state === ProxyState.INITIALIZING;
+  }
+
   /**
-   * The report for a socket error on the DAP connection. While a
-   * direct-connect attach is still initializing, that error is the init
-   * failure — the endpoint reset the connection — and it reaches this
-   * handler before the pending request's rejection reaches the init catch.
-   * The parent fails the attach on the first error it is sent, so that one
-   * carries the init-failure report and latches it, and the catch sends
-   * nothing more (issue #1139). Everywhere else the plain report stands.
+   * A direct connection that dies during the handshake is the init failure,
+   * and the socket says so before anything else does: a reset arrives as the
+   * client's `error` event and a hang-up as its `close` event, both ahead of
+   * the pending request's rejection reaching the init catch or the
+   * configuration phase. The parent fails the attach on the first thing it is
+   * sent — and what a close used to send first was the connection-closed
+   * status, read as "Proxy exited during initialization". So the first socket
+   * event sends the init-failure report and latches it; a later event, the
+   * init catch and the configuration phase then send nothing more.
    */
-  private describeDapClientError(err: Error): string {
-    if (this.directConnect && this.state === ProxyState.INITIALIZING) {
-      const report = this.describeDirectConnectFailure(this.directConnect, err);
-      this.initFailureReported = report;
-      return report;
+  private reportDirectConnectDrop(reason: Error): void {
+    if (!this.directConnect || this.initFailureReported !== null) {
+      return;
     }
-    return `DAP client error: ${err.message}`;
+    const report = this.describeDirectConnectFailure(this.directConnect, reason);
+    this.initFailureReported = report;
+    this.sendError(report);
   }
 
   /**
@@ -1338,10 +1345,20 @@ export class DapProxyWorker {
       },
       onError: (err) => {
         this.logger!.error('[Worker] DAP client error:', err);
-        this.sendError(this.describeDapClientError(err));
+        if (this.inDirectConnectHandshake()) {
+          this.reportDirectConnectDrop(err);
+          return;
+        }
+        this.sendError(`DAP client error: ${err.message}`);
       },
       onClose: () => {
         this.logger!.info('[Worker] DAP client connection closed.');
+        // Ahead of the terminal status below: the reason for a failed
+        // direct-connect handshake, in the words the client gives the
+        // requests it rejects on a close.
+        if (this.inDirectConnectHandshake()) {
+          this.reportDirectConnectDrop(new Error('DAP client disconnected'));
+        }
         // Adapters that close the DAP socket at debuggee exit (rdbg) race the
         // exit-time stdio flush exactly like terminated does — the parent
         // reacts to dap_connection_closed by tearing down its listeners, so
@@ -1806,7 +1823,11 @@ export class DapProxyWorker {
             program: this.currentInitPayload?.scriptPath
           })
         : undefined;
-    this.sendError(`Error in DAP sequence: ${message}${explanation ? `. ${explanation}` : ''}`);
+    // A direct connection that dropped under this phase has reported
+    // already, by endpoint (reportDirectConnectDrop).
+    if (this.initFailureReported === null) {
+      this.sendError(`Error in DAP sequence: ${message}${explanation ? `. ${explanation}` : ''}`);
+    }
     await this.shutdown();
   }
 
