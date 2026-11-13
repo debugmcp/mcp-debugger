@@ -307,6 +307,97 @@ describe('inspection tool handlers', () => {
       expect(payload.frame.name).toBe('main');
       expect(payload.scopeName).toBe('Locals');
       expect(payload.message).toBeUndefined();
+      expect(payload).not.toHaveProperty('noProgramFrame');
+      expect(payload).not.toHaveProperty('note');
+    });
+
+    describe('a stack with no program frame (issue #1135)', () => {
+      const TIMERS = { name: 'process.processTimers', file: '<node_internals>/internal/timers', line: 527 };
+      const SENTENCE =
+        "No program frame is active on thread 0: the only frame is internal/runtime (top: 'process.processTimers' <node_internals>/internal/timers:527). " +
+        'The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint.';
+
+      async function localsOf(result: Record<string, unknown>) {
+        ctx.sessionManager.getLocalVariables.mockResolvedValue(result);
+        return JSON.parse((await handleGetLocalVariables(ctx, { sessionId: 'test-session' })).content[0].text);
+      }
+
+      it('keeps the variables, flags the answer and says whose they are', async () => {
+        const payload = await localsOf({
+          variables: [{ name: 'now', value: '4210', type: 'number' }],
+          frame: TIMERS,
+          scopeName: 'Local: processTimers',
+          noProgramFrame: { threadId: 0, frameCount: 1, top: TIMERS }
+        });
+
+        expect(payload.success).toBe(true);
+        expect(payload.variables).toEqual([{ name: 'now', value: '4210', type: 'number' }]);
+        expect(payload.noProgramFrame).toBe(true);
+        expect(payload.note).toBe(`${SENTENCE} The variables shown belong to 'process.processTimers', not to your program.`);
+      });
+
+      it('points at get_stack_trace when the thread has more frames than this answer names', async () => {
+        const crt = { name: '__tmainCRTStartup', file: '@__tmainCRTStartup', line: 51 };
+        const payload = await localsOf({
+          variables: [{ name: '[return value]', value: '0', type: 'int' }],
+          frame: crt,
+          scopeName: 'Local',
+          noProgramFrame: { threadId: 12952, frameCount: 4, top: crt }
+        });
+
+        expect(payload.note).toBe(
+          "No program frame is active on thread 12952: all 4 frames are internal/runtime (top: '__tmainCRTStartup' @__tmainCRTStartup:51). " +
+          'The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint; ' +
+          'get_stack_trace with includeInternals: true lists the frames. ' +
+          "The variables shown belong to '__tmainCRTStartup', not to your program."
+        );
+      });
+
+      it('names the frame the variables came from when the read walked down from the top', async () => {
+        const lower = { name: 'java.lang.Thread.run', file: 'java/lang/Thread.java', line: 1583 };
+        const top = { name: 'jdk.internal.misc.Unsafe.park', file: 'jdk/internal/misc/Unsafe.java', line: 0 };
+        const payload = await localsOf({
+          variables: [{ name: 'target', value: 'Worker@1f', type: 'Runnable' }],
+          frame: lower,
+          scopeName: 'Local',
+          anchorNote: "Top frame 'jdk.internal.misc.Unsafe.park' has no local variables (runtime/stdlib frame); showing frame #2 'java.lang.Thread.run' instead",
+          noProgramFrame: { threadId: 3, frameCount: 5, top }
+        });
+
+        // The walk-down note first, then the verdict; the clause names the frame that answered, not the top.
+        expect(payload.note).toBe(
+          "Top frame 'jdk.internal.misc.Unsafe.park' has no local variables (runtime/stdlib frame); showing frame #2 'java.lang.Thread.run' instead. " +
+          "No program frame is active on thread 3: all 5 frames are internal/runtime (top: 'jdk.internal.misc.Unsafe.park' jdk/internal/misc/Unsafe.java:0). " +
+          'The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint; ' +
+          'get_stack_trace with includeInternals: true lists the frames. ' +
+          "The variables shown belong to 'java.lang.Thread.run', not to your program."
+        );
+      });
+
+      it('claims no variables when the list is empty', async () => {
+        const payload = await localsOf({
+          variables: [],
+          frame: TIMERS,
+          scopeName: 'Local: processTimers',
+          noProgramFrame: { threadId: 0, frameCount: 1, top: TIMERS }
+        });
+
+        expect(payload.noProgramFrame).toBe(true);
+        expect(payload.note).toBe(SENTENCE);
+        expect(payload.message).toBe('The Local: processTimers scope is empty.');
+      });
+
+      it('keeps a resolver note that already ends its sentence as it is', async () => {
+        const payload = await localsOf({
+          variables: [],
+          frame: TIMERS,
+          scopeName: null,
+          anchorNote: 'The stop was reported on thread 4; inspection is anchored on thread 0.',
+          noProgramFrame: { threadId: 0, frameCount: 1, top: TIMERS }
+        });
+
+        expect(payload.note).toBe(`The stop was reported on thread 4; inspection is anchored on thread 0. ${SENTENCE}`);
+      });
     });
 
     it('shows "not paused" message when no frame available', async () => {

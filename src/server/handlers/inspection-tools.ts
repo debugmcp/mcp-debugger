@@ -25,6 +25,18 @@ import {
   type ToolResult
 } from '../tool-result.js';
 
+/**
+ * Two notes as one text: the first is given its full stop when it lacks one
+ * (the locals anchor notes are clauses joined with '; ', a resolver note is a
+ * finished sentence).
+ */
+function joinSentences(first: string | undefined, second: string): string {
+  if (!first) {
+    return second;
+  }
+  return `${/[.!?]$/.test(first) ? first : `${first}.`} ${second}`;
+}
+
 export const getVariablesTool: ToolHandler = async (ctx, args) => {
   const sessionId = args.sessionId!;
   const scope = args.scope!;
@@ -378,6 +390,24 @@ export async function handleGetLocalVariables(ctx: ToolContext, args: { sessionI
     // since `frame` no longer names the top of the stack (issue #468).
     if (result.anchorNote) {
       response.note = result.anchorNote;
+    }
+
+    // No frame of the stack is program code (issue #1135): the variables are
+    // real — the adapter reported them for `frame` — but they are a runtime
+    // frame's, and get_stack_trace on the same stop already says so. The flag
+    // and the sentence are the ones that answer carries; the last clause
+    // names the frame the variables came from, which is not the stack's top
+    // after a walk-down, and is left out when there is nothing shown to name.
+    if (result.noProgramFrame) {
+      const { threadId, frameCount, top } = result.noProgramFrame;
+      response.noProgramFrame = true;
+      const whose = result.variables.length > 0 && result.frame
+        ? ` The variables shown belong to '${result.frame.name}', not to your program.`
+        : '';
+      response.note = joinSentences(
+        result.anchorNote,
+        ErrorMessages.stopWithoutProgramFrame(threadId, frameCount, top, { framesUnseen: frameCount > 1 }) + whose
+      );
     }
 
     // Surface adapter warnings embedded in the scope name — e.g. Delve

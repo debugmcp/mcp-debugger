@@ -16,7 +16,7 @@ import {
 } from './errors/debug-errors.js';
 import { SessionManager, SessionManagerConfig } from './session/session-manager.js';
 import type { CloseSessionOutcome, DebugResult, LaunchResultData, StepResultData, WaitForStopResultData } from './session/session-manager-core.js';
-import { FrameSummary, StackTraceResult } from './session/session-manager-data.js';
+import { LocalVariablesResult, StackTraceResult } from './session/session-manager-data.js';
 import { VariableTruncationSummary } from './session/variable-caps.js';
 import { createProductionDependencies } from './container/dependencies.js';
 import { ContainerConfig } from './container/types.js';
@@ -672,13 +672,7 @@ export class DebugMcpServer implements ToolContext {
     return this.sessionManager.getScopes(sessionId, frameId);
   }
 
-  public async getLocalVariables(sessionId: string, includeSpecial: boolean = false, names?: string[]): Promise<{
-    variables: Variable[];
-    frame: FrameSummary | null;
-    scopeName: string | null;
-    anchorNote?: string;
-    truncation?: VariableTruncationSummary;
-  }> {
+  public async getLocalVariables(sessionId: string, includeSpecial: boolean = false, names?: string[]): Promise<LocalVariablesResult> {
     this.validateSession(sessionId);
     return this.sessionManager.getLocalVariables(sessionId, includeSpecial, names);
   }

@@ -52,10 +52,17 @@ export interface EvaluateResult {
    * frame answered without a second stack request. Present on failure too.
    */
   frame?: FrameSummary;
+  /**
+   * True when the default anchor is a runtime frame because no frame of the
+   * stack is program code (issue #1135); `anchorNote` then carries the
+   * sentence get_stack_trace gives the same stop. Never set for an explicit
+   * frameId: the caller chose the frame.
+   */
+  noProgramFrame?: true;
 }
 
 /** The disclosure fields every return of a default-anchored evaluation carries. */
-type AnchorFields = Pick<EvaluateResult, 'anchorNote' | 'frame'>;
+type AnchorFields = Pick<EvaluateResult, 'anchorNote' | 'frame' | 'noProgramFrame'>;
 
 /**
  * The "variable name" an evaluate expression stands for, for name-based
@@ -160,12 +167,23 @@ export class ExpressionEvaluator {
           anchor.pausedFrame && !anchor.pausedFrame.kept
             ? ` Pass frameId: ${anchor.pausedFrame.frame.id} to evaluate there.`
             : '';
-        const anchorNote = [anchor.note, anchor.pausedFrameNote && `${anchor.pausedFrameNote}${pausedAdvice}`]
+        // No frame of the stack is program code (issue #1135): the expression
+        // runs in a runtime frame, and the answer says so in the sentence the
+        // stack and the stop answers use for the same stop.
+        const top = anchor.frames[0];
+        const outsideProgram = anchor.noProgramFrame && top
+          ? `${ErrorMessages.stopWithoutProgramFrame(anchor.threadId, anchor.totalFrameCount, top, {
+              framesUnseen: anchor.totalFrameCount > 1
+            })} The expression was evaluated in that frame.`
+          : undefined;
+        const anchorNote = [anchor.note, anchor.pausedFrameNote && `${anchor.pausedFrameNote}${pausedAdvice}`, outsideProgram]
           .filter((part): part is string => !!part)
           .join(' ');
-        anchorFields = anchorNote ? { anchorNote } : {};
-        if (anchor.frames.length > 0) {
-          const top = anchor.frames[0];
+        anchorFields = {
+          ...(anchorNote ? { anchorNote } : {}),
+          ...(outsideProgram ? { noProgramFrame: true as const } : {})
+        };
+        if (top) {
           frameId = top.id;
           anchorFields = { ...anchorFields, frame: frameSummary(top) };
           this.ctx.logger.info(

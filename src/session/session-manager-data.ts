@@ -44,7 +44,38 @@ export interface LocalVariablesResult {
    * Both notes may apply; they are joined with '; '.
    */
   anchorNote?: string;
+  /**
+   * Present when no frame of the resolved stack is program code (issue
+   * #1135): the resolver's own verdict (`StackTraceResult.noProgramFrame`),
+   * with what the sentence about it needs — the thread, how many frames it
+   * reported, and its top frame. The variables are still the ones the
+   * adapter reported for `frame`; this says whose frame that is.
+   */
+  noProgramFrame?: NoProgramFrameVerdict;
   truncation?: VariableTruncationSummary;
+}
+
+/** The facts behind `ErrorMessages.stopWithoutProgramFrame` for a resolved stack. */
+export interface NoProgramFrameVerdict {
+  threadId?: number;
+  frameCount: number;
+  top: FrameSummary;
+}
+
+/**
+ * The resolver's "no program frame" verdict as the inspection answers carry
+ * it, or nothing when the stack reaches the program (or has no frame at all).
+ */
+export function noProgramFrameVerdict(stackResult: StackTraceResult): NoProgramFrameVerdict | undefined {
+  const top = stackResult.frames[0];
+  if (!stackResult.noProgramFrame || !top) {
+    return undefined;
+  }
+  return {
+    ...(typeof stackResult.threadId === 'number' ? { threadId: stackResult.threadId } : {}),
+    frameCount: stackResult.totalFrameCount,
+    top: frameSummary(top)
+  };
 }
 
 /**
@@ -597,11 +628,16 @@ export abstract class SessionManagerData extends SessionManagerCore {
         anchorNotes.push(scopeNote);
       }
 
+      // No frame of this stack is program code (issue #1135): the variables
+      // are a runtime frame's, and the answer must be able to say so.
+      const noProgramFrame = noProgramFrameVerdict(stackResult);
+
       return {
         variables: cappedLocals.variables,
         frame: frameSummary(anchorFrame),
         scopeName,
         ...(anchorNotes.length > 0 ? { anchorNote: anchorNotes.join('; ') } : {}),
+        ...(noProgramFrame ? { noProgramFrame } : {}),
         ...(truncation ? { truncation } : {})
       };
       

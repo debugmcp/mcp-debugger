@@ -1173,7 +1173,23 @@ Gets local variables for the session's shared inspection anchor. It walks down f
 
 **Size guards:** same caps and `truncation` advisory as [get_variables](#get_variables); additionally, the multi-frame scope fan-out stops issuing DAP requests once the per-call variable budget is spent (`truncation.scopesSkipped` reports scopes never fetched). Top-frame scopes are fetched first, so the locals that matter are unaffected. The `truncation` counts describe only the returned payload — values cut while fetching fan-out scopes the policy then discarded (e.g. Global/Closure) are not reported (issue #438).
 
-If the originally stopped thread has no frames, this tool uses the same user-frame-preferring adopted anchor as `get_stack_trace`. The response's `anchorNote` always names an automatic thread or lower-frame switch.
+If the originally stopped thread has no frames, this tool uses the same user-frame-preferring adopted anchor as `get_stack_trace`. The response's `note` always names an automatic thread or lower-frame switch.
+
+**When no frame is program code** (issue #1135) — a pause on an idle Node server, which lands in the timer loop; a `step_out` of `main`, which lands in the C runtime — the answer still carries the variables the adapter reported for `frame`, and says whose they are: `noProgramFrame: true`, and a `note` with the sentence `get_stack_trace` gives the same stop plus one clause naming the frame.
+
+```json
+{
+  "success": true,
+  "variables": [ { "name": "now", "value": "4210", "type": "number", "variablesReference": 0, "expandable": false } ],
+  "count": 1,
+  "frame": { "name": "process.processTimers", "file": "<node_internals>/internal/timers", "line": 527 },
+  "scopeName": "Local: processTimers",
+  "noProgramFrame": true,
+  "note": "No program frame is active on thread 0: the only frame is internal/runtime (top: 'process.processTimers' <node_internals>/internal/timers:527). The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint. The variables shown belong to 'process.processTimers', not to your program."
+}
+```
+
+The clause is left out when the list is empty. The [stop snapshot](#the-stop-snapshot) of such a stop carries no `locals` at all: it is orientation, and a runtime frame's variables are not; this tool is the explicit read.
 
 **Example - Python:**
 ```json
@@ -1289,6 +1305,8 @@ Evaluates an expression in the context of the current debug session.
 ```
 
 `frame` is present when `frameId` was omitted and names the frame the expression ran in (the same shape `get_local_variables` reports).
+
+When `frameId` was omitted and no frame of the stack is program code (issue #1135), the answer also carries `noProgramFrame: true`, and `anchorNote` ends with the sentence `get_stack_trace` gives the same stop and `The expression was evaluated in that frame.` — the expression ran in a runtime frame (Node's timer loop, the C runtime's start-up), where your program's names do not resolve. An explicit `frameId` is the caller's choice and adds nothing.
 
 **Example - Simple Variable:**
 ```json
@@ -1572,7 +1590,7 @@ When the requested pause has not landed by the time the tool answers (an idle No
 
 **Notes:**
 - `state` is `"paused"` only once a stopped event has actually been observed; otherwise the attach reports `"running"`. When a requested post-attach pause is accepted but its stopped event has not arrived within the bounded wait, the response is successful with `state: "running"` and `pending: true` (at the top level and in `data`) and the `message` names the pending pause; the late stopped event is the only transition to `paused` — [`wait_for_stop`](#wait_for_stop) blocks until it arrives — and every paused session has a `lastStop`.
-- An idle Node server may instead answer `paused` at once: js-debug lands the pause on a sourceless `<anonymous>` frame between event-loop dispatches. The attach answer then carries (at the top level and under `data`) `note: "No program frame is active on thread 0: the only frame is internal/runtime (top: '<anonymous>' <unknown_source>:1). The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint; …"`, `get_stack_trace` shows that one frame with `noProgramFrame: true` and the same note, and `get_local_variables` is empty (issue #900). Either way, attach to a live server you still need to use with `stopOnEntry: false`.
+- An idle Node server may instead answer `paused` at once: js-debug lands the pause on a sourceless `<anonymous>` frame between event-loop dispatches. The attach answer then carries (at the top level and under `data`) `note: "No program frame is active on thread 0: the only frame is internal/runtime (top: '<anonymous>' <unknown_source>:1). The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint."`, `get_stack_trace` shows that one frame with `noProgramFrame: true` and the same note, and `get_local_variables` is empty with the same flag and note (issues #900, #1135). Either way, attach to a live server you still need to use with `stopOnEntry: false`.
 - A `paused` attach answer reads where its stop landed through the same resolver read as `get_stack_trace` (issue #904): one `stackTrace` round trip, and on a thread whose stack has not materialised yet (a .NET post-attach pause) the bounded readiness wait `get_stack_trace` used to pay, now on the attach's own clock. On Windows, where CodeLLDB reported the attach stop on the injected break-in thread and the attach anchored on the program's thread instead, the answer's `note` says `The stop was reported on thread X; inspection is anchored on thread Y.`
 - The initial stop of an attach is reported as `lastStop.reason: "pause"` (`stopReason: "pause"` in `get_stack_trace`) by every adapter, whether the debugger paused the target on request or, as CodeLLDB does, stopped it itself. On Windows, CodeLLDB reports that stop as the `DebugBreakProcess` break-in — an `0x80000003` exception on a helper thread — so the adapter's own words stay beside the pause as `lastStop.rawReason: "exception"` and `description: "Exception 0x80000003 encountered at address …"` (issue #817). Only the first stop of an attach that did not pass `stopOnEntry: false` is read this way: a break-in met later, or first by an attach that opted out of the initial stop, is a real `__debugbreak()` and keeps `reason: "exception"`.
 - When `processId` was used, the message reads `Attached to process PID <pid>` instead.
