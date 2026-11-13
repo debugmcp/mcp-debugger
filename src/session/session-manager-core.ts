@@ -171,8 +171,9 @@ export interface SnapshotException {
  *
  * A flag is only set when it is known. The locals a snapshot shows are
  * capped, so a name missing from a list that was cut may simply not have
- * fitted: a variable absent from a cut previous list is `{ after }` with no
- * `new`, and one absent from a cut current list is not listed at all.
+ * fitted, and a failed scope read also makes a list incomplete. A variable
+ * absent from an incomplete previous list is `{ after }` with no
+ * `new`, and one absent from an incomplete current list is not listed at all.
  */
 export interface ChangedVariable {
   /** The value last shown. Absent for a variable that was not among the locals last shown. */

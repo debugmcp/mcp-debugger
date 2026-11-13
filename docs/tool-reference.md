@@ -437,9 +437,10 @@ crashing state costs zero extra tool calls:
   (`DEBUG_MCP_SNAPSHOT_MAX_LOCALS` / `DEBUG_MCP_SNAPSHOT_MAX_VALUE_CHARS`); `truncation` says what
   was cut. The read is bounded (~2 s): if it expires or fails inside the composer, the answer ships
   without `locals` and `note` says so. A read that comes back empty is shown as no locals — and when
-  unprobed deeper frames exist (the snapshot probes the top 3), `note` says that too; an adapter
-  error the pipeline itself absorbs looks the same as a locals-free frame, and `get_local_variables`
-  on the same stop is the deeper read. The snapshot is orientation, not navigation —
+  unprobed deeper frames exist (the snapshot probes the top 3), `note` says that too; a
+  scopes or variables request that fails is noted as an incomplete locals list, and `get_local_variables`
+  on the same stop can retry the read.
+  The snapshot is orientation, not navigation —
   `get_local_variables` / `get_variables` remain the way to expand structures or fetch everything.
 - **`changedVariables`** replaces `locals` on a repeated stop in the same frame (issue #983) —
   stepping through a function, or a `continue_execution` → `wait_for_stop` loop over one
@@ -453,7 +454,9 @@ crashing state costs zero extra tool calls:
   locals a snapshot shows are capped (see `locals` above), so a name missing from a list that was
   cut may only not have fitted: a variable absent from a previous list that was cut is
   `{ "after": "30" }` with no `new`, and one absent from a current list that was cut is not listed
-  at all (`truncation` says when a list was cut). An adapter's own return-value entry — js-debug's
+  at all (`truncation` says when a list was cut). A failed scopes or variables request also makes the list
+  incomplete (`note` explains it): missing variables are not called `gone`, and variables that
+  reappear after the failed read are not called `new`. An adapter's own return-value entry — js-debug's
   `Return value` at a function's return point, debugpy's `(return) fn` after stepping over a call —
   is a local like any other here and appears as `new`. Frame identity is the locals anchor's name + file +
   visible stack depth: any mismatch (a different function, a recursion depth change) re-emits

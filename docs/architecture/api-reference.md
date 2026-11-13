@@ -393,8 +393,10 @@ Closes the mirror endpoint via the `mirrorUnexpose` pseudo-command and disconnec
 #### `listThreads(sessionId: string): Promise<Array<{ id: number; name: string }>>`
 Lists all threads in the debug session.
 
-#### `getLocalVariables(sessionId: string, includeSpecial?: boolean, names?: string[]): Promise<{ variables: Variable[]; frame: { name: string; file: string; line: number } | null; scopeName: string | null; anchorNote?: string; noProgramFrame?: NoProgramFrameVerdict; truncation?: VariableTruncationSummary }>`
+#### `getLocalVariables(sessionId: string, includeSpecial?: boolean, names?: string[]): Promise<{ variables: Variable[]; frame: { name: string; file: string; line: number } | null; scopeName: string | null; anchorNote?: string; noProgramFrame?: NoProgramFrameVerdict; incomplete?: true; truncation?: VariableTruncationSummary }>`
 Orchestrates stack trace → scopes → variables, then delegates to the language adapter's policy to extract just the locals. If `includeSpecial` is false (default), internal/special variables are filtered out; `names` is an optional exact-match, case-sensitive filter applied to the extracted locals. The return type is the exported `LocalVariablesResult` (issue #982 named it; also what the protected `extractLocalsFromResolved` — the same pipeline behind an already-resolved stack, which the stop snapshot uses — returns). `anchorNote` explains any departure from "the top frame's local scope" (a lower frame was anchored, and/or a sibling scope supplied the variables); `noProgramFrame` (`{ threadId?, frameCount, top }`, issue #1135) is the resolver's verdict that no frame of the stack is program code — the variables are then a runtime frame's, and the tool answer says so; `truncation` appears when the size guards cut the response.
+
+`incomplete: true` records a failed scopes or variables request, separately from caps; `anchorNote` explains the partial read. The snapshot uses this internal field to avoid marking unread variables `gone` or recovered variables `new`.
 
 ### Session Management
 

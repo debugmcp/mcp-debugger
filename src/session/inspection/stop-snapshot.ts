@@ -238,7 +238,9 @@ export async function composeStopSnapshot(
           // Whether the list about to be shown is every local the frame has
           // (issue #1140). A shortened value still names its variable, so
           // cuts do not count; an omitted variable or an unread scope does.
-          const complete = omitted === 0 && scopesUnread === 0;
+          // A failed scope request is unread too, even when another scope
+          // supplied enough locals to return a non-empty answer.
+          const complete = omitted === 0 && scopesUnread === 0 && !raced.incomplete;
           if (cappedLocals.variables.length === 0 && stackResult.frames.length > SNAPSHOT_FRAMES) {
             // The capped probe may simply not have reached the frames that
             // have locals; silence here would be indistinguishable from
