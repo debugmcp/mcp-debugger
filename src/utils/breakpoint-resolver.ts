@@ -83,14 +83,75 @@ function stripStatementTerminator(trimmedLine: string): string {
 }
 
 /**
- * Check that `line` contains the expected content. Accepted, in order:
- * exact trimmed-line equality, then exact equality against the
- * comment-stripped actual line (the expectation is the line's entire code,
- * issue #440), then the trimmed expectation as a substring of the actual
- * line, then as a substring of the comment-stripped actual line — so
- * trailing comments and partial-line anchors both work.
- * On mismatch the message shows expected vs actual plus surrounding context
- * so the agent can pick the correct line without another read.
+ * How `expectedContent` matches one source line, or null when it does not.
+ * Accepted, in order: exact trimmed-line equality, then exact equality
+ * against the comment-stripped line (the expectation is the line's entire
+ * code, issue #440), then the same without the line's statement terminator
+ * (issue #1038), then the trimmed expectation as a substring of the line,
+ * then as a substring of the comment-stripped line — so trailing comments
+ * and partial-line anchors both work.
+ *
+ * The one place these rules live: `assertLineContent` reads it for the line
+ * the caller named, and its mismatch message reads it for every other line
+ * (issue #1142), so what the message says about the file is this check's
+ * own verdict.
+ */
+function matchLineContent(rawLine: string, expectedContent: string): ContentMatchQuality | null {
+  const expected = expectedContent.trim();
+  const actual = rawLine.trim();
+  // Exact trimmed match, then comment-stripped-exact (whole code of a
+  // commented line, #440), then substring of the actual line. Then retry
+  // substring with trailing comments stripped from BOTH sides: stripping
+  // only the actual line would be redundant (a stripped prefix is always a
+  // substring of the full line) — the strip earns its keep when the
+  // EXPECTATION carries a stale trailing comment the file no longer has.
+  // Every relaxed pass is labeled so callers can warn (issue #379): the
+  // substring clause has no distinctiveness floor, and the naive strip
+  // collapses lines that differ only past a '//' or '#' — even inside
+  // string literals.
+  if (actual === expected) {
+    return 'exact';
+  }
+  // Whole-code match on a line that merely carries a trailing comment
+  // (issue #440): exact-equivalent, no warning. The expectation-side guard
+  // (strip must be a no-op on the expectation) is load-bearing — without it
+  // the naive strip would collapse lines that differ only inside a string
+  // literal ("http://a" vs "http://b") into a clean match.
+  if (
+    stripTrailingComment(expectedContent).trim() === expected &&
+    stripTrailingComment(rawLine).trim() === expected
+  ) {
+    return 'comment-stripped-exact';
+  }
+  // The whole statement without the line's terminator (issue #1038): a COBOL
+  // period, a C or JS semicolon — the one character an agent quoting a
+  // statement drops. Exact-equivalent, on the line as it is or past its
+  // trailing comment (the same expectation-side guard as above).
+  if (
+    stripStatementTerminator(actual) === expected ||
+    (stripTrailingComment(expectedContent).trim() === expected &&
+      stripStatementTerminator(stripTrailingComment(rawLine).trim()) === expected)
+  ) {
+    return 'terminator-stripped-exact';
+  }
+  if (actual.includes(expected)) {
+    return 'substring';
+  }
+  const strippedExpected = stripTrailingComment(expectedContent).trim();
+  if (
+    strippedExpected !== '' &&
+    stripTrailingComment(rawLine).trim().includes(strippedExpected)
+  ) {
+    return 'comment-stripped';
+  }
+  return null;
+}
+
+/**
+ * Check that `line` contains the expected content, by the rules of
+ * `matchLineContent`. On mismatch the message shows expected vs actual plus
+ * surrounding context so the agent can pick the correct line without another
+ * read.
  */
 export function assertLineContent(
   lines: string[],
@@ -121,50 +182,9 @@ export function assertLineContent(
 
   const expected = expectedContent.trim();
   const actual = lines[line - 1].trim();
-  // Exact trimmed match, then comment-stripped-exact (whole code of a
-  // commented line, #440), then substring of the actual line. Then retry
-  // substring with trailing comments stripped from BOTH sides: stripping
-  // only the actual line would be redundant (a stripped prefix is always a
-  // substring of the full line) — the strip earns its keep when the
-  // EXPECTATION carries a stale trailing comment the file no longer has.
-  // Every relaxed pass is labeled so callers can warn (issue #379): the
-  // substring clause has no distinctiveness floor, and the naive strip
-  // collapses lines that differ only past a '//' or '#' — even inside
-  // string literals.
-  if (actual === expected) {
-    return { ok: true, matchQuality: 'exact', actual };
-  }
-  // Whole-code match on a line that merely carries a trailing comment
-  // (issue #440): exact-equivalent, no warning. The expectation-side guard
-  // (strip must be a no-op on the expectation) is load-bearing — without it
-  // the naive strip would collapse lines that differ only inside a string
-  // literal ("http://a" vs "http://b") into a clean match.
-  if (
-    stripTrailingComment(expectedContent).trim() === expected &&
-    stripTrailingComment(lines[line - 1]).trim() === expected
-  ) {
-    return { ok: true, matchQuality: 'comment-stripped-exact', actual };
-  }
-  // The whole statement without the line's terminator (issue #1038): a COBOL
-  // period, a C or JS semicolon — the one character an agent quoting a
-  // statement drops. Exact-equivalent, on the line as it is or past its
-  // trailing comment (the same expectation-side guard as above).
-  if (
-    stripStatementTerminator(actual) === expected ||
-    (stripTrailingComment(expectedContent).trim() === expected &&
-      stripStatementTerminator(stripTrailingComment(lines[line - 1]).trim()) === expected)
-  ) {
-    return { ok: true, matchQuality: 'terminator-stripped-exact', actual };
-  }
-  if (actual.includes(expected)) {
-    return { ok: true, matchQuality: 'substring', actual };
-  }
-  const strippedExpected = stripTrailingComment(expectedContent).trim();
-  if (
-    strippedExpected !== '' &&
-    stripTrailingComment(lines[line - 1]).trim().includes(strippedExpected)
-  ) {
-    return { ok: true, matchQuality: 'comment-stripped', actual };
+  const matchQuality = matchLineContent(lines[line - 1], expectedContent);
+  if (matchQuality) {
+    return { ok: true, matchQuality, actual };
   }
 
   let message =
@@ -174,7 +194,7 @@ export function assertLineContent(
     `Context:\n${formatContext(lines, line)}\n` +
     `The file may have changed since you last read it. Pick the correct line from the context above.`;
   if (options?.statementHint) {
-    message += describeStatementAlternative(lines, line, expected, filePath);
+    message += describeWhereItMatches(lines, line, expectedContent, filePath);
   }
   return { ok: false, actual, message };
 }
@@ -190,42 +210,60 @@ function listLines(matches: number[]): string {
 }
 
 /**
- * What an expectedContent mismatch says about addressing by content instead
+ * What an expectedContent mismatch says about where the expected text is
  * (issue #1142). The mismatched text used to be offered as a `statement`
  * whatever it was, so an expectation that is nowhere in the file earned a
- * hint whose own outcome is "statement … not found". The answer now comes
- * from `resolveStatement` itself — the function `set_breakpoint {statement}`
- * runs — so the hint and the resolver cannot disagree:
+ * hint whose own outcome is "statement … not found". Each claim now comes
+ * from the function that owns it, so the message and that function cannot
+ * disagree:
  *
- * - on one line: the hint names it;
- * - on several: the hint adds `nearLine` (the line the caller asked for) and
- *   says which lines, and which one that picks;
- * - on none: no hint, and the message says the text matches no line;
- * - not a statement anchor at all (a comment, a blank, text spanning lines):
- *   nothing — the resolver would refuse it for what it is.
+ * - `resolveStatement` — what `set_breakpoint {statement}` runs — finds the
+ *   text on one line: the hint offers the statement and names the line;
+ * - it finds it on several: the hint adds `nearLine` (the line the caller
+ *   asked for) and says which lines, and which one that picks;
+ * - it does not (the text is absent, or it is only where the resolver does
+ *   not look: a comment line, or past a `//` or `#`): no statement is
+ *   offered, and the message names the lines this same expectedContent check
+ *   passes on (`matchLineContent`), or says that it passes on none;
+ * - text spanning lines: nothing — no single line can match it.
  */
-function describeStatementAlternative(
+function describeWhereItMatches(
   lines: string[],
   line: number,
-  expected: string,
+  expectedContent: string,
   filePath: string
 ): string {
-  if (expected.includes('\n') || isCommentOrBlank(expected)) {
+  const expected = expectedContent.trim();
+  if (expected.includes('\n')) {
     return '';
   }
-  const resolution = resolveStatement(lines, expected, filePath, line);
-  if (!resolution.ok) {
-    // With nearLine given the resolver cannot answer "ambiguous": this is
-    // its "not found".
-    return ' That text matches no line of the file, so it cannot be addressed by content (statement) either.';
+  // A comment or a blank is not a statement anchor: the resolver would
+  // refuse it for what it is.
+  if (!isCommentOrBlank(expected)) {
+    // With nearLine given the resolver cannot answer "ambiguous": its only
+    // refusal here is "not found".
+    const resolution = resolveStatement(lines, expected, filePath, line);
+    if (resolution.ok && resolution.candidates) {
+      return (
+        ` Or address by content: set_breakpoint {statement: "${expected}", nearLine: ${line}} — ` +
+        `that text is on lines ${listLines(resolution.candidates)}; nearLine picks the closest (line ${resolution.line}).`
+      );
+    }
+    if (resolution.ok) {
+      return ` Or address by content: set_breakpoint {statement: "${expected}"} — that text is on line ${resolution.line}.`;
+    }
   }
-  if (resolution.candidates) {
-    return (
-      ` Or address by content: set_breakpoint {statement: "${expected}", nearLine: ${line}} — ` +
-      `that text is on lines ${listLines(resolution.candidates)}; nearLine picks the closest (line ${resolution.line}).`
-    );
+  // The line the caller named is not among them: it just failed this check.
+  const passing: number[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (matchLineContent(lines[i], expectedContent) !== null) {
+      passing.push(i + 1);
+    }
   }
-  return ` Or address by content: set_breakpoint {statement: "${expected}"} — that text is on line ${resolution.line}.`;
+  if (passing.length === 0) {
+    return ' That expectedContent matches no line of the file.';
+  }
+  return ` That expectedContent matches line${passing.length === 1 ? '' : 's'} ${listLines(passing)}.`;
 }
 
 /**

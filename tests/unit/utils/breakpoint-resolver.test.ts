@@ -72,14 +72,56 @@ describe('assertLineContent', () => {
       return result.ok ? '' : result.message;
     };
 
-    it('offers no statement for text that is nowhere in the file, and says so', () => {
+    it('offers no statement for text that is nowhere in the file, and says no line matches', () => {
       const message = hintOf(5, 'THIS TEXT IS WRONG');
 
       // Following the old hint answered "statement ... not found".
       expect(message).not.toContain('statement: "THIS TEXT IS WRONG"');
       expect(message).not.toContain('Or address by content');
-      expect(message).toContain('Pick the correct line from the context above.');
-      expect(message).toMatch(/That text matches no line of the file, so it cannot be addressed by content \(statement\) either\.$/);
+      expect(message).toMatch(/Pick the correct line from the context above\. That expectedContent matches no line of the file\.$/);
+    });
+
+    describe('with no statement form to offer, it says where the same expectedContent would pass', () => {
+      // The statement resolver ignores comment lines and whatever follows a
+      // `//` or `#`; expectedContent does not. "Matches no line" was said for
+      // the resolver's reasons while the text sat in plain sight a line away.
+      const afterTheContext = (lines: string[], line: number, expected: string): string => {
+        const result = assertLineContent(lines, line, expected, FILE, { statementHint: true });
+        if (result.ok) throw new Error('expected a mismatch');
+        expect(result.message).not.toContain('Or address by content');
+        return result.message.slice(result.message.lastIndexOf('Pick the correct line'));
+      };
+      const PICK = 'Pick the correct line from the context above.';
+
+      it('text that is only in a trailing comment', () => {
+        const lines = ['def main():', '    a = 1', '    total = a + 1  # BUG HERE', '    return total'];
+
+        expect(afterTheContext(lines, 2, 'BUG HERE')).toBe(`${PICK} That expectedContent matches line 3.`);
+      });
+
+      it('part of a line that carries // inside a string', () => {
+        const lines = ['async function load() {', '  const base = 1;', '  return fetch("http://example.test/api/items");', '}'];
+
+        expect(afterTheContext(lines, 2, 'example.test/api/items')).toBe(`${PICK} That expectedContent matches line 3.`);
+      });
+
+      it('part of a line that carries # inside a string', () => {
+        const lines = ['def label():', '    n = 1', '    return "issue #42 is open"'];
+
+        expect(afterTheContext(lines, 2, '42 is open')).toBe(`${PICK} That expectedContent matches line 3.`);
+      });
+
+      it('an expectation that carries a trailing comment the file no longer has', () => {
+        const lines = ['def main():', '    a = 1', '    total = a + 1', '    return total'];
+
+        expect(afterTheContext(lines, 2, 'total = a + 1  # running sum')).toBe(`${PICK} That expectedContent matches line 3.`);
+      });
+
+      it('lists every such line, a comment-only one included', () => {
+        const lines = ['x = 1  # TODO', 'y = 2', 'z = 3  # TODO', '# TODO'];
+
+        expect(afterTheContext(lines, 2, 'TODO')).toBe(`${PICK} That expectedContent matches lines 1, 3 and 4.`);
+      });
     });
 
     it('names the line when the text is on exactly one', () => {
@@ -96,11 +138,12 @@ describe('assertLineContent', () => {
       );
     });
 
-    it('offers nothing for an expectation that is a comment: a comment is not a statement anchor', () => {
+    it('offers no statement for an expectation that is a comment, and names the line the comment is on', () => {
       const message = hintOf(5, '# a, b = b, a');
 
+      // A comment is not a statement anchor; the line it sits on still matches.
       expect(message).not.toContain('statement');
-      expect(message).toMatch(/Pick the correct line from the context above\.$/);
+      expect(message).toMatch(/Pick the correct line from the context above\. That expectedContent matches line 7\.$/);
     });
 
     it('offers nothing for an expectation that spans lines', () => {
@@ -123,9 +166,24 @@ describe('assertLineContent', () => {
       expect(result.message).toContain('that text is on lines 2, 3, 4, 5, 6 and 7 more; nearLine picks the closest (line 2).');
     });
 
+    it('lists exactly as many matches as the cap in full', () => {
+      const five = ['x = 0', ...Array.from({ length: 5 }, () => 'tick()')];
+      const result = assertLineContent(five, 1, 'tick()', FILE, { statementHint: true });
+      if (result.ok) throw new Error('expected a mismatch');
+
+      expect(result.message).toContain('that text is on lines 2, 3, 4, 5 and 6; nearLine picks the closest (line 2).');
+    });
+
     it('every hint it gives resolves: fed back to resolveStatement, it lands on the line named', () => {
-      const expectations = ['a, b = b, a', 'print(a, b)', 'a = 1', 'main()', 'b = 2', 'print', 'THIS TEXT IS WRONG', '# a, b = b, a', 'def'];
+      const expectations = [
+        'a, b = b, a', 'print(a, b)', 'a = 1', 'main()', 'b = 2', 'print', 'THIS TEXT IS WRONG', '# a, b = b, a', 'def',
+        // Seen by expectedContent and not by the statement resolver: only in
+        // a trailing comment, and carrying a comment the file does not have.
+        'the swap', 'a, b = b, a  # stale note', 'b = 2  # stale note'
+      ];
       let hintsChecked = 0;
+      let matchListsChecked = 0;
+      let noLineChecked = 0;
       for (let line = 1; line <= SWAP.length; line++) {
         for (const expected of expectations) {
           const result = assertLineContent(SWAP, line, expected, FILE, { statementHint: true });
@@ -135,6 +193,21 @@ describe('assertLineContent', () => {
             // No hint: then the resolver must not find the text either.
             const found = resolveStatement(SWAP, expected, FILE, line);
             expect(found.ok, `no hint at line ${line} for ${JSON.stringify(expected)}, yet it resolves`).toBe(false);
+            // And what the message says instead is the check's own verdict on
+            // every line: the lines it names pass, and "no line" means none does.
+            const passing = SWAP.map((_, index) => index + 1).filter(
+              (candidate) => assertLineContent(SWAP, candidate, expected, FILE).ok
+            );
+            const said = / That expectedContent matches (no line of the file|lines? [\d, and]+)\.$/.exec(result.message)?.[1];
+            expect(said, result.message).toBeDefined();
+            if (said === 'no line of the file') {
+              expect(passing, result.message).toEqual([]);
+              noLineChecked++;
+            } else {
+              expect((said ?? '').match(/\d+/g)?.map(Number), result.message).toEqual(passing);
+              expect(passing).not.toContain(line);
+              matchListsChecked++;
+            }
             continue;
           }
           hintsChecked++;
@@ -150,6 +223,8 @@ describe('assertLineContent', () => {
         }
       }
       expect(hintsChecked).toBeGreaterThan(10);
+      expect(matchListsChecked).toBeGreaterThan(10);
+      expect(noLineChecked).toBeGreaterThan(5);
     });
   });
 

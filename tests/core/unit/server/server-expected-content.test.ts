@@ -226,7 +226,7 @@ describe('set_breakpoint expectedContent (#271)', () => {
 
       expect(refusal).toContain('Pick the correct line from the context above.');
       expect(refusal).not.toContain('statement: "THIS TEXT IS WRONG"');
-      expect(refusal).toContain('That text matches no line of the file');
+      expect(refusal).toMatch(/ That expectedContent matches no line of the file\.$/);
 
       // What the old hint led to.
       await expect(callSetBreakpoint({ statement: 'THIS TEXT IS WRONG' })).rejects.toThrow(/not found/);
