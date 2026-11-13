@@ -441,10 +441,19 @@ crashing state costs zero extra tool calls:
   `get_local_variables` / `get_variables` remain the way to expand structures or fetch everything.
 - **`changedVariables`** replaces `locals` on a repeated stop in the same frame (issue #983) —
   stepping through a function, or a `continue_execution` → `wait_for_stop` loop over one
-  breakpoint: only what changed since the locals were last shown, as
-  `{ "name": { "before": "100.0", "after": "125.0" } }`. A variable new in scope appears with
-  `before: "<undefined>"`; one that left scope simply drops out; an **empty `{}` means nothing
-  visible changed** — that is information. Frame identity is the locals anchor's name + file +
+  breakpoint: only what differs from the locals last shown, one entry per variable (issue #1140):
+  - a changed value — `{ "before": "100.0", "after": "125.0" }`;
+  - a variable that appeared — `{ "after": "30", "new": true }`, with no `before`;
+  - a variable that left scope — `{ "before": "3", "gone": true }`, with no `after`.
+
+  No placeholder ever stands in for a missing side: any text can be a value. An **empty `{}` means
+  nothing visible changed** — that is information. The flags are only set when they are known. The
+  locals a snapshot shows are capped (see `locals` above), so a name missing from a list that was
+  cut may only not have fitted: a variable absent from a previous list that was cut is
+  `{ "after": "30" }` with no `new`, and one absent from a current list that was cut is not listed
+  at all (`truncation` says when a list was cut). An adapter's own return-value entry — js-debug's
+  `Return value` at a function's return point, debugpy's `(return) fn` after stepping over a call —
+  is a local like any other here and appears as `new`. Frame identity is the locals anchor's name + file +
   visible stack depth: any mismatch (a different function, a recursion depth change) re-emits
   full `locals` and rebases — never a wrong diff. The same stop answered twice (two
   `wait_for_stop` calls without resuming) re-emits full `locals` rather than diffing against
@@ -633,10 +642,21 @@ Steps over the current line, executing it without entering function calls.
 }
 ```
 
+A step past a declaration, and a step that leaves a block, in the same shape:
+
+```json
+"changedVariables": {
+  "total":   { "before": "0", "after": "2" },
+  "sum":     { "after": "30", "new": true },
+  "doubled": { "before": "2", "gone": true }
+}
+```
+
 `location` and `context` are best-effort: they appear when the post-step stack trace and the source file could both be read.
 
 The [stop snapshot](#the-stop-snapshot) rides on every landed step (issues #982/#983). Stepping within one
-function reports **`changedVariables`** — only what the executed line changed — instead of re-sending the
+function reports **`changedVariables`** — only what the executed line changed: a value that changed, a
+variable that appeared (`new: true`) or one that left scope (`gone: true`) — instead of re-sending the
 full `locals`; stepping into a new frame (or any frame-identity change) shows that frame's full `locals`.
 An empty `changedVariables: {}` says the line changed nothing visible. On an adapter that steps once per
 token position (Dart), the snapshot is composed once, from the final landing of the repeated step.

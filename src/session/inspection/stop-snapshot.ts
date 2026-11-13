@@ -17,7 +17,7 @@
  */
 import { SessionState, redactStopInfo } from '@debugmcp/shared';
 import type { OperationsContext } from '../operations-context.js';
-import type { SnapshotException, StopSnapshot } from '../session-manager-core.js';
+import type { ChangedVariable, SnapshotException, StopSnapshot } from '../session-manager-core.js';
 import type { StackTraceResult } from './frame-anchor-resolver.js';
 import { frameSummary } from './frame-anchor-resolver.js';
 import { applyVariableCaps, snapshotLocalsLimits } from '../variable-caps.js';
@@ -65,6 +65,43 @@ function looksLikeTypeName(text: string): boolean {
 /** Own enumerable assignment that survives exotic names ('__proto__'). */
 function setOwn<T>(target: Record<string, T>, key: string, value: T): void {
   Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
+}
+
+/**
+ * What differs between the locals last shown and the ones shown now (issue
+ * #1140): a changed value, a variable that appeared, a variable that left
+ * scope. No placeholder stands in for a missing side — any text can be a
+ * value — and a flag is only set when it is known:
+ *
+ * - `new` needs the BASE list to have been complete: a name missing from a
+ *   list that was cut by the snapshot's cap may only not have fitted;
+ * - `gone` needs the CURRENT list to be complete, for the same reason turned
+ *   round. Whether the base was cut does not matter for it: a variable that
+ *   was shown and is absent from a complete list has left scope.
+ */
+function diffLocals(
+  base: { rendered: Record<string, string>; complete: boolean },
+  now: Record<string, string>,
+  nowComplete: boolean
+): Record<string, ChangedVariable> {
+  const has = (map: Record<string, string>, name: string): boolean =>
+    Object.prototype.hasOwnProperty.call(map, name);
+  const changed: Record<string, ChangedVariable> = {};
+  for (const name of Object.keys(now)) {
+    if (!has(base.rendered, name)) {
+      setOwn(changed, name, { after: now[name], ...(base.complete ? { new: true as const } : {}) });
+    } else if (base.rendered[name] !== now[name]) {
+      setOwn(changed, name, { before: base.rendered[name], after: now[name] });
+    }
+  }
+  if (nowComplete) {
+    for (const name of Object.keys(base.rendered)) {
+      if (!has(now, name)) {
+        setOwn(changed, name, { before: base.rendered[name], gone: true as const });
+      }
+    }
+  }
+  return changed;
 }
 
 /**
@@ -190,6 +227,18 @@ export async function composeStopSnapshot(
           return undefined;
         } else {
           const cappedLocals = applyVariableCaps(raced.variables, snapshotLocalsLimits());
+          // Omissions merge from both passes; CUTS count only at the
+          // snapshot's own cap (a value cut upstream and re-cut here is one
+          // cut value, not two); unread scopes come from the pipeline.
+          const omitted =
+            (raced.truncation?.omittedCount ?? 0) + (cappedLocals.truncation?.omittedCount ?? 0);
+          const cut = cappedLocals.truncation?.valueTruncatedCount
+            ?? raced.truncation?.valueTruncatedCount ?? 0;
+          const scopesUnread = raced.truncation?.scopesSkipped ?? 0;
+          // Whether the list about to be shown is every local the frame has
+          // (issue #1140). A shortened value still names its variable, so
+          // cuts do not count; an omitted variable or an unread scope does.
+          const complete = omitted === 0 && scopesUnread === 0;
           if (cappedLocals.variables.length === 0 && stackResult.frames.length > SNAPSHOT_FRAMES) {
             // The capped probe may simply not have reached the frames that
             // have locals; silence here would be indistinguishable from
@@ -221,32 +270,15 @@ export async function composeStopSnapshot(
             if (stop && base && base.stopRef === stop) {
               snapshot.locals = flat;
             } else if (stop && base && base.frameKey === frameKey) {
-              const changed: Record<string, { before: string; after: string }> = {};
-              for (const name of Object.keys(flat)) {
-                const before = Object.prototype.hasOwnProperty.call(base.rendered, name)
-                  ? base.rendered[name]
-                  : '<undefined>';
-                if (before !== flat[name]) {
-                  setOwn(changed, name, { before, after: flat[name] });
-                }
-              }
-              snapshot.changedVariables = changed;
-              session.snapshotDiffBase = { stopRef: stop, frameKey, rendered: flat };
+              snapshot.changedVariables = diffLocals(base, flat, complete);
+              session.snapshotDiffBase = { stopRef: stop, frameKey, rendered: flat, complete };
             } else {
               snapshot.locals = flat;
               if (stop) {
-                session.snapshotDiffBase = { stopRef: stop, frameKey, rendered: flat };
+                session.snapshotDiffBase = { stopRef: stop, frameKey, rendered: flat, complete };
               }
             }
           }
-          // Omissions merge from both passes; CUTS count only at the
-          // snapshot's own cap (a value cut upstream and re-cut here is one
-          // cut value, not two); unread scopes come from the pipeline.
-          const omitted =
-            (raced.truncation?.omittedCount ?? 0) + (cappedLocals.truncation?.omittedCount ?? 0);
-          const cut = cappedLocals.truncation?.valueTruncatedCount
-            ?? raced.truncation?.valueTruncatedCount ?? 0;
-          const scopesUnread = raced.truncation?.scopesSkipped ?? 0;
           const parts: string[] = [];
           if (omitted > 0) parts.push(`${omitted} variable(s) omitted`);
           if (cut > 0) parts.push(`${cut} value(s) cut`);

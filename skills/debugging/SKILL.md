@@ -35,7 +35,8 @@ Do NOT reach for it when a single glance at the code or one log line would answe
 7. step_over / step_into / step_out / continue_execution
    wait_for_stop          {sessionId}                          -> blocks until the next stop or the exit (continue_execution does not wait)
    Each landed step's snapshot carries changedVariables {name: {before, after}} — what the executed
-   line changed — instead of re-sending full locals; an empty {} means nothing visible changed.
+   line changed — instead of re-sending full locals; a variable that appeared is {after, new: true},
+   one that left scope is {before, gone: true}, and an empty {} means nothing visible changed.
 8. get_output             {sessionId}                          -> captured debuggee stdout/stderr
 9. close_debug_session    {sessionId}                          -> ALWAYS, even on failure
 ```

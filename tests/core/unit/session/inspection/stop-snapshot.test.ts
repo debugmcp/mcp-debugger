@@ -513,9 +513,11 @@ describe('composeStopSnapshot diff cache (issue #983)', () => {
     newStop(session);
     const second = await composeStopSnapshot(ctx, 'sid', stack(), 'test');
     expect(second?.locals).toBeUndefined();
+    // A variable that was not there is marked as such, with no invented
+    // "before" value (issue #1140).
     expect(second?.changedVariables).toEqual({
       subtotal: { before: '100.0', after: '125.0' },
-      discount: { before: '<undefined>', after: '15.0' }
+      discount: { after: '15.0', new: true }
     });
   });
 
@@ -598,6 +600,196 @@ describe('composeStopSnapshot diff cache (issue #983)', () => {
     newStop(session);
     const third = await composeStopSnapshot(ctx, 'sid', stack(), 'test');
     expect(third?.changedVariables).toEqual({ x: { before: '1', after: '3' } });
+  });
+});
+
+describe('composeStopSnapshot diff vocabulary: changed, new, gone (issue #1140)', () => {
+  type Extract = ReturnType<typeof vi.fn>;
+  const COMPUTE = { name: 'compute', file: '/proj/app.py', line: 44 };
+  const variablesOf = (vals: Array<[string, string]>) =>
+    vals.map(([name, value]) => ({ name, value, type: 'str', variablesReference: 0 }));
+  const localsResult = (vals: Array<[string, string]>, extra: Record<string, unknown> = {}) => ({
+    variables: variablesOf(vals),
+    frame: COMPUTE,
+    scopeName: 'Locals',
+    ...extra
+  });
+  const numbered = (prefix: string, count: number): Array<[string, string]> =>
+    Array.from({ length: count }, (_, i): [string, string] => [`${prefix}${String(i).padStart(2, '0')}`, `${i}`]);
+  const newStop = (session: Record<string, unknown>) => {
+    session.lastStop = { reason: 'step', timestamp: Date.now(), threadId: 1 };
+  };
+
+  /** Compose once per read, each on a fresh stop, and answer the last snapshot. */
+  async function diffOf(...reads: Array<ReturnType<typeof localsResult>>) {
+    const { ctx, extractLocalsFromResolved, session } = makeCtx();
+    for (const read of reads) {
+      (extractLocalsFromResolved as Extract).mockResolvedValueOnce(read);
+    }
+    let last: Awaited<ReturnType<typeof composeStopSnapshot>>;
+    for (let i = 0; i < reads.length; i++) {
+      if (i > 0) newStop(session);
+      last = await composeStopSnapshot(ctx, 'sid', stack(), 'test');
+    }
+    return last;
+  }
+
+  it('says all three in one map: what changed, what appeared, what left scope', async () => {
+    const snapshot = await diffOf(
+      localsResult([['x', '1'], ['i', '3']]),
+      localsResult([['x', '2'], ['sum', '30']])
+    );
+
+    expect(snapshot?.changedVariables).toEqual({
+      x: { before: '1', after: '2' },
+      sum: { after: '30', new: true },
+      i: { before: '3', gone: true }
+    });
+    expect(snapshot?.locals).toBeUndefined();
+  });
+
+  it('a variable that left scope carries its last shown value', async () => {
+    const snapshot = await diffOf(localsResult([['x', '1'], ['i', '3']]), localsResult([['x', '1']]));
+
+    expect(snapshot?.changedVariables).toEqual({ i: { before: '3', gone: true } });
+  });
+
+  it('an empty map still means nothing visible changed', async () => {
+    const snapshot = await diffOf(localsResult([['x', '1']]), localsResult([['x', '1']]));
+
+    expect(snapshot?.changedVariables).toEqual({});
+  });
+
+  it('never calls a variable new when the previous list was cut: it may have been there, unseen', async () => {
+    // 25 locals, 20 shown: v20..v24 exist and were never shown.
+    const snapshot = await diffOf(
+      localsResult(numbered('v', 25)),
+      localsResult([['v24', '24'], ...numbered('v', 19)])
+    );
+
+    // Shown now, absent from what was shown before — and that is all that is known.
+    expect(snapshot?.changedVariables?.v24).toEqual({ after: '24' });
+    // v19 WAS shown and is absent from a list that is complete: that is known.
+    expect(snapshot?.changedVariables?.v19).toEqual({ before: '19', gone: true });
+    expect(Object.keys(snapshot?.changedVariables ?? {}).sort()).toEqual(['v19', 'v24']);
+  });
+
+  it('never calls a variable gone when the current list was cut: it may still be there, unseen', async () => {
+    const snapshot = await diffOf(
+      localsResult([['a', '1'], ['b', '2']]),
+      localsResult([['a', '1'], ...numbered('c', 24)])
+    );
+
+    // b is not among the 20 shown, and 5 were omitted: nothing can be said of b.
+    expect(snapshot?.changedVariables).not.toHaveProperty('b');
+    // The previous list was complete, so what is shown now and was not there is new.
+    expect(snapshot?.changedVariables?.c00).toEqual({ after: '0', new: true });
+    expect(snapshot?.truncation).toContain('omitted');
+  });
+
+  it('never calls a variable gone when a scope went unread this time', async () => {
+    const snapshot = await diffOf(
+      localsResult([['a', '1'], ['b', '2']]),
+      localsResult([['a', '1']], { truncation: { omittedCount: 0, valueTruncatedCount: 0, scopesSkipped: 1 } })
+    );
+
+    expect(snapshot?.changedVariables).toEqual({});
+  });
+
+  it('never calls a variable new when a scope went unread last time', async () => {
+    const snapshot = await diffOf(
+      localsResult([['a', '1']], { truncation: { omittedCount: 0, valueTruncatedCount: 0, scopesSkipped: 1 } }),
+      localsResult([['a', '1'], ['b', '2']])
+    );
+
+    expect(snapshot?.changedVariables).toEqual({ b: { after: '2' } });
+  });
+
+  it('a list cut by its upstream caps counts as cut', async () => {
+    const snapshot = await diffOf(
+      localsResult([['a', '1']], { truncation: { omittedCount: 3, valueTruncatedCount: 0 } }),
+      localsResult([['a', '1'], ['b', '2']])
+    );
+
+    expect(snapshot?.changedVariables).toEqual({ b: { after: '2' } });
+  });
+
+  it('a value that was only shortened does not make its list incomplete', async () => {
+    const snapshot = await diffOf(
+      localsResult([['a', 'y'.repeat(500)]]),
+      localsResult([['a', 'y'.repeat(500)], ['b', '2']])
+    );
+
+    expect(snapshot?.changedVariables).toEqual({ b: { after: '2', new: true } });
+  });
+
+  it('carries completeness forward: the list a diff was built from is the next base', async () => {
+    const snapshot = await diffOf(
+      localsResult([['a', '1']]),
+      localsResult([['a', '1'], ...numbered('c', 24)]),   // cut: becomes an incomplete base
+      localsResult([['a', '1'], ['z', '9']])
+    );
+
+    // z was not among the 20 shown, but 5 were omitted then: not provably new.
+    expect(snapshot?.changedVariables?.z).toEqual({ after: '9' });
+    // c00 was shown and is absent from a complete list: gone.
+    expect(snapshot?.changedVariables?.c00).toEqual({ before: '0', gone: true });
+  });
+
+  it('treats the text "<undefined>" as the value it is', async () => {
+    const snapshot = await diffOf(
+      localsResult([['x', '<undefined>']]),
+      localsResult([['x', '5'], ['y', '<undefined>']])
+    );
+
+    expect(snapshot?.changedVariables).toEqual({
+      x: { before: '<undefined>', after: '5' },
+      y: { after: '<undefined>', new: true }
+    });
+  });
+
+  it('keeps exotic names as own keys in both directions', async () => {
+    const appeared = await diffOf(localsResult([['x', '1']]), localsResult([['x', '1'], ['__proto__', '{}']]));
+    expect(Object.prototype.hasOwnProperty.call(appeared?.changedVariables, '__proto__')).toBe(true);
+    expect(JSON.parse(JSON.stringify(appeared?.changedVariables))['__proto__']).toEqual({ after: '{}', new: true });
+
+    const left = await diffOf(localsResult([['x', '1'], ['__proto__', '{}']]), localsResult([['x', '1']]));
+    expect(Object.prototype.hasOwnProperty.call(left?.changedVariables, '__proto__')).toBe(true);
+    expect(JSON.parse(JSON.stringify(left?.changedVariables))['__proto__']).toEqual({ before: '{}', gone: true });
+
+    // An inherited name is not a variable: "constructor" is new, not changed.
+    const inherited = await diffOf(localsResult([['x', '1']]), localsResult([['x', '1'], ['constructor', 'f']]));
+    expect(inherited?.changedVariables).toEqual({ constructor: { after: 'f', new: true } });
+  });
+
+  it("reports an adapter's return-value entry as it happens: new when it appears", async () => {
+    // debugpy keeps "(return) add" in the frame once it appears (measured,
+    // 1.8.20); js-debug shows "Return value" at a function's return point.
+    const snapshot = await diffOf(
+      localsResult([['a', '1']]),
+      localsResult([['a', '1'], ['(return) add', '3'], ['s', '3']]),
+      localsResult([['a', '1'], ['(return) add', '3'], ['s', '3'], ['t', '4']])
+    );
+
+    expect(snapshot?.changedVariables).toEqual({ t: { after: '4', new: true } });
+  });
+
+  it('an empty read emits no diff and leaves the base alone, so the next diff is against the last shown list', async () => {
+    const { ctx, extractLocalsFromResolved, session } = makeCtx();
+    (extractLocalsFromResolved as Extract)
+      .mockResolvedValueOnce(localsResult([['x', '1']]))
+      .mockResolvedValueOnce(localsResult([]))
+      .mockResolvedValueOnce(localsResult([['x', '2']]));
+
+    await composeStopSnapshot(ctx, 'sid', stack(), 'test');
+    newStop(session);
+    const empty = await composeStopSnapshot(ctx, 'sid', stack(), 'test');
+    expect(empty).not.toHaveProperty('changedVariables');
+    expect(empty).not.toHaveProperty('locals');
+
+    newStop(session);
+    const third = await composeStopSnapshot(ctx, 'sid', stack(), 'test');
+    expect(third?.changedVariables).toEqual({ x: { before: '1', after: '2' } });
   });
 });
 

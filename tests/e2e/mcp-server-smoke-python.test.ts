@@ -255,10 +255,12 @@ describe('MCP Server Python Debugging Smoke Test', () => {
       if (secondStep.state === 'paused' && secondStep.snapshot) {
         const stepSnapshot = secondStep.snapshot as {
           locals?: Record<string, string>;
-          changedVariables?: Record<string, { before: string; after: string }>;
+          changedVariables?: Record<string, { before?: string; after?: string; new?: true; gone?: true }>;
         };
         console.log('[Python Smoke Test] Second step changedVariables:', JSON.stringify(stepSnapshot.changedVariables));
         expect(stepSnapshot.changedVariables, 'second step in the same frame carries the diff').toBeDefined();
+        // No placeholder stands in for a missing value (issue #1140): a new variable says new.
+        expect(JSON.stringify(stepSnapshot.changedVariables)).not.toContain('<undefined>');
         expect(stepSnapshot.locals).toBeUndefined();
       }
     }

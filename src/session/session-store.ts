@@ -164,6 +164,13 @@ export interface ManagedSession extends DebugSessionInfo {
     stopRef: SessionStopInfo;
     frameKey: string;
     rendered: Record<string, string>;
+    /**
+     * Whether `rendered` is every local the frame had: no variable omitted by
+     * a cap, no scope left unread (issue #1140). A name missing from a list
+     * that was cut may only not have fitted, so only a complete base can call
+     * a variable new.
+     */
+    complete: boolean;
   };
   // Monotonic identity for each proxy installed on this session. A late event
   // from an older worker cannot satisfy intent armed against a newer one.
