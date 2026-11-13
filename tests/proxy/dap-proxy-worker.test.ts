@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest';
 import { DapProxyWorker, MAX_QUEUED_COMMANDS } from '../../src/proxy/dap-proxy-worker.js';
 import { GenericAdapterManager } from '../../src/proxy/dap-proxy-adapter-manager.js';
 import { DapConnectionManager } from '../../src/proxy/dap-proxy-connection-manager.js';
+import { DapResponseError } from '../../src/proxy/dap-response-error.js';
 import type {
   DapProxyDependencies,
   ILogger,
@@ -1765,6 +1766,9 @@ describe('DapProxyWorker', () => {
       const capabilitiesStatuses = () => mockMessageSender.send.mock.calls.filter(
         ([message]) => message.type === 'status' && message.status === 'adapter_capabilities'
       );
+      const directConnectStatuses = () => mockMessageSender.send.mock.calls
+        .map(([message]) => message)
+        .filter((message) => message.type === 'status' && message.status === 'direct_connect');
 
       it('ruby launch proceeds when the initialize response never arrives but initialized did (issue #492)', async () => {
         vi.useFakeTimers();
@@ -1864,6 +1868,94 @@ describe('DapProxyWorker', () => {
           'request_pending:launch',
           'response_received:launch'
         ]);
+        // A spawned adapter is not a direct connection (issue #1139).
+        expect(directConnectStatuses()).toEqual([]);
+      });
+
+      describe('direct-connect attach: the worker dials a listener it did not start (issue #1139)', () => {
+        const LISTENER = 'an rdbg debug server (rdbg --open --port 12345 …)';
+        const rubyAttachPayload = (): ProxyInitPayload => ({
+          cmd: 'init',
+          sessionId: 'ruby-direct-session',
+          language: 'ruby',
+          executablePath: 'ruby',
+          adapterHost: '127.0.0.1',
+          adapterPort: 8124,
+          logDir: '/logs',
+          scriptPath: 'attach://remote',
+          launchConfig: { request: 'attach', host: '10.0.0.5', port: 12345 }
+        });
+        const errorsSent = () => mockMessageSender.send.mock.calls
+          .map(([message]) => message as { type: string; message?: string })
+          .filter((message) => message.type === 'error')
+          .map((message) => message.message);
+
+        /** Run the worker's connect-and-handshake to its failure, with the teardown stubbed out. */
+        async function failedAttach(stubs: { processStub: unknown; connectionStub: unknown }): Promise<string[]> {
+          wireWorker(rubyAttachPayload(), stubs.processStub, stubs.connectionStub, RubyAdapterPolicy);
+          vi.spyOn(worker as unknown as { shutdown: () => Promise<void> }, 'shutdown').mockResolvedValue(undefined);
+          await expect((worker as any).startAdapterAndConnect(rubyAttachPayload())).rejects.toThrow();
+          return errorsSent() as string[];
+        }
+
+        it('says what it dialed, before the transport connects, and spawns nothing', async () => {
+          const stubs = makeStubs(async () => { throw new Error('DAP client disconnected'); });
+
+          await failedAttach(stubs);
+
+          expect(stubs.processStub.spawn).not.toHaveBeenCalled();
+          expect(directConnectStatuses()).toEqual([
+            expect.objectContaining({ status: 'direct_connect', host: '10.0.0.5', port: 12345, listener: LISTENER })
+          ]);
+          const order = mockMessageSender.send.mock.calls
+            .map(([m]) => m as StatusMessage & { stage?: string })
+            .filter((m) => m.type === 'status')
+            .map((m) => (m.status === 'dap_handshake_stage' ? m.stage : m.status));
+          expect(order.indexOf('direct_connect')).toBeGreaterThanOrEqual(0);
+          expect(order.indexOf('direct_connect')).toBeLessThan(order.indexOf('transport_connected'));
+          expect(order).not.toContain('adapter_spawned');
+        });
+
+        it('an endpoint that hangs up before answering initialize is reported as probably not a debug server', async () => {
+          // What an HTTP server does with a DAP frame: it closes the socket.
+          const errors = await failedAttach(makeStubs(async () => { throw new Error('DAP client disconnected'); }));
+
+          expect(errors).toEqual([
+            'Critical initialization error: 10.0.0.5:12345 never answered the DAP "initialize" request (DAP client disconnected). ' +
+            'Nothing was started for this attach: the server connected to what is already listening on that port, ' +
+            `so check that it is ${LISTENER} and not another service.`
+          ]);
+          // Nothing about an executable or an adapter process: there is none.
+          expect(errors[0]).not.toContain('Executable:');
+          expect(errors[0]).not.toContain('adapter PID');
+        });
+
+        it('an endpoint that refuses initialize in DAP is a debug server: its own words, and the endpoint', async () => {
+          const refusal = new DapResponseError({
+            seq: 2, type: 'response', request_seq: 1, command: 'initialize', success: false, message: 'client not supported'
+          });
+          const errors = await failedAttach(makeStubs(async () => { throw refusal; }));
+
+          expect(errors).toHaveLength(1);
+          expect(errors[0]).toContain('client not supported');
+          expect(errors[0]).toContain('[direct connect to 10.0.0.5:12345; no adapter process was started]');
+          expect(errors[0]).not.toContain('not another service');
+          expect(errors[0]).not.toContain('adapter PID');
+        });
+
+        it('a connection that was never made names the endpoint and says nothing was started', async () => {
+          const stubs = makeStubs(async () => undefined);
+          stubs.connectionStub.connectWithRetry.mockRejectedValue(
+            new Error('Failed to connect DAP client: nothing accepted a connection on 10.0.0.5:12345 within 12.5s (12.6s elapsed, 61 attempts; last error: ECONNREFUSED)')
+          );
+
+          const errors = await failedAttach(stubs);
+
+          expect(errors).toEqual([
+            'Critical initialization error: Failed to connect DAP client: nothing accepted a connection on 10.0.0.5:12345 within 12.5s ' +
+            '(12.6s elapsed, 61 attempts; last error: ECONNREFUSED) [direct connect to 10.0.0.5:12345; no adapter process was started]'
+          ]);
+        });
       });
 
       it('a policy without the opt-in still blocks on a missing initialize response', async () => {

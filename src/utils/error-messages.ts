@@ -16,7 +16,31 @@ export interface ProxyInitProgress {
   transportConnected: boolean;
   /** The DAP handshake request that was sent and has not been answered. */
   pendingCommand?: string;
+  /**
+   * Present when the worker spawned no adapter and dialed a DAP server that
+   * was already listening — a debugpy or rdbg attach (issue #1139). The
+   * endpoint is the caller's own host and port, so a stall there is not "an
+   * adapter that started": the wording names the endpoint instead.
+   */
+  directConnect?: DirectConnectEndpoint;
 }
+
+/** The endpoint of a direct-connect attach, as the worker dialed it. */
+export interface DirectConnectEndpoint {
+  host: string;
+  port: number;
+  /** The policy's phrase for what should be listening there ("a debugpy listener (…)"). */
+  listener?: string;
+}
+
+/**
+ * The second sentence of every direct-connect failure where the endpoint
+ * never spoke DAP (issue #1139): nothing of ours was started, so the likeliest
+ * cause is the endpoint itself.
+ */
+const notADebugServer = (endpoint: DirectConnectEndpoint): string =>
+  'Nothing was started for this attach: the server connected to what is already listening on that port, ' +
+  `so check that it is ${endpoint.listener ?? "the debugger's own listener"} and not another service.`;
 
 /**
  * Why no uncaught exception will stop a running program (issues #1009, #1032),
@@ -125,11 +149,39 @@ export const ErrorMessages = {
    * when the adapter demonstrably connected and answered events sent agents
    * to verify healthy toolchains with nowhere to go afterwards.
    *
+   *
+   * A direct-connect attach (issue #1139) has its own wording on every
+   * branch: the server started nothing, so "the adapter started", "retrying
+   * usually succeeds" and "check that the adapter is installed" are all
+   * false there. While `initialize` is unanswered the endpoint has not
+   * spoken DAP at all, and the likeliest cause is that it is not a debug
+   * server — the wrong port; once it has answered, it is one, and the stall
+   * is its own.
+   *
    * @param timeout - The timeout duration in seconds
    * @param progress - How far initialization got (issue #493); omit for the generic message
    */
   proxyInitTimeout: (timeout: number, progress?: ProxyInitProgress) => {
     const base = `Debug proxy initialization did not complete within ${timeout}s.`;
+    const direct = progress?.directConnect;
+    if (direct) {
+      const endpoint = `${direct.host}:${direct.port}`;
+      if (!progress.transportConnected) {
+        return `${base} No connection to ${endpoint} was established. Nothing was started for this attach: ` +
+          `check the host and port, and that ${direct.listener ?? 'the debug server'} is listening there and reachable from this machine.`;
+      }
+      if (progress.pendingCommand === 'initialize') {
+        return `${base} ${endpoint} accepted the connection but never answered the DAP "initialize" request. ` +
+          `${notADebugServer(direct)} Retrying the same port stalls the same way.`;
+      }
+      if (progress.pendingCommand) {
+        return `${base} ${endpoint} answered the start of the DAP handshake, but the "${progress.pendingCommand}" request ` +
+          'never received a response. Nothing was started for this attach: this is a stall in the debug server listening ' +
+          'on that port, not a missing install. If it recurs, capture a DAP trace (DAP_TRACE=1) of the failing attach.';
+      }
+      return `${base} Connected to ${endpoint} and the DAP handshake began, but initialization stalled before completing. ` +
+        'Nothing was started for this attach: the debug server listening on that port is what stalled.';
+    }
     if (progress?.transportConnected) {
       const pidNote = progress.adapterPid !== undefined
         ? ` The adapter process is running (PID ${progress.adapterPid}).`
@@ -153,6 +205,20 @@ export const ErrorMessages = {
       `Check that the required debug adapter is installed and accessible.`;
   },
   
+  /**
+   * A direct-connect attach whose endpoint never answered `initialize` and
+   * did not stall either (issue #1139): it hung up, or the request failed on
+   * the wire. What an HTTP server does with a DAP frame — the issue's own
+   * example, the application's port given instead of the debugger's. The
+   * worker's init-failure report used to read "DAP client disconnected
+   * [Executable: python | adapter PID=none exitCode=n/a]".
+   * Used in: src/proxy/dap-proxy-worker.ts (describeInitFailure)
+   * @param endpoint - What the worker dialed
+   * @param detail - The failure as the DAP client reported it
+   */
+  directConnectInitializeUnanswered: (endpoint: DirectConnectEndpoint, detail: string) =>
+    `${endpoint.host}:${endpoint.port} never answered the DAP "initialize" request (${detail}). ${notADebugServer(endpoint)}`,
+
   /**
    * Informational message for step operations still executing after the grace window
    * Occurs when: A step operation (stepOver, stepInto, stepOut) doesn't receive a 'stopped' event

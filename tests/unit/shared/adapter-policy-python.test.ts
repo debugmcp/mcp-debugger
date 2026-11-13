@@ -106,7 +106,15 @@ describe('PythonAdapterPolicy', () => {
         launchConfig: { request: 'attach', connect: { host: '10.0.0.5', port: 5679 } }
       });
 
-      expect(config).toEqual({ mode: 'connect', host: '10.0.0.5', port: 5679, logDir: '/logs' });
+      // With what should be listening there, for the answer of an attach that
+      // reaches something else (issue #1139).
+      expect(config).toEqual({
+        mode: 'connect',
+        host: '10.0.0.5',
+        port: 5679,
+        logDir: '/logs',
+        listener: 'a debugpy listener (python -m debugpy --listen 10.0.0.5:5679 …)'
+      });
     });
 
     it('returns connect mode for attach using top-level host/port', () => {
@@ -115,7 +123,13 @@ describe('PythonAdapterPolicy', () => {
         launchConfig: { request: 'attach', host: '192.168.1.2', port: 5680 }
       });
 
-      expect(config).toEqual({ mode: 'connect', host: '192.168.1.2', port: 5680, logDir: '/logs' });
+      expect(config).toEqual({
+        mode: 'connect',
+        host: '192.168.1.2',
+        port: 5680,
+        logDir: '/logs',
+        listener: 'a debugpy listener (python -m debugpy --listen 192.168.1.2:5680 …)'
+      });
     });
 
     it('defaults the attach host to 127.0.0.1', () => {

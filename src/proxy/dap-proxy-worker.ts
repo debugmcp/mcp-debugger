@@ -44,6 +44,7 @@ import {
   validateProxyInitPayload
 } from '../utils/type-guards.js';
 import { DapResponseError } from './dap-response-error.js';
+import { ErrorMessages, type DirectConnectEndpoint } from '../utils/error-messages.js';
 import { SilentDapCommandPayload } from './dap-extensions.js';
 // Import adapter policies from shared package
 import type { AdapterPolicy, AdapterSpecificState, BreakpointFields } from '@debugmcp/shared';
@@ -174,6 +175,15 @@ export class DapProxyWorker {
   private shutdownPromise: Promise<void> | null = null;
   /** The init-failure report already sent to the parent, so it goes once. */
   private initFailureReported: string | null = null;
+  /**
+   * The endpoint this worker dialed when it spawned no adapter (connect
+   * mode: a debugpy or rdbg attach), with the policy's phrase for what
+   * should be listening there; null when an adapter was spawned. Behind the
+   * `direct_connect` status and the wording of a failed init (issue #1139).
+   */
+  private directConnect: DirectConnectEndpoint | null = null;
+  /** Whether the endpoint answered `initialize` with a success response (issue #1139). */
+  private initializeAnswered = false;
   /** Once-per-session guard for the adapter_capabilities status message (issue #243). */
   private adapterCapabilitiesSent: boolean = false;
   // Exit-code synthesis bookkeeping (issue #247): a real DAP exited event
@@ -611,6 +621,9 @@ export class DapProxyWorker {
     if (!spawnConfig) {
       throw new Error(`Adapter policy ${this.adapterPolicy.name} does not provide spawn configuration`);
     }
+    // Facts of this attempt alone (issue #1139).
+    this.directConnect = null;
+    this.initializeAnswered = false;
 
     // Spawn mode's connect window (issue #963): the loop ends when the adapter
     // exits (this controller) or just after the parent's init deadline, whose
@@ -702,6 +715,15 @@ export class DapProxyWorker {
       this.logger!.info(
         `[Worker] Connecting directly to DAP server at ${spawnConfig.host}:${spawnConfig.port} (no adapter process to monitor)`
       );
+      // The counterpart of `adapter_spawned` (issue #1139): the parent's
+      // init-timeout diagnosis, and this worker's own failure report, name
+      // the endpoint instead of an adapter that was never started.
+      this.directConnect = {
+        host: spawnConfig.host,
+        port: spawnConfig.port,
+        ...(spawnConfig.listener ? { listener: spawnConfig.listener } : {})
+      };
+      this.sendStatus('direct_connect', { ...this.directConnect });
     }
 
     // Connect to adapter
@@ -942,6 +964,18 @@ export class DapProxyWorker {
    */
   private describeInitFailure(payload: ProxyInitPayload, error: unknown): string {
     const message = error instanceof Error ? error.message : String(error);
+    // A direct connection has no adapter command, executable or process to
+    // describe: what failed is the endpoint the caller named (issue #1139).
+    if (this.directConnect) {
+      const { host, port } = this.directConnect;
+      // The connection was made and `initialize` got no answer in DAP — the
+      // endpoint hung up, or the request died on the wire. A refusal in DAP
+      // (DapResponseError) is an answer: that endpoint is a debug server.
+      if (this.dapClient && !this.initializeAnswered && !(error instanceof DapResponseError)) {
+        return `Critical initialization error: ${ErrorMessages.directConnectInitializeUnanswered(this.directConnect, message)}`;
+      }
+      return `Critical initialization error: ${message} [direct connect to ${host}:${port}; no adapter process was started]`;
+    }
     const adapterCmd = payload.adapterCommand;
     const spawnInfo = adapterCmd
       ? `Adapter command: ${adapterCmd.command} ${(adapterCmd.args ?? []).join(' ')}`
@@ -1056,6 +1090,7 @@ export class DapProxyWorker {
       payload.sessionId,
       this.adapterPolicy.getDapAdapterConfiguration().type
     )).then((caps) => {
+      this.initializeAnswered = true;
       this.sendStatus('dap_handshake_stage', { stage: 'response_received', command: 'initialize' });
       return caps;
     });
