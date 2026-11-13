@@ -54,6 +54,105 @@ describe('assertLineContent', () => {
     expect(result.message).toContain('statement: "total = sum(prices)"');
   });
 
+  describe('the statement hint is what the resolver would answer (issue #1142)', () => {
+    const SWAP = [
+      'def main():',                    // 1
+      '    a = 1',                      // 2
+      '    b = 2',                      // 3
+      '    print(a, b)',                // 4
+      '    a, b = b, a  # the swap',    // 5
+      '    print(a, b)',                // 6
+      '    # a, b = b, a',              // 7
+      '',                               // 8
+      'main()',                         // 9
+    ];
+    const hintOf = (line: number, expected: string): string => {
+      const result = assertLineContent(SWAP, line, expected, FILE, { statementHint: true });
+      expect(result.ok).toBe(false);
+      return result.ok ? '' : result.message;
+    };
+
+    it('offers no statement for text that is nowhere in the file, and says so', () => {
+      const message = hintOf(5, 'THIS TEXT IS WRONG');
+
+      // Following the old hint answered "statement ... not found".
+      expect(message).not.toContain('statement: "THIS TEXT IS WRONG"');
+      expect(message).not.toContain('Or address by content');
+      expect(message).toContain('Pick the correct line from the context above.');
+      expect(message).toMatch(/That text matches no line of the file, so it cannot be addressed by content \(statement\) either\.$/);
+    });
+
+    it('names the line when the text is on exactly one', () => {
+      const message = hintOf(4, 'a, b = b, a');
+
+      expect(message).toMatch(/Or address by content: set_breakpoint \{statement: "a, b = b, a"\} — that text is on line 5\.$/);
+    });
+
+    it('adds nearLine and lists the lines when the text is on several', () => {
+      const message = hintOf(5, 'print(a, b)');
+
+      expect(message).toMatch(
+        /Or address by content: set_breakpoint \{statement: "print\(a, b\)", nearLine: 5\} — that text is on lines 4 and 6; nearLine picks the closest \(line 4\)\.$/
+      );
+    });
+
+    it('offers nothing for an expectation that is a comment: a comment is not a statement anchor', () => {
+      const message = hintOf(5, '# a, b = b, a');
+
+      expect(message).not.toContain('statement');
+      expect(message).toMatch(/Pick the correct line from the context above\.$/);
+    });
+
+    it('offers nothing for an expectation that spans lines', () => {
+      const message = hintOf(5, 'a = 1\n    b = 2');
+
+      expect(message).not.toContain('statement');
+      expect(message).toMatch(/Pick the correct line from the context above\.$/);
+    });
+
+    it('never names a comment-only line as where the text is', () => {
+      // Line 7 carries the text inside a comment; line 5 is the statement.
+      expect(hintOf(2, 'a, b = b, a')).toContain('that text is on line 5.');
+    });
+
+    it('caps a long list of matches', () => {
+      const many = ['x = 0', ...Array.from({ length: 12 }, () => 'tick()')];
+      const result = assertLineContent(many, 1, 'tick()', FILE, { statementHint: true });
+      if (result.ok) throw new Error('expected a mismatch');
+
+      expect(result.message).toContain('that text is on lines 2, 3, 4, 5, 6 and 7 more; nearLine picks the closest (line 2).');
+    });
+
+    it('every hint it gives resolves: fed back to resolveStatement, it lands on the line named', () => {
+      const expectations = ['a, b = b, a', 'print(a, b)', 'a = 1', 'main()', 'b = 2', 'print', 'THIS TEXT IS WRONG', '# a, b = b, a', 'def'];
+      let hintsChecked = 0;
+      for (let line = 1; line <= SWAP.length; line++) {
+        for (const expected of expectations) {
+          const result = assertLineContent(SWAP, line, expected, FILE, { statementHint: true });
+          if (result.ok) continue;
+          const hint = /set_breakpoint \{statement: "(.*?)"(?:, nearLine: (\d+))?\} — that text is on lines? .*?(?:\(line (\d+)\))?\.$/.exec(result.message);
+          if (!hint) {
+            // No hint: then the resolver must not find the text either.
+            const found = resolveStatement(SWAP, expected, FILE, line);
+            expect(found.ok, `no hint at line ${line} for ${JSON.stringify(expected)}, yet it resolves`).toBe(false);
+            continue;
+          }
+          hintsChecked++;
+          const [, statement, nearLine, closest] = hint;
+          const followed = resolveStatement(SWAP, statement, FILE, nearLine ? Number(nearLine) : undefined);
+          expect(followed.ok, `${result.message}`).toBe(true);
+          if (followed.ok) {
+            const named = closest ?? /that text is on line (\d+)\./.exec(result.message)?.[1];
+            expect(String(followed.line), result.message).toBe(named);
+            // The hint never sends the caller back to the line that just failed.
+            expect(followed.line).not.toBe(line);
+          }
+        }
+      }
+      expect(hintsChecked).toBeGreaterThan(10);
+    });
+  });
+
   it('passes when the expectation is a distinctive substring of the line (issue #367)', () => {
     const result = assertLineContent(LINES, 3, 'sum(prices)', FILE);
     expect(result.ok).toBe(true);

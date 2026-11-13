@@ -245,8 +245,10 @@ Context:
 >  12 |     return total
    13 |
    14 | def main():
-The file may have changed since you last read it. Pick the correct line from the context above.
+The file may have changed since you last read it. Pick the correct line from the context above. Or address by content: set_breakpoint {statement: "total = sum(prices)"} — that text is on line 11.
 ```
+
+The last sentence is the statement resolver's own answer for the expected text (issue #1142), so following it always works: on one line it names the line; on several it adds `nearLine` (the line you asked for) and lists them — `{statement: "print(a, b)", nearLine: 5} — that text is on lines 4 and 6; nearLine picks the closest (line 4).`; when the text is nowhere in the file it is replaced by `That text matches no line of the file, so it cannot be addressed by content (statement) either.`; and a comment, a blank or text spanning lines gets no such sentence. It is only added where statement anchors are available (`DEBUG_MCP_BP_ADDRESSING=content`, the default).
 
 Relatedly, when a debug adapter *accepts* a breakpoint but binds it to a different line (adapters snap requests on non-executable lines to the nearest valid one), the response reports it prominently instead of silently mutating the line: `message` and `warning` carry `"requested line 12, bound to line 13: \`...\`"`, and the response includes `requestedLine` alongside the bound `line`. Adapters that relocate breakpoints asynchronously (after the response) surface the move in `list_breakpoints`, where `line` ≠ `requestedLine` marks a snapped breakpoint.
 

@@ -200,6 +200,40 @@ describe('set_breakpoint expectedContent (#271)', () => {
     expect(mockSessionManager.setBreakpoint).not.toHaveBeenCalled();
   });
 
+  describe('the statement hint on a mismatch can be followed (issue #1142)', () => {
+    async function refusalOf(args: Record<string, unknown>): Promise<string> {
+      try {
+        await callSetBreakpoint(args);
+      } catch (error) {
+        return (error as Error).message;
+      }
+      throw new Error('set_breakpoint did not refuse');
+    }
+
+    it('an off-by-one line names where the text is, and that statement then binds there', async () => {
+      const refusal = await refusalOf({ line: 4, expectedContent: 'total = sum(prices)' });
+
+      expect(refusal).toMatch(/Or address by content: set_breakpoint \{statement: "total = sum\(prices\)"\} — that text is on line 3\.$/);
+
+      // Following the hint: the same text, as a statement.
+      const followed = JSON.parse((await callSetBreakpoint({ statement: 'total = sum(prices)' })).content[0].text);
+      expect(followed.success).toBe(true);
+      expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith('test-session', expect.objectContaining({ line: 3 }));
+    });
+
+    it('text that is nowhere in the file earns no statement hint, where following one used to fail', async () => {
+      const refusal = await refusalOf({ line: 3, expectedContent: 'THIS TEXT IS WRONG' });
+
+      expect(refusal).toContain('Pick the correct line from the context above.');
+      expect(refusal).not.toContain('statement: "THIS TEXT IS WRONG"');
+      expect(refusal).toContain('That text matches no line of the file');
+
+      // What the old hint led to.
+      await expect(callSetBreakpoint({ statement: 'THIS TEXT IS WRONG' })).rejects.toThrow(/not found/);
+      expect(mockSessionManager.setBreakpoint).not.toHaveBeenCalled();
+    });
+  });
+
   it('rejects expectedContent for attach sessions (no host-readable file)', async () => {
     mockSessionManager.getSession.mockReturnValue({
       id: 'test-session',

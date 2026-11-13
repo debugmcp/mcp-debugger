@@ -8,6 +8,8 @@
 
 const CONTEXT_LINES = 2;
 const MAX_LISTED_MATCHES = 20;
+/** How many match lines the expectedContent hint names before "and N more". */
+const MAX_HINTED_MATCHES = 5;
 
 /**
  * How an expectedContent assertion matched (issue #379): 'exact' is trimmed
@@ -172,9 +174,58 @@ export function assertLineContent(
     `Context:\n${formatContext(lines, line)}\n` +
     `The file may have changed since you last read it. Pick the correct line from the context above.`;
   if (options?.statementHint) {
-    message += ` Or address by content: set_breakpoint {statement: "${expected}"}.`;
+    message += describeStatementAlternative(lines, line, expected, filePath);
   }
   return { ok: false, actual, message };
+}
+
+/** "4", "4 and 6", "2, 3, 4, 5, 6 and 7 more". */
+function listLines(matches: number[]): string {
+  if (matches.length > MAX_HINTED_MATCHES) {
+    return `${matches.slice(0, MAX_HINTED_MATCHES).join(', ')} and ${matches.length - MAX_HINTED_MATCHES} more`;
+  }
+  return matches.length === 1
+    ? String(matches[0])
+    : `${matches.slice(0, -1).join(', ')} and ${matches[matches.length - 1]}`;
+}
+
+/**
+ * What an expectedContent mismatch says about addressing by content instead
+ * (issue #1142). The mismatched text used to be offered as a `statement`
+ * whatever it was, so an expectation that is nowhere in the file earned a
+ * hint whose own outcome is "statement … not found". The answer now comes
+ * from `resolveStatement` itself — the function `set_breakpoint {statement}`
+ * runs — so the hint and the resolver cannot disagree:
+ *
+ * - on one line: the hint names it;
+ * - on several: the hint adds `nearLine` (the line the caller asked for) and
+ *   says which lines, and which one that picks;
+ * - on none: no hint, and the message says the text matches no line;
+ * - not a statement anchor at all (a comment, a blank, text spanning lines):
+ *   nothing — the resolver would refuse it for what it is.
+ */
+function describeStatementAlternative(
+  lines: string[],
+  line: number,
+  expected: string,
+  filePath: string
+): string {
+  if (expected.includes('\n') || isCommentOrBlank(expected)) {
+    return '';
+  }
+  const resolution = resolveStatement(lines, expected, filePath, line);
+  if (!resolution.ok) {
+    // With nearLine given the resolver cannot answer "ambiguous": this is
+    // its "not found".
+    return ' That text matches no line of the file, so it cannot be addressed by content (statement) either.';
+  }
+  if (resolution.candidates) {
+    return (
+      ` Or address by content: set_breakpoint {statement: "${expected}", nearLine: ${line}} — ` +
+      `that text is on lines ${listLines(resolution.candidates)}; nearLine picks the closest (line ${resolution.line}).`
+    );
+  }
+  return ` Or address by content: set_breakpoint {statement: "${expected}"} — that text is on line ${resolution.line}.`;
 }
 
 /**
