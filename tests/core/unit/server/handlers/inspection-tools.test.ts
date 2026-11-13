@@ -8,12 +8,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import { DotnetAdapterPolicy, SessionLifecycleState } from '@debugmcp/shared';
 import {
+  getScopesTool,
   getStackTraceTool,
+  getVariablesTool,
   handleEvaluateExpression,
   handleGetSourceContext,
   handleGetLocalVariables
 } from '../../../../../src/server/handlers/inspection-tools.js';
-import { SessionTerminatedError } from '../../../../../src/errors/debug-errors.js';
+import { SessionNotFoundError, SessionTerminatedError } from '../../../../../src/errors/debug-errors.js';
 import { ErrorMessages } from '../../../../../src/utils/error-messages.js';
 import { createMockToolContext } from '../server-test-helpers.js';
 
@@ -521,6 +523,99 @@ describe('inspection tool handlers', () => {
       expect(payload.lastStop.text).not.toContain(SECRET);
       expect(payload.stopReason).toBe('exception');
       expect(stored.text).toContain(SECRET);
+    });
+  });
+
+  describe('an ended session is explained by every inspection tool, in terms of what the session is (issue #1141)', () => {
+    const ENDED = 'Session is terminated: test-session';
+    const LAUNCH_SENTENCE =
+      'The program has terminated, so no frames or variables exist. Use restart_debugging to run it again.';
+
+    /** Each inspection tool, called on a session whose gate throws the terminated error. */
+    const TOOLS: Array<[string, () => Promise<{ content: [{ text: string }] }>]> = [
+      ['get_stack_trace', () => getStackTraceTool(ctx, { sessionId: 'test-session' }, 'get_stack_trace')],
+      ['get_scopes', () => getScopesTool(ctx, { sessionId: 'test-session', frameId: 1 }, 'get_scopes')],
+      ['get_variables', () => getVariablesTool(ctx, { sessionId: 'test-session', scope: 7 }, 'get_variables')],
+      ['evaluate_expression', () => handleEvaluateExpression(ctx, { sessionId: 'test-session', expression: 'x' })],
+      ['get_local_variables', () => handleGetLocalVariables(ctx, { sessionId: 'test-session' })]
+    ];
+
+    function endedSession(session: Record<string, unknown>): void {
+      ctx.sessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.TERMINATED,
+        state: 'stopped',
+        ...session
+      });
+      const terminated = () => { throw new SessionTerminatedError('test-session'); };
+      ctx.validateSession = vi.fn().mockImplementation(terminated);
+      ctx.getStackTrace = vi.fn().mockImplementation(async () => terminated());
+      ctx.getScopes = vi.fn().mockImplementation(async () => terminated());
+      ctx.getVariablesDetailed = vi.fn().mockImplementation(async () => terminated());
+      ctx.getLocalVariables = vi.fn().mockImplementation(async () => terminated());
+    }
+
+    it.each(TOOLS)('%s: a launched program that ended points at restart_debugging', async (_name, call) => {
+      endedSession({ lastLaunch: { scriptPath: '/app/main.py' } });
+
+      const payload = JSON.parse((await call()).content[0].text);
+
+      expect(payload.success).toBe(false);
+      // The error text is unchanged: callers and tests match on it.
+      expect(payload.error).toBe(ENDED);
+      expect(payload.message).toBe(LAUNCH_SENTENCE);
+    });
+
+    it.each(TOOLS)('%s: an attach session points at attach_to_process, never at a restart it would be refused', async (_name, call) => {
+      endedSession({ attachMode: true });
+
+      const payload = JSON.parse((await call()).content[0].text);
+
+      expect(payload.error).toBe(ENDED);
+      expect(payload.message).toBe(
+        'The debugger is no longer attached to the target (it ended, or was detached), so no frames or variables exist. ' +
+        'Use attach_to_process to attach again.'
+      );
+      expect(payload.message).not.toContain('restart_debugging');
+    });
+
+    it.each(TOOLS)('%s: a child session names its parent', async (_name, call) => {
+      // A child of an attach root: the child rule wins, whatever else the row carries.
+      endedSession({ parentSessionId: 'parent-1', attachMode: true });
+
+      const payload = JSON.parse((await call()).content[0].text);
+
+      expect(payload.error).toBe(ENDED);
+      expect(payload.message).toBe(
+        'The process this child session debugged has ended or was released, so no frames or variables exist. ' +
+        'A child session cannot be restarted on its own: its parent is parent-1.'
+      );
+    });
+
+    it('keeps the launch wording when the session row cannot be read', async () => {
+      endedSession({});
+      ctx.sessionManager.getSession.mockReturnValue(undefined);
+
+      const payload = JSON.parse((await getStackTraceTool(ctx, { sessionId: 'test-session' }, 'get_stack_trace')).content[0].text);
+
+      expect(payload.message).toBe(LAUNCH_SENTENCE);
+    });
+
+    it('get_stack_trace keeps its failure diagnostics beside the sentence', async () => {
+      endedSession({ failureDiagnostics: { proxyLogPath: '/logs/proxy.log' } });
+
+      const payload = JSON.parse((await getStackTraceTool(ctx, { sessionId: 'test-session' }, 'get_stack_trace')).content[0].text);
+
+      expect(payload.diagnostics).toEqual({ proxyLogPath: '/logs/proxy.log' });
+      expect(payload.message).toBe(LAUNCH_SENTENCE);
+    });
+
+    it('adds nothing for a session that is merely unknown', async () => {
+      ctx.getStackTrace = vi.fn().mockRejectedValue(new SessionNotFoundError('nope'));
+
+      const payload = JSON.parse((await getStackTraceTool(ctx, { sessionId: 'nope' }, 'get_stack_trace')).content[0].text);
+
+      expect(payload).toEqual({ success: false, error: 'Session not found: nope' });
     });
   });
 });

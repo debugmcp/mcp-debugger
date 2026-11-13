@@ -605,7 +605,7 @@ describe('hot_reload and attach stopOnEntry tests', () => {
     });
 
     it('surfaces the attach note at the top level when the stop landed where no frame is program code (issues #904/#900)', async () => {
-      const note = "No program frame is active on thread 0: the only frame is internal/runtime (top: '<anonymous>' <unknown_source>:1). The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint; get_stack_trace with includeInternals: true lists the frames.";
+      const note = "No program frame is active on thread 0: the only frame is internal/runtime (top: '<anonymous>' <unknown_source>:1). The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint.";
       mockSessionManager.attachToProcess.mockResolvedValue({
         success: true,
         state: 'paused',

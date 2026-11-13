@@ -4,7 +4,6 @@
  */
 import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import { SessionState } from '@debugmcp/shared';
-import { SessionTerminatedError } from '../../errors/debug-errors.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { enforceExplicitNames, requireSessionId } from '../tool-validation.js';
@@ -13,6 +12,7 @@ import {
   debuggerOffWhyFor,
   describeStaleBuild,
   emittableStopInfo,
+  endedSessionExtras,
   hasOpenableSourcePath,
   variablePayloadExtras
 } from './shared.js';
@@ -52,7 +52,8 @@ export const getVariablesTool: ToolHandler = async (ctx, args) => {
     return jsonResult({ success: true, variables, count: variables.length, variablesReference: scope, ...variablePayloadExtras(variables, args.names, truncation) });
   } catch (error) {
     // Typed session errors report as {success: false}; anything else escapes.
-    return sessionErrorResultOrThrow(error);
+    // An ended session says what that means and what to do next (issue #1141).
+    return sessionErrorResultOrThrow(error, endedSessionExtras(ctx, error));
   }
 };
 
@@ -122,7 +123,9 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
     }
     // No frame of the shown stack is program code and nothing was hidden to
     // say so (issue #904): a lone sourceless frame (an idle js-debug pause,
-    // issue #900), or a Java stack its filter handed back whole.
+    // issue #900), or a Java stack its filter handed back whole. Every frame
+    // is in this answer, so the sentence never points back at this tool
+    // (issue #1141).
     if (stackTrace.noProgramFrame && stackTrace.hiddenFrameCount === 0 && stackTrace.frames[0]) {
       notes.push(ErrorMessages.stopWithoutProgramFrame(stackTrace.threadId, stackTrace.totalFrameCount, stackTrace.frames[0]));
     }
@@ -173,9 +176,12 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
   } catch (error) {
     const sessionResult = sessionErrorToResult(error);
     if (sessionResult) {
+      // An ended session gets the sentence get_local_variables always gave
+      // it, worded for what the session is (issue #1141).
       const diagnostics = failureDiagnostics();
-      return diagnostics
-        ? sessionErrorToResult(error, { diagnostics })!
+      const ended = endedSessionExtras(ctx, error);
+      return diagnostics || ended
+        ? sessionErrorToResult(error, { ...(diagnostics ? { diagnostics } : {}), ...ended })!
         : sessionResult;
     }
     if (error instanceof Error && !(error instanceof ProtocolError)) {
@@ -199,7 +205,7 @@ export const getScopesTool: ToolHandler = async (ctx, args) => {
     return jsonResult({ success: true, scopes });
   } catch (error) {
     // Typed session errors report as {success: false}; anything else escapes.
-    return sessionErrorResultOrThrow(error);
+    return sessionErrorResultOrThrow(error, endedSessionExtras(ctx, error));
   }
 };
 
@@ -246,7 +252,7 @@ export async function handleEvaluateExpression(ctx: ToolContext, args: { session
       timestamp: Date.now()
     });
 
-    return sessionErrorToResult(error) ??
+    return sessionErrorToResult(error, endedSessionExtras(ctx, error)) ??
       rethrowAsMcpError(error, 'Failed to evaluate expression');
   }
 }
@@ -418,11 +424,11 @@ export async function handleGetLocalVariables(ctx: ToolContext, args: { sessionI
 
     // Handle session state errors specifically. A terminated session is a
     // normal end state (e.g. a step_out ran the program to completion) —
-    // explain that instead of implying misuse.
-    const stateMessage = error instanceof SessionTerminatedError
-      ? 'The program has terminated, so no frames or variables exist. Use restart_debugging to run it again.'
-      : 'Cannot get local variables. The session must be paused at a breakpoint.';
-    return sessionErrorToResult(error, { message: stateMessage }) ??
+    // explain that instead of implying misuse, in the words every inspection
+    // tool uses for it (issue #1141).
+    const extras = endedSessionExtras(ctx, error) ??
+      { message: 'Cannot get local variables. The session must be paused at a breakpoint.' };
+    return sessionErrorToResult(error, extras) ??
       rethrowAsMcpError(error, 'Failed to get local variables');
   }
 }

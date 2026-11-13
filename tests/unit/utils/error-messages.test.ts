@@ -339,3 +339,34 @@ describe('the unarmed launch wording when the adapter cannot, or was not asked t
     expect(text).toMatch(/no pausing breakpoints/);
   });
 });
+
+describe('stopWithoutProgramFrame offers the frames only when some are unseen (issue #1141)', () => {
+  const top = { name: 'process.processTimers', file: '<node_internals>/internal/timers', line: 527 };
+  const HINT = 'get_stack_trace with includeInternals: true lists the frames';
+
+  it('ends at the remedy when the answer has shown every frame', () => {
+    const message = ErrorMessages.stopWithoutProgramFrame(0, 1, top);
+    expect(message).toBe(
+      "No program frame is active on thread 0: the only frame is internal/runtime (top: 'process.processTimers' <node_internals>/internal/timers:527). " +
+      'The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint.'
+    );
+    expect(message).not.toContain(HINT);
+  });
+
+  it('points at the full stack when the thread has frames the answer did not show', () => {
+    const message = ErrorMessages.stopWithoutProgramFrame(
+      12952,
+      4,
+      { name: '__tmainCRTStartup', file: '@__tmainCRTStartup', line: 51 },
+      { framesUnseen: true }
+    );
+    expect(message).toBe(
+      "No program frame is active on thread 12952: all 4 frames are internal/runtime (top: '__tmainCRTStartup' @__tmainCRTStartup:51). " +
+      `The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint; ${HINT}.`
+    );
+  });
+
+  it('names no thread when none is known', () => {
+    expect(ErrorMessages.stopWithoutProgramFrame(undefined, 1, top)).toMatch(/^No program frame is active: the only frame is/);
+  });
+});

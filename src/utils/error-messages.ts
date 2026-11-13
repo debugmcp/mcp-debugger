@@ -243,21 +243,30 @@ export const ErrorMessages = {
    * `<anonymous>` frame between event-loop dispatches (issue #900); a Windows
    * pause on a native helper thread that no sibling could replace. Worded
    * for every adapter — what the frame is, the language guide says.
-   * Used in: src/session/inspection/stop-location.ts
+   *
+   * The pointer at the full stack is offered only when the thread has frames
+   * the answer has not shown (issue #1141): `get_stack_trace` says this
+   * sentence exactly when it hid nothing, where "includeInternals: true lists
+   * the frames" told a caller who had passed it to pass it; and a one-frame
+   * stack has no more to list than the frame the sentence already names.
+   * Used in: src/session/inspection/stop-location.ts,
+   *   src/server/handlers/inspection-tools.ts
    * @param threadId - The thread the answer is anchored on, when known
    * @param frameCount - How many frames the thread reported
    * @param top - The frame shown
+   * @param opts.framesUnseen - The thread has frames this answer did not show
    */
   stopWithoutProgramFrame: (
     threadId: number | undefined,
     frameCount: number,
-    top: { name: string; file: string; line: number }
+    top: { name: string; file: string; line: number },
+    opts?: { framesUnseen?: boolean }
   ) =>
     `No program frame is active${typeof threadId === 'number' ? ` on thread ${threadId}` : ''}: ` +
     `${frameCount === 1 ? 'the only frame is' : `all ${frameCount} frames are`} internal/runtime ` +
     `(top: '${top.name}' ${top.file}:${top.line}). The stop landed outside your code: ` +
-    `continue_execution and trigger activity, or set a breakpoint; ` +
-    `get_stack_trace with includeInternals: true lists the frames.`,
+    `continue_execution and trigger activity, or set a breakpoint` +
+    (opts?.framesUnseen ? '; get_stack_trace with includeInternals: true lists the frames.' : '.'),
 
   /**
    * An explicit breakOnExceptions mode the adapter cannot honour (issue #1032):
@@ -469,6 +478,30 @@ export const ErrorMessages = {
    */
   stackTraceNotPaused: (state: string, why?: string) =>
     `Session is not paused (state: ${state}); stack traces are only available while paused${why ? `; ${why}` : ''}.`,
+
+  /**
+   * The `message` an inspection tool puts beside the bare
+   * `Session is terminated: <id>` error (issue #1141), worded by what the
+   * session is, because the remedy differs: a launched program is run again
+   * with restart_debugging; an attach session has no launch to replay and
+   * restart_debugging refuses it, so it is attached again; a child session
+   * was started by its parent and can do neither.
+   * Used in: src/server/handlers/shared.ts (endedSessionExtras)
+   * @param kind - What the ended session is
+   * @param parentSessionId - The parent's id, for a child session
+   */
+  endedSessionNothingToInspect: (kind: 'launch' | 'attach' | 'child', parentSessionId?: string) => {
+    switch (kind) {
+      case 'attach':
+        return 'The debugger is no longer attached to the target (it ended, or was detached), so no frames or variables exist. ' +
+          'Use attach_to_process to attach again.';
+      case 'child':
+        return 'The process this child session debugged has ended or was released, so no frames or variables exist. ' +
+          `A child session cannot be restarted on its own${parentSessionId ? `: its parent is ${parentSessionId}` : ''}.`;
+      case 'launch':
+        return 'The program has terminated, so no frames or variables exist. Use restart_debugging to run it again.';
+    }
+  },
 
   /**
    * get_local_variables with no frame and the session not paused, with the

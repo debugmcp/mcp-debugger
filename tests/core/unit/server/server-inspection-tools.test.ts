@@ -477,6 +477,8 @@ describe('Server Inspection Tools Tests', () => {
       const content = JSON.parse(result.content[0].text);
       expect(content.noProgramFrame).toBe(true);
       expect(content.note).toContain("No program frame is active: the only frame is internal/runtime (top: '<anonymous>' <unknown_source>:1)");
+      // This answer IS the stack: pointing at get_stack_trace from it goes round in a circle (issue #1141).
+      expect(content.note).not.toContain('lists the frames');
 
       // Absent, not false, on an ordinary stack.
       mockSessionManager.getStackTraceDetailed.mockResolvedValue({
@@ -488,6 +490,29 @@ describe('Server Inspection Tools Tests', () => {
         params: { name: 'get_stack_trace', arguments: { sessionId: 'test-session' } }
       })).content[0].text);
       expect(plain).not.toHaveProperty('noProgramFrame');
+    });
+
+    it('never tells a caller who passed includeInternals: true to pass it (issue #1141)', async () => {
+      mockSessionManager.getSession.mockReturnValue({ proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) } });
+      const frames = [
+        { id: 1, name: '__tmainCRTStartup', file: '@__tmainCRTStartup', line: 51 },
+        { id: 2, name: 'mainCRTStartup', file: '@mainCRTStartup', line: 9 }
+      ];
+      // With the flag the whole stack is shown: nothing hidden, no program frame.
+      mockSessionManager.getStackTraceDetailed.mockResolvedValue({
+        frames, threadId: 7, totalFrameCount: 2, hiddenFrameCount: 0, allFramesInternal: false, noProgramFrame: true
+      });
+
+      const content = JSON.parse((await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'get_stack_trace', arguments: { sessionId: 'test-session', includeInternals: true } }
+      })).content[0].text);
+
+      expect(content.includeInternals).toBe(true);
+      expect(content.stackFrames).toHaveLength(2);
+      expect(content.note).toContain('No program frame is active on thread 7: all 2 frames are internal/runtime');
+      expect(content.note).toContain('continue_execution and trigger activity, or set a breakpoint.');
+      expect(content.note).not.toContain('includeInternals');
     });
 
     it('should handle missing session', async () => {
