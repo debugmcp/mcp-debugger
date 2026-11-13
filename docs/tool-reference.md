@@ -248,7 +248,7 @@ Context:
 The file may have changed since you last read it. Pick the correct line from the context above. Or address by content: set_breakpoint {statement: "total = sum(prices)"} — that text is on line 11.
 ```
 
-The last sentence is the statement resolver's own answer for the expected text (issue #1142), so following it always works: on one line it names the line; on several it adds `nearLine` (the line you asked for) and lists them — `{statement: "print(a, b)", nearLine: 5} — that text is on lines 4 and 6; nearLine picks the closest (line 4).`; when the text is nowhere in the file it is replaced by `That text matches no line of the file, so it cannot be addressed by content (statement) either.`; and a comment, a blank or text spanning lines gets no such sentence. It is only added where statement anchors are available (`DEBUG_MCP_BP_ADDRESSING=content`, the default).
+The last sentence is the statement resolver's own answer for the expected text (issue #1142), so following it always works: on one line it names the line; on several it adds `nearLine` (the line you asked for) and lists them — `{statement: "print(a, b)", nearLine: 5} — that text is on lines 4 and 6; nearLine picks the closest (line 4).`; when the resolver would not find the text — it is absent, or it is only where statement matching does not look (a comment line, or past a `//` or `#` on a line) — no statement is offered, and the sentence instead names the lines this same `expectedContent` would pass on (`That expectedContent matches line 12.`) or says `That expectedContent matches no line of the file.`; and text spanning lines gets no such sentence. It is only added where statement anchors are available (`DEBUG_MCP_BP_ADDRESSING=content`, the default).
 
 Relatedly, when a debug adapter *accepts* a breakpoint but binds it to a different line (adapters snap requests on non-executable lines to the nearest valid one), the response reports it prominently instead of silently mutating the line: `message` and `warning` carry `"requested line 12, bound to line 13: \`...\`"`, and the response includes `requestedLine` alongside the bound `line`. Adapters that relocate breakpoints asynchronously (after the response) surface the move in `list_breakpoints`, where `line` ≠ `requestedLine` marks a snapped breakpoint.
 
@@ -660,7 +660,9 @@ The [stop snapshot](#the-stop-snapshot) rides on every landed step (issues #982/
 function reports **`changedVariables`** — only what the executed line changed: a value that changed, a
 variable that appeared (`new: true`) or one that left scope (`gone: true`) — instead of re-sending the
 full `locals`; stepping into a new frame (or any frame-identity change) shows that frame's full `locals`.
-An empty `changedVariables: {}` says the line changed nothing visible. On an adapter that steps once per
+An empty `changedVariables: {}` says the line changed nothing visible. A stop whose frame shows no locals
+at all carries neither `locals` nor `changedVariables`, so a frame whose every variable left scope says
+nothing on that stop. On an adapter that steps once per
 token position (Dart), the snapshot is composed once, from the final landing of the repeated step.
 
 When the stop that ended the step was recorded as something other than the step — a breakpoint on the landing
@@ -1197,7 +1199,7 @@ Gets local variables for the session's shared inspection anchor. It walks down f
 
 If the originally stopped thread has no frames, this tool uses the same user-frame-preferring adopted anchor as `get_stack_trace`. The response's `note` always names an automatic thread or lower-frame switch.
 
-**When no frame is program code** (issue #1135) — a pause on an idle Node server, which lands in the timer loop; a `step_out` of `main`, which lands in the C runtime — the answer still carries the variables the adapter reported for `frame`, and says whose they are: `noProgramFrame: true`, and a `note` with the sentence `get_stack_trace` gives the same stop plus one clause naming the frame.
+**When no frame is program code** (issue #1135) — a pause on a launched Node program idle between timers, which lands in the timer loop; a `step_out` of `main`, which lands in the C runtime — the answer still carries the variables the adapter reported for `frame`, and says whose they are: `noProgramFrame: true`, and a `note` with the sentence the pause or step answer gave for that stop (`No program frame is active…`) plus one clause naming the frame.
 
 ```json
 {
@@ -1328,7 +1330,7 @@ Evaluates an expression in the context of the current debug session.
 
 `frame` is present when `frameId` was omitted and names the frame the expression ran in (the same shape `get_local_variables` reports).
 
-When `frameId` was omitted and no frame of the stack is program code (issue #1135), the answer also carries `noProgramFrame: true`, and `anchorNote` ends with the sentence `get_stack_trace` gives the same stop and `The expression was evaluated in that frame.` — the expression ran in a runtime frame (Node's timer loop, the C runtime's start-up), where your program's names do not resolve. An explicit `frameId` is the caller's choice and adds nothing.
+When `frameId` was omitted and no frame of the stack is program code (issue #1135), the answer also carries `noProgramFrame: true`, and `anchorNote` ends with the sentence the pause or step answer gave for that stop (`No program frame is active…`) and `The expression was evaluated in that frame.` — the expression ran in a runtime frame (Node's timer loop, the C runtime's start-up), where your program's names do not resolve. An explicit `frameId` is the caller's choice and adds nothing.
 
 **Example - Simple Variable:**
 ```json

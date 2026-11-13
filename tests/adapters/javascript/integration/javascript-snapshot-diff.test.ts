@@ -40,7 +40,14 @@ describe('The snapshot diff against a real js-debug (issue #1140) @requires-node
     server = await startStdioClient({ name: 'snapshot-diff-js' });
     await server.createSession('javascript', 'snapshot-diff-js');
     await server.call('set_breakpoint', { file: FIXTURE, line: LINE_IN_BLOCK });
-    const launch = await server.call<StopAnswer>('start_debugging', { scriptPath: FIXTURE });
+    let launch = await server.call<StopAnswer>('start_debugging', { scriptPath: FIXTURE });
+    expect(launch.success, JSON.stringify(launch)).toBe(true);
+    // The launch answers paused when the breakpoint is reached within its
+    // hold (issue #823); a slower start answers pending, and wait_for_stop
+    // lands the same stop with the same first snapshot.
+    if (launch.state !== 'paused') {
+      launch = await server.call<StopAnswer>('wait_for_stop', { timeout: 15000 });
+    }
     expect(launch, JSON.stringify(launch)).toMatchObject({ success: true, state: 'paused' });
     // The first stop shows the frame's locals in full: the block's and the function's.
     expect(launch.snapshot?.locals, JSON.stringify(launch)).toMatchObject({ doubled: '2', i: '0', total: '0' });

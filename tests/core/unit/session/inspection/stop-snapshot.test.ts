@@ -765,6 +765,16 @@ describe('composeStopSnapshot diff vocabulary: changed, new, gone (issue #1140)'
   it("reports an adapter's return-value entry as it happens: new when it appears", async () => {
     // debugpy keeps "(return) add" in the frame once it appears (measured,
     // 1.8.20); js-debug shows "Return value" at a function's return point.
+    const appeared = await diffOf(
+      localsResult([['a', '1']]),
+      localsResult([['a', '1'], ['(return) add', '3'], ['s', '3']])
+    );
+    expect(appeared?.changedVariables).toEqual({
+      '(return) add': { after: '3', new: true },
+      s: { after: '3', new: true }
+    });
+
+    // It stays, so the next stop says nothing more about it.
     const snapshot = await diffOf(
       localsResult([['a', '1']]),
       localsResult([['a', '1'], ['(return) add', '3'], ['s', '3']]),

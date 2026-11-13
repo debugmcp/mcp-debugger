@@ -394,8 +394,8 @@ export async function handleGetLocalVariables(ctx: ToolContext, args: { sessionI
 
     // No frame of the stack is program code (issue #1135): the variables are
     // real — the adapter reported them for `frame` — but they are a runtime
-    // frame's, and get_stack_trace on the same stop already says so. The flag
-    // and the sentence are the ones that answer carries; the last clause
+    // frame's, and the stop's own answer already said so. The flag is the
+    // one get_stack_trace carries and the sentence the stop answer's; the last clause
     // names the frame the variables came from, which is not the stack's top
     // after a walk-down, and is left out when there is nothing shown to name.
     if (result.noProgramFrame) {

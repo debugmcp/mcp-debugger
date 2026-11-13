@@ -641,7 +641,12 @@ describe('ProxyManager.start', () => {
     }
   });
 
-  it('ignores a direct_connect status that names no usable endpoint', async () => {
+  it.each([
+    ['no host', { host: '', port: 5000 }],
+    ['a host that is not text', { host: 5000, port: 5000 }],
+    ['a port that is not a number', { host: '127.0.0.1', port: 'nope' }],
+    ['neither', { host: '', port: 'nope' }]
+  ])('ignores a direct_connect status that names no usable endpoint: %s', async (_what, endpoint) => {
     vi.useFakeTimers();
     fakeProcess.sendCommand.mockImplementation((cmd: any) => {
       if (cmd.cmd === 'init') {
@@ -649,7 +654,7 @@ describe('ProxyManager.start', () => {
           const emitStatus = (extra: Record<string, unknown>) =>
             fakeProcess.emit('message', { type: 'status', sessionId: cmd.sessionId, ...extra });
           emitStatus({ status: 'init_received' });
-          emitStatus({ status: 'direct_connect', host: '', port: 'nope' });
+          emitStatus({ status: 'direct_connect', ...endpoint });
           emitStatus({ status: 'dap_handshake_stage', stage: 'transport_connected' });
           emitStatus({ status: 'dap_handshake_stage', stage: 'request_pending', command: 'initialize' });
         }, 0);

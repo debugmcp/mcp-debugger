@@ -274,6 +274,19 @@ describe('SessionManager.evaluateExpression default-frame resolution', () => {
       expect(result).not.toHaveProperty('noProgramFrame');
       expect(result).not.toHaveProperty('anchorNote');
     });
+
+    it('says nothing of the kind when the stack reaches the program, runtime frames below it or not', async () => {
+      const PROGRAM = { id: 3, name: 'tick', line: 12, column: 3, source: { path: '/work/app/server.js' } };
+      const { sessionManager, session, evaluated } = await pausedOutsideTheProgram([PROGRAM, TIMERS, NEXT_TICK]);
+
+      const result = await sessionManager.evaluateExpression(session.id, 'typeof now');
+
+      expect(result.success).toBe(true);
+      expect(evaluated).toEqual([3]);
+      expect(result.frame).toEqual({ name: 'tick', file: '/work/app/server.js', line: 12 });
+      expect(result).not.toHaveProperty('noProgramFrame');
+      expect(result).not.toHaveProperty('anchorNote');
+    });
   });
 
   it('names the anchor frame when the evaluation itself fails (#672)', async () => {

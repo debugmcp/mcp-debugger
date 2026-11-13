@@ -401,6 +401,18 @@ describe('proxy initialization timeout for a direct-connect attach (issue #1139)
     expect(message).not.toContain('installed and accessible');
   });
 
+  it('names a plain debug server there when the policy has no phrase for what should be listening', () => {
+    const message = ErrorMessages.proxyInitTimeout(30, {
+      transportConnected: false,
+      directConnect: { host: '10.0.0.5', port: 12345 }
+    });
+
+    expect(message).toBe(
+      `${BASE} No connection to 10.0.0.5:12345 was established. Nothing was started for this attach: ` +
+      'check the host and port, and that the debug server is listening there and reachable from this machine.'
+    );
+  });
+
   it('leaves every spawned-adapter sentence as it was', () => {
     expect(ErrorMessages.proxyInitTimeout(30, { transportConnected: true, pendingCommand: 'initialize', adapterPid: 52875 })).toBe(
       `${BASE} Connected to the debug adapter, but the "initialize" request never received a response. ` +

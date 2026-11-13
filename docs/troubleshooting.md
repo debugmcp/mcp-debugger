@@ -233,10 +233,10 @@ The message's second sentence tells you which stage stalled — it is derived fr
 **A Python or Ruby attach is worded differently** (issue #1139), because the server starts nothing for it: it connects straight to the host and port you gave, and "the adapter" is whatever listens there. The usual cause of a failure is therefore the endpoint itself — most often the wrong port, such as the application's own HTTP port instead of the debugger's:
 
 - **"`host:port` accepted the connection but never answered the DAP \"initialize\" request. Nothing was started for this attach … check that it is a debugpy listener (`python -m debugpy --listen host:port …`) and not another service. Retrying the same port stalls the same way."** — something is listening, and it is silent to DAP. This one takes the full 30 s.
-- **"Critical initialization error: `host:port` never answered the DAP \"initialize\" request (DAP client disconnected). Nothing was started for this attach …"** — the endpoint hung up on the DAP frame, which is what an HTTP server does. This one answers at once.
+- **"Critical initialization error: `host:port` never answered the DAP \"initialize\" request (DAP client disconnected). Nothing was started for this attach …"** — the endpoint hung up on the DAP frame, which is what an HTTP server does, or reset the connection, which is what a forwarder with nothing behind it does (the reason in parentheses is then the socket's own, such as `read ECONNRESET`). This one answers at once.
 - **"`host:port` answered the start of the DAP handshake, but the \"attach\" request never received a response …"** — the endpoint is a debug server and stalled later; capture a `DAP_TRACE=1` trace if it recurs.
 
-`data.initProgress.directConnect` (`{ host, port, listener }`) carries the endpoint structurally.
+The answer for a stall — the two that wait out the 30 s — also carries the endpoint structurally, as `data.initProgress.directConnect` (`{ host, port, listener }`). The answers that fail sooner name it in the message only.
 
 For a worked example of diagnosing this class of failure (an rdbg launch that emitted the `initialized` event but never the `initialize` response), see the [rdbg initialize-response stall case study](./case-studies/rdbg-initialize-response-stall.md).
 

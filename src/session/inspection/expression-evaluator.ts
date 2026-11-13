@@ -55,7 +55,7 @@ export interface EvaluateResult {
   /**
    * True when the default anchor is a runtime frame because no frame of the
    * stack is program code (issue #1135); `anchorNote` then carries the
-   * sentence get_stack_trace gives the same stop. Never set for an explicit
+   * sentence the stop's own answer gave. Never set for an explicit
    * frameId: the caller chose the frame.
    */
   noProgramFrame?: true;

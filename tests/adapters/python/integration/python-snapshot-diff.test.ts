@@ -46,7 +46,14 @@ describe('The snapshot diff against a real debugpy (issue #1140) @requires-pytho
     server = await startStdioClient({ name: 'snapshot-diff-py', env: pythonPath() });
     await server.createSession('python', 'snapshot-diff-py');
     await server.call('set_breakpoint', { file: PROGRAM, line: LINE_BEFORE_B });
-    const launch = await server.call<StopAnswer>('start_debugging', { scriptPath: PROGRAM });
+    let launch = await server.call<StopAnswer>('start_debugging', { scriptPath: PROGRAM });
+    expect(launch.success, JSON.stringify(launch)).toBe(true);
+    // The launch answers paused when the breakpoint is reached within its
+    // hold (issue #823); a slower start answers pending, and wait_for_stop
+    // lands the same stop with the same first snapshot.
+    if (launch.state !== 'paused') {
+      launch = await server.call<StopAnswer>('wait_for_stop', { timeout: 15000 });
+    }
     expect(launch, JSON.stringify(launch)).toMatchObject({ success: true, state: 'paused' });
     expect(launch.snapshot?.locals, JSON.stringify(launch)).toEqual({ a: '1' });
 
