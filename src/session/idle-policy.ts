@@ -75,14 +75,17 @@ export interface IdleExpiryRecord {
    * What the close did to the program: a launched one is `ended`, an attached
    * one `released`. `closed` when there was none to act on — the session never
    * launched, or its program was already over when the policy came for it.
+   * `unconfirmed` when it was attached and nothing acknowledged the detach
+   * (issue #1148): the close did not see what became of the process.
    */
-  readonly outcome: 'ended' | 'released' | 'closed';
+  readonly outcome: 'ended' | 'released' | 'closed' | 'unconfirmed';
 }
 
 const OUTCOME_SENTENCE: Record<IdleExpiryRecord['outcome'], string> = {
   ended: 'Its program was ended.',
   released: 'The process it was attached to was released and keeps running.',
-  closed: 'It had no running program by then.'
+  closed: 'It had no running program by then.',
+  unconfirmed: 'The debug adapter did not confirm that it released the process it was attached to, so whether that process is still running is not known.'
 };
 
 /** How many expiry records the core keeps; the oldest go first. */

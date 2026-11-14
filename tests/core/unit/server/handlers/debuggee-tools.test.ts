@@ -135,6 +135,22 @@ describe('debuggee lifecycle tool handlers', () => {
     }
   });
 
+  describe('the fate fields on the detach_from_process answer (issue #1148)', () => {
+    const answer = async (data: Record<string, unknown>) => {
+      ctx.sessionManager.detachFromProcess.mockResolvedValueOnce({ success: true, state: 'stopped', data });
+      return JSON.parse((await detachFromProcessTool(ctx, { sessionId: 'test-session' }, 'detach_from_process')).content[0].text);
+    };
+
+    it('carries released, processEnded and the warning beside the message, as close_debug_session does', async () => {
+      expect(await answer({ message: 'released', released: true })).toMatchObject({ success: true, message: 'released', released: true });
+      expect(await answer({ message: 'ended', processEnded: true })).toMatchObject({ success: true, message: 'ended', processEnded: true });
+      const unconfirmed = await answer({ message: 'not confirmed', warning: 'not confirmed' });
+      expect(unconfirmed).toMatchObject({ success: true, message: 'not confirmed', warning: 'not confirmed' });
+      expect(unconfirmed).not.toHaveProperty('released');
+      expect(unconfirmed).not.toHaveProperty('processEnded');
+    });
+  });
+
   describe('the tree fields on the detach_from_process answer (issue #1081)', () => {
     it('hoists childrenReleased (a plain detach) and childrenClosed (a terminating one) beside the message', async () => {
       ctx.sessionManager.detachFromProcess.mockResolvedValueOnce({

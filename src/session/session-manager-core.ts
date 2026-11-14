@@ -728,6 +728,11 @@ export abstract class SessionManagerCore extends EventEmitter {
       if (withoutProgram.has(sessionId)) {
         return 'closed';
       }
+      // A borrowed root whose detach nothing acknowledged (issue #1148) is
+      // neither: the close did not see what became of its process.
+      if (sessionId === root.id && report.releaseUnconfirmed !== undefined) {
+        return 'unconfirmed';
+      }
       return report.released || report.releasedSessionIds?.includes(sessionId) ? 'released' : 'ended';
     };
     for (const sessionId of report.closedSessionIds) {
@@ -745,7 +750,8 @@ export abstract class SessionManagerCore extends EventEmitter {
     const did = {
       ended: 'its program was ended',
       released: 'its target was released and keeps running',
-      closed: 'it had no running program'
+      closed: 'it had no running program',
+      unconfirmed: 'the debug adapter did not confirm that it released its target'
     }[outcomeOf(root.id)];
     this.logger.info(
       `Idle debug session ${root.id} closed: ${did}` +

@@ -290,6 +290,24 @@ describe('Server Session Tools Tests', () => {
       expect(announce).toHaveBeenCalledTimes(3);
     });
 
+    it('says the release was not confirmed, and why, when nothing acknowledged the detach (issue #1148)', async () => {
+      mockSessionManager.closeSessionReporting.mockResolvedValue({
+        closed: true, closedSessionIds: ['test-session'], releaseUnconfirmed: 'DAP disconnect request timed out after 1000ms'
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'close_debug_session', arguments: { sessionId: 'test-session' } }
+      });
+
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        success: true,
+        message: 'Closed debug session: test-session',
+        warning: 'The debug adapter did not confirm that it released the process (DAP disconnect request timed out after 1000ms); ' +
+          'whether the process is still running is not known'
+      });
+    });
+
     it('says processEnded when the close ended a child process', async () => {
       mockSessionManager.closeSessionReporting.mockResolvedValue({ closed: true, closedSessionIds: ['child'], processEnded: true });
 
