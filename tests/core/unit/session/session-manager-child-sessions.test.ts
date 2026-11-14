@@ -4,6 +4,7 @@
  * with the parent's breakpoints under the per-tree cap, and wired like a root.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { ErrorMessages } from '../../../../src/utils/error-messages.js';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import { DebugLanguage, JsDebugAdapterPolicy, SessionState, type AdapterPolicy, type DapClientBehavior } from '@debugmcp/shared';
 import { createMockDependencies, createMockEnvironment, overridePolicy } from './session-manager-test-utils.js';
@@ -787,7 +788,7 @@ describe('SessionManager child sessions (issue #1081)', () => {
       const detached = await sessionManager.detachFromProcess(rootId);
 
       expect(detached.success).toBe(true);
-      expect(detached.data).toEqual({ message: 'Detached from process (process still running)' });
+      expect(detached.data).toEqual({ message: ErrorMessages.detachReleased(), released: true });
     });
 
     it('closing a released child preserves the release outcome and does not claim process termination', async () => {

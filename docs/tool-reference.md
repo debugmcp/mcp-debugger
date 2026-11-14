@@ -164,8 +164,14 @@ A session with child sessions, a child session or an attach root says what the c
   debug adapter they share alone.
 - `processEnded: true` when the named session is a child whose process the close ended (debugpy: a
   child's close terminates it, exit 0 reported to its parent).
-- `released: true` when the named session is an attach root: its descendants are detached with
-  their targets kept running, deepest first, their rows removed, then the root is detached. Also
+- `released: true` when the named session borrowed its program (an attach) and the debug adapter
+  acknowledged the detach (issue #1148): its descendants are detached with their targets kept
+  running, deepest first, their rows removed, then the root is detached. When the adapter did not
+  acknowledge it within the worker's 1 s bound there is no `released`, and `warning` reads `The
+  debug adapter did not confirm that it released the process (<why>); whether the process is still
+  running is not known`; `processEnded: true` instead when the adapter reported that the program
+  exited. A session whose program was already gone, or one that launched its program, carries none
+  of the three. It used to be `released: true` for every attach root, whatever the adapter did. Also
   when the named session is a JavaScript child: js-debug cannot end a target it adopted, so the
   close disconnects with the process kept running and it finishes undebugged (a root's close
   releases its JavaScript children the same way, counted in `childrenClosed`).
@@ -1646,12 +1652,22 @@ Detaches the debugger from a process the session attached to, leaving the proces
 {
   "success": true,
   "state": "stopped",
-  "message": "Detached from process (process still running)",
+  "message": "Detached from process: the debug adapter confirmed the detach, and the process was left running",
+  "released": true,
   "data": {
-    "message": "Detached from process (process still running)"
+    "message": "Detached from process: the debug adapter confirmed the detach, and the process was left running",
+    "released": true
   }
 }
 ```
+
+**What became of the process is observed, not assumed** (issue #1148). The answer is read from what the debug adapter did with the detaching `disconnect`:
+
+- `released: true`: the adapter acknowledged the detach, by answering the request or by sending `terminated` in reply to it (debugpy does the latter). The process was left running.
+- `processEnded: true`: the adapter reported that the program exited (`message`: `Detached from process: the debug adapter reported that the program had exited, so there is no process left running`).
+- Neither field, and a `warning` equal to the `message`: `Detached, but the debug adapter did not confirm it (<why>). The debugger was stopped anyway; whether the process is still running is not known`. The adapter did not acknowledge the detach within 10 s; it is stopped all the same, and what that did to the target is not something the server saw. `success` is still `true`: the session is ended either way. This used to answer `Detached from process (process still running)`, after 30 s.
+
+The 10 s is sized by measurement: every attach-capable adapter acknowledges a detach in 0 to 15 ms, and the worker may first spend up to 2 s resuming a stopped CodeLLDB target.
 
 **Notes:**
 - With `terminateProcess: true` the whole session is closed and the message reads `Detached and terminated process`.

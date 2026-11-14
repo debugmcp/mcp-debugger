@@ -114,6 +114,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       isRunning: vi.fn().mockReturnValue(true),
       getCurrentThreadId: vi.fn().mockReturnValue(1),
       getPreDetachResume: vi.fn().mockReturnValue(undefined),
+      getDetachResult: vi.fn().mockReturnValue(undefined),
       sendDapRequest: vi.fn().mockResolvedValue({}),
       stop: vi.fn(),
       once: vi.fn(),
@@ -3818,8 +3819,9 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.success).toBe(true);
       expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('disconnect', {
         terminateDebuggee: false
-      });
-      expect(result.data?.message).toContain('process still running');
+      }, { timeoutMs: 10_000 });
+      expect(result.data?.message).toBe(ErrorMessages.detachReleased());
+
     });
 
     it('detachFromProcess should survive proxyManager being nulled during disconnect (race condition)', async () => {
@@ -3879,7 +3881,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('disconnect', { terminateDebuggee: true });
       expect(mockProxyManager.sendDapRequest).not.toHaveBeenCalledWith('disconnect', {
         terminateDebuggee: false
-      });
+      }, { timeoutMs: 10_000 });
       expect(mockProxyManager.stop).toHaveBeenCalled();
     });
 
@@ -3964,7 +3966,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         const result = await operations.detachFromProcess('test-session', false);
 
         expect(result.success).toBe(true);
-        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('disconnect', { terminateDebuggee: false });
+        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('disconnect', { terminateDebuggee: false }, { timeoutMs: 10_000 });
       });
 
       it('answers a session with no program as before', async () => {
@@ -3995,10 +3997,11 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         expect(result.success).toBe(true);
         // The session layer sends only the disconnect; the continue is the worker's.
         expect(mockProxyManager.sendDapRequest.mock.calls.map((call) => call[0])).toEqual(['disconnect']);
-        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('disconnect', { terminateDebuggee: false });
+        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('disconnect', { terminateDebuggee: false }, { timeoutMs: 10_000 });
         expect(result.data?.resumedBeforeDetach).toBe(true);
         expect(result.data?.warning).toBeUndefined();
-        expect(result.data?.message).toContain('process still running');
+        expect(result.data?.message).toBe(ErrorMessages.detachReleased());
+
       });
 
       it('reports nothing about a resume when no resume was called for', async () => {

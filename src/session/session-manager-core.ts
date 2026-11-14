@@ -319,7 +319,12 @@ export type LaunchResultData = DebugResultData & StopAnswerFields & TreeAnswerFi
  * #1081): the children a plain detach released to run undebugged, or a
  * terminating detach closed.
  */
-export type DetachResultData = DebugResultData & Pick<TreeAnswerFields, 'childrenReleased' | 'childrenClosed'>;
+export type DetachResultData = DebugResultData & Pick<TreeAnswerFields, 'childrenReleased' | 'childrenClosed'> & {
+  /** The adapter acknowledged the detach and reported no exit: the process was left running (issue #1148). */
+  released?: true;
+  /** The adapter reported that the program exited (issue #1148). */
+  processEnded?: true;
+};
 
 /**
  * What a close did (the session tree, issue #1081): the rows it removed,
@@ -337,8 +342,16 @@ export interface CloseSessionOutcome {
   childrenClosed?: number;
   /** The named session is a child whose process this close ended (the policy's `closeChild: 'terminate'`). */
   processEnded?: true;
-  /** The named session's target runs on: an attach root (its descendants' too), or a child under `closeChild: 'release'`. */
+  /**
+   * The named session's target runs on: a borrowed program whose adapter
+   * acknowledged the detach (issue #1148), or a child under `closeChild: 'release'`.
+   */
   released?: true;
+  /**
+   * The named session borrowed its program and nothing acknowledged the
+   * detach (issue #1148): why. Neither `released` nor `processEnded` is set.
+   */
+  releaseUnconfirmed?: string;
 }
 
 /**
@@ -938,6 +951,31 @@ export abstract class SessionManagerCore extends EventEmitter {
   }
 
   /**
+   * What became of a borrowed program when its session closed (issue
+   * #1148), from the worker's report of the detaching disconnect: released
+   * when the adapter acknowledged it, ended when the adapter reported the
+   * program's exit, otherwise not confirmed, with why. No proxy means the
+   * program was already gone from this session: nothing is claimed.
+   */
+  private borrowedProgramFate(proxy: IProxyManager | undefined): { released: boolean; processEnded: boolean; unconfirmed?: string } {
+    if (!proxy) {
+      return { released: false, processEnded: false };
+    }
+    const report = proxy.getDetachResult();
+    if (report?.debuggeeExited) {
+      return { released: false, processEnded: true };
+    }
+    if (report?.acknowledged) {
+      return { released: true, processEnded: false };
+    }
+    return {
+      released: false,
+      processEnded: false,
+      unconfirmed: report ? report.error ?? 'the debug adapter did not answer the detach' : 'the debug adapter reported nothing about the detach'
+    };
+  }
+
+  /**
    * Close a session and its subtree, and say what the close did (issue
    * #1081): the descendants it took with it, deepest first; for a child,
    * whether its process was ended (the policy's `closeChild` pin: debugpy
@@ -987,10 +1025,19 @@ export abstract class SessionManagerCore extends EventEmitter {
           this.logger.warn('[SessionManager] Terminating disconnect failed, closing the session anyway:', disconnectError);
         }
       }
+      // A borrowed program (issue #1148): what this close did to it is what
+      // the worker saw the adapter do with the detaching disconnect, read
+      // once the worker has gone. A root with no live program has nothing
+      // for this close to release; a child answers from its own semantics.
+      const borrowedRoot =
+        !session.parentSessionId && releaseDescendants && session.proxyManager?.isRunning() ? session.proxyManager : undefined;
       const closed = await this.closeSingleSession(sessionId, { releaseChild: childEnd === 'release' });
+      const fate = session.parentSessionId
+        ? { released: released === true, processEnded: childEnd === 'terminate' }
+        : this.borrowedProgramFate(borrowedRoot);
       if (closed) {
         closedSessionIds.push(sessionId);
-        if (released) {
+        if (fate.released) {
           releasedSessionIds.push(sessionId);
         }
       }
@@ -999,8 +1046,9 @@ export abstract class SessionManagerCore extends EventEmitter {
         closedSessionIds,
         ...(releasedSessionIds.length > 0 ? { releasedSessionIds } : {}),
         ...(childrenClosed > 0 ? { childrenClosed } : {}),
-        ...(closed && childEnd === 'terminate' ? { processEnded: true as const } : {}),
-        ...(closed && released ? { released: true as const } : {})
+        ...(closed && fate.processEnded ? { processEnded: true as const } : {}),
+        ...(closed && fate.released ? { released: true as const } : {}),
+        ...(closed && fate.unconfirmed !== undefined ? { releaseUnconfirmed: fate.unconfirmed } : {})
       };
     } finally {
       finishClose();

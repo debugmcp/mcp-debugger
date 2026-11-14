@@ -748,6 +748,44 @@ export const ErrorMessages = {
     `Use the parent's id, or close_debug_session on the child.`,
 
   /**
+   * The detach answer when the adapter acknowledged the detach (issue #1148)
+   * Occurs when: the adapter answered the detaching disconnect, or sent
+   * `terminated` in reply to it, and reported no exit of the program
+   * Used in: src/session/attach/attach-controller.ts
+   */
+  detachReleased: () =>
+    'Detached from process: the debug adapter confirmed the detach, and the process was left running',
+
+  /**
+   * The detach answer when the adapter reported that the program exited (issue #1148)
+   * Used in: src/session/attach/attach-controller.ts
+   */
+  detachProgramEnded: () =>
+    'Detached from process: the debug adapter reported that the program had exited, so there is no process left running',
+
+  /**
+   * The detach answer when nothing acknowledged the detach (issue #1148)
+   * Occurs when: the detaching disconnect was neither answered nor followed
+   * by `terminated` within its bound, or the worker reported nothing. The
+   * adapter is stopped all the same; what that did to the target is not
+   * something the server saw. It used to answer "process still running".
+   * Used in: src/session/attach/attach-controller.ts
+   * @param reason - Why there is no acknowledgement
+   * @param look - What a look at the target's pid showed, for a pid attach
+   */
+  detachUnconfirmed: (reason: string, look?: string) =>
+    `Detached, but the debug adapter did not confirm it (${reason}). The debugger was stopped anyway; ` +
+    `whether the process is still running is not known${look ? `: ${look}` : ''}`,
+
+  /**
+   * The close answer's warning when the detach of a borrowed program was not acknowledged (issue #1148)
+   * Used in: src/server/handlers/session-tools.ts
+   * @param reason - Why there is no acknowledgement
+   */
+  closeReleaseUnconfirmed: (reason: string) =>
+    `The debug adapter did not confirm that it released the process (${reason}); whether the process is still running is not known`,
+
+  /**
    * Refusal of a plain detach on a session that launched its program (issue #1151)
    * Occurs when: detach_from_process is called without terminateProcess on a
    * session whose program it launched. A launched program ends with its

@@ -727,6 +727,40 @@ describe('ProxyManager Message Handling', () => {
       await proxyManager.stop();
     });
 
+    it('records what the adapter did with a detaching disconnect, whether it arrives before or after stop() (issue #1148)', async () => {
+      // detach_from_process: the report comes ahead of the response, while
+      // the manager is live. close_debug_session: stop() sets isStopped
+      // before the worker's auto-detach runs, so the report is a late message.
+      for (const stopped of [false, true]) {
+        const { proxyManager } = makeStoppableProxyManager();
+        expect(proxyManager.getDetachResult()).toBeUndefined();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (proxyManager as any).isStopped = stopped;
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (proxyManager as any).handleProxyMessage({
+          type: 'status', sessionId: 'drain-session', status: 'detach_result',
+          trigger: stopped ? 'close' : 'detach', acknowledged: true, by: 'terminated'
+        });
+
+        expect(proxyManager.getDetachResult()).toEqual({ trigger: stopped ? 'close' : 'detach', acknowledged: true, by: 'terminated' });
+      }
+    });
+
+    it('keeps the failure of a detach nothing acknowledged, and that the program exited (issue #1148)', async () => {
+      const { proxyManager } = makeStoppableProxyManager();
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (proxyManager as any).handleProxyMessage({
+        type: 'status', sessionId: 'drain-session', status: 'detach_result',
+        trigger: 'detach', acknowledged: false, debuggeeExited: true, error: "Request 'disconnect' timed out after 5s"
+      });
+
+      expect(proxyManager.getDetachResult()).toEqual({
+        trigger: 'detach', acknowledged: false, debuggeeExited: true, error: "Request 'disconnect' timed out after 5s"
+      });
+    });
+
     it('records a pre-detach resume outcome that arrives after stop() (issue #763)', async () => {
       // close_debug_session: stop() sets isStopped before the worker's
       // auto-detach runs, so the outcome of its resume is a late message —

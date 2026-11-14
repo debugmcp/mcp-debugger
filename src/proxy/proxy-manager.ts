@@ -112,6 +112,12 @@ export interface ProxyManagerEvents {
  * sender triggered it. Absent when no resume was called for. One shape with
  * the status message it comes from.
  */
+/** What the adapter did with a detaching disconnect (issue #1148), as the worker reported it. */
+export type DetachResult = Omit<
+  Extract<ProxyStatusMessage, { status: 'detach_result' }>,
+  'type' | 'sessionId' | 'status' | 'data'
+>;
+
 export type PreDetachResume = Omit<
   Extract<ProxyStatusMessage, { status: 'pre_detach_resume' }>,
   'type' | 'sessionId' | 'status' | 'data'
@@ -139,6 +145,13 @@ export interface IProxyManager extends EventEmitter {
    * 'pre_detach_resume' status; undefined when no resume was called for.
    */
   getPreDetachResume(): PreDetachResume | undefined;
+  /**
+   * What the adapter did with the detaching disconnect (issue #1148), from
+   * the worker's 'detach_result' status: acknowledged (by its response, or by
+   * `terminated` sent in reply) or not, and whether the program exited.
+   * Undefined when no detaching disconnect was sent, or no report arrived.
+   */
+  getDetachResult(): DetachResult | undefined;
   /**
    * The adapter process's last stderr lines, as the worker reported them with
    * its terminal status or error report (issue #897); empty until then.
@@ -257,6 +270,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   private currentThreadId: number | null = null;
   /** The worker's pre-detach resume outcome (issue #763), once reported. */
   private preDetachResume: PreDetachResume | undefined = undefined;
+  private detachResult: DetachResult | undefined = undefined;
   private pendingDapRequests = new Map<string, {
     resolve: (response: DebugProtocol.Response) => void;
     reject: (error: Error) => void;
@@ -842,6 +856,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     return this.preDetachResume;
   }
 
+  getDetachResult(): DetachResult | undefined {
+    return this.detachResult;
+  }
+
   getAdapterStderrTail(): readonly string[] {
     return this.adapterStderrTail;
   }
@@ -1305,6 +1323,25 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     );
   }
 
+  /**
+   * What the adapter did with a detaching disconnect (issue #1148). The
+   * session's detach answer and the close answer say "released" from this,
+   * not from the session's mode.
+   */
+  private recordDetachResult(message: Extract<ProxyStatusMessage, { status: 'detach_result' }>): void {
+    const { trigger, acknowledged, by, debuggeeExited, error } = message;
+    this.detachResult = {
+      trigger,
+      acknowledged: acknowledged === true,
+      ...(by !== undefined ? { by } : {}),
+      ...(debuggeeExited === true ? { debuggeeExited: true } : {}),
+      ...(error !== undefined ? { error } : {})
+    };
+    this.logger.info(
+      `[ProxyManager] Detaching disconnect (${trigger}): ${acknowledged ? `acknowledged by ${by ?? 'the adapter'}` : `not acknowledged${error !== undefined ? ` — ${error}` : ''}`}`
+    );
+  }
+
   private handleProxyMessage(rawMessage: unknown): void {
     // Skip all message processing after stop() to prevent emitting events with no listeners
     if (this.isStopped) {
@@ -1315,6 +1352,12 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       const late = rawMessage as { type?: string; status?: string } | undefined;
       if (late?.type === 'status' && late.status === 'pre_detach_resume') {
         this.recordPreDetachResume(rawMessage as Extract<ProxyStatusMessage, { status: 'pre_detach_resume' }>);
+        return;
+      }
+      // And the outcome of the close path's own detaching disconnect (issue
+      // #1148): it is what the close answer's `released` is read from.
+      if (late?.type === 'status' && late.status === 'detach_result') {
+        this.recordDetachResult(rawMessage as Extract<ProxyStatusMessage, { status: 'detach_result' }>);
         return;
       }
       this.logger.debug(`[ProxyManager] Ignoring late message after stop (session ${this.sessionId})`);
@@ -1612,6 +1655,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
           };
         }
         this.logger.info(`[ProxyManager] Direct connect to ${message.host}:${message.port} (no adapter process)`);
+        break;
+
+      case 'detach_result':
+        this.recordDetachResult(message);
         break;
 
       case 'pre_detach_resume':
