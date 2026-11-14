@@ -315,6 +315,66 @@ describe('PauseCoordinator', () => {
       expect(session.pauseIntent).toBe(armed);
     });
 
+    it('takes one pause request per session at a time: two that overlap and are both refused leave nothing armed', async () => {
+      // The third review's case: the second request used to arm over the
+      // first while the first was still being decided, and its refusal then
+      // put the first one's intent back after the first had been refused too.
+      const { proxy, session, coordinator } = fixture({ pauseWakeExpression: WAKE, holdsBreakpointsWhilePauseArmed: true });
+      const open: Array<{ command: string; resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
+      proxy.sendDapRequest.mockImplementation((command: string) =>
+        new Promise((resolve, reject) => { open.push({ command, resolve, reject }); }) as never
+      );
+      const turn = () => new Promise((resolve) => setImmediate(resolve));
+      const refusal = () => new Error('Thread is not running');
+
+      const first = coordinator.requestPause(request(session, proxy, 25));
+      const second = coordinator.requestPause(request(session, proxy, 25));
+      await turn();
+      // Only the first has started: one wake, nothing from the second.
+      expect(open.map((r) => r.command)).toEqual(['evaluate']);
+      open[0].resolve({ success: true });
+      await turn();
+      expect(open.map((r) => r.command)).toEqual(['evaluate', 'pause']);
+      expect(session.pauseIntent).toBeDefined();
+
+      open[1].reject(refusal());
+      await expect(first).resolves.toMatchObject({ status: 'rejected' });
+      await turn();
+      // The second starts now, finds nothing armed, and wakes the program itself.
+      expect(open.map((r) => r.command)).toEqual(['evaluate', 'pause', 'evaluate']);
+      open[2].resolve({ success: true });
+      await turn();
+      open[3].reject(refusal());
+      await expect(second).resolves.toMatchObject({ status: 'rejected' });
+
+      expect(session.pauseIntent).toBeUndefined();
+    });
+
+    it('keeps the first pause armed when a request that arrived beside it is refused after it was accepted', async () => {
+      vi.useFakeTimers();
+      const { proxy, session, coordinator } = fixture({ pauseWakeExpression: WAKE, holdsBreakpointsWhilePauseArmed: true });
+      const commands: string[] = [];
+      let pauses = 0;
+      proxy.sendDapRequest.mockImplementation((command: string) => {
+        commands.push(command);
+        if (command === 'pause' && ++pauses === 2) return Promise.reject(new Error('Thread is not running'));
+        return Promise.resolve({ success: true });
+      });
+
+      const first = coordinator.requestPause(request(session, proxy, 25));
+      const second = coordinator.requestPause(request(session, proxy, 25));
+      await vi.advanceTimersByTimeAsync(25);
+      await expect(first).resolves.toEqual({ status: 'pending' });
+      const armed = session.pauseIntent;
+      expect(armed).toBeDefined();
+      await vi.advanceTimersByTimeAsync(25);
+      await expect(second).resolves.toMatchObject({ status: 'rejected' });
+
+      // One wake only: the second found the first's pause armed and did not evaluate under it.
+      expect(commands).toEqual(['evaluate', 'pause', 'pause']);
+      expect(session.pauseIntent).toBe(armed);
+    });
+
     it('clears everything when the session ended under a second request', async () => {
       vi.useFakeTimers();
       const { proxy, session, coordinator } = fixture({ pauseWakeExpression: WAKE });

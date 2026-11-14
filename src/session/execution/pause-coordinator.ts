@@ -40,9 +40,36 @@ export interface PauseCoordinatorContext {
  * for whatever the debugger evaluates next.
  */
 export class PauseCoordinator {
+  /** The tail of each session's pause requests: one at a time (issue #1146). */
+  private readonly requests = new Map<string, Promise<void>>();
+
   constructor(private readonly ctx: PauseCoordinatorContext) {}
 
-  async requestPause(input: CoordinatePauseInput): Promise<PauseOutcome> {
+  /**
+   * One pause request per session at a time: a second waits for the first to
+   * answer. What a request finds armed is then always a pause whose own
+   * request was accepted or went unanswered, never one still being decided,
+   * so a refusal of this request can put it back, and the wake is never sent
+   * beside a pause another request is arming.
+   */
+  requestPause(input: CoordinatePauseInput): Promise<PauseOutcome> {
+    const sessionId = input.session.id;
+    const previous = this.requests.get(sessionId);
+    const run = previous ? previous.then(() => this.pauseOnce(input)) : this.pauseOnce(input);
+    const tail = run.then(
+      () => undefined,
+      () => undefined
+    );
+    this.requests.set(sessionId, tail);
+    void tail.then(() => {
+      if (this.requests.get(sessionId) === tail) {
+        this.requests.delete(sessionId);
+      }
+    });
+    return run;
+  }
+
+  private async pauseOnce(input: CoordinatePauseInput): Promise<PauseOutcome> {
     const { session, proxyManager, threadId, timeoutMs, source } = input;
 
     // A stop may have landed while the caller was discovering a thread.
@@ -86,12 +113,13 @@ export class PauseCoordinator {
       clearPauseIntent(session, intent);
       return { status: 'observed' };
     };
-    // A pause that was already armed when this one was asked for: still
-    // waiting in the target whatever becomes of this request.
+    // A pause that was already armed when this one was asked for: its own
+    // request has answered (requests take turns), so it is still waiting in
+    // the target whatever becomes of this one.
     const earlier = getCurrentPauseIntent(session);
     const rejected = (error: unknown, ended = false): PauseOutcome => {
       clearPauseIntent(session, intent);
-      if (!ended && earlier !== undefined && intent !== undefined && session.pauseIntent === undefined) {
+      if (!ended && earlier !== undefined && intent !== undefined) {
         // This request replaced the earlier one's intent and was refused;
         // the earlier pause is no less armed for that (issue #1146).
         session.pauseIntent = earlier;

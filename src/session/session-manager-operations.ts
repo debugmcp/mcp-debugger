@@ -386,24 +386,32 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     return this.execution.stepOut(sessionId);
   }
 
-  /**
-   * Resume the debuggee. Stays a facade method because the core's
-   * auto-continue path calls it directly.
-   */
+  /** Resume the debuggee, after any breakpoint requests of the caller's that were held for a pause. */
   async continue(sessionId: string): Promise<DebugResult> {
     // No `await` unless there is something to wait for: even `await
-    // undefined` costs a turn, and the core's auto-continue must resume
-    // within the stop's own call stack (issue #849).
+    // undefined` costs a turn of the event loop.
     const held = this.breakpointsHeldFor(sessionId);
     if (held) await held;
     return this.execution.continue(sessionId);
   }
 
   /**
-   * Before the program runs again: the breakpoint requests that were held for
-   * an armed pause and are being sent now that it landed (issue #1146). A
-   * resume must not outrun them. Synchronous when there is nothing to wait
-   * for, which is every case but that one.
+   * The core's own resume of a stop no caller was shown (an entry stop with
+   * `stopOnEntry` off): at once, inside the stop's own call stack, or a
+   * waiter sees the stop (issue #849). It does not wait at the caller's gate
+   * above. Requests still held go out through the state change it causes,
+   * as they would for any running program.
+   */
+  protected resumeUnseenStop(sessionId: string): Promise<DebugResult> {
+    return this.execution.continue(sessionId);
+  }
+
+  /**
+   * Before a caller's resume runs the program again: the breakpoint requests
+   * that were held for an armed pause and are being sent now that it landed,
+   * and any queued behind them (issue #1146). A resume must not outrun them.
+   * Synchronous when there is nothing to wait for, which is every case but
+   * that one.
    */
   private breakpointsHeldFor(sessionId: string): Promise<void> | undefined {
     return this.breakpoints.heldInFlight(sessionId);
