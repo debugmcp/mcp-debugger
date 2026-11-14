@@ -165,6 +165,10 @@ interface PinnedCapabilities {
   normalizeExceptionTypeName: boolean;
   /** Whether `next` stops once per token position, so step_over repeats it on the same line (issue #879). */
   stepsByTokenPosition: boolean | undefined;
+  /** Whether a pause is preceded by an evaluation that gives an idle program something to run (issue #1146). */
+  wakesBeforePause: boolean;
+  /** Whether breakpoint requests wait while a pause is armed and no stop has been observed (issue #1146). */
+  holdsBreakpointsWhilePauseArmed: boolean | undefined;
   childSessionStrategy: ChildSessionStrategy;
   requiresCommandQueueing: boolean;
   /**
@@ -200,7 +204,7 @@ interface PinnedCapabilities {
  * shim interpolates (#759); ruby/java/dotnet are the three that reject logpoints; js, java and cobol are the three
  * that bind function breakpoints late; js, python, go, cpp, cobol and dart are the six whose debugger a
  * `noDebug` launch turns off (#710); dart is the one whose close sends DAP `terminate` ahead of the
- * disconnect (#885), and the one whose `restart_debugging` is the adapter's own hot restart (#876); dotnet is the one whose adapter reads its entry stop as `stopAtEntry` (#973); dart is the one whose `next` stops per token position (#879); python is the one whose launch target may be `module` or `code` instead of `program`, and the one whose exception filters read the launch config — a pytest module launch arms `userUnhandled` (#985).
+ * disconnect (#885), and the one whose `restart_debugging` is the adapter's own hot restart (#876); dotnet is the one whose adapter reads its entry stop as `stopAtEntry` (#973); dart is the one whose `next` stops per token position (#879); js is the one whose pause is preceded by a wake evaluation and whose breakpoint requests wait for an armed pause (#1146); python is the one whose launch target may be `module` or `code` instead of `program`, and the one whose exception filters read the launch config — a pytest module launch arms `userUnhandled` (#985).
  */
 const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
   [DebugLanguage.PYTHON]: {
@@ -217,6 +221,8 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     exceptionFiltersForLaunch: true,
     normalizeExceptionTypeName: true,
     stepsByTokenPosition: undefined,
+    wakesBeforePause: false,
+    holdsBreakpointsWhilePauseArmed: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     childAdoption: { releaseLever: 'reject-request', childOutput: 'own-connection', closeChild: 'terminate' },
@@ -236,6 +242,8 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     exceptionFiltersForLaunch: false,
     normalizeExceptionTypeName: false,
     stepsByTokenPosition: undefined,
+    wakesBeforePause: false,
+    holdsBreakpointsWhilePauseArmed: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     childAdoption: undefined,
@@ -255,6 +263,8 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     exceptionFiltersForLaunch: false,
     normalizeExceptionTypeName: false,
     stepsByTokenPosition: undefined,
+    wakesBeforePause: true,
+    holdsBreakpointsWhilePauseArmed: true,
     childSessionStrategy: 'launchWithPendingTarget',
     requiresCommandQueueing: true,
     childAdoption: { releaseLever: 'throwaway-attach', childOutput: 'launch-session', closeChild: 'release' },
@@ -274,6 +284,8 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     exceptionFiltersForLaunch: false,
     normalizeExceptionTypeName: false,
     stepsByTokenPosition: undefined,
+    wakesBeforePause: false,
+    holdsBreakpointsWhilePauseArmed: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     childAdoption: undefined,
@@ -293,6 +305,8 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     exceptionFiltersForLaunch: false,
     normalizeExceptionTypeName: false,
     stepsByTokenPosition: undefined,
+    wakesBeforePause: false,
+    holdsBreakpointsWhilePauseArmed: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     childAdoption: undefined,
@@ -312,6 +326,8 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     exceptionFiltersForLaunch: false,
     normalizeExceptionTypeName: false,
     stepsByTokenPosition: undefined,
+    wakesBeforePause: false,
+    holdsBreakpointsWhilePauseArmed: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     childAdoption: undefined,
@@ -331,6 +347,8 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     exceptionFiltersForLaunch: false,
     normalizeExceptionTypeName: false,
     stepsByTokenPosition: undefined,
+    wakesBeforePause: false,
+    holdsBreakpointsWhilePauseArmed: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     childAdoption: undefined,
@@ -350,6 +368,8 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     exceptionFiltersForLaunch: false,
     normalizeExceptionTypeName: false,
     stepsByTokenPosition: undefined,
+    wakesBeforePause: false,
+    holdsBreakpointsWhilePauseArmed: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     childAdoption: undefined,
@@ -369,6 +389,8 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     exceptionFiltersForLaunch: false,
     normalizeExceptionTypeName: false,
     stepsByTokenPosition: undefined,
+    wakesBeforePause: false,
+    holdsBreakpointsWhilePauseArmed: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     childAdoption: undefined,
@@ -388,6 +410,8 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     exceptionFiltersForLaunch: false,
     normalizeExceptionTypeName: false,
     stepsByTokenPosition: true,
+    wakesBeforePause: false,
+    holdsBreakpointsWhilePauseArmed: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     childAdoption: undefined,
@@ -407,6 +431,8 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     exceptionFiltersForLaunch: false,
     normalizeExceptionTypeName: false,
     stepsByTokenPosition: undefined,
+    wakesBeforePause: false,
+    holdsBreakpointsWhilePauseArmed: undefined,
     childSessionStrategy: 'none',
     requiresCommandQueueing: false,
     childAdoption: undefined,
@@ -587,6 +613,11 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
 
   it('pins whether step_over repeats a token-position step on the same line (issue #879)', () => {
     expect(policy.stepsByTokenPosition).toBe(pinned.stepsByTokenPosition);
+  });
+
+  it('pins how a pause on an idle program is made to land, and what waits for it (issue #1146)', () => {
+    expect(typeof policy.pauseWakeExpression === 'string' && policy.pauseWakeExpression.length > 0).toBe(pinned.wakesBeforePause);
+    expect(policy.holdsBreakpointsWhilePauseArmed).toBe(pinned.holdsBreakpointsWhilePauseArmed);
   });
 
   it('only claims a function-breakpoint delivery quirk when it supports them at all', () => {

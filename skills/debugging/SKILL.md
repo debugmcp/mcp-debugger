@@ -77,7 +77,7 @@ For an already-running process (including remote machines, containers, and Kuber
 attach_to_process {sessionId, host: "localhost", port: 5678, sourcePaths: ["<local src>"], adapterConfig: {...}}
 ```
 
-- **Attach pauses the target by default** (omitting `stopOnEntry` means `true` — the opposite of `start_debugging`). Pass `stopOnEntry: false` for a live service you must not freeze. A response with `pending: true` means the pause lands when the target next runs code (`wait_for_stop` blocks until it does); `continue_execution` releases it.
+- **Attach pauses the target by default** (omitting `stopOnEntry` means `true` — the opposite of `start_debugging`). Pass `stopOnEntry: false` for a live service you must not freeze. An idle Node server answers `paused` in Node's timer loop, with a `note` that no program frame is active: set breakpoints, then `continue_execution`. A response with `pending: true` means the pause lands when the target next runs code (`wait_for_stop` blocks until it does); `continue_execution` releases it.
 - **Python**: target ran `python -m debugpy --listen <host>:<port> ...`; to address breakpoints by local-checkout path, map it onto the debuggee tree with `adapterConfig: {pathMappings: [{localRoot: "<abs local>", remoteRoot: "/app"}]}`
 - **Ruby**: target ran `rdbg --open --port <port> ...` (works through `kubectl port-forward`); `localfsMap: "/app:<abs local dir>"` maps paths
 - **JavaScript**: target ran `node --inspect=<host>:<port> ...` → attach by `host`/`port`; a plain `node app.js` on the same host → attach by `processId` (mcp-debugger opens its inspector on 9229 — pass `port` too if the target set `--inspect-port=<n>`)

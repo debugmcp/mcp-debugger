@@ -55,6 +55,57 @@ describe('SessionManager - Integration Tests', () => {
       expect(dependencies.mockProxyManager.stopCalls).toBe(1);
     });
 
+    describe("a 'continued' for a pause that was never reported (issue #1146)", () => {
+      const armedRunningSession = async () => {
+        const session = await sessionManager.createSession({ language: DebugLanguage.MOCK, executablePath: 'python' });
+        await sessionManager.startDebugging(session.id, 'test.py');
+        await vi.runAllTimersAsync();
+        dependencies.mockProxyManager.simulateEvent('stopped', 1, 'breakpoint');
+        await sessionManager.continue(session.id);
+        const managed = sessionManager.getSession(session.id)!;
+        expect(managed.state).toBe(SessionState.RUNNING);
+        managed.pauseIntent = { generation: managed.proxyGeneration ?? 0, source: 'user', armedAt: Date.now() };
+        const told = vi.fn();
+        (sessionManager as unknown as {
+          onSessionStateChange(id: string, listener: () => void): () => void;
+        }).onSessionStateChange(session.id, told);
+        return { managed, told };
+      };
+
+      it('clears the armed pause and tells the state listeners, for a policy that holds breakpoints on it', async () => {
+        // js-debug resumes a pause that lands in its own injected script
+        // without reporting it; the pause is then no longer waiting in the
+        // target, and what was held for it must go out.
+        overridePolicy(sessionManager, { holdsBreakpointsWhilePauseArmed: true });
+        const { managed, told } = await armedRunningSession();
+
+        dependencies.mockProxyManager.simulateEvent('continued');
+
+        expect(managed.pauseIntent).toBeUndefined();
+        expect(told).toHaveBeenCalledTimes(1);
+        expect(managed.state).toBe(SessionState.RUNNING);
+      });
+
+      it('leaves the armed pause alone for a policy that holds nothing on it', async () => {
+        const { managed, told } = await armedRunningSession();
+
+        dependencies.mockProxyManager.simulateEvent('continued');
+
+        expect(managed.pauseIntent).toMatchObject({ source: 'user' });
+        expect(told).not.toHaveBeenCalled();
+      });
+
+      it('says nothing to the listeners when no pause is armed', async () => {
+        overridePolicy(sessionManager, { holdsBreakpointsWhilePauseArmed: true });
+        const { managed, told } = await armedRunningSession();
+        managed.pauseIntent = undefined;
+
+        dependencies.mockProxyManager.simulateEvent('continued');
+
+        expect(told).not.toHaveBeenCalled();
+      });
+    });
+
     it('should handle auto-continue for stopOnEntry=false', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,

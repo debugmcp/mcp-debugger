@@ -667,6 +667,29 @@ export interface AdapterPolicy {
   stepsByTokenPosition?: boolean;
 
   /**
+   * An expression evaluated in the RUNNING target just before `pause` is
+   * requested (issue #1146). A pause sent to a program that is executing
+   * nothing stays armed in the engine and fires inside the next code that
+   * runs there. On an idle Node server that is the debugger's own next
+   * evaluation: js-debug resumes such a pause without reporting it, or Node
+   * spins a core and stops answering its inspector. The expression gives the
+   * pause program activity to land on instead. The core sends it only while
+   * no pause of its own is armed, because it is itself an evaluation.
+   * Undefined means a pause needs no help to land, or the engine cannot
+   * evaluate while the program runs.
+   */
+  pauseWakeExpression?: string;
+
+  /**
+   * Whether breakpoint requests wait while a pause of ours is armed and no
+   * stop has been observed (issue #1146). For js-debug a breakpoint request
+   * can make the adapter evaluate its own code in the target, which is where
+   * an armed pause fires. Held requests are sent when the session next stops.
+   * Undefined means a breakpoint request runs no code in the target.
+   */
+  holdsBreakpointsWhilePauseArmed?: boolean;
+
+  /**
    * Where the compiled file a location binds through may live (issues
    * #938/#950), most specific first. A `set_breakpoint` echoes the line from
    * the source file, while the engine binds it through a compiled one —

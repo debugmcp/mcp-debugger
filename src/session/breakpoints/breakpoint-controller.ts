@@ -27,10 +27,12 @@ import {
   type DebugLanguage
 } from '@debugmcp/shared';
 import { DebugProtocol } from '@vscode/debugprotocol';
-import { consumeChildSourced } from '../../utils/child-origin-events.js';
+import { consumeChildMirrorUnanswered, consumeChildSourced } from '../../utils/child-origin-events.js';
 import { DapResponseError } from '../../proxy/dap-response-error.js';
+import { ErrorMessages } from '../../utils/error-messages.js';
 import type { ManagedSession } from '../session-store.js';
 import type { BreakpointContext } from '../operations-context.js';
+import { getCurrentPauseIntent } from '../execution/pause-intent.js';
 import { buildFunctionBreakpointLaunchWarning, fileLabel } from './launch-warnings.js';
 import {
   applyBoundLocation,
@@ -69,6 +71,17 @@ export interface BreakpointSyncOutcome {
   synced: boolean;
   warning?: string;
   failure?: BreakpointSyncFailure;
+  /**
+   * The request was not sent: a pause is armed on the session and the
+   * policy's breakpoint work can run code in the target (issue #1146). It
+   * goes out when the session next stops.
+   */
+  held?: true;
+  /**
+   * The adapter answered, but the session that owns the runtime did not, so
+   * the records carry no verdict from the target yet (issue #1146).
+   */
+  unanswered?: true;
 }
 
 /** What `resyncAll` hands back for the launch/attach result (issue #754). */
@@ -81,6 +94,11 @@ export interface ResyncOutcome {
    * (the #710 rule: a known cause displaces the symptom).
    */
   functionBreakpointsFailed: boolean;
+  /**
+   * Some file's re-send was not answered by the session that owns the
+   * runtime (issue #1146): the adapter may still be working in the target.
+   */
+  unanswered?: true;
 }
 
 /**
@@ -119,6 +137,15 @@ export interface FunctionBreakpointRemoval {
 }
 
 export class BreakpointController {
+  /**
+   * What is waiting for an armed pause to land, per session (issue #1146):
+   * the files whose sets changed, whether the function set did, and the
+   * state subscription that releases them.
+   */
+  private readonly held = new Map<string, { files: Set<string>; functions: boolean; unsubscribe: () => void }>();
+  /** The send of what was held, while it is on its way to the adapter (issue #1146). */
+  private readonly releasing = new Map<string, Promise<void>>();
+
   constructor(private readonly ctx: BreakpointContext) {}
 
   async setBreakpoint(
@@ -194,6 +221,9 @@ export class BreakpointController {
     ) {
       return { synced: false };
     }
+    if (this.pauseArmed(session)) {
+      return this.hold(session, { file });
+    }
 
     // Collect ALL breakpoints for this source file (DAP setBreakpoints is replace-all)
     const allBpsForFile = Array.from(session.breakpoints.values())
@@ -225,6 +255,9 @@ export class BreakpointController {
             ...(options?.forceFreshEcho === true ? { __mcpForceFreshEcho: true } : {}),
           }
         );
+      // Read before the body: for a mirroring policy an unanswered mirror
+      // means this is the parent session's body alone (issue #1146).
+      const targetUnanswered = consumeChildMirrorUnanswered(response);
       if (
         response &&
         response.body &&
@@ -305,13 +338,129 @@ export class BreakpointController {
           }
         }
       }
-      return { synced: true };
+      return targetUnanswered
+        ? { synced: true, unanswered: true, warning: ErrorMessages.breakpointTargetUnanswered(fileLabel(file)) }
+        : { synced: true };
     } catch (error) {
       this.ctx.logger.error(
         `[SessionManager] Error sending setBreakpoints to proxy for session ${sessionId}:`,
         error
       );
       return this.failedSync(session, error, allBpsForFile, childAuthoritative);
+    }
+  }
+
+  /**
+   * Whether breakpoint requests must wait for an armed pause (issue #1146):
+   * the session is running, a pause of this proxy generation has been
+   * requested and no stop has been observed, and the policy's breakpoint work
+   * can run code in the target. Never throws.
+   */
+  private pauseArmed(session: ManagedSession): boolean {
+    if (session.state !== SessionState.RUNNING || getCurrentPauseIntent(session) === undefined) {
+      return false;
+    }
+    try {
+      return this.ctx.selectPolicy(session.language).holdsBreakpointsWhilePauseArmed === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Record a request that must wait for an armed pause, and subscribe once to
+   * the session's state so it goes out when the pause lands (issue #1146).
+   * The store already holds the change; only the wire waits.
+   */
+  private hold(session: ManagedSession, what: { file?: string; functions?: true }): BreakpointSyncOutcome {
+    let entry = this.held.get(session.id);
+    if (!entry) {
+      const sessionId = session.id;
+      // The listener runs inside the transition; read the state once the
+      // call stack has unwound (an auto-continued stop enters and leaves
+      // PAUSED within one stack).
+      const unsubscribe = this.ctx.onStateChange(sessionId, () => {
+        queueMicrotask(() => {
+          void this.release(sessionId);
+        });
+      });
+      entry = { files: new Set(), functions: false, unsubscribe };
+      this.held.set(sessionId, entry);
+    }
+    if (what.file !== undefined) {
+      entry.files.add(what.file);
+    }
+    if (what.functions) {
+      entry.functions = true;
+    }
+    this.ctx.logger.info(
+      `[SessionManager] Breakpoint request held for session ${session.id}: a pause is armed and no stop has been observed (issue #1146).`
+    );
+    return { synced: false, held: true, warning: ErrorMessages.breakpointHeldForPendingPause };
+  }
+
+  /**
+   * The send of what is held for a session, started at most once at a time.
+   * Resolves when it has been answered, or at once when the pause is still
+   * armed and nothing could be sent.
+   */
+  private release(sessionId: string): Promise<void> {
+    const running = this.releasing.get(sessionId);
+    if (running) {
+      return running;
+    }
+    const run = this.releaseHeld(sessionId).finally(() => {
+      if (this.releasing.get(sessionId) === run) {
+        this.releasing.delete(sessionId);
+      }
+    });
+    this.releasing.set(sessionId, run);
+    return run;
+  }
+
+  /**
+   * What a resume must wait for (issue #1146): the breakpoint requests held
+   * for an armed pause go out when the session stops, and a `continue` or a
+   * step that follows the stop at once would otherwise run the program past
+   * breakpoints that are not set yet. Undefined when nothing is held or on
+   * its way, so a resume that has nothing to wait for takes no extra turn of
+   * the event loop (the core's auto-continue relies on that, issue #849).
+   */
+  heldInFlight(sessionId: string): Promise<void> | undefined {
+    return this.held.has(sessionId) || this.releasing.has(sessionId) ? this.release(sessionId) : undefined;
+  }
+
+  /**
+   * Send what was held, once nothing is armed any more: the session stopped,
+   * or the adapter reported a resume for a pause it never reported. A session
+   * that ended or was removed drops its entry. Never throws.
+   */
+  private async releaseHeld(sessionId: string): Promise<void> {
+    const entry = this.held.get(sessionId);
+    if (!entry) {
+      return;
+    }
+    let session: ManagedSession;
+    try {
+      session = this.ctx.getSession(sessionId);
+    } catch {
+      this.held.delete(sessionId);
+      entry.unsubscribe();
+      return;
+    }
+    if (this.pauseArmed(session)) {
+      return;
+    }
+    this.held.delete(sessionId);
+    entry.unsubscribe();
+    this.ctx.logger.info(
+      `[SessionManager] Sending the breakpoint requests held for session ${sessionId}: ${entry.files.size} file(s)${entry.functions ? ' and the function breakpoints' : ''}.`
+    );
+    for (const file of entry.files) {
+      await this.syncBreakpointsForFile(session, file, { forceFreshEcho: true });
+    }
+    if (entry.functions) {
+      await this.syncFunctionBreakpoints(session);
     }
   }
 
@@ -527,10 +676,14 @@ export class BreakpointController {
     const lineFailures = new Map<string, { failure: BreakpointSyncFailure; files: string[] }>();
     const key = (failure: BreakpointSyncFailure): string => `${failure.refused ? 'refused' : 'failed'}:${failure.message}`;
     let hint = '';
+    const unansweredFiles: string[] = [];
     if (session.breakpoints.size > 0) {
       const files = [...new Set(Array.from(session.breakpoints.values()).map((bp) => bp.file))];
       for (const file of files) {
         const outcome = await this.syncBreakpointsForFile(session, file, options);
+        if (outcome.unanswered) {
+          unansweredFiles.push(file);
+        }
         if (outcome.failure === undefined) {
           continue;
         }
@@ -543,6 +696,9 @@ export class BreakpointController {
     const warnings = [...lineFailures.values()].map(({ failure, files }) =>
       this.describeResendFailure(`the breakpoints for ${fileLabels(files).join(', ')}`, failure)
     );
+    if (unansweredFiles.length > 0) {
+      warnings.push(ErrorMessages.breakpointTargetUnanswered(fileLabels(unansweredFiles).join(', ')));
+    }
     let functionBreakpointsFailed = false;
     if ((session.functionBreakpoints?.size ?? 0) > 0) {
       const outcome = await this.syncFunctionBreakpoints(session);
@@ -570,7 +726,11 @@ export class BreakpointController {
     if (hint) {
       warnings.push(hint);
     }
-    return { warnings, functionBreakpointsFailed };
+    return {
+      warnings,
+      functionBreakpointsFailed,
+      ...(unansweredFiles.length > 0 ? { unanswered: true as const } : {})
+    };
   }
 
   /** One sentence for a failed re-send: the adapter's refusal, or the transport's failure. */
@@ -594,6 +754,9 @@ export class BreakpointController {
       (session.state !== SessionState.RUNNING && session.state !== SessionState.PAUSED)
     ) {
       return { synced: false };
+    }
+    if (this.pauseArmed(session)) {
+      return this.hold(session, { functions: true });
     }
 
     const allFnBps = Array.from(session.functionBreakpoints.values());

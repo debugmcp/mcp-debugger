@@ -591,6 +591,41 @@ export const ErrorMessages = {
     '(pass stopOnEntry: false to attach without pausing)',
 
   /**
+   * Warning when attach skipped its pause because the breakpoint re-send was
+   * not answered by the session that owns the runtime (issue #1146)
+   * Occurs when: The adapter may still be working in the target; a pause
+   * armed now could fire inside that work, where it is lost or freezes the target
+   * Used in: src/session/attach/attach-controller.ts
+   */
+  attachPauseNotRequested:
+    'The post-attach pause was not requested, because the debug adapter had not finished its breakpoint work in the target ' +
+    'and a pause armed during that work can fire inside it; the program is running. ' +
+    'Call pause_execution once list_breakpoints shows the breakpoints answered',
+
+  /**
+   * Warning when a breakpoint request reached the adapter but the session
+   * that owns the runtime did not answer it in time (issue #1146)
+   * Occurs when: A child-mirroring adapter (js-debug) answers on its parent
+   * session only; the target's own answer is still outstanding
+   * Used in: src/session/breakpoints/breakpoint-controller.ts
+   * @param what - The file, or files, the request was for
+   */
+  breakpointTargetUnanswered: (what: string) =>
+    `The debug adapter's target session did not answer the breakpoint request for ${what} in time, ` +
+    `so whether the breakpoints are set in the program is not known yet; list_breakpoints shows its answer when it arrives`,
+
+  /**
+   * Warning when a breakpoint request is held back for an armed pause (issue #1146)
+   * Occurs when: A pause is pending on the session (the program has run no
+   * code since it was requested) and the adapter's breakpoint work can run
+   * code in the program, where that pause would fire
+   * Used in: src/session/breakpoints/breakpoint-controller.ts
+   */
+  breakpointHeldForPendingPause:
+    'Held: a pause is pending on this session, so this breakpoint request is sent when the program stops. ' +
+    'Sending it now would make the debug adapter run its own code in the program, and the pending pause would fire inside that',
+
+  /**
    * Error message for attach verification failures
    * Occurs when: After an attach handshake, the debugger does not report any
    * threads within the verification window — either the attach is dead

@@ -55,9 +55,17 @@ export function resolveDapTimeoutOverride(
   return { timeoutMs };
 }
 
+/**
+ * Whether a failed DAP request got no answer at all, as against one the
+ * adapter refused: the worker's and the parent's timeout wordings.
+ */
+export function isDapRequestTimeout(errorMessage: string): boolean {
+  return /timed out|did not respond/i.test(errorMessage);
+}
+
 /** Append the 'timeout' tool-arg hint to DAP timeout failures. */
 export function withTimeoutHint(errorMessage: string): string {
-  if (!/timed out|did not respond/i.test(errorMessage)) {
+  if (!isDapRequestTimeout(errorMessage)) {
     return errorMessage;
   }
   const separator = errorMessage.trimEnd().endsWith('.') ? ' ' : '. ';

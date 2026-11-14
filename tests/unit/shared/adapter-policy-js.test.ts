@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import * as path from 'path';
-import { JsDebugAdapterPolicy } from '../../../packages/shared/src/interfaces/adapter-policy-js.js';
+import { JsDebugAdapterPolicy, JS_PAUSE_WAKE_DELAY_MS } from '../../../packages/shared/src/interfaces/adapter-policy-js.js';
 import type { StopReasonContext } from '../../../packages/shared/src/interfaces/adapter-policy.js';
 
 describe('JsDebugAdapterPolicy', () => {
@@ -767,6 +767,48 @@ describe('JsDebugAdapterPolicy', () => {
       expect(callerNull.resolveSourceMapLocations).toBeNull();
     });
   });
+});
+
+describe('JsDebugAdapterPolicy and a pause on an idle program (issue #1146)', () => {
+    /** Evaluate the wake expression against a stand-in `setTimeout`, the way the target would. */
+    const runWake = (setTimeoutStub: (...args: unknown[]) => unknown): unknown =>
+      new Function('setTimeout', `return ${JsDebugAdapterPolicy.pauseWakeExpression}`)(setTimeoutStub);
+
+    it('wakes with exactly one no-op timer, sized by the exported delay, and unrefs it', () => {
+      const unref = vi.fn();
+      const setTimeoutStub = vi.fn(() => ({ unref }));
+
+      const value = runWake(setTimeoutStub);
+
+      expect(setTimeoutStub).toHaveBeenCalledTimes(1);
+      const [callback, delay] = setTimeoutStub.mock.calls[0] as unknown as [() => unknown, number];
+      expect(delay).toBe(JS_PAUSE_WAKE_DELAY_MS);
+      expect(callback()).toBeUndefined();
+      expect(unref).toHaveBeenCalledTimes(1);
+      // Nothing for the adapter to render or keep alive.
+      expect(value).toBeUndefined();
+    });
+
+    it('does not throw where a timer handle has no unref (a number, or nothing)', () => {
+      expect(() => runWake(() => 42)).not.toThrow();
+      expect(() => runWake(() => undefined)).not.toThrow();
+    });
+
+    it('leaves no name behind in the target: the expression declares nothing global', () => {
+      const expression = JsDebugAdapterPolicy.pauseWakeExpression!;
+      expect(expression.startsWith('(function(){')).toBe(true);
+      expect(expression.endsWith('})()')).toBe(true);
+      expect(expression).not.toMatch(/globalThis|window\.|global\./);
+    });
+
+    it('sizes the delay to outlast the round trip that arms the pause, without making an idle pause slow', () => {
+      expect(JS_PAUSE_WAKE_DELAY_MS).toBeGreaterThanOrEqual(100);
+      expect(JS_PAUSE_WAKE_DELAY_MS).toBeLessThanOrEqual(500);
+    });
+
+    it('holds breakpoint requests while a pause is armed', () => {
+      expect(JsDebugAdapterPolicy.holdsBreakpointsWhilePauseArmed).toBe(true);
+    });
 });
 
 describe('JsDebugAdapterPolicy.performHandshake workspace root and pauseForSourceMap (issue #699)', () => {

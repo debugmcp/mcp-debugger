@@ -367,16 +367,22 @@ export abstract class SessionManagerOperations extends SessionManagerData {
 
   /** Step over the current line. */
   async stepOver(sessionId: string): Promise<DebugResult<StepResultData>> {
+    const held = this.breakpointsHeldFor(sessionId);
+    if (held) await held;
     return this.execution.stepOver(sessionId);
   }
 
   /** Step into the call on the current line. */
   async stepInto(sessionId: string): Promise<DebugResult<StepResultData>> {
+    const held = this.breakpointsHeldFor(sessionId);
+    if (held) await held;
     return this.execution.stepInto(sessionId);
   }
 
   /** Step out of the current frame. */
   async stepOut(sessionId: string): Promise<DebugResult<StepResultData>> {
+    const held = this.breakpointsHeldFor(sessionId);
+    if (held) await held;
     return this.execution.stepOut(sessionId);
   }
 
@@ -385,7 +391,22 @@ export abstract class SessionManagerOperations extends SessionManagerData {
    * auto-continue path calls it directly.
    */
   async continue(sessionId: string): Promise<DebugResult> {
+    // No `await` unless there is something to wait for: even `await
+    // undefined` costs a turn, and the core's auto-continue must resume
+    // within the stop's own call stack (issue #849).
+    const held = this.breakpointsHeldFor(sessionId);
+    if (held) await held;
     return this.execution.continue(sessionId);
+  }
+
+  /**
+   * Before the program runs again: the breakpoint requests that were held for
+   * an armed pause and are being sent now that it landed (issue #1146). A
+   * resume must not outrun them. Synchronous when there is nothing to wait
+   * for, which is every case but that one.
+   */
+  private breakpointsHeldFor(sessionId: string): Promise<void> | undefined {
+    return this.breakpoints.heldInFlight(sessionId);
   }
 
   /** Pause a running debuggee. */

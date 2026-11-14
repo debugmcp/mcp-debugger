@@ -30,7 +30,8 @@ function makeControllerWithCtx(): { controller: BreakpointController; ctx: Break
     logger: createMockLogger(),
     getSession: vi.fn(),
     selectPolicy: vi.fn(),
-    selectStorePolicy: vi.fn()
+    selectStorePolicy: vi.fn(),
+    onStateChange: vi.fn().mockReturnValue(() => undefined)
   };
   return { controller: new BreakpointController(ctx), ctx };
 }

@@ -925,6 +925,15 @@ export abstract class SessionManagerCore extends EventEmitter {
     return this.sessionStore.selectPolicy(session.language);
   }
 
+  /** Whether the session's policy holds breakpoint requests on an armed pause (issue #1146). Never throws. */
+  private holdsBreakpointsWhilePauseArmed(session: ManagedSession): boolean {
+    try {
+      return this.sessionStore.selectPolicy(session.language).holdsBreakpointsWhilePauseArmed === true;
+    } catch {
+      return false;
+    }
+  }
+
   public getSession(sessionId: string): ManagedSession | undefined {
     return this.sessionStore.get(sessionId);
   }
@@ -2110,6 +2119,19 @@ export abstract class SessionManagerCore extends EventEmitter {
           `[SessionManager] Ignoring continued event for session ${sessionId} because state is already PAUSED`
         );
         return;
+      }
+
+      // A resume reported while a pause of ours is armed and no stop was ever
+      // observed (issue #1146): the pause fired somewhere the adapter chose
+      // not to report (js-debug resumes one that lands in its own injected
+      // script), so it is no longer waiting in the target. Only for a policy
+      // that holds breakpoint requests on that intent: it is what releases them.
+      if (getCurrentPauseIntent(session) !== undefined && this.holdsBreakpointsWhilePauseArmed(session)) {
+        this.logger.warn(
+          `[SessionManager] 'continued' for session ${sessionId} with a pause armed and no stop observed: the adapter resumed that pause without reporting it`
+        );
+        clearPauseIntent(session);
+        this.notifySessionStateListeners(sessionId);
       }
 
       this._updateSessionState(session, SessionState.RUNNING);

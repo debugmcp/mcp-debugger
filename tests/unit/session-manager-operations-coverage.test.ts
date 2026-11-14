@@ -6,6 +6,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ErrorMessages } from '../../src/utils/error-messages.js';
 import { DapResponseError } from '../../src/proxy/dap-response-error.js';
+import { markChildMirrorUnanswered } from '../../src/utils/child-origin-events.js';
 import path from 'path';
 import { SessionManagerOperations } from '../../src/session/session-manager-operations';
 import type { SessionManagerDependencies } from '../../src/session/session-manager-core';
@@ -2966,6 +2967,119 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.data?.pending).toBe(true);
       expect(result.data?.message).toMatch(/post-attach pause pending/);
       expect(mockSession.lastStop).toBeUndefined();
+    });
+
+    // Issue #1146: the breakpoint requests held for an armed pause are sent
+    // when it lands, and a resume must not run the program past them.
+    describe('a resume waits for held breakpoint requests (issue #1146)', () => {
+      const pausedSession = () => {
+        mockSession.proxyManager = mockProxyManager;
+        mockSession.state = SessionState.PAUSED;
+        mockSession.lastStop = { reason: 'pause' } as ManagedSession['lastStop'];
+        mockProxyManager.getCurrentThreadId.mockReturnValue(1);
+      };
+
+      it.each([
+        ['continue', 'continue'],
+        ['stepOver', 'next'],
+        ['stepInto', 'stepIn'],
+        ['stepOut', 'stepOut']
+      ] as const)('%s sends nothing until the held requests have been answered', async (method, command) => {
+        pausedSession();
+        let release: (() => void) | undefined;
+        const heldInFlight = vi
+          .spyOn(internals(operations).breakpoints, 'heldInFlight')
+          .mockReturnValue(new Promise<void>((resolve) => { release = resolve; }));
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+
+        const resumed = operations[method]('test-session');
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(heldInFlight).toHaveBeenCalledWith('test-session');
+        expect(mockProxyManager.sendDapRequest.mock.calls.some(([sent]) => sent === command)).toBe(false);
+
+        release!();
+        await vi.waitFor(() =>
+          expect(mockProxyManager.sendDapRequest.mock.calls.some(([sent]) => sent === command)).toBe(true)
+        );
+        // A step waits for its landing; this case is about the order only.
+        mockSession.state = SessionState.STOPPED;
+        void resumed.catch(() => undefined);
+      });
+
+      it('continue takes no extra turn of the event loop when nothing is held', async () => {
+        // The core's auto-continue resumes inside the stop's own call stack
+        // (issue #849): even `await undefined` would let a waiter see the stop.
+        pausedSession();
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+
+        void operations.continue('test-session');
+
+        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('continue', { threadId: 1 });
+      });
+    });
+
+    // Issue #1146: a pause is armed in the target from the moment it is
+    // requested, and a breakpoint re-send can make the adapter run its own
+    // code there (js-debug evaluates a script per execution context when its
+    // breakpoint count rises from zero). So the re-send goes first.
+    it('re-sends the breakpoints before it requests the post-attach pause (issue #1146)', async () => {
+      mockSession.language = DebugLanguage.RUBY;
+      mockSession.breakpoints = new Map([
+        ['bp-1', { id: 'bp-1', file: '/app/server.rb', line: 3, verified: false }]
+      ]);
+      const order: string[] = [];
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        order.push(command);
+        if (command === 'threads') return { body: { threads: [{ id: 1, name: 'main' }] } };
+        if (command === 'setBreakpoints') return { body: { breakpoints: [{ verified: true, line: 3 }] } };
+        return {};
+      });
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+        return {};
+      });
+
+      const result = await operations.attachToProcess('test-session', { port: 12345, host: '127.0.0.1' });
+
+      expect(result.success).toBe(true);
+      expect(order).toContain('setBreakpoints');
+      expect(order).toContain('pause');
+      expect(order.indexOf('setBreakpoints')).toBeLessThan(order.indexOf('pause'));
+      // The re-send did its work: the record carries the adapter's answer.
+      expect(mockSession.breakpoints.get('bp-1')?.verified).toBe(true);
+    });
+
+    it('requests no pause when the target session did not answer the breakpoint re-send (issue #1146)', async () => {
+      // An unanswered re-send means the adapter may still be working in the
+      // target; a pause armed now could fire inside that work.
+      mockSession.language = DebugLanguage.RUBY;
+      mockSession.breakpoints = new Map([
+        ['bp-1', { id: 'bp-1', file: '/app/server.rb', line: 3, verified: false }]
+      ]);
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') return { body: { threads: [{ id: 1, name: 'main' }] } };
+        if (command === 'setBreakpoints') {
+          const response = { body: { breakpoints: [{ verified: false }] } };
+          markChildMirrorUnanswered(response);
+          return response;
+        }
+        return {};
+      });
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+        return {};
+      });
+
+      const result = await operations.attachToProcess('test-session', { port: 12345, host: '127.0.0.1' });
+
+      expect(result.success).toBe(true);
+      expect(result.state).toBe(SessionState.RUNNING);
+      expect(mockProxyManager.sendDapRequest.mock.calls.some(([command]) => command === 'pause')).toBe(false);
+      expect(result.data?.pending).toBeUndefined();
+      expect(result.data?.message).toBe('Attached to process at 127.0.0.1:12345');
+      expect(result.data?.warning).toContain('server.rb');
+      expect(result.data?.warning).toMatch(/did not answer/);
+      expect(result.data?.warning).toMatch(/The post-attach pause was not requested/);
     });
 
     // The core reads the attach's stopOnEntry from the dapLaunchArgs handed to
