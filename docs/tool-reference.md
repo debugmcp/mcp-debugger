@@ -1633,7 +1633,9 @@ When the requested pause has not landed by the time the tool answers (an idle No
 
 ### detach_from_process
 
-Detaches the debugger from an attached process, leaving the process running.
+Detaches the debugger from a process the session attached to, leaving the process running.
+
+**A session owns a program it launched and borrows one it attached to** (issue #1151). Ending a session ends what it owns, in every adapter, so there is no detach that leaves a launched program running: a plain `detach_from_process` on a launched session is refused before anything is touched, with `success: false`, the session's `state` unchanged, and a `message` that says so and names what to do (`close_debug_session`, or `terminateProcess: true`, to end the program; to debug a program that must keep running afterwards, start it outside the debugger and use `attach_to_process`). It used to answer `Detached from process (process still running)` while the program was gone. A launch option that starts a program so it can outlive its session is tracked in #1156.
 
 **Parameters:**
 - `sessionId` (string, required): The ID of the debug session.
@@ -1654,7 +1656,7 @@ Detaches the debugger from an attached process, leaving the process running.
 **Notes:**
 - With `terminateProcess: true` the whole session is closed and the message reads `Detached and terminated process`.
 - Detaching sends DAP `disconnect` with `terminateDebuggee: false`, then stops the proxy; the session ends in `"stopped"` either way, so a later re-attach needs a new session.
-- CodeLLDB sessions on Windows (C/C++ and COBOL attach sessions, and any C/C++, Rust or COBOL launch detached this way): while the target is stopped, a DAP `continue` goes out ahead of the detaching `disconnect` — on this path, on `close_debug_session` and on shutdown alike — and `data.resumedBeforeDetach` is `true`; if the debugger refuses the continue, the detach still proceeds with `resumedBeforeDetach: false` and `data.warning` names the risk. Why: CodeLLDB's Windows detach otherwise kills a target whose last resume was a step (issue #763; the mechanism is in the C/C++ guide's attach section).
+- CodeLLDB sessions on Windows (C/C++ and COBOL attach sessions): while the target is stopped, a DAP `continue` goes out ahead of the detaching `disconnect` — on this path, on `close_debug_session` and on shutdown alike — and `data.resumedBeforeDetach` is `true`; if the debugger refuses the continue, the detach still proceeds with `resumedBeforeDetach: false` and `data.warning` names the risk. Why: CodeLLDB's Windows detach otherwise kills a target whose last resume was a step (issue #763; the mechanism is in the C/C++ guide's attach section).
 - Detaching a session with no active debug process reports `success: false` with `No active debug session to detach from` in `message`.
 - **An attach root with child sessions** (the session tree, issues #1081 and #1082; Python and JavaScript): the children are detached first, deepest first, each with `disconnect` and `terminateDebuggee: false` so it runs on undebugged, then the parent. The child rows stay listed as `stopped` with `programEnd: { note: "Released: detached with its parent; the process runs on undebugged.", data: { released: true } }`, and the answer carries `childrenReleased: n` — n children now run undebugged (top level and in `data`). With `terminateProcess: true` the whole subtree is closed and the answer carries `childrenClosed: n` instead.
 

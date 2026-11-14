@@ -196,6 +196,9 @@ export class ProxyLauncher {
       // no-op.
       const proxyManager = lease.transferTo(this.ctx.proxyManagerFactory);
       session.proxyManager = proxyManager;
+      // The same fact the worker is given as `attachMode` (issue #1151): it
+      // decides what ending this session does to the program.
+      session.programOwnership = inputs.isAttachMode ? 'borrowed' : 'owned';
 
       // Set up event handlers
       // The core must see the same entry-stop intent the worker sees (#791).

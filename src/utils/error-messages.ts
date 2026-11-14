@@ -727,6 +727,20 @@ export const ErrorMessages = {
     `Use the parent's id, or close_debug_session on the child.`,
 
   /**
+   * Refusal of a plain detach on a session that launched its program (issue #1151)
+   * Occurs when: detach_from_process is called without terminateProcess on a
+   * session whose program it launched. A launched program ends with its
+   * session in every adapter, so there is no detach that leaves it running;
+   * the answer used to claim one. Refused before any state changes.
+   * Used in: src/session/attach/attach-controller.ts
+   */
+  detachOwnedProgramRefused: () =>
+    'detach_from_process leaves a program running, and this program was launched by this session: ' +
+    'a launched program ends with its session, so there is nothing to detach from and nothing was changed. ' +
+    'To end it now, call close_debug_session, or detach_from_process with terminateProcess: true. ' +
+    'To debug a program that must keep running afterwards, start it outside the debugger and use attach_to_process',
+
+  /**
    * Hint appended to launch-toolchain failures on attach-capable languages
    * Occurs when: resolving the language executable for a launch fails, but the
    * adapter supports attach (which may not need the local toolchain at all)

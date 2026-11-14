@@ -181,6 +181,12 @@ export interface ManagedSession extends DebugSessionInfo {
   // run on a remote filesystem (container, pod, other machine), so host-side
   // file existence checks do not apply to their source paths.
   attachMode?: boolean;
+  // Whether this session owns its program or borrows it (issue #1151),
+  // recorded where the proxy launch is committed, from the one fact the
+  // worker's shutdown also reads: a launch owns the program and ends it with
+  // the session; an attach (attach_to_process, or attach-shaped launch
+  // arguments) borrows it and releases it. Undefined until a program started.
+  programOwnership?: 'owned' | 'borrowed';
   // Where that target lives (issue #903): 'pid' and 'loopback' are this host,
   // so the host file is the debuggee's own source and content addressing is
   // allowed (issue #899); cleared with attachMode by a launch.

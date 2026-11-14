@@ -639,6 +639,7 @@ describe('SessionManager child sessions (issue #1081)', () => {
     it('closing an attach root releases every descendant (targets kept) and says released', async () => {
       const { rootId, childView, grandchildView } = await tree();
       sessionManager.getSession(rootId)!.attachMode = true;
+      sessionManager.getSession(rootId)!.programOwnership = 'borrowed';
 
       const outcome = await sessionManager.closeSessionReporting(rootId);
 
@@ -673,6 +674,7 @@ describe('SessionManager child sessions (issue #1081)', () => {
     async function attachTree() {
       const rootId = await startRoot();
       sessionManager.getSession(rootId)!.attachMode = true;
+      sessionManager.getSession(rootId)!.programOwnership = 'borrowed';
       dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
       await vi.runAllTimersAsync();
       const childId = childOf(rootId)!.id;
@@ -780,6 +782,7 @@ describe('SessionManager child sessions (issue #1081)', () => {
     it('a detach with no children answers as before', async () => {
       const rootId = await startRoot();
       sessionManager.getSession(rootId)!.attachMode = true;
+      sessionManager.getSession(rootId)!.programOwnership = 'borrowed';
 
       const detached = await sessionManager.detachFromProcess(rootId);
 
@@ -1247,6 +1250,7 @@ describe('SessionManager child sessions (issue #1081)', () => {
     it('reads child and grandchild output from their own connections under an attach root', async () => {
       const { rootId, childId, grandchildId, childView } = await jsTree();
       sessionManager.getSession(rootId)!.attachMode = true;
+      sessionManager.getSession(rootId)!.programOwnership = 'borrowed';
       childView.simulateEvent('output', { category: 'stdout', output: 'child console output\n' });
 
       expect(sessionManager.outputOnFor(childId)).toBeUndefined();

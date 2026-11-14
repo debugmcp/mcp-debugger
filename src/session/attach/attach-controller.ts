@@ -590,6 +590,13 @@ export class AttachController {
     sessionId: string,
     terminateProcess: boolean = false
   ): Promise<DebugResult<DetachResultData>> {
+    // Ownership first (issue #1151), before the in-flight claim and before
+    // anything is touched: a session ends a program it launched, so a detach
+    // that would leave it running is refused by name.
+    const session = this.ctx.getSession(sessionId);
+    if (!terminateProcess && session.proxyManager && session.programOwnership === 'owned') {
+      return { success: false, state: session.state, error: ErrorMessages.detachOwnedProgramRefused() };
+    }
     return this.inFlight.run(sessionId, 'detach', 'detach_from_process', this.ctx, () =>
       this.detach(sessionId, terminateProcess)
     );

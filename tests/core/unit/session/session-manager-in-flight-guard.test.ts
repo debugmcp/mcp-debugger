@@ -178,6 +178,9 @@ describe('SessionManager - in-flight launch guard (issue #711)', () => {
   it('refuses start_debugging while a detach is in flight', async () => {
     const session = await createSession();
     await sessionManager.startDebugging(session.id, 'test.py');
+    // A plain detach is for a borrowed program (issue #1151); on a launched
+    // one it is refused before it could be in flight.
+    sessionManager.getSession(session.id)!.programOwnership = 'borrowed';
 
     const gate = deferred();
     const proxy = dependencies.mockProxyManager;
