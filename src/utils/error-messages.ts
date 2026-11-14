@@ -220,6 +220,27 @@ export const ErrorMessages = {
     `${endpoint.host}:${endpoint.port} never answered the DAP "initialize" request (${detail}). ${notADebugServer(endpoint)}`,
 
   /**
+   * A direct-connect attach whose connection ended during the handshake,
+   * worded by the parent (issue #1152). There is no adapter process and no
+   * worker failure to describe: what ended is the endpoint the caller
+   * named. The parent used to answer "Proxy exited during initialization"
+   * with the worker's stderr, whenever the worker's exit reached it before
+   * the worker's own report.
+   * Used in: src/proxy/proxy-manager.ts (startInitializationSequence)
+   * @param endpoint - What the worker dialed
+   * @param endedByDebugServer - The endpoint sent DAP `terminated` before the connection closed
+   */
+  directConnectEndedDuringHandshake: (endpoint: DirectConnectEndpoint, endedByDebugServer: boolean) => {
+    const at = `${endpoint.host}:${endpoint.port}`;
+    const listener = endpoint.listener ?? 'the debug server';
+    return endedByDebugServer
+      ? `${at} ended the debug session during the DAP handshake: it sent "terminated" and the connection closed. ` +
+        `Nothing was started for this attach, so there is nothing to retry on this side: check that ${listener} is still running there and accepts a client.`
+      : `The connection to ${at} ended during the DAP handshake, before initialization completed. ` +
+        `Nothing was started for this attach: check that ${listener} is still listening there.`;
+  },
+
+  /**
    * Informational message for step operations still executing after the grace window
    * Occurs when: A step operation (stepOver, stepInto, stepOut) doesn't receive a 'stopped' event
    * within the grace window — usually because the step runs long-lived user code, which is not an error

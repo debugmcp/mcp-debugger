@@ -479,11 +479,20 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         reject(error);
       }, this.initializationTimeoutMs);
 
+      // A direct connection (issue #1152): no adapter was spawned, so an
+      // ending here is the endpoint's, and the parent words it by endpoint
+      // whichever of the worker's messages arrives first.
+      let endedByDebugServer = false;
+      const handleTerminated = () => {
+        endedByDebugServer = true;
+      };
+
       const cleanup = () => {
         clearTimeout(timeout);
         this.removeListener('initialized', handleInitialized);
         this.removeListener('error', handleError);
         this.removeListener('exit', handleExit);
+        this.removeListener('terminated', handleTerminated);
       };
 
       const handleInitialized = () => {
@@ -495,11 +504,22 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
       const handleError = (error: Error) => {
         cleanup();
-        reject(error);
+        const direct = this.initProgress.directConnect;
+        const endpoint = direct ? `${direct.host}:${direct.port}` : undefined;
+        reject(
+          endpoint !== undefined && !error.message.includes(endpoint)
+            ? new Error(`${error.message} [direct connect to ${endpoint}; no adapter process was started]`)
+            : error
+        );
       };
 
       const handleExit = (code: number | null, signal?: string) => {
         cleanup();
+        const direct = this.initProgress.directConnect;
+        if (direct) {
+          reject(new Error(ErrorMessages.directConnectEndedDuringHandshake(direct, endedByDebugServer)));
+          return;
+        }
         let errorMessage = `Proxy exited during initialization. Code: ${code}, Signal: ${signal}`;
         if (this.stderrBuffer.length > 0) {
           // Cap what gets embedded in the user-facing error — the full
@@ -520,6 +540,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       this.once('initialized', handleInitialized);
       this.once('error', handleError);
       this.once('exit', handleExit);
+      this.on('terminated', handleTerminated);
     });
   }
 
