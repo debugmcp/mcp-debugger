@@ -438,8 +438,6 @@ export class AttachController {
       }
 
       assertTargetPresent();
-      // A delayed requested pause, or a breakpoint, can land after the wait.
-      if (session.state === SessionState.PAUSED) attachPausePending = false;
       // Unverified-at-attach function breakpoints get the same launch-style
       // warning (issue #308); bind-late adapters (js/java) stay suppressed
       // inside the builder.

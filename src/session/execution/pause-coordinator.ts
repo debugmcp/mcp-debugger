@@ -55,7 +55,7 @@ export class PauseCoordinator {
     let stoppedSeen = false;
     let endedSeen = false;
     let resolveEvent: ((value: 'stopped' | 'ended') => void) | undefined;
-    const event = new Promise<'stopped' | 'ended'>((resolve) => {
+    let event = new Promise<'stopped' | 'ended'>((resolve) => {
       resolveEvent = resolve;
     });
     const onStopped = () => {
@@ -93,21 +93,33 @@ export class PauseCoordinator {
     /**
      * A pause request that got no answer is not a refusal: it may still be
      * queued in a target busy in native code, and arms when that returns.
-     * The intent stays, so the stop it produces is still read as this pause
-     * and breakpoint requests keep waiting for it (issue #1146).
+     * Where breakpoint requests wait on the intent (issue #1146) it stays, so
+     * they keep waiting and the stop it produces is still read as this
+     * pause. Elsewhere it is cleared as before: a stale intent would relabel
+     * some later, unrelated stop.
      */
-    const unanswered = (error: unknown): PauseOutcome => ({ status: 'rejected', error });
+    const unanswered = (error: unknown): PauseOutcome =>
+      this.holdsBreakpointsOnIntent(session) ? { status: 'rejected', error } : rejected(error);
 
     try {
       // An intent that is still armed is a pause waiting in the target, and
       // the wake is itself an evaluation: exactly what that pause fires in.
       if (getCurrentPauseIntent(session) === undefined) {
         await this.wakeBeforePause(session, proxyManager);
-        if (stoppedSeen || (sessionPaused() && session.lastStop)) {
+        if (sessionPaused() && session.lastStop) {
           return observed();
         }
         if (endedSeen) {
           return rejected(new Error('Session ended before pause took effect'), true);
+        }
+        if (stoppedSeen) {
+          // A stop came and went during the wake: no intent was armed, so
+          // the core treated it as its own (it auto-continues a launch's
+          // entry stop). It is not this pause's answer; listen afresh.
+          stoppedSeen = false;
+          event = new Promise<'stopped' | 'ended'>((resolve) => {
+            resolveEvent = resolve;
+          });
         }
       }
       intent = armPauseIntent(session, source);
@@ -164,6 +176,15 @@ export class PauseCoordinator {
       return { status: 'pending' };
     } finally {
       cleanup();
+    }
+  }
+
+  /** Whether the session's policy holds breakpoint requests on an armed pause (issue #1146). Never throws. */
+  private holdsBreakpointsOnIntent(session: ManagedSession): boolean {
+    try {
+      return this.ctx.selectPolicy(session.language).holdsBreakpointsWhilePauseArmed === true;
+    } catch {
+      return false;
     }
   }
 

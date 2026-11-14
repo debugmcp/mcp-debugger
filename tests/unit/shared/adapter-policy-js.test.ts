@@ -794,6 +794,20 @@ describe('JsDebugAdapterPolicy and a pause on an idle program (issue #1146)', ()
       expect(() => runWake(() => undefined)).not.toThrow();
     });
 
+    it('swallows what a replaced setTimeout throws, so the debugger never stops on its own expression', () => {
+      // Launches break on uncaught exceptions by default; an uncaught throw
+      // from this expression would itself be reported as a stop.
+      expect(() => runWake(() => { throw new Error('timers are not available here'); })).not.toThrow();
+      expect(() => runWake(() => ({ unref() { throw new Error('no unref'); } }))).not.toThrow();
+    });
+
+    it('contains no debugger statement and nothing but the one timer call', () => {
+      const expression = JsDebugAdapterPolicy.pauseWakeExpression!;
+      expect(expression).not.toMatch(/\bdebugger\b/);
+      expect(expression.match(/setTimeout\(/g)).toHaveLength(1);
+      expect(expression).not.toMatch(/setInterval|setImmediate|require\(|import\(/);
+    });
+
     it('leaves no name behind in the target: the expression declares nothing global', () => {
       const expression = JsDebugAdapterPolicy.pauseWakeExpression!;
       expect(expression.startsWith('(function(){')).toBe(true);

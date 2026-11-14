@@ -412,7 +412,10 @@ open on its port (Node never closes it by itself) — a later attach by PID or b
   #900). `get_local_variables` returns that frame's own variables with
   `noProgramFrame: true` and a `note` saying they belong to it, not to your program
   (issue #1135). Continue and send a request, or set a breakpoint first.
-  `pause_execution` lands the same way, on attached and launched programs. A
+  `pause_execution` lands the same way, on attached and launched programs. On a
+  loaded machine the pause can land first inside an evaluation js-debug makes on
+  its own account just after attaching: the frame is then a sourceless
+  `<anonymous>` with the same `note`, and continuing carries on from it. A
   program the timer cannot wake — busy in native code, or one that replaced
   `setTimeout` — still answers `state: "running", pending: true`, and stops on its
   next JavaScript; until then breakpoint requests are held and answered `Held: a

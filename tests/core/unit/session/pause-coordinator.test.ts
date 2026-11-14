@@ -6,7 +6,7 @@ import type { IProxyManager } from '../../../../src/proxy/proxy-manager.js';
 import { PauseCoordinator } from '../../../../src/session/execution/pause-coordinator.js';
 import type { ManagedSession } from '../../../../src/session/session-store.js';
 
-function fixture(policy: { pauseWakeExpression?: string } = {}) {
+function fixture(policy: { pauseWakeExpression?: string; holdsBreakpointsWhilePauseArmed?: boolean } = {}) {
   const proxy = new EventEmitter() as EventEmitter & {
     sendDapRequest: Mock<
       (
@@ -109,20 +109,21 @@ describe('PauseCoordinator', () => {
   describe('a pause needs something to land on (issue #1146)', () => {
     it("evaluates the policy's wake expression before it arms and requests the pause", async () => {
       const { proxy, session, coordinator } = fixture({ pauseWakeExpression: WAKE });
+      // Recorded and asserted afterwards: an `expect` that throws inside the
+      // mock would be swallowed by the wake's own catch.
+      const intentAt: Record<string, unknown> = {};
       proxy.sendDapRequest.mockImplementation((command: string) => {
-        if (command === 'evaluate') {
-          // Nothing is armed while the debugger's own code runs in the target.
-          expect(session.pauseIntent).toBeUndefined();
-          return Promise.resolve({ success: true });
-        }
-        expect(session.pauseIntent).toMatchObject({ generation: 7, source: 'user' });
-        proxy.emit('stopped', { reason: 'pause', threadId: 1 });
+        intentAt[command] = session.pauseIntent === undefined ? 'none' : { ...session.pauseIntent };
+        if (command === 'pause') proxy.emit('stopped', { reason: 'pause', threadId: 1 });
         return Promise.resolve({ success: true });
       });
 
       await expect(coordinator.requestPause(request(session, proxy))).resolves.toEqual({ status: 'observed' });
 
       expect(commands(proxy)).toEqual(['evaluate', 'pause']);
+      // Nothing is armed while the debugger's own code runs in the target.
+      expect(intentAt.evaluate).toBe('none');
+      expect(intentAt.pause).toMatchObject({ generation: 7, source: 'user' });
       const [, args, options] = proxy.sendDapRequest.mock.calls[0];
       expect(args).toEqual({ expression: WAKE, context: 'repl' });
       // Bounded: a target that cannot answer must not hold the pause back for 30 s.
@@ -204,6 +205,41 @@ describe('PauseCoordinator', () => {
       expect(proxy.listenerCount('stopped')).toBe(0);
     });
 
+    it('does not take a stop that came and went during the wake for its own: the pause is still requested', async () => {
+      // No intent is armed during the wake, so the core treats a stop that
+      // arrives then as its own business; it auto-continues a launch's entry
+      // stop. The session is running again when the wake returns.
+      vi.useFakeTimers();
+      const { proxy, session, coordinator } = fixture({ pauseWakeExpression: WAKE });
+      proxy.sendDapRequest.mockImplementation((command: string) => {
+        if (command === 'evaluate') proxy.emit('stopped', { reason: 'entry', threadId: 1 });
+        return Promise.resolve({ success: true });
+      });
+
+      const result = coordinator.requestPause(request(session, proxy, 25));
+      await vi.advanceTimersByTimeAsync(25);
+
+      await expect(result).resolves.toEqual({ status: 'pending' });
+      expect(commands(proxy)).toEqual(['evaluate', 'pause']);
+      expect(session.pauseIntent).toMatchObject({ generation: 7, source: 'user' });
+    });
+
+    it('requests the pause without a wake when the policy cannot be selected', async () => {
+      const { proxy, session, logger } = fixture();
+      const coordinator = new PauseCoordinator({
+        logger,
+        selectPolicy: () => { throw new Error('no policy for this language'); }
+      });
+      proxy.sendDapRequest.mockImplementation(() => {
+        proxy.emit('stopped', { reason: 'pause', threadId: 1 });
+        return Promise.resolve({ success: true });
+      });
+
+      await expect(coordinator.requestPause(request(session, proxy))).resolves.toEqual({ status: 'observed' });
+
+      expect(commands(proxy)).toEqual(['pause']);
+    });
+
     it('reports a session that ended during the wake, and requests no pause', async () => {
       const { proxy, session, coordinator } = fixture({ pauseWakeExpression: WAKE });
       proxy.sendDapRequest.mockImplementation(() => {
@@ -223,16 +259,37 @@ describe('PauseCoordinator', () => {
     it.each([
       "Request 'pause' timed out after 30s",
       "Debug adapter did not respond to 'pause' request within 35s. This typically means the debug adapter has crashed or lost connection."
-    ])('keeps the intent armed when the pause request got no answer: %s', async (message) => {
+    ])('keeps the intent armed when the pause request got no answer, where breakpoints wait on it: %s', async (message) => {
       // No answer is not a refusal: the request may still be queued in a
       // target that is busy in native code, and will arm when it returns.
-      const { proxy, session, coordinator } = fixture();
+      const { proxy, session, coordinator } = fixture({ holdsBreakpointsWhilePauseArmed: true });
       const error = new Error(message);
       proxy.sendDapRequest.mockRejectedValue(error);
 
       await expect(coordinator.requestPause(request(session, proxy))).resolves.toEqual({ status: 'rejected', error });
 
       expect(session.pauseIntent).toMatchObject({ generation: 7, source: 'user' });
+    });
+
+    it('clears the intent after an unanswered pause request where nothing waits on it', async () => {
+      // A stale intent would relabel some later, unrelated stop as this pause.
+      const { proxy, session, coordinator } = fixture();
+      const error = new Error("Request 'pause' timed out after 30s");
+      proxy.sendDapRequest.mockRejectedValue(error);
+
+      await expect(coordinator.requestPause(request(session, proxy))).resolves.toEqual({ status: 'rejected', error });
+
+      expect(session.pauseIntent).toBeUndefined();
+    });
+
+    it('clears the intent when the adapter refused the pause, whatever waits on it', async () => {
+      const { proxy, session, coordinator } = fixture({ holdsBreakpointsWhilePauseArmed: true });
+      const error = new Error('Thread is not running');
+      proxy.sendDapRequest.mockRejectedValue(error);
+
+      await expect(coordinator.requestPause(request(session, proxy))).resolves.toEqual({ status: 'rejected', error });
+
+      expect(session.pauseIntent).toBeUndefined();
     });
   });
 });

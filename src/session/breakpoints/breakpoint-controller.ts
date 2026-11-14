@@ -224,6 +224,7 @@ export class BreakpointController {
     if (this.pauseArmed(session)) {
       return this.hold(session, { file });
     }
+    await this.sendHeldFirst(session);
 
     // Collect ALL breakpoints for this source file (DAP setBreakpoints is replace-all)
     const allBpsForFile = Array.from(session.breakpoints.values())
@@ -397,6 +398,19 @@ export class BreakpointController {
       `[SessionManager] Breakpoint request held for session ${session.id}: a pause is armed and no stop has been observed (issue #1146).`
     );
     return { synced: false, held: true, warning: ErrorMessages.breakpointHeldForPendingPause };
+  }
+
+  /**
+   * Ahead of a request that can go out: whatever is still held for the
+   * session goes first. The state listener sends it when the session stops,
+   * but an armed pause can also end with no state change at all (a refused
+   * pause request clears its intent), and a held file must not sit unsent
+   * while a later request for another file goes out.
+   */
+  private async sendHeldFirst(session: ManagedSession): Promise<void> {
+    if (this.held.has(session.id)) {
+      await this.release(session.id);
+    }
   }
 
   /**
@@ -677,10 +691,12 @@ export class BreakpointController {
     const key = (failure: BreakpointSyncFailure): string => `${failure.refused ? 'refused' : 'failed'}:${failure.message}`;
     let hint = '';
     const unansweredFiles: string[] = [];
+    let held = false;
     if (session.breakpoints.size > 0) {
       const files = [...new Set(Array.from(session.breakpoints.values()).map((bp) => bp.file))];
       for (const file of files) {
         const outcome = await this.syncBreakpointsForFile(session, file, options);
+        held ||= outcome.held === true;
         if (outcome.unanswered) {
           unansweredFiles.push(file);
         }
@@ -702,6 +718,7 @@ export class BreakpointController {
     let functionBreakpointsFailed = false;
     if ((session.functionBreakpoints?.size ?? 0) > 0) {
       const outcome = await this.syncFunctionBreakpoints(session);
+      held ||= outcome.held === true;
       if (outcome.failure !== undefined) {
         functionBreakpointsFailed = true;
         hint ||= this.liveSyncHint(session, outcome.failure.message);
@@ -725,6 +742,11 @@ export class BreakpointController {
     // names the path, so every file is a distinct answer).
     if (hint) {
       warnings.push(hint);
+    }
+    // A re-send made under an armed pause sent nothing (issue #1146): one
+    // sentence for the launch or attach answer, however many files waited.
+    if (held) {
+      warnings.push(ErrorMessages.breakpointHeldForPendingPause);
     }
     return {
       warnings,
@@ -758,6 +780,7 @@ export class BreakpointController {
     if (this.pauseArmed(session)) {
       return this.hold(session, { functions: true });
     }
+    await this.sendHeldFirst(session);
 
     const allFnBps = Array.from(session.functionBreakpoints.values());
 
@@ -1037,7 +1060,9 @@ export class BreakpointController {
     return {
       cleared: toClear.length + fnToClear.length,
       files,
-      ...(warnings.length > 0 ? { warning: warnings.join('; ') } : {})
+      // One sentence per distinct warning: a clear held for an armed pause
+      // (issue #1146) says so once, not once per file.
+      ...(warnings.length > 0 ? { warning: [...new Set(warnings)].join('; ') } : {})
     };
   }
 }

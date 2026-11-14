@@ -204,6 +204,63 @@ describe('breakpoint requests wait for an armed pause (issue #1146)', () => {
 
     expect(sent()).toEqual([]);
     expect(unsubscribe).toHaveBeenCalledTimes(1);
+    // The entry is gone too, not only its subscription.
+    expect(controller.heldInFlight('sess-1')).toBeUndefined();
+  });
+
+  it('sends what it held ahead of the next request, when the armed pause ended with no state change', async () => {
+    // A refused pause request clears its intent and changes no state: the
+    // listener never runs, and the held file must not sit unsent while a
+    // request for another file goes out.
+    const { controller, session, arm, sent } = harness();
+    arm();
+    await controller.setBreakpoint('sess-1', { file: FILE, line: 29 });
+    session.pauseIntent = undefined;
+
+    const result = await controller.setBreakpoint('sess-1', { file: OTHER, line: 4 });
+
+    expect(sent()).toEqual([`setBreakpoints ${FILE} [29]`, `setBreakpoints ${OTHER} [4]`]);
+    expect(result.warning).toBeUndefined();
+    expect(controller.heldInFlight('sess-1')).toBeUndefined();
+  });
+
+  it('sends the held files ahead of a function breakpoint request too', async () => {
+    const { controller, session, arm, sent } = harness();
+    arm();
+    await controller.setBreakpoint('sess-1', { file: FILE, line: 29 });
+    session.pauseIntent = undefined;
+
+    await controller.setFunctionBreakpoint('sess-1', { functionName: 'doWork' });
+
+    expect(sent()).toEqual([`setBreakpoints ${FILE} [29]`, 'setFunctionBreakpoints [doWork]']);
+  });
+
+  it('says it once when a clear of several files and the functions is held', async () => {
+    const { controller, session, arm, sent } = harness();
+    session.breakpoints.set('a', { id: 'a', file: FILE, line: 29, verified: true } as Breakpoint);
+    session.breakpoints.set('b', { id: 'b', file: OTHER, line: 4, verified: true } as Breakpoint);
+    session.functionBreakpoints.set('f', { id: 'f', functionName: 'doWork', verified: true } as FunctionBreakpoint);
+    arm();
+
+    const cleared = await controller.clearBreakpoints('sess-1');
+
+    expect(cleared.cleared).toBe(3);
+    expect(cleared.warning).toBe(ErrorMessages.breakpointHeldForPendingPause);
+    expect(sent()).toEqual([]);
+  });
+
+  it('says it once for a re-sync made under the armed pause, and sends nothing', async () => {
+    const { controller, session, arm, sent } = harness();
+    session.breakpoints.set('a', { id: 'a', file: FILE, line: 29, verified: false } as Breakpoint);
+    session.breakpoints.set('b', { id: 'b', file: OTHER, line: 4, verified: false } as Breakpoint);
+    session.functionBreakpoints.set('f', { id: 'f', functionName: 'doWork', verified: false } as FunctionBreakpoint);
+    arm();
+
+    const outcome = await controller.resyncAll(session, { forceFreshEcho: true });
+
+    expect(outcome.warnings).toEqual([ErrorMessages.breakpointHeldForPendingPause]);
+    expect(outcome.functionBreakpointsFailed).toBe(false);
+    expect(sent()).toEqual([]);
   });
 
   it('holds nothing once the pause has landed: a request while paused goes straight out', async () => {

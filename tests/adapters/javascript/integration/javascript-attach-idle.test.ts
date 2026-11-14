@@ -26,6 +26,15 @@
  * The pause lands because the server schedules one no-op timer in the target
  * before it requests the pause, so the stop is in `processTimers`: no program
  * frame, and the answer says so.
+ *
+ * One thing is outside the server's hands: js-debug evaluates code of its own
+ * in the target shortly after it attaches (telemetry, the environment for
+ * child processes). On a loaded machine that can run after the pause is
+ * armed, and the pause then lands inside it: `paused` on a sourceless
+ * `<anonymous>` frame, measured 6 runs in 6 at 16 busy processes on 16 cores.
+ * Both landings are a real pause with the same note, so the cases accept
+ * either, and the held-breakpoint case first works its way to a pause that
+ * is really pending.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
@@ -128,13 +137,32 @@ async function breakpointsUntil(accept: (states: string[]) => boolean, timeoutMs
   return states;
 }
 
-/** The idle landing: a real pause, in the timer code the wake ran, and the answer says it is not the program's. */
+/**
+ * The idle landing: a real pause, not a pending one, and the answer says it
+ * is not the program's. Where: the timer code the wake ran, or (on a loaded
+ * machine) js-debug's own evaluation, which has no source.
+ */
 function expectIdleLanding(stop: Stop): void {
   expect(stop.success, JSON.stringify(stop)).toBe(true);
   expect(stop.state, JSON.stringify(stop)).toBe('paused');
   expect(stop.pending, JSON.stringify(stop)).toBeUndefined();
-  expect(stop.location?.file, JSON.stringify(stop)).toMatch(/timers/);
+  expect(stop.location?.file, JSON.stringify(stop)).toMatch(/timers|<unknown_source>/);
   expect(stop.note, JSON.stringify(stop)).toMatch(/No program frame is active/);
+}
+
+/**
+ * Get to a pause that is pending on a server the wake cannot reach. A pause
+ * that landed inside one of js-debug's own evaluations is resumed and asked
+ * for again: once those have run, nothing is left for it to land in.
+ */
+async function reachPendingPause(first: Stop): Promise<void> {
+  let answer = first;
+  for (let attempt = 0; attempt < 5 && answer.state === 'paused'; attempt++) {
+    expect((await call('continue_execution')).success).toBe(true);
+    answer = await call<Stop>('pause_execution');
+  }
+  expect(answer.state, JSON.stringify(answer)).toBe('running');
+  expect(answer.pending, JSON.stringify(answer)).toBe(true);
 }
 
 async function waitForBreakpointStop(file: string, line: number): Promise<void> {
@@ -206,8 +234,8 @@ describe('a pause on an idle Node server lands, and nothing is left frozen (issu
     const target = await startTarget(noTimersServer);
     await server.createSession('javascript', 'attach-idle-held');
     const attached = await call<Stop>('attach_to_process', { host: '127.0.0.1', port: target.inspectPort, verifyTimeout: 20000 });
-    expect(attached.state, JSON.stringify(attached)).toBe('running');
-    expect(attached.pending, JSON.stringify(attached)).toBe(true);
+    expect(attached.success, JSON.stringify(attached)).toBe(true);
+    await reachPendingPause(attached);
 
     const bp = await call<BreakpointAnswer>('set_breakpoint', { file: noTimersServer, line: NO_TIMERS_BREAKPOINT_LINE });
 

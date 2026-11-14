@@ -229,7 +229,7 @@ const jsDebugChildAdoption: ChildAdoptionContract = {
 export const JS_PAUSE_WAKE_DELAY_MS = 150;
 
 const JS_PAUSE_WAKE_EXPRESSION =
-  `(function(){var t=setTimeout(function(){},${JS_PAUSE_WAKE_DELAY_MS});if(t&&typeof t.unref==='function')t.unref()})()`;
+  `(function(){try{var t=setTimeout(function(){},${JS_PAUSE_WAKE_DELAY_MS});if(t&&typeof t.unref==='function')t.unref()}catch(e){}})()`;
 
 export const JsDebugAdapterPolicy = {
   name: 'js-debug',
@@ -769,7 +769,9 @@ export const JsDebugAdapterPolicy = {
    * answers nothing more). One unref'd no-op timer, scheduled while nothing
    * is armed, gives the pause the event loop to land on: it stops in
    * `processTimers`, the landing an idle server with timers of its own
-   * already has. Unref'd, so it never keeps a finishing program alive.
+   * already has. Unref'd, so it never keeps a finishing program alive; and
+   * it swallows whatever a replaced `setTimeout` throws, so the debugger's
+   * own expression is never an uncaught exception to stop on.
    */
   pauseWakeExpression: JS_PAUSE_WAKE_EXPRESSION,
 
