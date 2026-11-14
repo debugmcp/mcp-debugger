@@ -407,6 +407,18 @@ export class FrameAnchorResolver {
     policy: AdapterPolicy
   ): Promise<{ frames: DebugProtocol.StackFrame[]; threadId: number; note?: string }> {
     const { pausedStackReadyTimeoutMs, pausedStackReadyIntervalMs } = this.ctx.tunables;
+    // What an empty paused stack means under this adapter (issue #1132). Where
+    // the policy says no frame will appear there is nothing to wait for: one
+    // look at the sibling threads, then the policy's sentence.
+    const empty = policy.describeEmptyPausedStack?.();
+    if (empty?.framesWillNotAppear) {
+      const sibling = await this.scanSiblings(sessionId, proxyManager, threadId, policy, pausedStackReadyIntervalMs);
+      if (sibling) {
+        return this.adoptFramedSibling(sessionId, session, proxyManager, threadId, stopAtGate, sibling);
+      }
+      this.ctx.logger.info(`[FrameAnchor ${sessionId}] Thread ${threadId} is paused with no frames: ${empty.note}`);
+      return { frames: [], threadId, note: empty.note };
+    }
     const deadline = Date.now() + pausedStackReadyTimeoutMs;
     while (Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, pausedStackReadyIntervalMs));
@@ -432,28 +444,15 @@ export class FrameAnchorResolver {
         Math.max(deadline - Date.now(), pausedStackReadyIntervalMs)
       );
       if (scanned) {
-        // A stop that landed during the scan has re-anchored the session
-        // itself; adopting now would clobber it with a stale verdict.
-        if (session.lastStop !== stopAtGate || session.state !== SessionState.PAUSED) {
-          this.ctx.logger.info(
-            `[FrameAnchor ${sessionId}] The stop changed while scanning for a framed thread; not adopting thread ${scanned.threadId}.`
-          );
-          return {
-            frames: [],
-            threadId,
-            note: 'A new stop landed while the stack was being read; ask again.'
-          };
-        }
-        proxyManager.setCurrentThreadId(scanned.threadId);
-        this.ctx.logger.info(
-          `[FrameAnchor ${sessionId}] Thread ${threadId} stayed frameless; adopted thread ${scanned.threadId}.`
-        );
-        return {
-          frames: scanned.frames,
-          threadId: scanned.threadId,
-          note: `The stopped thread ${threadId} reported no stack frames; switched to thread ${scanned.threadId}, which has one.`
-        };
+        return this.adoptFramedSibling(sessionId, session, proxyManager, threadId, stopAtGate, scanned);
       }
+    }
+    if (empty) {
+      // The policy's own reading, after the wait it did not rule out.
+      this.ctx.logger.info(
+        `[FrameAnchor ${sessionId}] Thread ${threadId} is paused with no frames after ${pausedStackReadyTimeoutMs}ms: ${empty.note}`
+      );
+      return { frames: [], threadId, note: empty.note };
     }
     this.ctx.logger.warn(
       `[FrameAnchor ${sessionId}] Stack stayed empty for ${pausedStackReadyTimeoutMs}ms on thread ${threadId}.`
@@ -462,6 +461,38 @@ export class FrameAnchorResolver {
       frames: [],
       threadId,
       note: `The stopped thread reported no stack frames within ${pausedStackReadyTimeoutMs}ms; the target may be paused in native code. Try get_stack_trace with a threadId from list_threads, or continue_execution followed by pause_execution to re-anchor the session on a reportable thread.`
+    };
+  }
+
+  /** Anchor the session on a sibling thread that has frames, unless the stop changed while it was being found. */
+  private adoptFramedSibling(
+    sessionId: string,
+    session: Pick<ManagedSession, 'state' | 'lastStop'>,
+    proxyManager: IProxyManager,
+    threadId: number,
+    stopAtGate: ManagedSession['lastStop'],
+    scanned: { threadId: number; frames: DebugProtocol.StackFrame[] }
+  ): { frames: DebugProtocol.StackFrame[]; threadId: number; note: string } {
+    // A stop that landed during the scan has re-anchored the session
+    // itself; adopting now would clobber it with a stale verdict.
+    if (session.lastStop !== stopAtGate || session.state !== SessionState.PAUSED) {
+      this.ctx.logger.info(
+        `[FrameAnchor ${sessionId}] The stop changed while scanning for a framed thread; not adopting thread ${scanned.threadId}.`
+      );
+      return {
+        frames: [],
+        threadId,
+        note: 'A new stop landed while the stack was being read; ask again.'
+      };
+    }
+    proxyManager.setCurrentThreadId(scanned.threadId);
+    this.ctx.logger.info(
+      `[FrameAnchor ${sessionId}] Thread ${threadId} stayed frameless; adopted thread ${scanned.threadId}.`
+    );
+    return {
+      frames: scanned.frames,
+      threadId: scanned.threadId,
+      note: `The stopped thread ${threadId} reported no stack frames; switched to thread ${scanned.threadId}, which has one.`
     };
   }
 
@@ -608,6 +639,12 @@ export class FrameAnchorResolver {
         `Thread ${requested} reported no stack frames; thread ${label(alternative.threadId, alternative.threadName)} has frames. ` +
         `Try get_stack_trace with threadId ${alternative.threadId}.`
       );
+    }
+    // What an empty paused stack means under this adapter, when the policy
+    // has something particular to say (issue #1132).
+    const empty = policy.describeEmptyPausedStack?.();
+    if (empty) {
+      return empty.note;
     }
     return (
       `Thread ${requested} reported no stack frames (it may be a native/runtime thread, or its stack may not have materialized yet). ` +

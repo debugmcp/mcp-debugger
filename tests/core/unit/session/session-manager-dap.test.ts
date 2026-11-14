@@ -3650,6 +3650,98 @@ describe('SessionManager - DAP Operations', () => {
         .pausedStackReadyIntervalMs = 25;
     }
 
+    // Issue #1132: an empty stack on a paused thread means different things
+    // under different adapters. Under Dart it is an isolate idle in an
+    // `await`: no frame will appear however long the read waits, nothing is
+    // in native code, and re-pausing lands idle again. The policy says what
+    // it means, and whether waiting can help.
+    describe('what the policy says an empty paused stack means (issue #1132)', () => {
+      const IDLE = 'The isolate is idle between events.';
+      const withPolicy = (framesWillNotAppear: boolean) => {
+        (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => ({
+          describeEmptyPausedStack: () => ({ note: IDLE, framesWillNotAppear })
+        });
+      };
+      const emptyStack = () => {
+        let stackTraceCalls = 0;
+        dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+          if (command === 'stackTrace') {
+            stackTraceCalls++;
+            return { success: true, body: { stackFrames: [] } };
+          }
+          if (command === 'threads') {
+            return { success: true, body: { threads: [{ id: 1, name: 'main' }] } };
+          }
+          return { success: true, body: {} };
+        });
+        return () => stackTraceCalls;
+      };
+
+      it('answers at once with the policy\'s sentence when no frame will appear', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        // A window the test would notice: 3 s is what the answer used to cost.
+        (sessionManager as unknown as { pausedStackReadyTimeoutMs: number }).pausedStackReadyTimeoutMs = 3000;
+        withPolicy(true);
+        const calls = emptyStack();
+
+        const startedAt = Date.now();
+        const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, { ensureStackReady: true });
+
+        expect(result.frames).toEqual([]);
+        expect(result.note).toBe(IDLE);
+        expect(Date.now() - startedAt).toBeLessThan(1000);
+        // The read that came back empty; no polling of the same thread.
+        expect(calls()).toBe(1);
+      });
+
+      it('still adopts a sibling thread that has frames, without waiting', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        (sessionManager as unknown as { pausedStackReadyTimeoutMs: number }).pausedStackReadyTimeoutMs = 3000;
+        withPolicy(true);
+        dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: { threadId?: number }) => {
+          if (command === 'stackTrace') {
+            return { success: true, body: { stackFrames: args?.threadId === 2 ? [READY_FRAME] : [] } };
+          }
+          if (command === 'threads') {
+            return { success: true, body: { threads: [{ id: 1, name: 'main' }, { id: 2, name: 'worker' }] } };
+          }
+          return { success: true, body: {} };
+        });
+
+        const startedAt = Date.now();
+        const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, { ensureStackReady: true });
+
+        expect(result.frames.map((f) => f.name)).toEqual(['Program.Main']);
+        expect(result.threadId).toBe(2);
+        expect(Date.now() - startedAt).toBeLessThan(1000);
+      });
+
+      it('waits as before when frames may still appear, and then says what the policy says', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        setShortReadyWindow();
+        withPolicy(false);
+        const calls = emptyStack();
+
+        const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, { ensureStackReady: true });
+
+        expect(result.frames).toEqual([]);
+        expect(result.note).toBe(IDLE);
+        expect(calls()).toBeGreaterThan(2);
+      });
+
+      it('says it for a thread the caller named, too', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        setShortReadyWindow();
+        withPolicy(true);
+        emptyStack();
+
+        const result = await sessionManager.getStackTraceDetailed(session.id, 1);
+
+        expect(result.frames).toEqual([]);
+        expect(result.note).toBe(IDLE);
+      });
+    });
+
     it('retries an empty-but-successful stack until frames appear', async () => {
       const session = await createPausedSession(sessionManager, dependencies);
       setShortReadyWindow();

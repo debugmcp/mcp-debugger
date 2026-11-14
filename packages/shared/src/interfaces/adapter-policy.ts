@@ -550,6 +550,21 @@ export interface AdapterPolicy {
   filterStackFrames?(frames: StackFrame[], includeInternals: boolean): StackFrame[];
 
   /**
+   * What an empty stack on a paused thread means under this adapter (issue
+   * #1132), for an adapter where it means something particular. Without it
+   * the read waits a few seconds for frames (netcoredbg answers an empty
+   * stack right after a post-attach pause, a transient race) and then says
+   * the target may be in native code. Under Dart an empty stack is an
+   * isolate idle in an `await`: no frame appears however long the read
+   * waits, nothing is in native code, and pausing again lands idle again.
+   *
+   * `note` is what the answer says. `framesWillNotAppear` means waiting
+   * cannot help, so the read does not wait; it is a claim to measure before
+   * making (Dart: ten pauses of a busy isolate never had an empty first read).
+   */
+  describeEmptyPausedStack?(): { note: string; framesWillNotAppear?: boolean };
+
+  /**
    * Give the adapter's frames the shape every adapter's have (issue #1143): a
    * frame's name is the function's name and nothing else, and what the
    * adapter says about a frame beside its name is data on the frame. Applied

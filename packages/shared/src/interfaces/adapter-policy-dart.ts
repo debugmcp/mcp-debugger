@@ -315,6 +315,20 @@ export const DartAdapterPolicy = {
   /** Attaching to a running isolate reports no stop; `pause` answers in a few ms (measured). */
   getAttachBehavior: () => ({ pauseAfterAttach: true }),
 
+  // A paused isolate with no frames is idle in the event loop, waiting in an
+  // `await` (issue #1132): the usual state of a Dart program between events.
+  // No frame will appear, so the read does not wait for one. Measured on Dart
+  // 3.13, ten pauses each with a DAP trace: an isolate idle in an `await`
+  // answered its first stack read with 0 frames ten times in ten; one busy in
+  // a loop answered with its frames ten times in ten, never empty.
+  describeEmptyPausedStack: () => ({
+    note:
+      'The isolate is idle between events (waiting in an `await`), so no Dart frame is on its stack; it is not in native code, ' +
+      'and pausing again lands in the same idle state. To stop where the program runs next, set a breakpoint in the code that ' +
+      'runs next (the loop body, a handler or a callback) and continue_execution; wait_for_stop answers when it is hit.',
+    framesWillNotAppear: true
+  }),
+
   isAsyncBoundaryFrame: (frame: StackFrame): boolean => isAsyncGap(frame),
 
   isInternalFrame: (frame: StackFrame): boolean => {
