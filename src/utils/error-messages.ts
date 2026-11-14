@@ -220,6 +220,20 @@ export const ErrorMessages = {
     `${endpoint.host}:${endpoint.port} never answered the DAP "initialize" request (${detail}). ${notADebugServer(endpoint)}`,
 
   /**
+   * The note on a stack whose top frames the exception has already left (issue #1143)
+   * Occurs when: an exception stop lists the traceback's frames above the
+   * frame execution is paused in (pydevd at a user-unhandled stop): frame 0
+   * carries `unwound: true`. Locals and evaluate read the raise site; a step
+   * continues from the live frame.
+   * Used in: src/session/inspection/frame-anchor-resolver.ts
+   * @param raised - The function the exception was raised in (frame 0)
+   * @param live - The first frame still on the call stack, when the answer shows one
+   */
+  exceptionRaisedInUnwoundFrame: (raised: string, live?: { name: string; where: string }) =>
+    `The exception was raised in '${raised}', which has already unwound: its variables are readable.` +
+    (live ? ` Execution is paused in '${live.name}' (${live.where}); a step continues from there.` : ''),
+
+  /**
    * Informational message for step operations still executing after the grace window
    * Occurs when: A step operation (stepOver, stepInto, stepOut) doesn't receive a 'stopped' event
    * within the grace window — usually because the step runs long-lived user code, which is not an error

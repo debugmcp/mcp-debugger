@@ -54,7 +54,7 @@ The same matrix on a uv-managed CPython 3.11.15 with debugpy 1.8.22 and pytest 9
 
 - `stopped.reason = "exception"`, `exceptionInfo.breakMode = "always"` (pydevd reports a caught-type stop as `always`, never `userUnhandled`).
 - `stopped.text`, `exceptionInfo.exceptionId` and `details.typeName` all carry a pydevd suffix: `AssertionError       (note: full exception trace is shown but execution is paused at: test_assert_fails)`. Left alone it leaks into `snapshot.exception.type`; the preset work strips it.
-- The live frame's name carries ` (Current frame)` (also in the `stackTrace` text).
+- The live frame's name carries ` (Current frame)` (also in the `stackTrace` text). Since issue #1143 the Python policy takes the marker off and flags the frames above it `unwound: true` instead; re-measured then on five shapes (assert in the body, raise in a helper, a decorated test, a `KeyError` two calls deep, a raising fixture): the marked frame is always the first live one.
 - `exceptionInfo.description` / `details.message` is the exception message — for an assert, pytest's rewritten explanation.
 
 ### `justMyCode: false`
@@ -78,5 +78,5 @@ Measured with a scratch venv (pytest 9.1.1, pytest-xdist 3.8.0, pytest-cov 7.1.0
 1. Filters: `uncaught` + `userUnhandled` under the `"uncaught"` default for a pytest module launch; `"all"` and `"none"` unchanged.
 2. Args: `<abs test file>[::<selector>]`, `-x`, then per plugin `-p no:xdist` / `-p no:cov` — or `-n0` / `--no-cov` when the project's `addopts` turns the plugin on, nothing when the caller's args ask for it — then the caller's `args`.
 3. `cwd`: pytest's rootdir by pytest's own rule (nearest ancestor with `pytest.ini`/`.pytest.ini`, a `pyproject.toml` with `[tool.pytest.ini_options]`, a `tox.ini` with `[pytest]` or a `setup.cfg` with `[tool:pytest]`; else the nearest `setup.py`), else the top-most `conftest.py` ancestor, else the test file's directory — because `python -m` puts `cwd` on `sys.path`. A bare `pyproject.toml` (build metadata only) does not count, as it does not for pytest.
-4. Strip pydevd's `(note: full exception trace …)` suffix from the exception type in the snapshot and the stop record; keep the frame-name marker as debugpy reports it.
+4. Strip pydevd's `(note: full exception trace …)` suffix from the exception type in the snapshot and the stop record; keep the frame-name marker as debugpy reports it. (Superseded by issue #1143: a frame's name is the function's name; the marker became `unwound: true` on the frames above the live one.)
 5. Document: the skip stop, the `(Current frame)` marker, output capture, that the raise site is frame 0 even when it has already unwound, and that on Python ≤ 3.11 an exception `pytest.raises` expects pauses once.

@@ -550,6 +550,17 @@ export interface AdapterPolicy {
   filterStackFrames?(frames: StackFrame[], includeInternals: boolean): StackFrame[];
 
   /**
+   * Give the adapter's frames the shape every adapter's have (issue #1143): a
+   * frame's name is the function's name and nothing else, and what the
+   * adapter says about a frame beside its name is data on the frame. Applied
+   * to every stack before it is filtered or answered. pydevd is the one
+   * adapter that needs it: it marks the live frame of an exception stop by
+   * appending " (Current frame)" to its NAME, with the frames the exception
+   * has left listed above it. Returns the given array when nothing changes.
+   */
+  normalizeStackFrames?(frames: StackFrame[]): StackFrame[];
+
+  /**
    * Check if a stack frame is an internal/framework frame.
    * This is used by filterStackFrames to determine which frames to filter out.
    * 

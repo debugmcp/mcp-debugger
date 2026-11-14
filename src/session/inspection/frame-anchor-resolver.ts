@@ -31,10 +31,33 @@ import {
 } from './stop-anchor.js';
 
 /** The frame fields a tool response names when it says which frame answered. */
-export type FrameSummary = Pick<StackFrame, 'name' | 'file' | 'line'>;
+export type FrameSummary = Pick<StackFrame, 'name' | 'file' | 'line' | 'unwound'>;
 
 export function frameSummary(frame: StackFrame): FrameSummary {
-  return { name: frame.name, file: frame.file, line: frame.line };
+  // `unwound` rides along (issue #1143): an answer that names a frame the
+  // exception has left says so wherever it names it.
+  return { name: frame.name, file: frame.file, line: frame.line, ...(frame.unwound ? { unwound: true as const } : {}) };
+}
+
+/** The adapter's frames as the server's, in the shape the policy gives every stack (issue #1143). */
+function framesOf(rawFrames: DebugProtocol.StackFrame[], policy: Pick<AdapterPolicy, 'normalizeStackFrames'>): StackFrame[] {
+  const frames = rawFrames.map(toStackFrame);
+  return policy.normalizeStackFrames ? policy.normalizeStackFrames(frames) : frames;
+}
+
+/**
+ * The sentence for a stack whose top frames the exception has already left
+ * (issue #1143): where it was raised, and where execution is paused.
+ */
+function describeUnwoundFrames(frames: StackFrame[]): string | undefined {
+  if (!frames[0]?.unwound) {
+    return undefined;
+  }
+  const live = frames.find((frame) => !frame.unwound);
+  return ErrorMessages.exceptionRaisedInUnwoundFrame(
+    frames[0].name,
+    live ? { name: live.name, where: `${live.file.split(/[\\/]/).pop() ?? live.file}:${live.line}` } : undefined
+  );
 }
 
 /**
@@ -238,7 +261,7 @@ export class FrameAnchorResolver {
         }
       }
 
-      let frames: StackFrame[] = rawFrames.map(toStackFrame);
+      let frames: StackFrame[] = framesOf(rawFrames, policy);
       const totalFrameCount = frames.length;
       let allFramesInternal = false;
       let pausedFrame: PausedFrameDisclosure | undefined;
@@ -298,6 +321,13 @@ export class FrameAnchorResolver {
         session.lastStop === stopAtGate
       ) {
         note = `The stop was reported on thread ${stopAtGate.threadId}; inspection is anchored on thread ${resultThreadId}.`;
+      }
+
+      // Where the exception was raised is not where execution is paused
+      // (issue #1143): say both, beside whatever else the read has to say.
+      const unwoundNote = describeUnwoundFrames(frames);
+      if (unwoundNote) {
+        note = note ? `${note} ${unwoundNote}` : unwoundNote;
       }
 
       this.ctx.logger.info(

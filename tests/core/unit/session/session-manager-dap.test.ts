@@ -3029,6 +3029,58 @@ describe('SessionManager - DAP Operations', () => {
       });
     }
 
+    // Issue #1143: a policy may give the adapter's frames the shape every
+    // other adapter's have. pydevd lists the frames an exception has left
+    // above the live one and marks the live one in its NAME; the Python
+    // policy turns that into `unwound: true` on the frames above it, and the
+    // resolver says in a sentence where the exception was raised and where
+    // execution is paused.
+    describe('frames the exception has already left (issue #1143)', () => {
+      const HELPER = { id: 1, name: 'check_positive', line: 16, source: { path: '/proj/billing/proration.py' } };
+      const TEST = { id: 2, name: 'test_assert_in_helper (Current frame)', line: 20, source: { path: '/proj/tests/test_billing.py' } };
+      const usePythonFrames = () => {
+        (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => ({
+          normalizeStackFrames: PythonAdapterPolicy.normalizeStackFrames
+        });
+      };
+
+      it('flags them, takes the marker off the live frame, and says where execution is paused', async () => {
+        const session = await pausedSessionWithFrames([HELPER, TEST]);
+        usePythonFrames();
+
+        const result = await sessionManager.getStackTraceDetailed(session.id);
+
+        expect(result.frames).toEqual([
+          { id: 1, name: 'check_positive', file: '/proj/billing/proration.py', line: 16, unwound: true },
+          { id: 2, name: 'test_assert_in_helper', file: '/proj/tests/test_billing.py', line: 20 }
+        ]);
+        expect(result.note).toBe(
+          "The exception was raised in 'check_positive', which has already unwound: its variables are readable. " +
+          "Execution is paused in 'test_assert_in_helper' (test_billing.py:20); a step continues from there."
+        );
+      });
+
+      it('says nothing more when frame 0 is the live frame', async () => {
+        const session = await pausedSessionWithFrames([{ ...TEST, name: 'test_assert_fails (Current frame)' }]);
+        usePythonFrames();
+
+        const result = await sessionManager.getStackTraceDetailed(session.id);
+
+        expect(result.frames.map((f) => f.name)).toEqual(['test_assert_fails']);
+        expect(result.frames[0]).not.toHaveProperty('unwound');
+        expect(result.note).toBeUndefined();
+      });
+
+      it('leaves the frames of a policy with no such hook as the adapter sent them', async () => {
+        const session = await pausedSessionWithFrames([HELPER, TEST]);
+
+        const result = await sessionManager.getStackTraceDetailed(session.id);
+
+        expect(result.frames.map((f) => f.name)).toEqual(['check_positive', 'test_assert_in_helper (Current frame)']);
+        expect(result.note).toBeUndefined();
+      });
+    });
+
     it('reports hidden-frame counts when a policy filters internals', async () => {
       const session = await pausedSessionWithFrames(RUNTIME_FRAMES);
       stubFilteringPolicy(f => !(f.file ?? '').includes('/runtime/'));
