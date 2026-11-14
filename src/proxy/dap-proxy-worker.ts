@@ -190,6 +190,14 @@ export class DapProxyWorker {
   // wins over synthesis, and parent+child terminated events synthesize once
   private exitedEventSeen: boolean = false;
   private exitSynthesisAttempted: boolean = false;
+  /**
+   * The detaching disconnect in flight (issue #1148): who sent it, and
+   * whether the adapter sent `terminated` since. Reported once, as
+   * `detach_result`: the session's answer says "released" only for a detach
+   * the adapter acknowledged.
+   */
+  private detachInFlight: { trigger: 'detach' | 'close' | 'shutdown'; terminated: boolean } | null = null;
+  private detachReported = false;
   /** Armed when adapter stdio forwarding is active (issue #222): resolves once both stdio streams close. */
   private adapterStdioDrained: Promise<void> | null = null;
   /**
@@ -1319,6 +1327,7 @@ export class DapProxyWorker {
         });
       },
       onTerminated: (body) => {
+        this.noteTerminatedDuringDetach();
         this.dropHeldEntryStop('the session terminated');
         // No stop survives the debuggee's end: the pre-detach resume (issue
         // #763) must not chase a target that is gone.
@@ -2289,7 +2298,11 @@ export class DapProxyWorker {
       // Complete tracking
       this.requestTracker.complete(payload.requestId);
 
-      // Send response
+      // Send response; a detach's outcome goes first, so the session has it
+      // when its request settles (issue #1148).
+      if (payload.dapCommand === 'disconnect') {
+        this.reportDetach(true);
+      }
       this.sendDapResponse(payload.requestId, true, response);
       this.noteResumeCommand(payload.dapCommand, payload.dapArgs, response);
 
@@ -2305,6 +2318,9 @@ export class DapProxyWorker {
       // An answer that never came names no id: whatever was waiting for it
       // goes out as it came, ahead of the failure (issue #790).
       this.releaseHeldBreakpointEvents();
+      if (payload.dapCommand === 'disconnect') {
+        this.reportDetach(false, message);
+      }
       this.sendDapResponse(payload.requestId, false, error instanceof DapResponseError ? error.response : undefined, message);
     }
   }
@@ -2353,6 +2369,9 @@ export class DapProxyWorker {
         }
         
         this.requestTracker.complete(payload.requestId);
+        if (payload.dapCommand === 'disconnect') {
+          this.reportDetach(true);
+        }
         this.sendDapResponse(payload.requestId, true, response);
         this.noteResumeCommand(payload.dapCommand, payload.dapArgs, response);
 
@@ -2364,6 +2383,9 @@ export class DapProxyWorker {
         this.requestTracker.complete(payload.requestId);
         const message = error instanceof Error ? error.message : String(error);
         this.logger!.error(`[Worker] Queued DAP command ${payload.dapCommand} failed:`, { error: message });
+        if (payload.dapCommand === 'disconnect') {
+          this.reportDetach(false, message);
+        }
         this.sendDapResponse(payload.requestId, false, error instanceof DapResponseError ? error.response : undefined, message);
       }
     }
@@ -2511,10 +2533,13 @@ export class DapProxyWorker {
       // socket meanwhile, and a concurrent shutdown may have torn the client down.
       if (this.connectionManager && this.dapClient && !this.dapDisconnectSent) {
         this.dapDisconnectSent = true;
+        this.beginDetach('close');
         try {
-          await this.connectionManager.disconnect(this.dapClient, false);
+          const outcome = await this.connectionManager.disconnect(this.dapClient, false);
+          this.reportDetach(outcome?.answered === true, outcome?.error);
         } catch (e) {
           this.logger?.warn('[Worker] Auto-detach disconnect failed (best effort):', e);
+          this.reportDetach(false, e instanceof Error ? e.message : String(e));
         }
         this.dapClient = null;
       }
@@ -2588,7 +2613,11 @@ export class DapProxyWorker {
       if (this.connectionManager && this.dapClient && !this.dapDisconnectSent) {
         this.dapDisconnectSent = true;
         const terminateDebuggee = !this.isAttachMode;
-        await this.connectionManager.disconnect(this.dapClient, terminateDebuggee);
+        if (!terminateDebuggee) {
+          this.beginDetach('shutdown');
+        }
+        const outcome = await this.connectionManager.disconnect(this.dapClient, terminateDebuggee);
+        this.reportDetach(outcome?.answered === true, outcome?.error);
       }
     }
 
@@ -2850,11 +2879,57 @@ export class DapProxyWorker {
     const detaching = (payload.dapArgs as { terminateDebuggee?: boolean } | undefined)?.terminateDebuggee === false;
     if (detaching) {
       await this.resumeBeforeDetach('detach');
+      this.beginDetach('detach');
     }
     await this.childConnections?.releaseAllHeld('root disconnect');
     if (this.isAttachMode) {
       this.dapDisconnectSent = true;
     }
+  }
+
+  /** A detaching disconnect is about to go out (issue #1148). */
+  private beginDetach(trigger: 'detach' | 'close' | 'shutdown'): void {
+    if (!this.detachReported) {
+      this.detachInFlight = { trigger, terminated: false };
+    }
+  }
+
+  /**
+   * `terminated` while a detaching disconnect is in flight is the adapter's
+   * reply to it (issue #1148). debugpy answers that way, and the shutdown
+   * this worker starts on the event is what fails the pending request, so
+   * the request's own failure says nothing about the detach.
+   */
+  private noteTerminatedDuringDetach(): void {
+    if (this.detachInFlight) {
+      this.detachInFlight.terminated = true;
+    }
+  }
+
+  /**
+   * Tell the parent what became of the detaching disconnect (issue #1148),
+   * once: acknowledged by its response or by `terminated` in reply, or not
+   * at all; and whether an `exited` event says the program ended. A
+   * terminating disconnect reports nothing: no detach was begun.
+   */
+  private reportDetach(answered: boolean, error?: string): void {
+    const inFlight = this.detachInFlight;
+    if (!inFlight || this.detachReported) {
+      return;
+    }
+    this.detachInFlight = null;
+    this.detachReported = true;
+    const by = answered ? 'response' : inFlight.terminated ? 'terminated' : undefined;
+    this.logger?.info(
+      `[Worker] Detaching disconnect (${inFlight.trigger}): ${by ? `acknowledged by ${by}` : `not acknowledged${error ? ` (${error})` : ''}`}${this.exitedEventSeen ? '; the program exited' : ''}`
+    );
+    this.sendStatusSafely('detach_result', {
+      trigger: inFlight.trigger,
+      acknowledged: by !== undefined,
+      ...(by !== undefined ? { by } : {}),
+      ...(this.exitedEventSeen ? { debuggeeExited: true } : {}),
+      ...(by === undefined && error !== undefined ? { error } : {})
+    });
   }
 
   /**
