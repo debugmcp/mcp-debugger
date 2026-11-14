@@ -598,9 +598,10 @@ export const ErrorMessages = {
    * Used in: src/session/attach/attach-controller.ts
    */
   attachPauseNotRequested:
-    'The post-attach pause was not requested, because the debug adapter had not finished its breakpoint work in the target ' +
-    'and a pause armed during that work can fire inside it; the program is running. ' +
-    'Call pause_execution when you want it paused',
+    'The post-attach pause was not requested: the debug adapter\'s target session had not answered the breakpoint request, ' +
+    'and a pause armed while the adapter is still working in the program can fire inside the adapter\'s own code. ' +
+    'The program is running. The server cannot see when the adapter finishes; a breakpoint turning verified in list_breakpoints ' +
+    'is the sign that it has. pause_execution pauses the program',
 
   /**
    * Warning when a breakpoint request reached the adapter but the session

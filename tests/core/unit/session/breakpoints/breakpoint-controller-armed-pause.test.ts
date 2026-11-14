@@ -465,6 +465,39 @@ describe('one breakpoint request per session at a time (issue #1146)', () => {
     expect(controller.heldInFlight('sess-1')).toBeUndefined();
   });
 
+  it('makes a resume wait for held requests that a later request is sending in its own turn', async () => {
+    // Held requests stranded by a refused pause go out ahead of the next
+    // request, inside that request's turn and with no state change to tell
+    // anyone. Their callers were told "sent when the program stops", so a
+    // resume that arrives while they are on their way waits for them too.
+    const { controller, session, arm, sent, sendDapRequest } = harness();
+    arm();
+    await controller.setBreakpoint('sess-1', { file: FILE, line: 1 });
+    await controller.setBreakpoint('sess-1', { file: OTHER, line: 2 });
+    session.pauseIntent = undefined;
+    const proxy = deferred(sendDapRequest);
+
+    const third = controller.setBreakpoint('sess-1', { file: THIRD, line: 3 });
+    await proxy.turn();
+    expect(sent()).toEqual([`setBreakpoints ${FILE} [1]`]);
+
+    const resume = controller.heldInFlight('sess-1');
+    expect(resume).toBeInstanceOf(Promise);
+    let resumed = false;
+    void resume?.then(() => { resumed = true; });
+
+    await proxy.answerNext();
+    expect(sent()).toEqual([`setBreakpoints ${FILE} [1]`, `setBreakpoints ${OTHER} [2]`]);
+    expect(resumed).toBe(false);
+    await proxy.answerNext();
+    await proxy.answerNext();
+    await Promise.all([third, resume]);
+
+    expect(sent()).toEqual([`setBreakpoints ${FILE} [1]`, `setBreakpoints ${OTHER} [2]`, `setBreakpoints ${THIRD} [3]`]);
+    expect(resumed).toBe(true);
+    expect(controller.heldInFlight('sess-1')).toBeUndefined();
+  });
+
   it('holds a request that reaches its turn while a pause is still armed', async () => {
     // The same start, but the new pause does not land: the request that
     // waited behind the flush is held when its turn comes, and so is the

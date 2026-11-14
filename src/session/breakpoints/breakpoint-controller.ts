@@ -480,38 +480,51 @@ export class BreakpointController {
     if (!this.held.has(session.id)) {
       return { files: new Map() };
     }
-    return this.flushHeld(session.id).then((flushed) => {
-      if (!this.live(session)) {
-        return 'not-live';
-      }
-      return this.pauseArmed(session) ? 'armed' : flushed;
-    });
+    // Counted like a queued flush: the entry leaves `held` as soon as the
+    // flush starts, and a resume must still see that its requests are on
+    // their way (see heldInFlight).
+    this.countFlush(session.id, 1);
+    return this.flushHeld(session.id)
+      .finally(() => this.countFlush(session.id, -1))
+      .then((flushed) => {
+        if (!this.live(session)) {
+          return 'not-live';
+        }
+        return this.pauseArmed(session) ? 'armed' : flushed;
+      });
   }
 
   /** Queue a flush of what is held for the session and count it while it is queued or running. */
   private queueFlush(sessionId: string): Promise<void> {
-    this.flushes.set(sessionId, (this.flushes.get(sessionId) ?? 0) + 1);
+    this.countFlush(sessionId, 1);
     return this.inTurn(sessionId, async () => {
       try {
         await this.flushHeld(sessionId);
       } finally {
-        const left = (this.flushes.get(sessionId) ?? 1) - 1;
-        if (left > 0) {
-          this.flushes.set(sessionId, left);
-        } else {
-          this.flushes.delete(sessionId);
-        }
+        this.countFlush(sessionId, -1);
       }
     });
+  }
+
+  /** One more, or one fewer, flush queued or running for the session. */
+  private countFlush(sessionId: string, by: 1 | -1): void {
+    const count = (this.flushes.get(sessionId) ?? 0) + by;
+    if (count > 0) {
+      this.flushes.set(sessionId, count);
+    } else {
+      this.flushes.delete(sessionId);
+    }
   }
 
   /**
    * What a resume must wait for (issue #1146): the breakpoint requests held
    * for an armed pause go out when the session stops, and a `continue` or a
    * step that follows the stop at once would otherwise run the program past
-   * breakpoints that are not set yet. Undefined when nothing is held or on
-   * its way, so a resume that has nothing to wait for takes no extra turn of
-   * the event loop (the core's auto-continue relies on that, issue #849).
+   * breakpoints that are not set yet. That covers held requests going out
+   * ahead of a later request, in that request's turn, as well as a flush of
+   * their own. Undefined when nothing is held or on its way, so a resume
+   * that has nothing to wait for takes no extra turn of the event loop (the
+   * core's auto-continue relies on that, issue #849).
    */
   heldInFlight(sessionId: string): Promise<void> | undefined {
     return this.held.has(sessionId) || this.flushes.has(sessionId) ? this.queueFlush(sessionId) : undefined;
