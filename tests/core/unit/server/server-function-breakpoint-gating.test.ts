@@ -196,6 +196,39 @@ describe('set_breakpoint function gating (#271 phase 3)', () => {
     expect(content.functionName).toBe('load_prices');
   });
 
+  // Issue #1144: `warning` is the field for something to act on. A bind
+  // that succeeded describes itself in `message`; repeating that in
+  // `warning` made every COBOL paragraph breakpoint look like a problem.
+  it('keeps a verified bind\'s description out of warning (issue #1144)', async () => {
+    mockSessionManager.getSessionPolicy.mockReturnValue({ name: 'cobol', supportsFunctionBreakpoints: true });
+    mockSessionManager.setFunctionBreakpoint.mockResolvedValue({
+      breakpoint: {
+        id: 'fbp-1', functionName: '2000-COMPUTE', verified: true,
+        message: '2000-COMPUTE (paragraph of HELLO) -> hello.cob:42'
+      }
+    });
+
+    const content = JSON.parse((await callSetFunctionBreakpoint({ function: '2000-COMPUTE' })).content[0].text);
+
+    expect(content.verified).toBe(true);
+    expect(content.message).toBe('2000-COMPUTE (paragraph of HELLO) -> hello.cob:42');
+    expect(content).not.toHaveProperty('warning');
+  });
+
+  it('still carries an unverified bind\'s message in warning (issue #1144)', async () => {
+    mockSessionManager.getSessionPolicy.mockReturnValue({ name: 'cobol', supportsFunctionBreakpoints: true });
+    const why = 'no paragraph, section or program named NO-SUCH-PARA';
+    mockSessionManager.setFunctionBreakpoint.mockResolvedValue({
+      breakpoint: { id: 'fbp-2', functionName: 'NO-SUCH-PARA', verified: false, message: why }
+    });
+
+    const content = JSON.parse((await callSetFunctionBreakpoint({ function: 'NO-SUCH-PARA' })).content[0].text);
+
+    expect(content.verified).toBe(false);
+    expect(content.message).toBe(why);
+    expect(content.warning).toBe(why);
+  });
+
   it('accepts with a warning when support is unknown pre-launch', async () => {
     mockSessionManager.getSessionPolicy.mockReturnValue({ name: 'ruby' });
 
