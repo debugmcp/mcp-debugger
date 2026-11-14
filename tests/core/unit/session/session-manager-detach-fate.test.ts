@@ -17,6 +17,7 @@ import { SessionManager, SessionManagerConfig } from '../../../../src/session/se
 import { DebugLanguage, SessionState } from '@debugmcp/shared';
 import { createMockDependencies } from './session-manager-test-utils.js';
 import { ErrorMessages } from '../../../../src/utils/error-messages.js';
+import { launchConfigIsAttach } from '../../../../src/proxy/proxy-config.js';
 
 describe('SessionManager - the fate of a borrowed program (issue #1148)', () => {
   let sessionManager: SessionManager;
@@ -49,6 +50,49 @@ describe('SessionManager - the fate of a borrowed program (issue #1148)', () => 
     managed.programOwnership = 'borrowed';
     return session.id;
   }
+
+  // The review found the first key for #1151 was read from the launch
+  // arguments before the adapter transformed them, while the worker decides
+  // what its shutdown does from the transformed config: an attach-shaped
+  // launch on an adapter with no attach transform was called borrowed and
+  // then ended. Both now read one function of one config.
+  describe('who owns the program (issue #1151)', () => {
+    it('is one function of the launch config the worker is given', () => {
+      expect(launchConfigIsAttach({ request: 'attach' })).toBe(true);
+      expect(launchConfigIsAttach({ request: 'launch', __attachMode: true })).toBe(true);
+      expect(launchConfigIsAttach({ request: 'launch' })).toBe(false);
+      expect(launchConfigIsAttach({})).toBe(false);
+      expect(launchConfigIsAttach(undefined)).toBe(false);
+    });
+
+    it.each([
+      ['a plain launch', {}],
+      ['a launch whose arguments are attach-shaped', { request: 'attach' }],
+      ['a launch carrying the internal attach flag', { __attachMode: true }]
+    ])('records for %s what the config handed to the worker says', async (_what, extra) => {
+      const session = await sessionManager.createSession({ language: DebugLanguage.MOCK, executablePath: 'python' });
+      const started = sessionManager.startDebugging(session.id, 'test.py', [], { stopOnEntry: false, ...extra } as never);
+      await vi.runAllTimersAsync();
+      await started;
+
+      const given = dependencies.mockProxyManager.startCalls.at(-1)!;
+      expect(sessionManager.getSession(session.id)!.programOwnership).toBe(
+        launchConfigIsAttach(given.launchConfig as Record<string, unknown>) ? 'borrowed' : 'owned'
+      );
+    });
+
+    it('does not refuse a terminating detach on an owned program', async () => {
+      const session = await sessionManager.createSession({ language: DebugLanguage.MOCK, executablePath: 'python' });
+      const started = sessionManager.startDebugging(session.id, 'test.py', [], { stopOnEntry: false });
+      await vi.runAllTimersAsync();
+      await started;
+      expect(sessionManager.getSession(session.id)!.programOwnership).toBe('owned');
+
+      const ended = await sessionManager.detachFromProcess(session.id, true);
+
+      expect(ended).toMatchObject({ success: true, data: { message: 'Detached and terminated process' } });
+    });
+  });
 
   describe('detach_from_process', () => {
     it('says released when the adapter acknowledged the detach', async () => {
@@ -105,6 +149,45 @@ describe('SessionManager - the fate of a borrowed program (issue #1148)', () => 
       expect(first.data?.message).toBe(ErrorMessages.detachUnconfirmed('Proxy exited'));
     });
 
+    it('answers a second detach as a session with nothing to detach from, not from the report of the first', async () => {
+      const sessionId = await borrowedSession();
+      dependencies.mockProxyManager.detachResult = { trigger: 'detach', acknowledged: true, by: 'response' };
+      await sessionManager.detachFromProcess(sessionId);
+
+      const again = await sessionManager.detachFromProcess(sessionId);
+
+      expect(again).toMatchObject({ success: false, error: 'No active debug session to detach from' });
+    });
+
+    it('does not read the report of the worker shutting down by itself as the answer to this detach', async () => {
+      // A `terminated` the adapter sent by itself makes the worker shut down
+      // and report its shutdown-path disconnect. A detach arriving in that
+      // window gets a failed request, and that report is not about it.
+      const sessionId = await borrowedSession();
+      dependencies.mockProxyManager.detachResult = { trigger: 'shutdown', acknowledged: true, by: 'response' };
+      vi.spyOn(dependencies.mockProxyManager, 'sendDapRequest').mockRejectedValueOnce(new Error('DAP client disconnected'));
+
+      const detached = await sessionManager.detachFromProcess(sessionId);
+
+      expect(detached.data?.released).toBeUndefined();
+      expect(detached.data?.message).toBe(ErrorMessages.detachUnconfirmed('DAP client disconnected'));
+    });
+
+    it('carries the unconfirmed detach and a refused pre-detach resume in one warning', async () => {
+      const sessionId = await borrowedSession();
+      dependencies.mockProxyManager.detachResult = { trigger: 'detach', acknowledged: false, error: 'no answer' };
+      dependencies.mockProxyManager.preDetachResume = { trigger: 'detach', threadId: 7, resumed: false, error: 'process is running' };
+      vi.spyOn(dependencies.mockProxyManager, 'sendDapRequest').mockRejectedValueOnce(new Error('no answer'));
+
+      const detached = await sessionManager.detachFromProcess(sessionId);
+
+      const [fate, resume, ...rest] = String(detached.data?.warning).split('; Could not resume');
+      expect(fate).toBe(ErrorMessages.detachUnconfirmed('no answer'));
+      expect(resume).toMatch(/^ the stopped target before detaching \(process is running\)/);
+      expect(rest).toEqual([]);
+      expect(detached.data?.message).toBe(ErrorMessages.detachUnconfirmed('no answer'));
+    });
+
     it('bounds the wait for the acknowledgement', async () => {
       const sessionId = await borrowedSession();
       const send = vi.spyOn(dependencies.mockProxyManager, 'sendDapRequest');
@@ -158,6 +241,29 @@ describe('SessionManager - the fate of a borrowed program (issue #1148)', () => 
       const outcome = await sessionManager.closeSessionReporting(sessionId);
 
       expect(outcome).toEqual({ closed: true, closedSessionIds: [sessionId], processEnded: true });
+    });
+
+    it('reads a borrowed program from what the launch recorded, not from attachMode, which a launch clears', async () => {
+      // An attach made through start_debugging with attach-shaped arguments:
+      // the worker detaches at shutdown, and the close must say what it saw.
+      const sessionId = await borrowedSession();
+      sessionManager.getSession(sessionId)!.attachMode = false;
+      dependencies.mockProxyManager.detachResult = { trigger: 'close', acknowledged: true, by: 'response' };
+
+      const outcome = await sessionManager.closeSessionReporting(sessionId);
+
+      expect(outcome).toEqual({ closed: true, closedSessionIds: [sessionId], releasedSessionIds: [sessionId], released: true });
+    });
+
+    it('does not read a detach-triggered report as the report of this close', async () => {
+      const sessionId = await borrowedSession();
+      dependencies.mockProxyManager.detachResult = { trigger: 'detach', acknowledged: true, by: 'response' };
+      dependencies.mockProxyManager.reportsDetachOnStop = false;
+
+      const outcome = await sessionManager.closeSessionReporting(sessionId);
+
+      expect(outcome.released).toBeUndefined();
+      expect(outcome.releaseUnconfirmed).toBe('the debug adapter reported nothing about the detach');
     });
 
     it('claims nothing for a session that no longer has a program', async () => {

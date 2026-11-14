@@ -471,3 +471,12 @@ export class SessionStore {
     this.sessions.clear();
   }
 }
+
+/**
+ * Whether the session borrows its program (issue #1151): ending it releases
+ * the program instead of ending it. What the proxy launch recorded decides;
+ * `attachMode` stands in only for a session nothing was recorded on.
+ */
+export function borrowsProgram(session: Pick<ManagedSession, 'programOwnership' | 'attachMode'>): boolean {
+  return session.programOwnership !== undefined ? session.programOwnership === 'borrowed' : session.attachMode === true;
+}

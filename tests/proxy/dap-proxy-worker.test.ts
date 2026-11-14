@@ -3978,6 +3978,56 @@ describe('DapProxyWorker', () => {
         }]);
       });
 
+      it('reports the detaching disconnect of the shutdown path in attach mode', async () => {
+        const { disconnect } = wire(undefined, vi.fn().mockResolvedValue({ answered: true }));
+        (worker as any).adapterProcess = { pid: 4242 };
+
+        await worker.shutdown();
+
+        expect(disconnect).toHaveBeenCalledWith(expect.anything(), false);
+        expect(results()).toEqual([{ trigger: 'shutdown', acknowledged: true, by: 'response', debuggeeExited: undefined, error: undefined }]);
+      });
+
+      it('reports nothing for a launch-mode shutdown, whose disconnect ends the program', async () => {
+        const { disconnect } = wire(undefined, vi.fn().mockResolvedValue({ answered: true }));
+        (worker as any).isAttachMode = false;
+        (worker as any).adapterProcess = { pid: 4242 };
+
+        await worker.shutdown();
+
+        expect(disconnect).toHaveBeenCalledWith(expect.anything(), true);
+        expect(results()).toEqual([]);
+      });
+
+      it('does not count a terminated that came during the resume sent ahead of the detach', async () => {
+        // The resume goes first; the detach begins when its disconnect is about to go out.
+        const sendRequest = vi.fn().mockImplementation(async (command: string) => {
+          if (command === 'continue') {
+            (worker as any).noteTerminatedDuringDetach();
+            return {};
+          }
+          throw new Error('DAP client disconnected');
+        });
+        wire(sendRequest);
+        (worker as any).adapterPolicy = { ...plainPolicy, getAttachBehavior: () => ({ resumeBeforeDetach: true }) };
+        (worker as any).lastStop = { reason: 'step', threadId: 7, allThreadsStopped: true };
+
+        await detach('detach-8');
+
+        expect(results()).toEqual([{ trigger: 'detach', acknowledged: false, by: undefined, debuggeeExited: undefined, error: 'DAP client disconnected' }]);
+      });
+
+      it('reports once per worker: a detach that arrives after a shutdown report adds nothing', async () => {
+        wire(undefined, vi.fn().mockResolvedValue({ answered: true }));
+        (worker as any).beginDetach('shutdown');
+        (worker as any).reportDetach(true);
+
+        (worker as any).beginDetach('detach');
+        (worker as any).reportDetach(true);
+
+        expect(results()).toEqual([{ trigger: 'shutdown', acknowledged: true, by: 'response', debuggeeExited: undefined, error: undefined }]);
+      });
+
       it('reports once: a session-sent detach is not reported again by the close that follows', async () => {
         wire();
 

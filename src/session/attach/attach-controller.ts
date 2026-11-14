@@ -623,7 +623,10 @@ export class AttachController {
       `[SessionManager] Detaching from process for session ${sessionId}, terminateProcess: ${terminateProcess}`
     );
 
-    if (!session.proxyManager) {
+    // A proxy that has stopped is a program this session let go of already
+    // (issue #1148): a second detach has nothing to detach from, and must not
+    // answer from what the first one saw.
+    if (!session.proxyManager || !session.proxyManager.isRunning()) {
       return {
         success: false,
         state: session.state,
@@ -670,7 +673,11 @@ export class AttachController {
         // What the adapter did with it (issue #1148), as the worker saw it:
         // the request's own failure says nothing when `terminated` came in
         // reply (debugpy). With no report, the request's outcome stands.
-        const report = proxyManager.getDetachResult();
+        // Only a report of this request: a worker shutting down by itself
+        // (the adapter sent `terminated` unasked) reports its own disconnect,
+        // which says nothing about a detach that arrived as it went.
+        const reported = proxyManager.getDetachResult();
+        const report = reported?.trigger === 'detach' ? reported : undefined;
         if (report?.debuggeeExited) {
           fate = { message: ErrorMessages.detachProgramEnded(), processEnded: true };
         } else if (report ? report.acknowledged : disconnectFailure === undefined) {

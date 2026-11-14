@@ -33,7 +33,7 @@ import {
 import { TEST_RUNNER_KEY } from './test-runner-gate.js';
 import { AdapterLease } from '../../adapters/adapter-lease.js';
 import { DebugSessionCreationError, PythonNotFoundError } from '../../errors/debug-errors.js';
-import { ProxyConfig } from '../../proxy/proxy-config.js';
+import { ProxyConfig, launchConfigIsAttach } from '../../proxy/proxy-config.js';
 import { sessionRunDirectoryFor } from '../../proxy/session-log-layout.js';
 import { didYouMean } from '../../utils/did-you-mean.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
@@ -196,9 +196,11 @@ export class ProxyLauncher {
       // no-op.
       const proxyManager = lease.transferTo(this.ctx.proxyManagerFactory);
       session.proxyManager = proxyManager;
-      // The same fact the worker is given as `attachMode` (issue #1151): it
-      // decides what ending this session does to the program.
-      session.programOwnership = inputs.isAttachMode ? 'borrowed' : 'owned';
+      // The fact the worker reads to decide what its shutdown does to the
+      // program (issue #1151), read the same way from the same config: the
+      // transformed one. The arguments as given are not it: an adapter with
+      // no attach transform turns attach-shaped arguments into a launch.
+      session.programOwnership = launchConfigIsAttach(plan.launchConfig) ? 'borrowed' : 'owned';
 
       // Set up event handlers
       // The core must see the same entry-stop intent the worker sees (#791).

@@ -112,6 +112,18 @@ export interface ProxyManagerEvents {
  * sender triggered it. Absent when no resume was called for. One shape with
  * the status message it comes from.
  */
+/** Whether a failure message already names the endpoint a direct connection dialed (issue #1152): the exact port, not a longer one. */
+function namesEndpoint(message: string, endpoint: { host: string; port: number }): boolean {
+  const at = `${endpoint.host}:${endpoint.port}`;
+  for (let index = message.indexOf(at); index !== -1; index = message.indexOf(at, index + 1)) {
+    const next = message.charAt(index + at.length);
+    if (next < '0' || next > '9') {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** What the adapter did with a detaching disconnect (issue #1148), as the worker reported it. */
 export type DetachResult = Omit<
   Extract<ProxyStatusMessage, { status: 'detach_result' }>,
@@ -519,22 +531,33 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       const handleError = (error: Error) => {
         cleanup();
         const direct = this.initProgress.directConnect;
-        const endpoint = direct ? `${direct.host}:${direct.port}` : undefined;
-        reject(
-          endpoint !== undefined && !error.message.includes(endpoint)
-            ? new Error(`${error.message} [direct connect to ${endpoint}; no adapter process was started]`)
-            : error
-        );
+        if (direct && !namesEndpoint(error.message, direct)) {
+          // The same error, so whatever it carries beside its message stays.
+          error.message = `${error.message} [direct connect to ${direct.host}:${direct.port}; no adapter process was started]`;
+        }
+        reject(error);
       };
 
       const handleExit = (code: number | null, signal?: string) => {
         cleanup();
         const direct = this.initProgress.directConnect;
-        if (direct) {
+        // The endpoint's ending, not the worker's own: the worker reported
+        // the connection over (a codeless exit), or left cleanly after the
+        // endpoint's `terminated` (which this process answers by stopping
+        // the worker, so "stopped by us" is expected there). A worker that
+        // crashed or was killed, or that this process stopped with no
+        // `terminated` from the endpoint, is described as before, with the
+        // endpoint added so the answer still says what was dialed.
+        const endpointEnded =
+          direct !== undefined && !signal && (code === null || code === 0) && (endedByDebugServer || !this.isStopped);
+        if (direct && endpointEnded) {
           reject(new Error(ErrorMessages.directConnectEndedDuringHandshake(direct, endedByDebugServer)));
           return;
         }
         let errorMessage = `Proxy exited during initialization. Code: ${code}, Signal: ${signal}`;
+        if (direct) {
+          errorMessage += ` [direct connect to ${direct.host}:${direct.port}; no adapter process was started]`;
+        }
         if (this.stderrBuffer.length > 0) {
           // Cap what gets embedded in the user-facing error — the full
           // buffer is already in the logs (issue #146).

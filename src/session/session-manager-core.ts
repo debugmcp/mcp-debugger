@@ -17,7 +17,7 @@ import { isSnapshotEnabled } from '../utils/snapshot-mode.js';
 import { getVariableAccessMode, type VariableAccessMode } from '../utils/variable-access.js';
 import type { FrameSummary } from './inspection/frame-anchor-resolver.js';
 import { ValidationResultCache } from '../utils/language-availability.js';
-import { SessionStore, ManagedSession } from './session-store.js';
+import { SessionStore, ManagedSession, borrowsProgram } from './session-store.js';
 import type { UnhitBreakpointSummary } from './breakpoints/launch-warnings.js';
 import type { ChildReleaseCause, ToolchainValidationState } from './session-store.js';
 import { OutputRingBuffer } from './output-buffer.js';
@@ -967,7 +967,10 @@ export abstract class SessionManagerCore extends EventEmitter {
     if (!proxy) {
       return { released: false, processEnded: false };
     }
-    const report = proxy.getDetachResult();
+    // Only the worker's own detaching disconnect is this close's: a report
+    // left by an earlier detach_from_process says nothing about it.
+    const reported = proxy.getDetachResult();
+    const report = reported && reported.trigger !== 'detach' ? reported : undefined;
     if (report?.debuggeeExited) {
       return { released: false, processEnded: true };
     }
@@ -996,7 +999,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     }
     // An attach root's close preserves its external targets, descendants
     // included: their connections are closed without ending them.
-    const releaseDescendants = !options.terminateDebuggee && !session.parentSessionId && session.attachMode === true;
+    const releaseDescendants = !options.terminateDebuggee && !session.parentSessionId && borrowsProgram(session);
     const closedSessionIds: string[] = [];
     const releasedSessionIds: string[] = [];
     const finishClose = this.beginSubtreeClose(sessionId);

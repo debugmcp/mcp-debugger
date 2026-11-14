@@ -218,7 +218,9 @@ Two measured effects the answers name:
 - Closing or idle-reaping an **attach root** preserves the external targets: every descendant is
   detached deepest-first with `disconnect(terminateDebuggee: false)` and the adapter's existing
   resume-before-detach policy, then the root is detached. All selected rows are removed and the
-  answer says `released: true`. This cascade uses the initiating root operation's preserve-target
+  answer says `released: true` when the adapter acknowledged the root's detach (issue #1148:
+  the worker reports what the adapter did with the detaching disconnect; unacknowledged, the
+  answer carries a `warning` and no `released`). This cascade uses the initiating root operation's preserve-target
   policy, not the termination rule for an explicit child close above. It preserves today's worker
   auto-detach on attach-mode close (`handleTerminate` and `performShutdown` in
   `src/proxy/dap-proxy-worker.ts`). Worker/adapter cleanup must not escalate to killing the

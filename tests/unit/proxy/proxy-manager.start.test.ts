@@ -788,13 +788,77 @@ describe('ProxyManager.start', () => {
       expect(await failure()).toBe(report);
     });
 
-    it('answers from the exit when it comes before the worker error', async () => {
+    it('answers from the ending when it comes before the worker error', async () => {
       duringDirectHandshake((emit) => {
-        fakeProcess.emit('exit', 1, null);
+        emit({ type: 'status', status: 'dap_connection_closed' });
         emit({ type: 'error', message: 'Critical initialization error: DAP client disconnected' });
       });
 
       expect(await failure()).toBe(ErrorMessages.directConnectEndedDuringHandshake({ host: '127.0.0.1', port: 5000, listener }, false));
+    });
+
+    it.each([
+      ['exited with an error code', 1, null, 'Code: 1, Signal: undefined'],
+      ['was killed', null, 'SIGKILL', 'Code: null, Signal: SIGKILL']
+    ] as const)('still describes a worker that %s as the worker, with its stderr, and says what was dialed', async (_what, code, signal, exit) => {
+      // The review's case: a crash of ours is not the endpoint hanging up,
+      // and its stack is the only evidence of it.
+      duringDirectHandshake(() => {
+        (fakeProcess.stderr as unknown as EventEmitter).emit('data', Buffer.from('TypeError: boom at worker' + String.fromCharCode(10)));
+        fakeProcess.emit('exit', code, signal);
+      });
+
+      const message = await failure();
+
+      expect(message).toContain(`Proxy exited during initialization. ${exit} [direct connect to 127.0.0.1:5000; no adapter process was started]`);
+      expect(message).toContain('TypeError: boom at worker');
+      expect(message).not.toContain('ended during the DAP handshake');
+    });
+
+    it('adds the endpoint when the error names only a longer port, and keeps the error it was given', async () => {
+      duringDirectHandshake((emit) => {
+        emit({ type: 'error', message: 'Critical initialization error: connect ECONNREFUSED 127.0.0.1:50001' });
+      });
+
+      expect(await failure()).toBe(
+        'Critical initialization error: connect ECONNREFUSED 127.0.0.1:50001 [direct connect to 127.0.0.1:5000; no adapter process was started]'
+      );
+    });
+
+    it('still words it by endpoint when this process stopped the worker in answer to terminated', async () => {
+      // What the session does on `terminated`: it stops the proxy. The exit
+      // that follows is the endpoint's ending all the same.
+      duringDirectHandshake((emit) => {
+        emit({ type: 'dapEvent', event: 'terminated', body: {} });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (proxyManager as any).isStopped = true;
+        fakeProcess.emit('exit', 0, null);
+      });
+
+      expect(await failure()).toBe(ErrorMessages.directConnectEndedDuringHandshake({ host: '127.0.0.1', port: 5000, listener }, true));
+    });
+
+    it('describes the worker, not the endpoint, when this process stopped it with no terminated from the endpoint', async () => {
+      duringDirectHandshake(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (proxyManager as any).isStopped = true;
+        fakeProcess.emit('exit', 0, null);
+      });
+
+      const message = await failure();
+
+      expect(message).toContain('Proxy exited during initialization. Code: 0');
+      expect(message).toContain('[direct connect to 127.0.0.1:5000; no adapter process was started]');
+    });
+
+    it('stops listening for terminated once the start has settled', async () => {
+      duringDirectHandshake((emit) => {
+        emit({ type: 'status', status: 'dap_connection_closed' });
+      });
+
+      await failure();
+
+      expect(proxyManager.listenerCount('terminated')).toBe(0);
     });
   });
 

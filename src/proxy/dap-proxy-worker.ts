@@ -4,6 +4,7 @@
  */
 
 import { ChildProcess } from 'child_process';
+import { launchConfigIsAttach } from './proxy-config.js';
 import { existsSync } from 'fs';
 import path from 'path';
 import { DebugProtocol } from '@vscode/debugprotocol';
@@ -778,8 +779,7 @@ export class DapProxyWorker {
       // with terminateDebuggee=false so the target survives) — including for
       // command-queueing policies (js-debug), whose handshake is driven by
       // the SessionManager rather than this worker.
-      const isAttachMode = payload.launchConfig?.request === 'attach' ||
-                           payload.launchConfig?.__attachMode === true;
+      const isAttachMode = launchConfigIsAttach(payload.launchConfig);
       this.isAttachMode = isAttachMode;
       // The launcher's decision, stamped on the payload: an attach never
       // carries it, and a launch config reshaped by an adapter transform
