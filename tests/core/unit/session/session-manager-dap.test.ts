@@ -109,7 +109,7 @@ describe('SessionManager - DAP Operations', () => {
       expect(dependencies.mockProxyManager.dapRequestCalls[0]).toMatchObject({
         command: 'setBreakpoints',
         args: expect.objectContaining({
-          source: { path: expect.stringContaining('test.py') }
+          source: { path: expect.stringContaining('test.py'), name: 'test.py' }
         })
       });
     });
@@ -506,7 +506,7 @@ describe('SessionManager - DAP Operations', () => {
       expect(dependencies.mockProxyManager.dapRequestCalls[0]).toMatchObject({
         command: 'setBreakpoints',
         args: expect.objectContaining({
-          source: { path: 'a.py' },
+          source: { path: 'a.py', name: 'a.py' },
           breakpoints: []
         })
       });

@@ -2,7 +2,7 @@
  * DAP connection management utilities
  */
 
-import * as path from 'path';
+import { toDapSource } from '../utils/dap-source.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import {
   IDapClient,
@@ -454,7 +454,7 @@ export class DapConnectionManager {
     const sourceBreakpoints: DebugProtocol.SourceBreakpoint[] = breakpoints.map((bp) => toWireSourceBreakpoint(bp, policy));
 
     const setBreakpointsArgs: DebugProtocol.SetBreakpointsArguments = {
-      source: { path: sourcePath, name: path.basename(sourcePath) },
+      source: toDapSource(sourcePath),
       breakpoints: sourceBreakpoints
     };
 

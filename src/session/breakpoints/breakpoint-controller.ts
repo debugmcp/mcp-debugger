@@ -16,6 +16,7 @@
  * (issues #793, #806).
  */
 import { getErrorMessage } from '../../errors/debug-errors.js';
+import { dapSourcePath, toDapSource } from '../../utils/dap-source.js';
 import { v4 as uuidv4 } from 'uuid';
 import {
   Breakpoint,
@@ -195,9 +196,13 @@ export class BreakpointController {
       return { synced: false };
     }
 
-    // Collect ALL breakpoints for this source file (DAP setBreakpoints is replace-all)
+    // Collect ALL breakpoints for this source file (DAP setBreakpoints is
+    // replace-all), by the form the file is sent under (issue #1147): a file
+    // named under two spellings is one set to the adapter, and a request per
+    // spelling would wipe the other's breakpoints there.
+    const source = toDapSource(file);
     const allBpsForFile = Array.from(session.breakpoints.values())
-      .filter(bp => bp.file === file);
+      .filter(bp => bp.file === file || dapSourcePath(bp.file) === source.path);
     // For child-mirroring adapters (js-debug), setBreakpoints responses
     // come from the parent session, which owns no runtime: its verified
     // flags are pessimistic and its ids belong to a different id space
@@ -217,7 +222,8 @@ export class BreakpointController {
         await session.proxyManager.sendDapRequest<DebugProtocol.SetBreakpointsResponse>(
           'setBreakpoints',
           {
-            source: { path: file },
+            // The same `source` the launch route sends (issue #1147).
+            source,
             breakpoints: allBpsForFile.map((bp) => toWireSourceBreakpoint(bp, policy)),
             // Reserved key, stripped by the proxy before the adapter sees
             // it: asks a child-mirroring proxy for an authoritative echo

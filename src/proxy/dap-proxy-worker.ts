@@ -4,6 +4,7 @@
  */
 
 import { ChildProcess } from 'child_process';
+import { dapSourcePath } from '../utils/dap-source.js';
 import { existsSync } from 'fs';
 import path from 'path';
 import { DebugProtocol } from '@vscode/debugprotocol';
@@ -1634,7 +1635,9 @@ export class DapProxyWorker {
       if (initPayload.initialBreakpoints?.length) {
         this.logger!.info('[Worker] Initial breakpoints payload:', initPayload.initialBreakpoints);
         for (const breakpoint of initPayload.initialBreakpoints) {
-          const filePath = path.resolve(breakpoint.file);
+          // The form both routes send (issue #1147): path.resolve for a
+          // path of this host, as given for one that names a file elsewhere.
+          const filePath = dapSourcePath(breakpoint.file);
           if (!groupedBreakpoints.has(filePath)) {
             groupedBreakpoints.set(filePath, []);
           }
