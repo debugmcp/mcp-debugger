@@ -372,6 +372,211 @@ describe('a resume does not outrun what was held (issue #1146)', () => {
   });
 });
 
+describe('one breakpoint request per session at a time (issue #1146)', () => {
+  // The second review found the first version of "send what is held first"
+  // could wait on itself and could send under a pause armed meanwhile. Every
+  // request now takes its turn in one queue per session, and reads the armed
+  // pause right before it sends.
+  const THIRD = '/app/third.js';
+  const FOURTH = '/app/fourth.js';
+
+  /** A proxy whose answers the test releases one by one, in the order the requests went out. */
+  function deferred(sendDapRequest: ReturnType<typeof harness>['sendDapRequest']) {
+    const answers: Array<() => void> = [];
+    sendDapRequest.mockImplementation((command: string, args?: { breakpoints?: unknown[] }) =>
+      new Promise((resolve) => {
+        answers.push(() => resolve({ body: { breakpoints: (args?.breakpoints ?? []).map(() => ({ verified: true })) }, command }));
+      }) as never
+    );
+    const turn = () => new Promise((resolve) => setImmediate(resolve));
+    return {
+      /** Answer the oldest request still open, then let what waited on it run. */
+      async answerNext() {
+        const next = answers.shift();
+        if (!next) throw new Error('no request is waiting for an answer');
+        next();
+        await turn();
+      },
+      open: () => answers.length,
+      turn
+    };
+  }
+
+  it('sends a second request only when the first has been answered', async () => {
+    const { controller, sent, sendDapRequest } = harness();
+    const proxy = deferred(sendDapRequest);
+
+    const first = controller.setBreakpoint('sess-1', { file: FILE, line: 29 });
+    const second = controller.setBreakpoint('sess-1', { file: OTHER, line: 4 });
+    await proxy.turn();
+    expect(sent()).toEqual([`setBreakpoints ${FILE} [29]`]);
+
+    await proxy.answerNext();
+    expect(sent()).toEqual([`setBreakpoints ${FILE} [29]`, `setBreakpoints ${OTHER} [4]`]);
+    await proxy.answerNext();
+    await Promise.all([first, second]);
+  });
+
+  it('starts an uncontended request in the caller\'s own stack', () => {
+    const { controller, sent } = harness();
+
+    void controller.setBreakpoint('sess-1', { file: FILE, line: 29 });
+
+    expect(sent()).toEqual([`setBreakpoints ${FILE} [29]`]);
+  });
+
+  it('settles every caller when a pause is asked for and lands while a flush is on its way', async () => {
+    // The interleaving that hung the first version: two files stranded by a
+    // refused pause; a third request starts the flush; while the first file
+    // is being answered a new pause is asked for, a fourth request arrives
+    // under it, and that pause lands. In the queue the fourth request simply
+    // waits its turn, and by then nothing is armed.
+    const { controller, session, arm, land, sent, sendDapRequest } = harness();
+    arm();
+    await controller.setBreakpoint('sess-1', { file: FILE, line: 1 });
+    await controller.setBreakpoint('sess-1', { file: OTHER, line: 2 });
+    session.pauseIntent = undefined;
+    const proxy = deferred(sendDapRequest);
+
+    const third = controller.setBreakpoint('sess-1', { file: THIRD, line: 3 });
+    await proxy.turn();
+    expect(sent()).toEqual([`setBreakpoints ${FILE} [1]`]);
+    arm();
+    const fourth = controller.setBreakpoint('sess-1', { file: FOURTH, line: 4 });
+    const landed = land();
+    const later = controller.setBreakpoint('sess-1', { file: FILE, line: 7 });
+
+    for (let guard = 0; guard < 20 && sent().length < 5; guard++) {
+      if (proxy.open() > 0) await proxy.answerNext(); else await proxy.turn();
+    }
+    while (proxy.open() > 0) {
+      await proxy.answerNext();
+    }
+    const [, fourthResult] = await Promise.all([third, fourth, landed, later]);
+
+    expect(sent()).toEqual([
+      `setBreakpoints ${FILE} [1]`,
+      `setBreakpoints ${OTHER} [2]`,
+      `setBreakpoints ${THIRD} [3]`,
+      `setBreakpoints ${FOURTH} [4]`,
+      `setBreakpoints ${FILE} [1,7]`
+    ]);
+    expect(fourthResult.warning).toBeUndefined();
+    expect(controller.heldInFlight('sess-1')).toBeUndefined();
+  });
+
+  it('holds a request that reaches its turn while a pause is still armed', async () => {
+    // The same start, but the new pause does not land: the request that
+    // waited behind the flush is held when its turn comes, and so is the
+    // rest of the flush.
+    const { controller, session, arm, sent, sendDapRequest } = harness();
+    arm();
+    await controller.setBreakpoint('sess-1', { file: FILE, line: 1 });
+    await controller.setBreakpoint('sess-1', { file: OTHER, line: 2 });
+    session.pauseIntent = undefined;
+    const proxy = deferred(sendDapRequest);
+
+    const third = controller.setBreakpoint('sess-1', { file: THIRD, line: 3 });
+    await proxy.turn();
+    arm();
+    const fourth = controller.setBreakpoint('sess-1', { file: FOURTH, line: 4 });
+    await proxy.answerNext();
+    const [thirdResult, fourthResult] = await Promise.all([third, fourth]);
+
+    expect(sent()).toEqual([`setBreakpoints ${FILE} [1]`]);
+    expect(thirdResult.warning).toBe(ErrorMessages.breakpointHeldForPendingPause);
+    expect(fourthResult.warning).toBe(ErrorMessages.breakpointHeldForPendingPause);
+  });
+
+  it('holds a request when a pause is armed while the flush ahead of it is being answered', async () => {
+    const { controller, session, arm, sent, sendDapRequest } = harness();
+    arm();
+    await controller.setBreakpoint('sess-1', { file: FILE, line: 1 });
+    session.pauseIntent = undefined;
+    const proxy = deferred(sendDapRequest);
+
+    const third = controller.setBreakpoint('sess-1', { file: THIRD, line: 3 });
+    await proxy.turn();
+    arm();
+    await proxy.answerNext();
+    const result = await third;
+
+    expect(sent()).toEqual([`setBreakpoints ${FILE} [1]`]);
+    expect(result.warning).toBe(ErrorMessages.breakpointHeldForPendingPause);
+    expect(result.breakpoint.verified).toBe(false);
+  });
+
+  it('holds a function breakpoint request the same way', async () => {
+    const { controller, session, arm, sent, sendDapRequest } = harness();
+    arm();
+    await controller.setBreakpoint('sess-1', { file: FILE, line: 1 });
+    session.pauseIntent = undefined;
+    const proxy = deferred(sendDapRequest);
+
+    const fn = controller.setFunctionBreakpoint('sess-1', { functionName: 'doWork' });
+    await proxy.turn();
+    arm();
+    await proxy.answerNext();
+
+    expect((await fn).warning).toBe(ErrorMessages.breakpointHeldForPendingPause);
+    expect(sent()).toEqual([`setBreakpoints ${FILE} [1]`]);
+  });
+
+  it('puts the rest back when a pause is armed part-way through a flush', async () => {
+    const { controller, session, arm, land, sent, sendDapRequest } = harness();
+    arm();
+    await controller.setBreakpoint('sess-1', { file: FILE, line: 1 });
+    await controller.setBreakpoint('sess-1', { file: OTHER, line: 2 });
+    await controller.setFunctionBreakpoint('sess-1', { functionName: 'doWork' });
+    session.pauseIntent = undefined;
+    const proxy = deferred(sendDapRequest);
+
+    const flush = controller.heldInFlight('sess-1');
+    await proxy.turn();
+    arm();
+    await proxy.answerNext();
+    await flush;
+    expect(sent()).toEqual([`setBreakpoints ${FILE} [1]`]);
+
+    // ...and they go out when that pause lands.
+    const landed = land();
+    while (proxy.open() > 0 || sent().length < 3) {
+      await proxy.turn();
+      if (proxy.open() > 0) await proxy.answerNext();
+    }
+    await landed;
+    expect(sent()).toEqual([`setBreakpoints ${FILE} [1]`, `setBreakpoints ${OTHER} [2]`, 'setFunctionBreakpoints [doWork]']);
+  });
+
+  it('sends a file once when the request for it follows a stranded hold of the same file', async () => {
+    const { controller, session, arm, sent } = harness();
+    arm();
+    await controller.setBreakpoint('sess-1', { file: FILE, line: 1 });
+    session.pauseIntent = undefined;
+
+    const result = await controller.setBreakpoint('sess-1', { file: FILE, line: 9 });
+
+    expect(sent()).toEqual([`setBreakpoints ${FILE} [1,9]`]);
+    expect(result.breakpoint.verified).toBe(true);
+    expect(result.warning).toBeUndefined();
+  });
+
+  it.each([
+    ['only files', true, false],
+    ['only the function set', false, true]
+  ] as const)('says the re-sync was held when %s waited', async (_name, files, functions) => {
+    const { controller, session, arm, sent } = harness();
+    if (files) session.breakpoints.set('a', { id: 'a', file: FILE, line: 29, verified: false } as Breakpoint);
+    if (functions) session.functionBreakpoints.set('f', { id: 'f', functionName: 'doWork', verified: false } as FunctionBreakpoint);
+    arm();
+
+    const outcome = await controller.resyncAll(session, { forceFreshEcho: true });
+
+    expect(outcome.warnings).toEqual([ErrorMessages.breakpointHeldForPendingPause]);
+    expect(sent()).toEqual([]);
+  });
+});
+
 describe("a re-send the target session did not answer says so (issue #1146)", () => {
   it('reports the outstanding answer on set_breakpoint and leaves the record unverified', async () => {
     const { controller, sendDapRequest } = harness({ ...HOLDS, getDapClientBehavior: () => ({ mirrorBreakpointsToChild: true }) });

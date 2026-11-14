@@ -282,6 +282,77 @@ describe('PauseCoordinator', () => {
       expect(session.pauseIntent).toBeUndefined();
     });
 
+    it('clears the intent after an unanswered pause request when the policy cannot be asked what waits on it', async () => {
+      const { proxy, session, logger } = fixture();
+      const coordinator = new PauseCoordinator({
+        logger,
+        selectPolicy: () => { throw new Error('no policy for this language'); }
+      });
+      const error = new Error("Request 'pause' timed out after 30s");
+      proxy.sendDapRequest.mockRejectedValue(error);
+
+      await expect(coordinator.requestPause(request(session, proxy))).resolves.toEqual({ status: 'rejected', error });
+
+      expect(session.pauseIntent).toBeUndefined();
+    });
+
+    it('leaves an earlier pending pause armed when a second request is refused', async () => {
+      // The refusal answers the second request. The first pause is no less
+      // armed in the target, and breakpoint requests must keep waiting on it.
+      vi.useFakeTimers();
+      const { proxy, session, coordinator } = fixture({ pauseWakeExpression: WAKE, holdsBreakpointsWhilePauseArmed: true });
+      proxy.sendDapRequest.mockResolvedValue({ success: true });
+      const first = coordinator.requestPause(request(session, proxy, 25));
+      await vi.advanceTimersByTimeAsync(25);
+      await expect(first).resolves.toEqual({ status: 'pending' });
+      const armed = session.pauseIntent;
+      expect(armed).toBeDefined();
+
+      const error = new Error('Thread is not running');
+      proxy.sendDapRequest.mockRejectedValue(error);
+      await expect(coordinator.requestPause(request(session, proxy, 25))).resolves.toEqual({ status: 'rejected', error });
+
+      expect(session.pauseIntent).toBe(armed);
+    });
+
+    it('clears everything when the session ended under a second request', async () => {
+      vi.useFakeTimers();
+      const { proxy, session, coordinator } = fixture({ pauseWakeExpression: WAKE });
+      proxy.sendDapRequest.mockResolvedValue({ success: true });
+      const first = coordinator.requestPause(request(session, proxy, 25));
+      await vi.advanceTimersByTimeAsync(25);
+      await first;
+
+      proxy.sendDapRequest.mockImplementation(() => {
+        proxy.emit('exit');
+        return Promise.resolve({ success: true });
+      });
+      await expect(coordinator.requestPause(request(session, proxy, 25))).resolves.toMatchObject({ status: 'rejected', ended: true });
+
+      expect(session.pauseIntent).toBeUndefined();
+    });
+
+    it('answers observed when the session is paused at the end of the wait, though no event came after the wake', async () => {
+      // The core reads the source line of a launch's first stop before it
+      // reports it: the `stopped` event arrives during the wake, and PAUSED
+      // is entered later with no second event.
+      vi.useFakeTimers();
+      const { proxy, session, coordinator } = fixture({ pauseWakeExpression: WAKE });
+      proxy.sendDapRequest.mockImplementation((command: string) => {
+        if (command === 'evaluate') proxy.emit('stopped', { reason: 'pause', threadId: 1 });
+        return Promise.resolve({ success: true });
+      });
+
+      const result = coordinator.requestPause(request(session, proxy, 25));
+      await vi.advanceTimersByTimeAsync(10);
+      session.lastStop = { reason: 'breakpoint' } as ManagedSession['lastStop'];
+      session.state = SessionState.PAUSED;
+      await vi.advanceTimersByTimeAsync(15);
+
+      await expect(result).resolves.toEqual({ status: 'observed' });
+      expect(session.pauseIntent).toBeUndefined();
+    });
+
     it('clears the intent when the adapter refused the pause, whatever waits on it', async () => {
       const { proxy, session, coordinator } = fixture({ holdsBreakpointsWhilePauseArmed: true });
       const error = new Error('Thread is not running');

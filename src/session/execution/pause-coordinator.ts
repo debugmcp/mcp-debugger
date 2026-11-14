@@ -86,8 +86,16 @@ export class PauseCoordinator {
       clearPauseIntent(session, intent);
       return { status: 'observed' };
     };
+    // A pause that was already armed when this one was asked for: still
+    // waiting in the target whatever becomes of this request.
+    const earlier = getCurrentPauseIntent(session);
     const rejected = (error: unknown, ended = false): PauseOutcome => {
       clearPauseIntent(session, intent);
+      if (!ended && earlier !== undefined && intent !== undefined && session.pauseIntent === undefined) {
+        // This request replaced the earlier one's intent and was refused;
+        // the earlier pause is no less armed for that (issue #1146).
+        session.pauseIntent = earlier;
+      }
       return { status: 'rejected', error, ...(ended ? { ended: true as const } : {}) };
     };
     /**
@@ -171,6 +179,13 @@ export class PauseCoordinator {
         return rejected(new Error('Session ended before pause took effect'), true);
       }
 
+      // A stop the core was still settling when the wake returned (it reads
+      // the source line of a launch's first stop before it reports it)
+      // enters PAUSED with no second event: read the state before calling
+      // the pause pending.
+      if (sessionPaused() && session.lastStop) {
+        return observed();
+      }
       // A delivered pause may stop later when the target next executes. Keep
       // this exact generation's intent armed for core stop normalization.
       return { status: 'pending' };

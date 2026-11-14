@@ -600,7 +600,7 @@ export const ErrorMessages = {
   attachPauseNotRequested:
     'The post-attach pause was not requested, because the debug adapter had not finished its breakpoint work in the target ' +
     'and a pause armed during that work can fire inside it; the program is running. ' +
-    'Call pause_execution once list_breakpoints shows the breakpoints answered',
+    'Call pause_execution when you want it paused',
 
   /**
    * Warning when a breakpoint request reached the adapter but the session
@@ -612,7 +612,7 @@ export const ErrorMessages = {
    */
   breakpointTargetUnanswered: (what: string) =>
     `The debug adapter's target session did not answer the breakpoint request for ${what} in time, ` +
-    `so whether the breakpoints are set in the program is not known yet; list_breakpoints shows its answer when it arrives`,
+    `so whether the breakpoints are set in the program is not known; list_breakpoints turns to verified if the target reports one bound`,
 
   /**
    * Warning when a breakpoint request is held back for an armed pause (issue #1146)

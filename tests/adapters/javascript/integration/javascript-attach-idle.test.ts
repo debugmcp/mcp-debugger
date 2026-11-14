@@ -235,6 +235,15 @@ describe('a pause on an idle Node server lands, and nothing is left frozen (issu
     await server.createSession('javascript', 'attach-idle-held');
     const attached = await call<Stop>('attach_to_process', { host: '127.0.0.1', port: target.inspectPort, verifyTimeout: 20000 });
     expect(attached.success, JSON.stringify(attached)).toBe(true);
+    // The wake cannot reach this server, so the timer loop is never where it
+    // lands: the attach is pending, or (loaded machine) paused inside one of
+    // js-debug's own evaluations.
+    if (attached.state === 'paused') {
+      expect(attached.location?.file, JSON.stringify(attached)).toMatch(/<unknown_source>/);
+    } else {
+      expect(attached.state, JSON.stringify(attached)).toBe('running');
+      expect(attached.pending, JSON.stringify(attached)).toBe(true);
+    }
     await reachPendingPause(attached);
 
     const bp = await call<BreakpointAnswer>('set_breakpoint', { file: noTimersServer, line: NO_TIMERS_BREAKPOINT_LINE });
@@ -279,7 +288,13 @@ describe('a pause on an idle Node server lands, and nothing is left frozen (issu
     }
     expect(port, 'the launched server never printed its port').toBeGreaterThan(0);
 
-    expectIdleLanding(await call<Stop>('pause_execution'));
+    // A launched program has long finished js-debug's start-up evaluations by
+    // the time it prints its port, so here the landing is pinned: the timer
+    // the wake scheduled, and nothing else.
+    const paused = await call<Stop>('pause_execution');
+    expectIdleLanding(paused);
+    expect(paused.location?.file, JSON.stringify(paused)).toMatch(/timers/);
+    expect(paused.note, JSON.stringify(paused)).toMatch(/processTimers/);
 
     expect((await call('continue_execution')).success).toBe(true);
     expect(await get(port, '/work', 10000)).toEqual({ body: 'work done: 332833500' });
