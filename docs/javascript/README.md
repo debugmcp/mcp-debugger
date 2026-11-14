@@ -404,16 +404,24 @@ open on its port (Node never closes it by itself) — a later attach by PID or b
 - Attach by PID activates the inspector on Node's default port unless the target set
   `--inspect-port`; two PID attaches to two different plain `node` processes on one host
   therefore need the second target started with `--inspect-port=<n>` and `port: <n>` passed
-- Attach pauses the target unless you pass `stopOnEntry: false`. js-debug's pause
-  lands on the next event-loop dispatch, so an idle server answers one of two ways:
-  `state: "running", pending: true` (the `message` names the pending pause) and it
-  freezes on its next request; or `paused` at once on a sourceless `<anonymous>`
-  frame between dispatches, with `note` saying no program frame is active and
-  `get_local_variables` empty (issue #900) — continue and send a request, or set a
-  breakpoint. A pause that lands in a named runtime frame instead (a launched
-  program idle between timers stops in `process.processTimers`) has variables of
-  its own: `get_local_variables` returns them with `noProgramFrame: true` and a
-  `note` saying they belong to that frame, not to your program (issue #1135). Attach to a live server you still need to use with `stopOnEntry: false`
+- Attach pauses the target unless you pass `stopOnEntry: false`. V8 lands a pause
+  on the next JavaScript that runs, and an idle server runs none, so the server
+  first schedules one no-op timer in the target (`setTimeout`, 150 ms, unref'd) and
+  the pause lands when it fires (issue #1146): the attach answers `paused` in
+  `process.processTimers`, with `note` saying no program frame is active (issue
+  #900). `get_local_variables` returns that frame's own variables with
+  `noProgramFrame: true` and a `note` saying they belong to it, not to your program
+  (issue #1135). Continue and send a request, or set a breakpoint first.
+  `pause_execution` lands the same way, on attached and launched programs. On a
+  loaded machine the pause can land first inside an evaluation js-debug makes on
+  its own account just after attaching: the frame is then a sourceless
+  `<anonymous>` with the same `note`, and continuing carries on from it. A
+  program the timer cannot wake — busy in native code, or one that replaced
+  `setTimeout` — still answers `state: "running", pending: true`, and stops on its
+  next JavaScript; until then breakpoint requests are held and answered `Held: a
+  pause is pending…`, because js-debug sets a breakpoint by running code of its own
+  in the target, which is where a pending pause would fire. Attach to a live server
+  you still need to use with `stopOnEntry: false`
 - Some advanced DAP features may not be exposed through MCP tools
 - **Source-mapped frames you cannot open.** A package that ships `.js.map` files
   whose `sources` point at `.ts` files it did not ship makes js-debug report those

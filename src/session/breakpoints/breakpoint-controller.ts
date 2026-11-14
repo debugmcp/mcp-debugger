@@ -27,10 +27,12 @@ import {
   type DebugLanguage
 } from '@debugmcp/shared';
 import { DebugProtocol } from '@vscode/debugprotocol';
-import { consumeChildSourced } from '../../utils/child-origin-events.js';
+import { consumeChildMirrorUnanswered, consumeChildSourced } from '../../utils/child-origin-events.js';
 import { DapResponseError } from '../../proxy/dap-response-error.js';
+import { ErrorMessages } from '../../utils/error-messages.js';
 import type { ManagedSession } from '../session-store.js';
 import type { BreakpointContext } from '../operations-context.js';
+import { getCurrentPauseIntent } from '../execution/pause-intent.js';
 import { buildFunctionBreakpointLaunchWarning, fileLabel } from './launch-warnings.js';
 import {
   applyBoundLocation,
@@ -69,6 +71,23 @@ export interface BreakpointSyncOutcome {
   synced: boolean;
   warning?: string;
   failure?: BreakpointSyncFailure;
+  /**
+   * The request was not sent: a pause is armed on the session and the
+   * policy's breakpoint work can run code in the target (issue #1146). It
+   * goes out when the session next stops.
+   */
+  held?: true;
+  /**
+   * The adapter answered, but the session that owns the runtime did not, so
+   * the records carry no verdict from the target yet (issue #1146).
+   */
+  unanswered?: true;
+}
+
+/** What a flush of held requests sent, by file and for the function set (issue #1146). */
+interface HeldFlush {
+  files: Map<string, BreakpointSyncOutcome>;
+  functions?: BreakpointSyncOutcome;
 }
 
 /** What `resyncAll` hands back for the launch/attach result (issue #754). */
@@ -81,6 +100,11 @@ export interface ResyncOutcome {
    * (the #710 rule: a known cause displaces the symptom).
    */
   functionBreakpointsFailed: boolean;
+  /**
+   * Some file's re-send was not answered by the session that owns the
+   * runtime (issue #1146): the adapter may still be working in the target.
+   */
+  unanswered?: true;
 }
 
 /**
@@ -119,6 +143,23 @@ export interface FunctionBreakpointRemoval {
 }
 
 export class BreakpointController {
+  /**
+   * What is waiting for an armed pause to land, per session (issue #1146):
+   * the files whose sets changed, whether the function set did, and the
+   * state subscription that releases them.
+   */
+  private readonly held = new Map<string, { files: Set<string>; functions: boolean; unsubscribe: () => void }>();
+  /**
+   * The tail of each session's queue of held work (issue #1146). A session
+   * has one only while requests are held or on their way out: the send of
+   * what was held takes a turn here, and so does every breakpoint request
+   * that arrives meanwhile, so nothing overtakes the held requests or runs
+   * inside their send. With nothing held there is no queue: a request goes
+   * to the adapter at once, beside any other already in flight, as it always
+   * did.
+   */
+  private readonly turns = new Map<string, Promise<void>>();
+
   constructor(private readonly ctx: BreakpointContext) {}
 
   async setBreakpoint(
@@ -181,17 +222,50 @@ export class BreakpointController {
    * logged and reported via `warning` — the store remains the source of truth
    * and the set is re-applied on the next launch.
    */
-  async syncBreakpointsForFile(
+  syncBreakpointsForFile(
+    session: ManagedSession,
+    file: string,
+    options?: { forceFreshEcho?: boolean }
+  ): Promise<BreakpointSyncOutcome> {
+    if (!this.queued(session.id)) {
+      return this.sendOrHoldFile(session, file, options);
+    }
+    return this.inTurn(session.id, async () => {
+      const flushed = await this.flushHeld(session.id);
+      // What the flush sent is this file's current set, this request's
+      // change included: its answer is this request's answer, whatever was
+      // armed since, and a second send would tell the adapter nothing new.
+      return flushed.files.get(file) ?? this.sendOrHoldFile(session, file, options);
+    });
+  }
+
+  /**
+   * Hold the file's set under an armed pause, send it otherwise. Nothing is
+   * awaited between reading the armed pause and the send: the request is on
+   * its way to the adapter before any other code can arm one.
+   */
+  private sendOrHoldFile(
+    session: ManagedSession,
+    file: string,
+    options?: { forceFreshEcho?: boolean }
+  ): Promise<BreakpointSyncOutcome> {
+    if (!this.live(session)) {
+      return Promise.resolve({ synced: false });
+    }
+    if (this.pauseArmed(session)) {
+      return Promise.resolve(this.hold(session, { file }));
+    }
+    return this.sendFile(session, file, options);
+  }
+
+  /** Send one file's set now. The caller has read the armed pause in this same stack. */
+  private async sendFile(
     session: ManagedSession,
     file: string,
     options?: { forceFreshEcho?: boolean }
   ): Promise<BreakpointSyncOutcome> {
     const sessionId = session.id;
-    if (
-      !session.proxyManager ||
-      !session.proxyManager.isRunning() ||
-      (session.state !== SessionState.RUNNING && session.state !== SessionState.PAUSED)
-    ) {
+    if (!this.live(session) || !session.proxyManager) {
       return { synced: false };
     }
 
@@ -225,6 +299,9 @@ export class BreakpointController {
             ...(options?.forceFreshEcho === true ? { __mcpForceFreshEcho: true } : {}),
           }
         );
+      // Read before the body: for a mirroring policy an unanswered mirror
+      // means this is the parent session's body alone (issue #1146).
+      const targetUnanswered = consumeChildMirrorUnanswered(response);
       if (
         response &&
         response.body &&
@@ -305,7 +382,9 @@ export class BreakpointController {
           }
         }
       }
-      return { synced: true };
+      return targetUnanswered
+        ? { synced: true, unanswered: true, warning: ErrorMessages.breakpointTargetUnanswered(fileLabel(file)) }
+        : { synced: true };
     } catch (error) {
       this.ctx.logger.error(
         `[SessionManager] Error sending setBreakpoints to proxy for session ${sessionId}:`,
@@ -313,6 +392,173 @@ export class BreakpointController {
       );
       return this.failedSync(session, error, allBpsForFile, childAuthoritative);
     }
+  }
+
+  /**
+   * Whether breakpoint requests must wait for an armed pause (issue #1146):
+   * the session is running, a pause of this proxy generation has been
+   * requested and no stop has been observed, and the policy's breakpoint work
+   * can run code in the target. Never throws.
+   */
+  private pauseArmed(session: ManagedSession): boolean {
+    if (session.state !== SessionState.RUNNING || getCurrentPauseIntent(session) === undefined) {
+      return false;
+    }
+    try {
+      return this.ctx.selectPolicy(session.language).holdsBreakpointsWhilePauseArmed === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Record a request that must wait for an armed pause, and subscribe once to
+   * the session's state so it goes out when the pause lands (issue #1146).
+   * The store already holds the change; only the wire waits.
+   */
+  private hold(session: ManagedSession, what: { file?: string; functions?: true }): BreakpointSyncOutcome {
+    let entry = this.held.get(session.id);
+    if (!entry) {
+      const sessionId = session.id;
+      // The listener runs inside the transition; read the state once the
+      // call stack has unwound (an auto-continued stop enters and leaves
+      // PAUSED within one stack).
+      const unsubscribe = this.ctx.onStateChange(sessionId, () => {
+        queueMicrotask(() => {
+          void this.queueFlush(sessionId);
+        });
+      });
+      entry = { files: new Set(), functions: false, unsubscribe };
+      this.held.set(sessionId, entry);
+    }
+    if (what.file !== undefined) {
+      entry.files.add(what.file);
+    }
+    if (what.functions) {
+      entry.functions = true;
+    }
+    this.ctx.logger.info(
+      `[SessionManager] Breakpoint request held for session ${session.id}: a pause is armed and no stop has been observed (issue #1146).`
+    );
+    return { synced: false, held: true, warning: ErrorMessages.breakpointHeldForPendingPause };
+  }
+
+  /** Whether there is a live debuggee to send to. */
+  private live(session: ManagedSession): boolean {
+    return (
+      session.proxyManager !== undefined &&
+      session.proxyManager !== null &&
+      session.proxyManager.isRunning() &&
+      (session.state === SessionState.RUNNING || session.state === SessionState.PAUSED)
+    );
+  }
+
+  /** Whether the session has held work: requests held, or a turn queued or running. */
+  private queued(sessionId: string): boolean {
+    return this.held.has(sessionId) || this.turns.has(sessionId);
+  }
+
+  /**
+   * Run a task in the session's turn: after everything queued before it, and
+   * before anything queued after. A task that finds the queue empty starts
+   * at once, in the caller's own stack. The queue is gone the moment its last
+   * turn ends, before that turn's caller is answered: whatever the caller
+   * does next finds a session with no held work.
+   */
+  private inTurn<T>(sessionId: string, task: () => Promise<T>): Promise<T> {
+    const previous = this.turns.get(sessionId);
+    const run = previous ? previous.then(task) : task();
+    const tail = run.then(
+      () => undefined,
+      () => undefined
+    );
+    const leave = (): void => {
+      if (this.turns.get(sessionId) === tail) {
+        this.turns.delete(sessionId);
+      }
+    };
+    // Registered before the caller can await `run`, so it runs first, and
+    // on `run` itself, so the caller's answer is not a turn later for it.
+    void run.then(leave, leave);
+    this.turns.set(sessionId, tail);
+    return run;
+  }
+
+  /** Queue a send of what is held for the session. */
+  private queueFlush(sessionId: string): Promise<void> {
+    return this.inTurn(sessionId, async () => {
+      await this.flushHeld(sessionId);
+    });
+  }
+
+  /**
+   * What a caller's resume must wait for (issue #1146): the breakpoint
+   * requests held for an armed pause go out when the session stops, and a
+   * `continue` or a step that follows the stop at once would otherwise run
+   * the program past breakpoints that are not set yet. That covers held
+   * requests going out ahead of a later request, in that request's turn, and
+   * every request queued behind them. Undefined when the session has no held
+   * work, which is every case but that one: an ordinary request is already on
+   * its way to the adapter when a later resume is sent, as it always was.
+   */
+  heldInFlight(sessionId: string): Promise<void> | undefined {
+    return this.queued(sessionId) ? this.queueFlush(sessionId) : undefined;
+  }
+
+  /**
+   * Send what is held, when nothing is armed any more; with nothing held it
+   * answers at once with nothing sent. The caller holds the
+   * session's turn. A pause armed again part-way puts the rest back; a
+   * session that ended or was removed drops its entry. Never throws. The
+   * answers are handed back so a request for a file just sent need not send
+   * it twice.
+   */
+  private async flushHeld(sessionId: string): Promise<HeldFlush> {
+    const flushed: HeldFlush = { files: new Map() };
+    const entry = this.held.get(sessionId);
+    if (!entry) {
+      return flushed;
+    }
+    let session: ManagedSession;
+    try {
+      session = this.ctx.getSession(sessionId);
+    } catch {
+      this.held.delete(sessionId);
+      entry.unsubscribe();
+      return flushed;
+    }
+    if (this.pauseArmed(session)) {
+      return flushed;
+    }
+    this.held.delete(sessionId);
+    entry.unsubscribe();
+    if (!this.live(session)) {
+      return flushed;
+    }
+    this.ctx.logger.info(
+      `[SessionManager] Sending the breakpoint requests held for session ${sessionId}: ${entry.files.size} file(s)${entry.functions ? ' and the function breakpoints' : ''}.`
+    );
+    const files = [...entry.files];
+    for (let index = 0; index < files.length; index++) {
+      if (this.pauseArmed(session)) {
+        for (const rest of files.slice(index)) {
+          this.hold(session, { file: rest });
+        }
+        if (entry.functions) {
+          this.hold(session, { functions: true });
+        }
+        return flushed;
+      }
+      flushed.files.set(files[index], await this.sendFile(session, files[index], { forceFreshEcho: true }));
+    }
+    if (entry.functions) {
+      if (this.pauseArmed(session)) {
+        this.hold(session, { functions: true });
+        return flushed;
+      }
+      flushed.functions = await this.sendFunctions(session);
+    }
+    return flushed;
   }
 
   /**
@@ -527,10 +773,16 @@ export class BreakpointController {
     const lineFailures = new Map<string, { failure: BreakpointSyncFailure; files: string[] }>();
     const key = (failure: BreakpointSyncFailure): string => `${failure.refused ? 'refused' : 'failed'}:${failure.message}`;
     let hint = '';
+    const unansweredFiles: string[] = [];
+    let held = false;
     if (session.breakpoints.size > 0) {
       const files = [...new Set(Array.from(session.breakpoints.values()).map((bp) => bp.file))];
       for (const file of files) {
         const outcome = await this.syncBreakpointsForFile(session, file, options);
+        held ||= outcome.held === true;
+        if (outcome.unanswered) {
+          unansweredFiles.push(file);
+        }
         if (outcome.failure === undefined) {
           continue;
         }
@@ -543,9 +795,13 @@ export class BreakpointController {
     const warnings = [...lineFailures.values()].map(({ failure, files }) =>
       this.describeResendFailure(`the breakpoints for ${fileLabels(files).join(', ')}`, failure)
     );
+    if (unansweredFiles.length > 0) {
+      warnings.push(ErrorMessages.breakpointTargetUnanswered(fileLabels(unansweredFiles).join(', ')));
+    }
     let functionBreakpointsFailed = false;
     if ((session.functionBreakpoints?.size ?? 0) > 0) {
       const outcome = await this.syncFunctionBreakpoints(session);
+      held ||= outcome.held === true;
       if (outcome.failure !== undefined) {
         functionBreakpointsFailed = true;
         hint ||= this.liveSyncHint(session, outcome.failure.message);
@@ -570,7 +826,16 @@ export class BreakpointController {
     if (hint) {
       warnings.push(hint);
     }
-    return { warnings, functionBreakpointsFailed };
+    // A re-send made under an armed pause sent nothing (issue #1146): one
+    // sentence for the launch or attach answer, however many files waited.
+    if (held) {
+      warnings.push(ErrorMessages.breakpointHeldForPendingPause);
+    }
+    return {
+      warnings,
+      functionBreakpointsFailed,
+      ...(unansweredFiles.length > 0 ? { unanswered: true as const } : {})
+    };
   }
 
   /** One sentence for a failed re-send: the adapter's refusal, or the transport's failure. */
@@ -586,13 +851,31 @@ export class BreakpointController {
    * file). Same live-session guard and never-throws contract as
    * syncBreakpointsForFile.
    */
-  async syncFunctionBreakpoints(session: ManagedSession): Promise<BreakpointSyncOutcome> {
+  syncFunctionBreakpoints(session: ManagedSession): Promise<BreakpointSyncOutcome> {
+    if (!this.queued(session.id)) {
+      return this.sendOrHoldFunctions(session);
+    }
+    return this.inTurn(session.id, async () => {
+      const flushed = await this.flushHeld(session.id);
+      return flushed.functions ?? this.sendOrHoldFunctions(session);
+    });
+  }
+
+  /** Hold the function set under an armed pause, send it otherwise; nothing awaited in between. */
+  private sendOrHoldFunctions(session: ManagedSession): Promise<BreakpointSyncOutcome> {
+    if (!this.live(session)) {
+      return Promise.resolve({ synced: false });
+    }
+    if (this.pauseArmed(session)) {
+      return Promise.resolve(this.hold(session, { functions: true }));
+    }
+    return this.sendFunctions(session);
+  }
+
+  /** Send the function-breakpoint set now. The caller has read the armed pause in this same stack. */
+  private async sendFunctions(session: ManagedSession): Promise<BreakpointSyncOutcome> {
     const sessionId = session.id;
-    if (
-      !session.proxyManager ||
-      !session.proxyManager.isRunning() ||
-      (session.state !== SessionState.RUNNING && session.state !== SessionState.PAUSED)
-    ) {
+    if (!this.live(session) || !session.proxyManager) {
       return { synced: false };
     }
 
@@ -874,7 +1157,9 @@ export class BreakpointController {
     return {
       cleared: toClear.length + fnToClear.length,
       files,
-      ...(warnings.length > 0 ? { warning: warnings.join('; ') } : {})
+      // One sentence per distinct warning: a clear held for an armed pause
+      // (issue #1146) says so once, not once per file.
+      ...(warnings.length > 0 ? { warning: [...new Set(warnings)].join('; ') } : {})
     };
   }
 }

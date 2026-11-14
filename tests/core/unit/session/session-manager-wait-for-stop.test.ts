@@ -9,6 +9,7 @@ import { DebugLanguage, SessionState } from '@debugmcp/shared';
 import { createMockDependencies } from './session-manager-test-utils.js';
 import { SessionNotFoundError } from '../../../../src/errors/debug-errors.js';
 import type { DebugResult, WaitForStopResultData } from '../../../../src/session/session-manager-core.js';
+import { internals } from '../../../test-utils/helpers/operations-internals.js';
 
 describe('SessionManager - waitForStop (issue #849)', () => {
   let sessionManager: SessionManager;
@@ -108,6 +109,21 @@ describe('SessionManager - waitForStop (issue #849)', () => {
     dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
     await afterStop();
     expect(wait.result()?.data?.lastStop).toMatchObject({ reason: 'breakpoint' });
+  });
+
+  it('does not report an auto-continued entry stop while held breakpoint requests are still going out (issue #1146)', async () => {
+    // A caller's resume waits for breakpoint requests that were held for a
+    // pause. The core's own resume of a stop nobody was shown does not: it
+    // must happen inside the stop's own call stack, or this wait sees the stop.
+    const sessionId = await runningSession();
+    vi.spyOn(internals(sessionManager).breakpoints, 'heldInFlight').mockReturnValue(new Promise<void>(() => undefined));
+    const wait = track(sessionManager.waitForStop(sessionId, 10_000));
+
+    dependencies.mockProxyManager.simulateStopped(1, 'entry');
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(sessionManager.getSession(sessionId)?.state).toBe(SessionState.RUNNING);
+    expect(wait.result()).toBeUndefined();
   });
 
   it('answers pending when its timeout passes with the program still running', async () => {

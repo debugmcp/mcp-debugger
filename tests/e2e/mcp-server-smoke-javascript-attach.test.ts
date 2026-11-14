@@ -592,11 +592,13 @@ describe('MCP Server JavaScript Attach-Mode Smoke Tests', () => {
     return lastState;
   }
 
-  it('pause_execution lands on an attached IDLE server once JS runs (issue #513)', async () => {
+  it('pause_execution lands on an attached IDLE server without waiting for a request (issues #513, #1146)', async () => {
     // The #513 repro: attach (stopOnEntry:false) to a server whose event loop
-    // is completely idle, request a pause, then make the server execute JS.
-    // Pre-fix, js-debug's smart-stepper turned the pause into an endless
-    // auto-step through internal frames and the stop never landed.
+    // is completely idle and request a pause. Pre-#513, js-debug's
+    // smart-stepper turned the pause into an endless auto-step through
+    // internal frames and the stop never landed. Until #1146 the pause then
+    // stayed pending until the server next ran JavaScript; now the server
+    // gives it a timer to land on, so it lands by itself.
     const target = await spawnTarget(IDLE_TARGET_SCRIPT);
     targetProcess = target.proc;
 
@@ -617,35 +619,11 @@ describe('MCP Server JavaScript Attach-Mode Smoke Tests', () => {
     const pauseResult = await callToolSafely(mcpClient!, 'pause_execution', { sessionId: sessionId! });
     expect(pauseResult.success, `pause_execution failed: ${JSON.stringify(pauseResult)}`).toBe(true);
 
+    // Truly idle server: nothing runs, so nothing but the server's own wake
+    // timer can give the pause something to land on (issue #1146).
     const pauseData = (pauseResult.data ?? {}) as { pending?: boolean };
-    if (pauseResult.state !== 'paused') {
-      // Truly idle server: the pause is armed but cannot land until JS runs —
-      // the documented pending contract
-      expect(pauseData.pending, `expected pending pause, got: ${JSON.stringify(pauseResult)}`).toBe(true);
-
-      // Make the server execute JS; the armed pause must now land. The pause
-      // typically fires BEFORE the handler can respond, so the request
-      // hanging (and being torn down) is the expected outcome — its only job
-      // is to put JavaScript on the target's event loop.
-      await new Promise<void>(resolve => {
-        const req = http.get(`http://127.0.0.1:${httpPort}/work`, res => {
-          res.resume();
-          res.on('end', resolve);
-          res.on('error', () => resolve());
-        });
-        req.on('error', () => resolve());
-        req.setTimeout(3000, () => {
-          req.destroy();
-          resolve();
-        });
-      });
-
-      const state = await pollForSessionState('paused', 15000);
-      expect(
-        state,
-        'the pending pause must land once the target provably executes JS (issue #513)'
-      ).toBe('paused');
-    }
+    expect(pauseResult.state, `expected the pause to land, got: ${JSON.stringify(pauseResult)}`).toBe('paused');
+    expect(pauseData.pending).toBeUndefined();
 
     // The paused session must be genuinely usable
     const stackResult = await callToolSafely(mcpClient!, 'get_stack_trace', {
@@ -657,8 +635,21 @@ describe('MCP Server JavaScript Attach-Mode Smoke Tests', () => {
     expect(frames.length, 'paused session must report at least one stack frame').toBeGreaterThan(0);
     expect(stackResult.stopReason).toBe('pause');
 
-    // Leave the target running for teardown
+    // Leave the target running for teardown, and prove it is: the server answers.
     await callToolSafely(mcpClient!, 'continue_execution', { sessionId: sessionId! });
+    const answered = await new Promise<boolean>(resolve => {
+      const req = http.get(`http://127.0.0.1:${httpPort}/work`, res => {
+        res.resume();
+        res.on('end', () => resolve(true));
+        res.on('error', () => resolve(false));
+      });
+      req.on('error', () => resolve(false));
+      req.setTimeout(5000, () => {
+        req.destroy();
+        resolve(false);
+      });
+    });
+    expect(answered, 'the resumed server must answer a request').toBe(true);
   }, 120000);
 
   it('pause_execution stops a busy attached target within the grace window', async () => {

@@ -40,7 +40,8 @@ function makeController(policy: unknown = {}): { controller: BreakpointControlle
     logger: createMockLogger(),
     getSession: vi.fn(),
     selectPolicy: vi.fn().mockReturnValue(policy),
-    selectStorePolicy: vi.fn()
+    selectStorePolicy: vi.fn(),
+    onStateChange: vi.fn().mockReturnValue(() => undefined)
   };
   return { controller: new BreakpointController(ctx), ctx };
 }

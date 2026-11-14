@@ -362,6 +362,40 @@ export class AttachController {
       proxyManager.setCurrentThreadId(discoveredThreadId);
       this.ctx.logger.info(`[SessionManager] Set threadId=${discoveredThreadId} for attach mode`);
 
+      assertTargetPresent();
+      // stopOnEntry controls our pause request, not stops the target itself
+      // produced while verification was in flight (e.g. a queued breakpoint).
+      if (session.state !== SessionState.PAUSED || !session.lastStop) {
+        this.ctx.updateState(session, SessionState.RUNNING);
+      }
+
+      // Attach parity with the post-launch belt-and-braces re-sync (issues
+      // #236/#439, here for #500): breakpoints set before attach_to_process
+      // were sent during the handshake, whose responses the policy may
+      // discard — and for js-debug the child session only answered its
+      // pending stub while adoption was in flight. Re-sending now, with the
+      // debuggee-owning session provably live, delivers the authoritative
+      // verification. forceFreshEcho: js-debug answers a no-change re-send
+      // with an empty echo, and pre-attach breakpoints were already
+      // registered via its pending-target queue — without a fresh echo their
+      // verified state is unrecoverable (issue #500).
+      // A refused re-send is stamped on the records by the send itself; its
+      // warning joins the attach result below (issue #754).
+      //
+      // It runs BEFORE the pause is requested (issue #1146). A pause is armed
+      // in the target from the moment it is sent, and it fires in whatever
+      // code runs there next. For js-debug this re-send is such code: the
+      // fresh echo clears the file and sets it again, js-debug reinstalls
+      // its source-map handler when its breakpoint count rises from zero,
+      // and that install evaluates a script in every execution context. An
+      // armed pause landed inside that evaluation: js-debug then resumed it
+      // without reporting it, or Node spun a core and answered nothing more.
+      const resync = await this.breakpoints.resyncAll(session, { forceFreshEcho: true });
+      assertTargetPresent();
+      // The session that owns the runtime never answered the re-send: the
+      // adapter may still be working in the target, so no pause is armed.
+      let attachPauseSkipped = false;
+
       if (attachConfig.stopOnEntry !== false) {
         // Some debuggers (rdbg; js-debug attaches with continueOnAttach) do
         // not suspend a running target on attach; issue an explicit pause so
@@ -372,7 +406,12 @@ export class AttachController {
         // reported). A rejected pause means the target is already stopped
         // (e.g. started suspended) — fine, no stop event will follow.
         const attachBehavior = this.ctx.selectPolicy(session.language).getAttachBehavior?.();
-        if (attachBehavior?.pauseAfterAttach) {
+        if (attachBehavior?.pauseAfterAttach && resync.unanswered) {
+          attachPauseSkipped = true;
+          this.ctx.logger.warn(
+            `[SessionManager] Post-attach pause not requested for session ${sessionId}: the breakpoint re-send was not answered by the target session (issue #1146)`
+          );
+        } else if (attachBehavior?.pauseAfterAttach) {
           const pauseThreadId = attachBehavior.pauseAllThreads ? 0 : discoveredThreadId;
           const pauseOutcome = await this.pauseCoordinator.requestPause({
             session,
@@ -399,28 +438,6 @@ export class AttachController {
       }
 
       assertTargetPresent();
-      // stopOnEntry controls our pause request, not stops the target itself
-      // produced while verification was in flight (e.g. a queued breakpoint).
-      if (session.state !== SessionState.PAUSED || !session.lastStop) {
-        this.ctx.updateState(session, SessionState.RUNNING);
-      }
-
-      // Attach parity with the post-launch belt-and-braces re-sync (issues
-      // #236/#439, here for #500): breakpoints set before attach_to_process
-      // were sent during the handshake, whose responses the policy may
-      // discard — and for js-debug the child session only answered its
-      // pending stub while adoption was in flight. Re-sending now, with the
-      // debuggee-owning session provably live, delivers the authoritative
-      // verification. forceFreshEcho: js-debug answers a no-change re-send
-      // with an empty echo, and pre-attach breakpoints were already
-      // registered via its pending-target queue — without a fresh echo their
-      // verified state is unrecoverable (issue #500).
-      // A refused re-send is stamped on the records by the send itself; its
-      // warning joins the attach result below (issue #754).
-      const resync = await this.breakpoints.resyncAll(session, { forceFreshEcho: true });
-      assertTargetPresent();
-      // A breakpoint or delayed requested pause can land during the re-send.
-      if (session.state === SessionState.PAUSED) attachPausePending = false;
       // Unverified-at-attach function breakpoints get the same launch-style
       // warning (issue #308); bind-late adapters (js/java) stay suppressed
       // inside the builder.
@@ -482,6 +499,9 @@ export class AttachController {
       session.attachForwardedUnknownConfigKeys = undefined;
       session.attachTransformNotices = undefined;
       const warningParts: string[] = [...resync.warnings];
+      if (attachPauseSkipped) {
+        warningParts.push(ErrorMessages.attachPauseNotRequested);
+      }
       if (attachFnBpWarning) {
         warningParts.push(attachFnBpWarning);
       }

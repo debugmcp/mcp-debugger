@@ -55,6 +55,28 @@ export function consumeChildSourced(response: unknown): boolean {
   return consumeKey(response, CHILD_SOURCED_KEY);
 }
 
+const CHILD_MIRROR_UNANSWERED_KEY = '__mcpChildMirrorUnanswered';
+
+/**
+ * Mark a setBreakpoints response whose mirrored request to the child session
+ * (the one that owns the runtime) got no answer within the mirror's bound, so
+ * the body is the parent session's alone (issue #1146). The caller then knows
+ * the target's own answer is still outstanding. No-op for non-objects.
+ */
+export function markChildMirrorUnanswered(response: unknown): void {
+  if (response !== null && typeof response === 'object') {
+    (response as Record<string, unknown>)[CHILD_MIRROR_UNANSWERED_KEY] = true;
+  }
+}
+
+/**
+ * Read and remove the unanswered-mirror marker from a DAP response.
+ * Returns true when the response was marked by {@link markChildMirrorUnanswered}.
+ */
+export function consumeChildMirrorUnanswered(response: unknown): boolean {
+  return consumeKey(response, CHILD_MIRROR_UNANSWERED_KEY);
+}
+
 function consumeKey(value: unknown, key: string): boolean {
   if (value === null || typeof value !== 'object') {
     return false;

@@ -121,7 +121,7 @@ The filtering is implemented using the existing `AdapterPolicy` system:
 
 2. **JsDebugAdapterPolicy** (`packages/shared/src/interfaces/adapter-policy-js.ts`)
    - Implements filtering for JavaScript
-   - Identifies internal frames by path: `<node_internals>`/`node:`, any `node_modules` segment, and any frame with no source at all (the line-0 async separators and the idle-pause `<anonymous>` landing, issues #655/#900); `frame.name` never participates
+   - Identifies internal frames by path: `<node_internals>`/`node:`, any `node_modules` segment, and any frame with no source at all (the line-0 async separators and a sourceless `<anonymous>` landing, issues #655/#900); `frame.name` never participates
    - No local fallback — the central `FrameAnchorResolver` guarantee below owns the all-internal case
 
 3. **GoAdapterPolicy** (`packages/shared/src/interfaces/adapter-policy-go.ts`)

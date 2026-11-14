@@ -25,7 +25,7 @@ import {
 import { ChildSessionManager, type ChildSessionOptions } from './child-session-manager.js';
 import { sendSetBreakpointsStamping } from './breakpoint-condition-errors.js';
 import type { IDapClient } from './dap-proxy-interfaces.js';
-import { markChildOrigin, markChildSourced } from '../utils/child-origin-events.js';
+import { markChildMirrorUnanswered, markChildOrigin, markChildSourced } from '../utils/child-origin-events.js';
 import { getErrorMessage } from '../errors/debug-errors.js';
 import { DapFrameDecoder, encodeDapMessage } from './dap-framing.js';
 
@@ -861,7 +861,7 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
     // the caller's positional merge stamps the truth synchronously — no
     // reliance on a later `breakpoint` event that js-debug may never send.
     const parentResp = await parentPromise;
-    const childResp = await this.awaitChildMirror(childMirror);
+    const { response: childResp, unanswered } = await this.awaitChildMirror(childMirror);
     const adoptionInProgress =
       typeof this.childSessionManager?.isAdoptionInProgress === 'function'
         ? this.childSessionManager.isAdoptionInProgress()
@@ -881,17 +881,23 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
       );
       return merged;
     }
+    if (unanswered) {
+      // The session that owns the runtime has not answered: the caller must
+      // not read the parent's body as the target's verdict (issue #1146).
+      markChildMirrorUnanswered(parentResp);
+    }
     return parentResp;
   }
 
   /**
-   * Await a child setBreakpoints mirror with a bound, resolving null on
-   * timeout so a hung child can only delay — never fail — the parent path.
+   * Await a child setBreakpoints mirror with a bound, resolving without a
+   * response on timeout so a hung child can only delay — never fail — the
+   * parent path; `unanswered` says the bound expired (issue #1146).
    * The mirror promise itself never rejects (storeBreakpoints catches).
    */
   private awaitChildMirror(
     mirror: Promise<DebugProtocol.SetBreakpointsResponse | null>
-  ): Promise<DebugProtocol.SetBreakpointsResponse | null> {
+  ): Promise<{ response: DebugProtocol.SetBreakpointsResponse | null; unanswered: boolean }> {
     return new Promise((resolve) => {
       let settled = false;
       const timer = this.timers.setTimeout(() => {
@@ -900,14 +906,14 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
           logger.warn(
             `[MinimalDapClient] Child setBreakpoints mirror did not answer within ${CHILD_MIRROR_TIMEOUT_MS}ms; returning the parent response`
           );
-          resolve(null);
+          resolve({ response: null, unanswered: true });
         }
       }, CHILD_MIRROR_TIMEOUT_MS);
       void mirror.then((resp) => {
         if (!settled) {
           settled = true;
           this.timers.clearTimeout(timer);
-          resolve(resp);
+          resolve({ response: resp, unanswered: false });
         }
       });
     });

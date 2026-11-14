@@ -14,9 +14,17 @@
  * `NODE_OPTIONS` and `VSCODE_INSPECTOR_OPTIONS` in this process's environment
  * over the inspector, with retries, after the attach request has been
  * answered (measured on a slow CI runner: a child forked right after the
- * answer ran unreported). The `go` line therefore waits for the injection (at
- * most 5 s) before forking; a `now` line forks at once, for an attach that
- * opted out, where nothing is ever injected.
+ * answer ran unreported). The `go` line therefore waits for the injection
+ * before forking; a `now` line forks at once, for an attach that opted out,
+ * where nothing is ever injected.
+ *
+ * The wait is sized by what the injection was measured to take. js-debug
+ * resolves the target's Node binary before it injects (it spawns it), and the
+ * first attach of a test file pays for that cold: 0.2 s warm, 4.25 s in one
+ * case of a windows-latest CI run and more than 5 s in the case before it,
+ * which forked without the bootloader and failed. So the wait is 20 s. When
+ * it expires the fork goes ahead unreported and the line below says so, which
+ * is what the test then fails on, inside its own 30 s wait.
  */
 import { fork } from 'node:child_process';
 import { dirname, join } from 'node:path';
@@ -28,7 +36,7 @@ console.log('ATTACH_PARENT_READY');
 process.stdin.setEncoding('utf8');
 process.stdin.once('data', (line) => {
   const waitForInjection = String(line).trim() !== 'now';
-  const deadline = Date.now() + 5000;
+  const deadline = Date.now() + 20000;
   const start = () => {
     if (waitForInjection && !injected() && Date.now() < deadline) {
       setTimeout(start, 25);
