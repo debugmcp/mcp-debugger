@@ -312,17 +312,18 @@ export const JavaAdapterPolicy = {
 
   /**
    * An unresolvedSource frame under the JDI bridge (issues #672/#816) is a
-   * class the bridge has no file path for: `resolveSourcePath` knows a path
-   * only for classes a breakpoint was set in, and names every other one by
-   * package path (`java/io/PrintStream.java`, `com/example/Foo.java`). The
-   * class may well have source — it is the path the bridge lacks.
+   * class the bridge found no file for: `resolveSourcePath` looks a class's
+   * package path up under the source roots the session knows (issue #1138)
+   * and names the class by that path alone when it is under none
+   * (`java/io/PrintStream.java`, `com/example/Foo.java`). The class may
+   * well have source — it is the root the bridge lacks.
    */
   describeUnresolvedSource: (info: UnresolvedSourceContext): string => {
     const example = info.files[0] ? ` (${info.files[0]})` : '';
     return (
       `${info.count === 1 ? 'It is a class' : 'They are classes'} the JDI bridge names by package path${example} ` +
-      'because it has no file path for them: a breakpoint set in a class\'s source file teaches the bridge its ' +
-      "path, and the JDK's own classes have no source on this host."
+      'because the source is under none of the source roots it knows: sourcePaths, or a line breakpoint set in ' +
+      "a file of the same source tree, shows it a root, and the JDK's own classes have no source on this host."
     );
   },
 
