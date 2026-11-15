@@ -221,6 +221,16 @@ const jsDebugChildAdoption: ChildAdoptionContract = {
     buildJsChildStartArgs(report.targetId, report.configuration, rootConfig?.request === 'attach' ? rootConfig : undefined).args
 };
 
+/**
+ * How long after the wake evaluation its timer fires (issue #1146). It has to
+ * outlast the round trip that arms the pause behind it, and it is the whole
+ * cost a pause pays on an idle program.
+ */
+export const JS_PAUSE_WAKE_DELAY_MS = 150;
+
+const JS_PAUSE_WAKE_EXPRESSION =
+  `(function(){try{var t=setTimeout(function(){},${JS_PAUSE_WAKE_DELAY_MS});if(t&&typeof t.unref==='function')t.unref()}catch(e){}})()`;
+
 export const JsDebugAdapterPolicy = {
   name: 'js-debug',
   supportsLogPoints: true,
@@ -750,6 +760,27 @@ export const JsDebugAdapterPolicy = {
    * state it reports after attach to be real (issue #124).
    */
   getAttachBehavior: () => ({ pauseAfterAttach: true }),
+
+  /**
+   * A pause sent to a Node program that is running no JavaScript stays armed
+   * in V8 and fires inside the next evaluation the inspector dispatches,
+   * js-debug's own included (issue #1146, measured on Node 24 and js-debug
+   * 1.140: the pause is then resumed unreported, or Node spins a core and
+   * answers nothing more). One unref'd no-op timer, scheduled while nothing
+   * is armed, gives the pause the event loop to land on: it stops in
+   * `processTimers`, the landing an idle server with timers of its own
+   * already has. Unref'd, so it never keeps a finishing program alive; and
+   * it swallows whatever a replaced `setTimeout` throws, so the debugger's
+   * own expression is never an uncaught exception to stop on.
+   */
+  pauseWakeExpression: JS_PAUSE_WAKE_EXPRESSION,
+
+  /**
+   * js-debug installs its source-map handler when its breakpoint count rises
+   * from zero, by evaluating a script in every execution context of the
+   * target, and the function-breakpoint bridge evaluates too (issue #1146).
+   */
+  holdsBreakpointsWhilePauseArmed: true,
 
   /**
    * Perform JavaScript-specific handshake sequence for js-debug/pwa-node.

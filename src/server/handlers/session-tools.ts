@@ -260,6 +260,11 @@ export const closeDebugSessionTool: ToolHandler = async (ctx, args) => {
     message: outcome.closed ? `Closed debug session: ${args.sessionId}` : `Failed to close debug session: ${args.sessionId}`,
     ...(outcome.childrenClosed ? { childrenClosed: outcome.childrenClosed } : {}),
     ...(outcome.processEnded ? { processEnded: true } : {}),
-    ...(outcome.released ? { released: true } : {})
+    ...(outcome.released ? { released: true } : {}),
+    // A borrowed program whose detach nothing acknowledged (issue #1148):
+    // neither field above, and the answer says why.
+    ...(outcome.releaseUnconfirmed !== undefined
+      ? { warning: ErrorMessages.closeReleaseUnconfirmed(outcome.releaseUnconfirmed) }
+      : {})
   });
 };

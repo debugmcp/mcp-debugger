@@ -17,7 +17,7 @@ import { isSnapshotEnabled } from '../utils/snapshot-mode.js';
 import { getVariableAccessMode, type VariableAccessMode } from '../utils/variable-access.js';
 import type { FrameSummary } from './inspection/frame-anchor-resolver.js';
 import { ValidationResultCache } from '../utils/language-availability.js';
-import { SessionStore, ManagedSession } from './session-store.js';
+import { SessionStore, ManagedSession, borrowsProgram } from './session-store.js';
 import type { UnhitBreakpointSummary } from './breakpoints/launch-warnings.js';
 import type { ChildReleaseCause, ToolchainValidationState } from './session-store.js';
 import { OutputRingBuffer } from './output-buffer.js';
@@ -319,7 +319,12 @@ export type LaunchResultData = DebugResultData & StopAnswerFields & TreeAnswerFi
  * #1081): the children a plain detach released to run undebugged, or a
  * terminating detach closed.
  */
-export type DetachResultData = DebugResultData & Pick<TreeAnswerFields, 'childrenReleased' | 'childrenClosed'>;
+export type DetachResultData = DebugResultData & Pick<TreeAnswerFields, 'childrenReleased' | 'childrenClosed'> & {
+  /** The adapter acknowledged the detach and reported no exit: the process was left running (issue #1148). */
+  released?: true;
+  /** The adapter reported that the program exited (issue #1148). */
+  processEnded?: true;
+};
 
 /**
  * What a close did (the session tree, issue #1081): the rows it removed,
@@ -337,8 +342,16 @@ export interface CloseSessionOutcome {
   childrenClosed?: number;
   /** The named session is a child whose process this close ended (the policy's `closeChild: 'terminate'`). */
   processEnded?: true;
-  /** The named session's target runs on: an attach root (its descendants' too), or a child under `closeChild: 'release'`. */
+  /**
+   * The named session's target runs on: a borrowed program whose adapter
+   * acknowledged the detach (issue #1148), or a child under `closeChild: 'release'`.
+   */
   released?: true;
+  /**
+   * The named session borrowed its program and nothing acknowledged the
+   * detach (issue #1148): why. Neither `released` nor `processEnded` is set.
+   */
+  releaseUnconfirmed?: string;
 }
 
 /**
@@ -715,6 +728,11 @@ export abstract class SessionManagerCore extends EventEmitter {
       if (withoutProgram.has(sessionId)) {
         return 'closed';
       }
+      // A borrowed root whose detach nothing acknowledged (issue #1148) is
+      // neither: the close did not see what became of its process.
+      if (sessionId === root.id && report.releaseUnconfirmed !== undefined) {
+        return 'unconfirmed';
+      }
       return report.released || report.releasedSessionIds?.includes(sessionId) ? 'released' : 'ended';
     };
     for (const sessionId of report.closedSessionIds) {
@@ -732,7 +750,8 @@ export abstract class SessionManagerCore extends EventEmitter {
     const did = {
       ended: 'its program was ended',
       released: 'its target was released and keeps running',
-      closed: 'it had no running program'
+      closed: 'it had no running program',
+      unconfirmed: 'the debug adapter did not confirm that it released its target'
     }[outcomeOf(root.id)];
     this.logger.info(
       `Idle debug session ${root.id} closed: ${did}` +
@@ -925,6 +944,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     return this.sessionStore.selectPolicy(session.language);
   }
 
+
   public getSession(sessionId: string): ManagedSession | undefined {
     return this.sessionStore.get(sessionId);
   }
@@ -935,6 +955,34 @@ export abstract class SessionManagerCore extends EventEmitter {
   
   async closeSession(sessionId: string): Promise<boolean> {
     return (await this.closeSessionReporting(sessionId)).closed;
+  }
+
+  /**
+   * What became of a borrowed program when its session closed (issue
+   * #1148), from the worker's report of the detaching disconnect: released
+   * when the adapter acknowledged it, ended when the adapter reported the
+   * program's exit, otherwise not confirmed, with why. No proxy means the
+   * program was already gone from this session: nothing is claimed.
+   */
+  private borrowedProgramFate(proxy: IProxyManager | undefined): { released: boolean; processEnded: boolean; unconfirmed?: string } {
+    if (!proxy) {
+      return { released: false, processEnded: false };
+    }
+    // Only the worker's own detaching disconnect is this close's: a report
+    // left by an earlier detach_from_process says nothing about it.
+    const reported = proxy.getDetachResult();
+    const report = reported && reported.trigger !== 'detach' ? reported : undefined;
+    if (report?.debuggeeExited) {
+      return { released: false, processEnded: true };
+    }
+    if (report?.acknowledged) {
+      return { released: true, processEnded: false };
+    }
+    return {
+      released: false,
+      processEnded: false,
+      unconfirmed: report ? report.error ?? 'the debug adapter did not answer the detach' : 'the debug adapter reported nothing about the detach'
+    };
   }
 
   /**
@@ -952,7 +1000,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     }
     // An attach root's close preserves its external targets, descendants
     // included: their connections are closed without ending them.
-    const releaseDescendants = !options.terminateDebuggee && !session.parentSessionId && session.attachMode === true;
+    const releaseDescendants = !options.terminateDebuggee && !session.parentSessionId && borrowsProgram(session);
     const closedSessionIds: string[] = [];
     const releasedSessionIds: string[] = [];
     const finishClose = this.beginSubtreeClose(sessionId);
@@ -987,10 +1035,19 @@ export abstract class SessionManagerCore extends EventEmitter {
           this.logger.warn('[SessionManager] Terminating disconnect failed, closing the session anyway:', disconnectError);
         }
       }
+      // A borrowed program (issue #1148): what this close did to it is what
+      // the worker saw the adapter do with the detaching disconnect, read
+      // once the worker has gone. A root with no live program has nothing
+      // for this close to release; a child answers from its own semantics.
+      const borrowedRoot =
+        !session.parentSessionId && releaseDescendants && session.proxyManager?.isRunning() ? session.proxyManager : undefined;
       const closed = await this.closeSingleSession(sessionId, { releaseChild: childEnd === 'release' });
+      const fate = session.parentSessionId
+        ? { released: released === true, processEnded: childEnd === 'terminate' }
+        : this.borrowedProgramFate(borrowedRoot);
       if (closed) {
         closedSessionIds.push(sessionId);
-        if (released) {
+        if (fate.released) {
           releasedSessionIds.push(sessionId);
         }
       }
@@ -999,8 +1056,9 @@ export abstract class SessionManagerCore extends EventEmitter {
         closedSessionIds,
         ...(releasedSessionIds.length > 0 ? { releasedSessionIds } : {}),
         ...(childrenClosed > 0 ? { childrenClosed } : {}),
-        ...(closed && childEnd === 'terminate' ? { processEnded: true as const } : {}),
-        ...(closed && released ? { released: true as const } : {})
+        ...(closed && fate.processEnded ? { processEnded: true as const } : {}),
+        ...(closed && fate.released ? { released: true as const } : {}),
+        ...(closed && fate.unconfirmed !== undefined ? { releaseUnconfirmed: fate.unconfirmed } : {})
       };
     } finally {
       finishClose();
@@ -2112,6 +2170,11 @@ export abstract class SessionManagerCore extends EventEmitter {
         return;
       }
 
+      // An armed pause intent is left alone here (issue #1146): a
+      // `continued` is no proof that our pause was consumed. js-debug sends
+      // one for every resume, its own source-map pauses during module
+      // loading included, and clearing the intent on those let the real
+      // pause stop be auto-continued as an entry stop.
       this._updateSessionState(session, SessionState.RUNNING);
     };
     proxyManager.on('continued', handleContinued);

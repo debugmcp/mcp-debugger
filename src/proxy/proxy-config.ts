@@ -41,3 +41,17 @@ export interface ProxyConfig {
     env?: Record<string, string>;
   };
 }
+
+/**
+ * Whether a launch config, as the worker is given it, is an attach (issue
+ * #1151). The one read of this fact: the worker decides from it what its
+ * shutdown does to the program (detach, or end it), and the session records
+ * from it whether it borrows the program or owns it. The config is the
+ * adapter's transformed one, so a transform that rewrites `request` (an
+ * adapter with no attach of its own turns attach-shaped launch arguments into
+ * a launch) is seen by both.
+ */
+export function launchConfigIsAttach(launchConfig: object | null | undefined): boolean {
+  const config = launchConfig as { request?: unknown; __attachMode?: unknown } | null | undefined;
+  return config?.request === 'attach' || config?.__attachMode === true;
+}

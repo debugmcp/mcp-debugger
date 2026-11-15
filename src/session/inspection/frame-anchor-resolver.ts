@@ -251,7 +251,7 @@ export class FrameAnchorResolver {
         note = ready.note;
         resultThreadId = ready.threadId;
       } else if (rawFrames.length === 0 && typeof threadId === 'number') {
-        note = await this.describeFramelessThread(sessionId, proxyManager, threadId, policy);
+        note = await this.describeFramelessThread(sessionId, proxyManager, threadId, policy, stopAtGate?.reason);
       } else if (
         rawFrames.length > 0 &&
         opts?.ensureStackReady &&
@@ -677,7 +677,8 @@ export class FrameAnchorResolver {
     sessionId: string,
     proxyManager: IProxyManager,
     threadId: number,
-    policy: AdapterPolicy
+    policy: AdapterPolicy,
+    stopReason: string | undefined
   ): Promise<string> {
     const threads = await this.listThreadsForScan(sessionId, proxyManager) ?? [];
     const label = (id: number, name?: string): string => name ? `${id} (${name})` : String(id);
@@ -696,9 +697,9 @@ export class FrameAnchorResolver {
         `Try get_stack_trace with threadId ${alternative.threadId}.`
       );
     }
-    // What an empty paused stack means under this adapter, when the policy
-    // has something particular to say (issue #1132).
-    const empty = policy.describeEmptyPausedStack?.();
+    // The same pause-only reading as the implicit readiness path (issue
+    // #1132): naming a thread does not make an entry stop an idle isolate.
+    const empty = isProgramNeutralStopReason(stopReason) ? policy.describeEmptyPausedStack?.() : undefined;
     if (empty) {
       return empty.note;
     }

@@ -33,7 +33,7 @@ export { SessionManagerOperations } from './session-manager-operations.js';
 export class SessionManager extends SessionManagerOperations {
   protected async handleAutoContinue(sessionId: string): Promise<void> {
     this.logger.info(`[SessionManager] Auto-continuing session ${sessionId}`);
-    const result = await this.continue(sessionId);
+    const result = await this.resumeUnseenStop(sessionId);
     if (!result.success) {
       this.logger.warn(`[SessionManager] Auto-continue failed for session ${sessionId}: ${result.error}`);
     }

@@ -236,9 +236,17 @@ describe('JavaAdapterPolicy', () => {
       expect(JavaAdapterPolicy.isInternalFrame!(frame('com.acme.App$Worker.lambda$run$0'))).toBe(false);
       // The JDK's own classes are known by name, whatever the path.
       expect(JavaAdapterPolicy.isInternalFrame!(frame('java.lang.Thread.run'))).toBe(true);
-      // A default-package class carries no package in its name: the fragment
-      // still decides for it (the part of #1160 that stays open).
-      expect(JavaAdapterPolicy.isInternalFrame!(frame('Main.main'))).toBe(true);
+    });
+
+    it('keeps default-package classes under JDK-like directory names (issue #1160)', () => {
+      // The bridge always names the declaring class, including for classes
+      // in the default package. A JDK class would carry its java./jdk./etc.
+      // prefix, so Main.main is not made internal by its project directory.
+      for (const file of ['/home/user/jdk/app/Main.java', '/home/user/rt.jar/app/Main.java']) {
+        for (const name of ['Main.main', 'Main.<init>', 'Main$Worker.run']) {
+          expect(JavaAdapterPolicy.isInternalFrame!({ id: 1, name, file, line: 12 })).toBe(false);
+        }
+      }
     });
   });
 
@@ -434,7 +442,8 @@ describe('JavaAdapterPolicy', () => {
     it('should filter frames with /jdk/ in path', () => {
       const frames = [
         { id: 1, name: 'com.example.App.run', file: '/app/App.java', line: 10 },
-        { id: 2, name: 'Runtime.exec', file: '/usr/lib/jdk/Runtime.java', line: 100 }
+        // No declaring class in the name: the path remains the fallback.
+        { id: 2, name: 'exec', file: '/usr/lib/jdk/Runtime.java', line: 100 }
       ];
 
       const filtered = JavaAdapterPolicy.filterStackFrames!(frames, false);
@@ -445,7 +454,7 @@ describe('JavaAdapterPolicy', () => {
     it('should filter frames with /rt.jar/ in path', () => {
       const frames = [
         { id: 1, name: 'com.example.App.run', file: '/app/App.java', line: 10 },
-        { id: 2, name: 'Object.wait', file: '/jre/lib/rt.jar/Object.java', line: 50 }
+        { id: 2, name: 'wait', file: '/jre/lib/rt.jar/Object.java', line: 50 }
       ];
 
       const filtered = JavaAdapterPolicy.filterStackFrames!(frames, false);

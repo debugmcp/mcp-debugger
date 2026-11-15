@@ -205,7 +205,7 @@ export function buildToolDefinitions(options: BuildToolDefinitionsOptions): Tool
         required: ['sessionId']
       }
     },
-    { name: 'detach_from_process', description: 'Detach from the debugged process without terminating it', inputSchema: {
+    { name: 'detach_from_process', description: 'Detach from a process the session attached to, leaving it running. A program the session launched ends with its session: a plain detach there is refused (use close_debug_session, or terminateProcess: true)', inputSchema: {
         type: 'object',
         properties: {
           sessionId: { type: 'string', description: 'Debug session ID' },

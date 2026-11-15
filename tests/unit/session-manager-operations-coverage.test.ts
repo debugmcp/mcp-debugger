@@ -6,6 +6,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ErrorMessages } from '../../src/utils/error-messages.js';
 import { DapResponseError } from '../../src/proxy/dap-response-error.js';
+import { markChildMirrorUnanswered } from '../../src/utils/child-origin-events.js';
 import path from 'path';
 import { SessionManagerOperations } from '../../src/session/session-manager-operations';
 import type { SessionManagerDependencies } from '../../src/session/session-manager-core';
@@ -114,6 +115,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       isRunning: vi.fn().mockReturnValue(true),
       getCurrentThreadId: vi.fn().mockReturnValue(1),
       getPreDetachResume: vi.fn().mockReturnValue(undefined),
+      getDetachResult: vi.fn().mockReturnValue(undefined),
       sendDapRequest: vi.fn().mockResolvedValue({}),
       stop: vi.fn(),
       once: vi.fn(),
@@ -2968,6 +2970,119 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(mockSession.lastStop).toBeUndefined();
     });
 
+    // Issue #1146: the breakpoint requests held for an armed pause are sent
+    // when it lands, and a resume must not run the program past them.
+    describe('a resume waits for held breakpoint requests (issue #1146)', () => {
+      const pausedSession = () => {
+        mockSession.proxyManager = mockProxyManager;
+        mockSession.state = SessionState.PAUSED;
+        mockSession.lastStop = { reason: 'pause' } as ManagedSession['lastStop'];
+        mockProxyManager.getCurrentThreadId.mockReturnValue(1);
+      };
+
+      it.each([
+        ['continue', 'continue'],
+        ['stepOver', 'next'],
+        ['stepInto', 'stepIn'],
+        ['stepOut', 'stepOut']
+      ] as const)('%s sends nothing until the held requests have been answered', async (method, command) => {
+        pausedSession();
+        let release: (() => void) | undefined;
+        const heldInFlight = vi
+          .spyOn(internals(operations).breakpoints, 'heldInFlight')
+          .mockReturnValue(new Promise<void>((resolve) => { release = resolve; }));
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+
+        const resumed = operations[method]('test-session');
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(heldInFlight).toHaveBeenCalledWith('test-session');
+        expect(mockProxyManager.sendDapRequest.mock.calls.some(([sent]) => sent === command)).toBe(false);
+
+        release!();
+        await vi.waitFor(() =>
+          expect(mockProxyManager.sendDapRequest.mock.calls.some(([sent]) => sent === command)).toBe(true)
+        );
+        // A step waits for its landing; this case is about the order only.
+        mockSession.state = SessionState.STOPPED;
+        void resumed.catch(() => undefined);
+      });
+
+      it('continue takes no extra turn of the event loop when nothing is held', async () => {
+        // The core's auto-continue resumes inside the stop's own call stack
+        // (issue #849): even `await undefined` would let a waiter see the stop.
+        pausedSession();
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+
+        void operations.continue('test-session');
+
+        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('continue', { threadId: 1 });
+      });
+    });
+
+    // Issue #1146: a pause is armed in the target from the moment it is
+    // requested, and a breakpoint re-send can make the adapter run its own
+    // code there (js-debug evaluates a script per execution context when its
+    // breakpoint count rises from zero). So the re-send goes first.
+    it('re-sends the breakpoints before it requests the post-attach pause (issue #1146)', async () => {
+      mockSession.language = DebugLanguage.RUBY;
+      mockSession.breakpoints = new Map([
+        ['bp-1', { id: 'bp-1', file: '/app/server.rb', line: 3, verified: false }]
+      ]);
+      const order: string[] = [];
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        order.push(command);
+        if (command === 'threads') return { body: { threads: [{ id: 1, name: 'main' }] } };
+        if (command === 'setBreakpoints') return { body: { breakpoints: [{ verified: true, line: 3 }] } };
+        return {};
+      });
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+        return {};
+      });
+
+      const result = await operations.attachToProcess('test-session', { port: 12345, host: '127.0.0.1' });
+
+      expect(result.success).toBe(true);
+      expect(order).toContain('setBreakpoints');
+      expect(order).toContain('pause');
+      expect(order.indexOf('setBreakpoints')).toBeLessThan(order.indexOf('pause'));
+      // The re-send did its work: the record carries the adapter's answer.
+      expect(mockSession.breakpoints.get('bp-1')?.verified).toBe(true);
+    });
+
+    it('requests no pause when the target session did not answer the breakpoint re-send (issue #1146)', async () => {
+      // An unanswered re-send means the adapter may still be working in the
+      // target; a pause armed now could fire inside that work.
+      mockSession.language = DebugLanguage.RUBY;
+      mockSession.breakpoints = new Map([
+        ['bp-1', { id: 'bp-1', file: '/app/server.rb', line: 3, verified: false }]
+      ]);
+      mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
+        if (command === 'threads') return { body: { threads: [{ id: 1, name: 'main' }] } };
+        if (command === 'setBreakpoints') {
+          const response = { body: { breakpoints: [{ verified: false }] } };
+          markChildMirrorUnanswered(response);
+          return response;
+        }
+        return {};
+      });
+      vi.spyOn(internals(operations).proxyLauncher, 'start').mockImplementation(async () => {
+        mockSession.proxyManager = mockProxyManager;
+        return {};
+      });
+
+      const result = await operations.attachToProcess('test-session', { port: 12345, host: '127.0.0.1' });
+
+      expect(result.success).toBe(true);
+      expect(result.state).toBe(SessionState.RUNNING);
+      expect(mockProxyManager.sendDapRequest.mock.calls.some(([command]) => command === 'pause')).toBe(false);
+      expect(result.data?.pending).toBeUndefined();
+      expect(result.data?.message).toBe('Attached to process at 127.0.0.1:12345');
+      expect(result.data?.warning).toContain('server.rb');
+      expect(result.data?.warning).toMatch(/did not answer/);
+      expect(result.data?.warning).toMatch(/The post-attach pause was not requested/);
+    });
+
     // The core reads the attach's stopOnEntry from the dapLaunchArgs handed to
     // the proxy launcher (issue #817): adapterConfig wins the launcher's merge
     // on the wire, so a value given only there — or given there against the
@@ -3818,8 +3933,9 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.success).toBe(true);
       expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('disconnect', {
         terminateDebuggee: false
-      });
-      expect(result.data?.message).toContain('process still running');
+      }, { timeoutMs: 10_000 });
+      expect(result.data?.message).toBe(ErrorMessages.detachReleased());
+
     });
 
     it('detachFromProcess should survive proxyManager being nulled during disconnect (race condition)', async () => {
@@ -3879,7 +3995,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('disconnect', { terminateDebuggee: true });
       expect(mockProxyManager.sendDapRequest).not.toHaveBeenCalledWith('disconnect', {
         terminateDebuggee: false
-      });
+      }, { timeoutMs: 10_000 });
       expect(mockProxyManager.stop).toHaveBeenCalled();
     });
 
@@ -3922,6 +4038,61 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     // ahead of every attach-mode disconnect where the policy asks and reports
     // the outcome as 'pre_detach_resume'; the session layer only sends the
     // disconnect and reads that outcome back into the detach result.
+    // Issue #1151: a session owns a program it launched and borrows one it
+    // attached to. Ending a session ends what it owns (the worker follows a
+    // launch session's disconnect with a terminating one and a tree kill), so
+    // a plain detach has nothing true to answer there: it is refused by name
+    // before anything is touched.
+    describe('a launched program ends with its session (issue #1151)', () => {
+      it('refuses a plain detach on a session that owns its program, and touches nothing', async () => {
+        mockSession.state = SessionState.PAUSED;
+        mockSession.proxyManager = mockProxyManager;
+        mockSession.programOwnership = 'owned';
+
+        const result = await operations.detachFromProcess('test-session', false);
+
+        expect(result).toEqual({
+          success: false,
+          state: SessionState.PAUSED,
+          error: ErrorMessages.detachOwnedProgramRefused()
+        });
+        expect(mockProxyManager.sendDapRequest).not.toHaveBeenCalled();
+        expect(mockProxyManager.stop).not.toHaveBeenCalled();
+        expect(mockSession.state).toBe(SessionState.PAUSED);
+        expect(mockSession.proxyManager).toBe(mockProxyManager);
+      });
+
+      it('names what to do instead: end it, or start it outside and attach', () => {
+        const message = ErrorMessages.detachOwnedProgramRefused();
+
+        expect(message).toMatch(/launched by this session/);
+        expect(message).toMatch(/close_debug_session/);
+        expect(message).toMatch(/terminateProcess: true/);
+        expect(message).toMatch(/attach_to_process/);
+      });
+
+      it('does not refuse a borrowed program', async () => {
+        mockSession.state = SessionState.PAUSED;
+        mockSession.proxyManager = mockProxyManager;
+        mockSession.programOwnership = 'borrowed';
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+
+        const result = await operations.detachFromProcess('test-session', false);
+
+        expect(result.success).toBe(true);
+        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('disconnect', { terminateDebuggee: false }, { timeoutMs: 10_000 });
+      });
+
+      it('answers a session with no program as before', async () => {
+        mockSession.proxyManager = undefined;
+        mockSession.programOwnership = 'owned';
+
+        const result = await operations.detachFromProcess('test-session', false);
+
+        expect(result).toMatchObject({ success: false, error: 'No active debug session to detach from' });
+      });
+    });
+
     describe('resume before detach (issue #763)', () => {
       const resumingPolicy = {
         getAttachBehavior: () => ({
@@ -3940,10 +4111,11 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         expect(result.success).toBe(true);
         // The session layer sends only the disconnect; the continue is the worker's.
         expect(mockProxyManager.sendDapRequest.mock.calls.map((call) => call[0])).toEqual(['disconnect']);
-        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('disconnect', { terminateDebuggee: false });
+        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('disconnect', { terminateDebuggee: false }, { timeoutMs: 10_000 });
         expect(result.data?.resumedBeforeDetach).toBe(true);
         expect(result.data?.warning).toBeUndefined();
-        expect(result.data?.message).toContain('process still running');
+        expect(result.data?.message).toBe(ErrorMessages.detachReleased());
+
       });
 
       it('reports nothing about a resume when no resume was called for', async () => {

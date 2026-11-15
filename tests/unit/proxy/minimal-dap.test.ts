@@ -1310,10 +1310,30 @@ describe('MinimalDapClient', () => {
         const resp = await sendPromise;
         expect(resp.body?.breakpoints?.[0]).toMatchObject({ id: 7, verified: false });
         expect(resp).not.toHaveProperty('__mcpChildSourced');
+        // The caller is told the runtime-owning session has not answered
+        // (issue #1146): the parent's body is not the target's verdict.
+        expect(resp).toHaveProperty('__mcpChildMirrorUnanswered', true);
         client.shutdown();
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it('marks nothing unanswered when the mirror resolved without a child response (no child, or a failed mirror)', async () => {
+      const stubManager = createChildSessionManagerStub();
+      stubManager.hasActiveChildren.mockReturnValue(true);
+      stubManager.storeBreakpoints.mockResolvedValue(null);
+      const { client, respondToParent } = createMirrorMergeClient(stubManager);
+
+      const sendPromise = client.sendRequest('setBreakpoints', {
+        source: { path: './foo.js' }, breakpoints: [{ line: 10 }]
+      });
+      await respondToParent();
+      const resp = await sendPromise;
+
+      expect(resp.body?.breakpoints?.[0]).toMatchObject({ id: 7, verified: false });
+      expect(resp).not.toHaveProperty('__mcpChildMirrorUnanswered');
+      client.shutdown();
     });
 
     it('strips the reserved __mcpForceFreshEcho key and forwards the intent to the mirror', async () => {

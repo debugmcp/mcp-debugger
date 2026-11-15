@@ -3788,6 +3788,7 @@ describe('SessionManager - DAP Operations', () => {
 
       it('says it for a thread the caller named, too', async () => {
         const session = await createPausedSession(sessionManager, dependencies);
+        dependencies.mockProxyManager.simulateStopped(1, 'pause');
         setShortReadyWindow();
         withPolicy(true);
         emptyStack();
@@ -3796,6 +3797,19 @@ describe('SessionManager - DAP Operations', () => {
 
         expect(result.frames).toEqual([]);
         expect(result.note).toBe(IDLE);
+      });
+
+      it('does not call an entry stop idle when the caller names its thread', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        setShortReadyWindow();
+        withPolicy(true);
+        emptyStack();
+
+        const result = await sessionManager.getStackTraceDetailed(session.id, 1);
+
+        expect(result.frames).toEqual([]);
+        expect(result.note).toContain('Thread 1 (main) reported no stack frames');
+        expect(result.note).not.toContain(IDLE);
       });
     });
 

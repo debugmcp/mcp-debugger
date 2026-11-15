@@ -55,8 +55,9 @@ interface Target {
   /**
    * Tell attach_parent.js to fork its child (one line on stdin): `go` once
    * js-debug's bootloader is in the target's environment, which happens a
-   * moment after the attach answers (measured; a fork inside that window
-   * runs unreported), `now` at once (an attach that opted out injects nothing).
+   * moment after the attach answers, or seconds after it on a cold runner
+   * (measured; a fork inside that window runs unreported; the fixture waits
+   * up to 20 s), `now` at once (an attach that opted out injects nothing).
    */
   go: (mode?: 'go' | 'now') => void;
 }

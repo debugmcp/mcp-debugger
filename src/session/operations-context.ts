@@ -242,7 +242,7 @@ export type AttachContext = Pick<
 /** Breakpoint tooling: the store, the wire, and both policy sources. */
 export type BreakpointContext = Pick<
   OperationsContext,
-  'logger' | 'getSession' | 'selectPolicy' | 'selectStorePolicy'
+  'logger' | 'getSession' | 'selectPolicy' | 'selectStorePolicy' | 'onStateChange'
 >;
 
 /**

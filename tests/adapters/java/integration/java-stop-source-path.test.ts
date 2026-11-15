@@ -483,5 +483,31 @@ describe('The file a Java stop reports (issue #1138) @requires-java', () => {
       const context = await client.call<ContextAnswer>('get_source_context', { file: main.file, line: main.line });
       expect(context, JSON.stringify(context)).toMatchObject({ success: true });
     }, 120_000);
+
+    it('promotes an already configured root when a breakpoint identifies the active source tree', async () => {
+      // Two versions of the same source tree may be configured. Before a
+      // breakpoint identifies one, the first root wins and is cached.
+      const decoyRoot = path.join(root, 'older-sources');
+      const decoyApp = path.join(decoyRoot, 'com', 'acme', 'App.java');
+      fs.mkdirSync(path.dirname(decoyApp), { recursive: true });
+      fs.writeFileSync(decoyApp, APP);
+
+      const port = await startJvmWaitingForDebugger();
+      const client = await connect('java-stop-source-attach-promote-root');
+      await attach(client, port, { sourcePaths: [decoyRoot, sourceRoot] });
+
+      const before = await frameOf(client, 'App.main');
+      expect(samePath(before.file, decoyApp), JSON.stringify(before)).toBe(true);
+
+      // Clock's unambiguous path teaches the actual tree. It was already in
+      // sourcePaths, so it must move to the front and invalidate the earlier
+      // App lookup rather than being dismissed as an already known root.
+      await setLineBreakpoint(client, clockSource, CLOCK_RETURN_LINE);
+      await resumeToStop(client);
+      expect(await topFrameName(client)).toContain('Clock.now');
+
+      const after = await frameOf(client, 'App.main');
+      expect(samePath(after.file, appSource), JSON.stringify(after)).toBe(true);
+    }, 120_000);
   });
 });

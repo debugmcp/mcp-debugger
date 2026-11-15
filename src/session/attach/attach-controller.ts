@@ -61,6 +61,17 @@ function observedAttachStopThread(session: ManagedSession): number | undefined {
   return session.state === SessionState.PAUSED ? session.lastStop?.threadId : undefined;
 }
 
+/**
+ * How long a detach waits for the adapter to acknowledge it (issue #1148).
+ * Sized by measurement: every attach-capable adapter answers a detaching
+ * disconnect in 0 to 15 ms (413 ms at most across a day of launch-mode
+ * runs), and the worker may spend up to 2 s on the resume it sends ahead of
+ * one. When it expires the adapter is stopped anyway and the answer says
+ * the detach was not confirmed. It used to wait the full request timeout,
+ * 30 s, and then answer "process still running".
+ */
+export const DETACH_ACKNOWLEDGEMENT_TIMEOUT_MS = 10_000;
+
 export class AttachController {
   constructor(
     private readonly ctx: AttachContext,
@@ -362,6 +373,40 @@ export class AttachController {
       proxyManager.setCurrentThreadId(discoveredThreadId);
       this.ctx.logger.info(`[SessionManager] Set threadId=${discoveredThreadId} for attach mode`);
 
+      assertTargetPresent();
+      // stopOnEntry controls our pause request, not stops the target itself
+      // produced while verification was in flight (e.g. a queued breakpoint).
+      if (session.state !== SessionState.PAUSED || !session.lastStop) {
+        this.ctx.updateState(session, SessionState.RUNNING);
+      }
+
+      // Attach parity with the post-launch belt-and-braces re-sync (issues
+      // #236/#439, here for #500): breakpoints set before attach_to_process
+      // were sent during the handshake, whose responses the policy may
+      // discard — and for js-debug the child session only answered its
+      // pending stub while adoption was in flight. Re-sending now, with the
+      // debuggee-owning session provably live, delivers the authoritative
+      // verification. forceFreshEcho: js-debug answers a no-change re-send
+      // with an empty echo, and pre-attach breakpoints were already
+      // registered via its pending-target queue — without a fresh echo their
+      // verified state is unrecoverable (issue #500).
+      // A refused re-send is stamped on the records by the send itself; its
+      // warning joins the attach result below (issue #754).
+      //
+      // It runs BEFORE the pause is requested (issue #1146). A pause is armed
+      // in the target from the moment it is sent, and it fires in whatever
+      // code runs there next. For js-debug this re-send is such code: the
+      // fresh echo clears the file and sets it again, js-debug reinstalls
+      // its source-map handler when its breakpoint count rises from zero,
+      // and that install evaluates a script in every execution context. An
+      // armed pause landed inside that evaluation: js-debug then resumed it
+      // without reporting it, or Node spun a core and answered nothing more.
+      const resync = await this.breakpoints.resyncAll(session, { forceFreshEcho: true });
+      assertTargetPresent();
+      // The session that owns the runtime never answered the re-send: the
+      // adapter may still be working in the target, so no pause is armed.
+      let attachPauseSkipped = false;
+
       if (attachConfig.stopOnEntry !== false) {
         // Some debuggers (rdbg; js-debug attaches with continueOnAttach) do
         // not suspend a running target on attach; issue an explicit pause so
@@ -372,7 +417,12 @@ export class AttachController {
         // reported). A rejected pause means the target is already stopped
         // (e.g. started suspended) — fine, no stop event will follow.
         const attachBehavior = this.ctx.selectPolicy(session.language).getAttachBehavior?.();
-        if (attachBehavior?.pauseAfterAttach) {
+        if (attachBehavior?.pauseAfterAttach && resync.unanswered) {
+          attachPauseSkipped = true;
+          this.ctx.logger.warn(
+            `[SessionManager] Post-attach pause not requested for session ${sessionId}: the breakpoint re-send was not answered by the target session (issue #1146)`
+          );
+        } else if (attachBehavior?.pauseAfterAttach) {
           const pauseThreadId = attachBehavior.pauseAllThreads ? 0 : discoveredThreadId;
           const pauseOutcome = await this.pauseCoordinator.requestPause({
             session,
@@ -399,28 +449,6 @@ export class AttachController {
       }
 
       assertTargetPresent();
-      // stopOnEntry controls our pause request, not stops the target itself
-      // produced while verification was in flight (e.g. a queued breakpoint).
-      if (session.state !== SessionState.PAUSED || !session.lastStop) {
-        this.ctx.updateState(session, SessionState.RUNNING);
-      }
-
-      // Attach parity with the post-launch belt-and-braces re-sync (issues
-      // #236/#439, here for #500): breakpoints set before attach_to_process
-      // were sent during the handshake, whose responses the policy may
-      // discard — and for js-debug the child session only answered its
-      // pending stub while adoption was in flight. Re-sending now, with the
-      // debuggee-owning session provably live, delivers the authoritative
-      // verification. forceFreshEcho: js-debug answers a no-change re-send
-      // with an empty echo, and pre-attach breakpoints were already
-      // registered via its pending-target queue — without a fresh echo their
-      // verified state is unrecoverable (issue #500).
-      // A refused re-send is stamped on the records by the send itself; its
-      // warning joins the attach result below (issue #754).
-      const resync = await this.breakpoints.resyncAll(session, { forceFreshEcho: true });
-      assertTargetPresent();
-      // A breakpoint or delayed requested pause can land during the re-send.
-      if (session.state === SessionState.PAUSED) attachPausePending = false;
       // Unverified-at-attach function breakpoints get the same launch-style
       // warning (issue #308); bind-late adapters (js/java) stay suppressed
       // inside the builder.
@@ -482,6 +510,9 @@ export class AttachController {
       session.attachForwardedUnknownConfigKeys = undefined;
       session.attachTransformNotices = undefined;
       const warningParts: string[] = [...resync.warnings];
+      if (attachPauseSkipped) {
+        warningParts.push(ErrorMessages.attachPauseNotRequested);
+      }
       if (attachFnBpWarning) {
         warningParts.push(attachFnBpWarning);
       }
@@ -590,6 +621,13 @@ export class AttachController {
     sessionId: string,
     terminateProcess: boolean = false
   ): Promise<DebugResult<DetachResultData>> {
+    // Ownership first (issue #1151), before the in-flight claim and before
+    // anything is touched: a session ends a program it launched, so a detach
+    // that would leave it running is refused by name.
+    const session = this.ctx.getSession(sessionId);
+    if (!terminateProcess && session.proxyManager && session.programOwnership === 'owned') {
+      return { success: false, state: session.state, error: ErrorMessages.detachOwnedProgramRefused() };
+    }
     return this.inFlight.run(sessionId, 'detach', 'detach_from_process', this.ctx, () =>
       this.detach(sessionId, terminateProcess)
     );
@@ -605,7 +643,10 @@ export class AttachController {
       `[SessionManager] Detaching from process for session ${sessionId}, terminateProcess: ${terminateProcess}`
     );
 
-    if (!session.proxyManager) {
+    // A proxy that has stopped is a program this session let go of already
+    // (issue #1148): a second detach has nothing to detach from, and must not
+    // answer from what the first one saw.
+    if (!session.proxyManager || !session.proxyManager.isRunning()) {
       return {
         success: false,
         state: session.state,
@@ -615,6 +656,10 @@ export class AttachController {
 
     let resumedBeforeDetach: boolean | undefined;
     let warning: string | undefined;
+    // What became of the process, as observed (issue #1148).
+    let fate: { message: string; released?: true; processEnded?: true; warning?: string } = {
+      message: ErrorMessages.detachReleased()
+    };
     // The session tree (issue #1081): a terminating detach closes the
     // subtree; a plain one releases the children first, deepest first, so
     // each runs on undebugged, then detaches the parent.
@@ -636,12 +681,32 @@ export class AttachController {
         // the policy asks (issue #763: CodeLLDB on Windows kills a target
         // detached right after a step) and reports the outcome as the
         // 'pre_detach_resume' status, read back below for the result.
+        let disconnectFailure: string | undefined;
         try {
           await proxyManager.sendDapRequest('disconnect', {
             terminateDebuggee: false
-          });
+          }, { timeoutMs: DETACH_ACKNOWLEDGEMENT_TIMEOUT_MS });
         } catch (disconnectError) {
+          disconnectFailure = disconnectError instanceof Error ? disconnectError.message : String(disconnectError);
           this.ctx.logger.warn(`[SessionManager] Disconnect request failed, continuing with cleanup:`, disconnectError);
+        }
+        // What the adapter did with it (issue #1148), as the worker saw it:
+        // the request's own failure says nothing when `terminated` came in
+        // reply (debugpy). With no report, the request's outcome stands.
+        // Only a report of this request: a worker shutting down by itself
+        // (the adapter sent `terminated` unasked) reports its own disconnect,
+        // which says nothing about a detach that arrived as it went.
+        const reported = proxyManager.getDetachResult();
+        const report = reported?.trigger === 'detach' ? reported : undefined;
+        if (report?.debuggeeExited) {
+          fate = { message: ErrorMessages.detachProgramEnded(), processEnded: true };
+        } else if (report ? report.acknowledged : disconnectFailure === undefined) {
+          fate = { message: ErrorMessages.detachReleased(), released: true };
+        } else {
+          const unconfirmed = ErrorMessages.detachUnconfirmed(
+            report?.error ?? disconnectFailure ?? 'the debug adapter did not answer the detach'
+          );
+          fate = { message: unconfirmed, warning: unconfirmed };
         }
 
         const resume = proxyManager.getPreDetachResume();
@@ -683,11 +748,13 @@ export class AttachController {
         success: true,
         state: SessionState.STOPPED,
         data: {
-          message: terminateProcess
-            ? 'Detached and terminated process'
-            : 'Detached from process (process still running)',
+          message: terminateProcess ? 'Detached and terminated process' : fate.message,
+          ...(!terminateProcess && fate.released ? { released: true as const } : {}),
+          ...(!terminateProcess && fate.processEnded ? { processEnded: true as const } : {}),
           ...(resumedBeforeDetach !== undefined ? { resumedBeforeDetach } : {}),
-          ...(warning !== undefined ? { warning } : {}),
+          ...(!terminateProcess && (fate.warning !== undefined || warning !== undefined)
+            ? { warning: [fate.warning, warning].filter((part) => part !== undefined).join('; ') }
+            : terminateProcess && warning !== undefined ? { warning } : {}),
           ...(childrenClosed > 0 ? { childrenClosed } : {}),
           ...(childrenReleased > 0 ? { childrenReleased } : {})
         }

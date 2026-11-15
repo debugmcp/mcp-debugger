@@ -3,7 +3,7 @@
  */
 import { EventEmitter } from 'events';
 import { DebugProtocol } from '@vscode/debugprotocol';
-import { IProxyManager, ProxyManagerEvents, type PreDetachResume } from '../../../src/proxy/proxy-manager.js';
+import { IProxyManager, ProxyManagerEvents, type DetachResult, type PreDetachResume } from '../../../src/proxy/proxy-manager.js';
 import type { ChildAdoptResult, ChildStopOptions, IChildProxyView } from '../../../src/proxy/child-proxy-view.js';
 import type { ChildAdoptArgs } from '../../../src/proxy/dap-proxy-interfaces.js';
 import type { ProxyMessage } from '../../../src/dap-core/types.js';
@@ -72,6 +72,11 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
 
   async stop(): Promise<void> {
     this.stopCalls++;
+    // A healthy worker's auto-detach, answered (issue #1148). Only a
+    // borrowed program's close reads it.
+    if (this.reportsDetachOnStop && this.detachResult === undefined) {
+      this.detachResult = { trigger: 'close', acknowledged: true, by: 'response' };
+    }
     this._isRunning = false;
     this._currentThreadId = null;
     this._config = null;
@@ -220,6 +225,15 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
     return this.preDetachResume;
   }
 
+  /** Test seam: what the worker would have reported for a detaching disconnect (issue #1148). */
+  detachResult: DetachResult | undefined = undefined;
+  /** Test seam: false for a worker that reports nothing about its detach (killed, or too old). */
+  reportsDetachOnStop = true;
+
+  getDetachResult(): DetachResult | undefined {
+    return this.detachResult;
+  }
+
   getAdapterStderrTail(): readonly string[] {
     return this.adapterStderrTail;
   }
@@ -256,6 +270,8 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
   }
 
   reset(): void {
+    this.detachResult = undefined;
+    this.reportsDetachOnStop = true;
     this.startCalls = [];
     this.stopCalls = 0;
     this.dapRequestCalls = [];

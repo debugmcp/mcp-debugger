@@ -3864,6 +3864,207 @@ describe('DapProxyWorker', () => {
       });
     });
 
+    // Issue #1148: `released` used to be asserted from the session's mode, and
+    // a detach the adapter never acknowledged was answered "process still
+    // running". Only the worker sees what the adapter did with a detaching
+    // disconnect, so it reports it: answered, or `terminated` sent in reply
+    // (debugpy: the worker's own shutdown on that event is what fails the
+    // pending request), or neither. An `exited` event means the program ended.
+    describe('what the adapter did with a detaching disconnect (issue #1148)', () => {
+      const plainPolicy = {
+        name: 'stub',
+        shouldQueueCommand: () => ({ shouldQueue: false }),
+        getInitializationBehavior: () => ({}),
+        createInitialState: () => ({})
+      };
+      type Sent = { type: string; status?: string; [key: string]: unknown };
+      const sentMessages = () => mockMessageSender.send.mock.calls.map(([message]) => message as Sent);
+      const results = () => sentMessages()
+        .filter((message) => message.type === 'status' && message.status === 'detach_result')
+        .map(({ trigger, acknowledged, by, debuggeeExited, error }) => ({ trigger, acknowledged, by, debuggeeExited, error }));
+      const detach = (requestId: string, terminateDebuggee = false) => (worker as any).handleDapCommand({
+        requestId, cmd: 'dap', sessionId: 's', dapCommand: 'disconnect', dapArgs: { terminateDebuggee }
+      });
+
+      function wire(sendRequest = vi.fn().mockResolvedValue({}), disconnect = vi.fn().mockResolvedValue({ answered: true })) {
+        (worker as any).logger = mockLogger;
+        (worker as any).dapClient = { ...mockDapClient, sendRequest };
+        (worker as any).adapterPolicy = plainPolicy;
+        (worker as any).adapterState = {};
+        (worker as any).processManager = { shutdown: vi.fn().mockResolvedValue(undefined) };
+        (worker as any).connectionManager = { disconnect };
+        (worker as any).state = ProxyState.CONNECTED;
+        (worker as any).isAttachMode = true;
+        (worker as any).lastStop = null;
+        (worker as any).currentSessionId = 's';
+        return { sendRequest, disconnect };
+      }
+
+      it('reports an answered detach ahead of the response the session is waiting on', async () => {
+        wire();
+
+        await detach('detach-1');
+
+        expect(results()).toEqual([{ trigger: 'detach', acknowledged: true, by: 'response', debuggeeExited: undefined, error: undefined }]);
+        const kinds = sentMessages().map((message) => (message.type === 'status' ? `status:${message.status}` : message.type));
+        expect(kinds.indexOf('status:detach_result')).toBeLessThan(kinds.lastIndexOf('dapResponse'));
+      });
+
+      it('takes terminated sent in reply as the acknowledgement when the request then fails (debugpy)', async () => {
+        const sendRequest = vi.fn().mockImplementation(async (command: string) => {
+          if (command === 'disconnect') {
+            // The adapter's `terminated`, then the worker's own teardown of the client.
+            (worker as any).noteTerminatedDuringDetach();
+            throw new Error('DAP client disconnected');
+          }
+          return {};
+        });
+        wire(sendRequest);
+
+        await detach('detach-2');
+
+        expect(results()).toEqual([{ trigger: 'detach', acknowledged: true, by: 'terminated', debuggeeExited: undefined, error: undefined }]);
+      });
+
+      it('reports a detach nothing acknowledged, with the failure', async () => {
+        wire(vi.fn().mockRejectedValue(new Error("Request 'disconnect' timed out after 30s")));
+
+        await detach('detach-3');
+
+        expect(results()).toEqual([{
+          trigger: 'detach', acknowledged: false, by: undefined, debuggeeExited: undefined, error: "Request 'disconnect' timed out after 30s"
+        }]);
+      });
+
+      it('says the program exited when an exited event was seen, whatever answered', async () => {
+        wire();
+        (worker as any).exitedEventSeen = true;
+
+        await detach('detach-4');
+
+        expect(results()).toEqual([{ trigger: 'detach', acknowledged: true, by: 'response', debuggeeExited: true, error: undefined }]);
+      });
+
+      it('does not count a terminated that came before the detach was sent', async () => {
+        wire(vi.fn().mockRejectedValue(new Error('DAP client disconnected')));
+        (worker as any).noteTerminatedDuringDetach();
+
+        await detach('detach-5');
+
+        expect(results()).toEqual([{ trigger: 'detach', acknowledged: false, by: undefined, debuggeeExited: undefined, error: 'DAP client disconnected' }]);
+      });
+
+      it('reports nothing for a terminating disconnect', async () => {
+        wire();
+
+        await detach('end-1', true);
+
+        expect(results()).toEqual([]);
+      });
+
+      it('reports the auto-detach close_debug_session triggers, answered or not', async () => {
+        wire(undefined, vi.fn().mockResolvedValue({ answered: true }));
+        await worker.handleTerminate();
+        expect(results()).toEqual([{ trigger: 'close', acknowledged: true, by: 'response', debuggeeExited: undefined, error: undefined }]);
+      });
+
+      it('reports an auto-detach the adapter did not answer within the cap', async () => {
+        wire(undefined, vi.fn().mockResolvedValue({ answered: false, error: 'DAP disconnect request timed out after 1000ms' }));
+
+        await worker.handleTerminate();
+
+        expect(results()).toEqual([{
+          trigger: 'close', acknowledged: false, by: undefined, debuggeeExited: undefined, error: 'DAP disconnect request timed out after 1000ms'
+        }]);
+      });
+
+      it('reports the detaching disconnect of the shutdown path in attach mode', async () => {
+        const { disconnect } = wire(undefined, vi.fn().mockResolvedValue({ answered: true }));
+        (worker as any).adapterProcess = { pid: 4242 };
+
+        await worker.shutdown();
+
+        expect(disconnect).toHaveBeenCalledWith(expect.anything(), false);
+        expect(results()).toEqual([{ trigger: 'shutdown', acknowledged: true, by: 'response', debuggeeExited: undefined, error: undefined }]);
+      });
+
+      it('reports nothing for a launch-mode shutdown, whose disconnect ends the program', async () => {
+        const { disconnect } = wire(undefined, vi.fn().mockResolvedValue({ answered: true }));
+        (worker as any).isAttachMode = false;
+        (worker as any).adapterProcess = { pid: 4242 };
+
+        await worker.shutdown();
+
+        expect(disconnect).toHaveBeenCalledWith(expect.anything(), true);
+        expect(results()).toEqual([]);
+      });
+
+      it('does not count a terminated that came during the resume sent ahead of the detach', async () => {
+        // The resume goes first; the detach begins when its disconnect is about to go out.
+        const sendRequest = vi.fn().mockImplementation(async (command: string) => {
+          if (command === 'continue') {
+            (worker as any).noteTerminatedDuringDetach();
+            return {};
+          }
+          throw new Error('DAP client disconnected');
+        });
+        wire(sendRequest);
+        (worker as any).adapterPolicy = { ...plainPolicy, getAttachBehavior: () => ({ resumeBeforeDetach: true }) };
+        (worker as any).lastStop = { reason: 'step', threadId: 7, allThreadsStopped: true };
+
+        await detach('detach-8');
+
+        expect(results()).toEqual([{ trigger: 'detach', acknowledged: false, by: undefined, debuggeeExited: undefined, error: 'DAP client disconnected' }]);
+      });
+
+      it('reports once per worker: a detach that arrives after a shutdown report adds nothing', async () => {
+        wire(undefined, vi.fn().mockResolvedValue({ answered: true }));
+        (worker as any).beginDetach('shutdown');
+        (worker as any).reportDetach(true);
+
+        (worker as any).beginDetach('detach');
+        (worker as any).reportDetach(true);
+
+        expect(results()).toEqual([{ trigger: 'shutdown', acknowledged: true, by: 'response', debuggeeExited: undefined, error: undefined }]);
+      });
+
+      it('does not count a terminated during held-child release as an acknowledgement of the unsent detach', async () => {
+        const order: string[] = [];
+        const sendRequest = vi.fn().mockImplementation(async () => {
+          order.push('disconnect');
+          throw new Error('DAP client disconnected');
+        });
+        wire(sendRequest);
+        // js-debug can wait for a throwaway attach while releasing a held
+        // child. A root termination during that wait precedes its disconnect.
+        (worker as any).childConnections = {
+          clientOf: vi.fn().mockReturnValue(undefined),
+          closeAll: vi.fn().mockResolvedValue(undefined),
+          releaseAllHeld: vi.fn().mockImplementation(async () => {
+            order.push('release');
+            (worker as any).noteTerminatedDuringDetach();
+          })
+        };
+
+        await detach('detach-during-child-release');
+
+        expect(order).toEqual(['release', 'disconnect']);
+        expect(results()).toEqual([{
+          trigger: 'detach', acknowledged: false, by: undefined,
+          debuggeeExited: undefined, error: 'DAP client disconnected'
+        }]);
+      });
+
+      it('reports once: a session-sent detach is not reported again by the close that follows', async () => {
+        wire();
+
+        await detach('detach-6');
+        await worker.handleTerminate();
+
+        expect(results()).toHaveLength(1);
+      });
+    });
+
     describe('resume before detach (issue #763)', () => {
       const resumingPolicy = {
         name: 'lldb-stub',

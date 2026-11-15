@@ -2240,10 +2240,16 @@ public class JdiDapServer {
             if (sourcePath.length() <= relative.length() + 1 || !endsWithPath(sourcePath, relative)) return;
             String root = sourcePath.substring(0, sourcePath.length() - relative.length() - 1);
             synchronized (resolvedSources) {
-                if (sourceRoots.contains(root) && defaultPackageRoots.contains(root)) return;
-                if (!sourceRoots.contains(root)) sourceRoots.add(0, root);
-                if (!defaultPackageRoots.contains(root)) defaultPackageRoots.add(0, root);
-                // A file looked up before this root was known may be under it.
+                if (!sourceRoots.isEmpty() && root.equals(sourceRoots.get(0)) &&
+                        !defaultPackageRoots.isEmpty() && root.equals(defaultPackageRoots.get(0))) return;
+                // A configured root may already be known, but the caller's
+                // breakpoint now identifies it as the active source tree.
+                // Promote it even then, ahead of other versions of the same
+                // package, and forget lookups cached under the old priority.
+                sourceRoots.remove(root);
+                sourceRoots.add(0, root);
+                defaultPackageRoots.remove(root);
+                defaultPackageRoots.add(0, root);
                 resolvedSources.clear();
             }
             log("Source root learnt from a breakpoint on " + typeName + ": " + root);

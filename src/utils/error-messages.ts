@@ -220,6 +220,26 @@ export const ErrorMessages = {
     `${endpoint.host}:${endpoint.port} never answered the DAP "initialize" request (${detail}). ${notADebugServer(endpoint)}`,
 
   /**
+   * A direct-connect attach whose connection ended during the handshake,
+   * worded by the parent (issue #1152). There is no adapter process and no
+   * worker failure to describe: what ended is the endpoint the caller
+   * named. The parent used to answer "Proxy exited during initialization"
+   * with the worker's stderr, whenever the worker's exit reached it before
+   * the worker's own report.
+   * Used in: src/proxy/proxy-manager.ts (startInitializationSequence)
+   * @param endpoint - What the worker dialed
+   * @param endedByDebugServer - The endpoint sent DAP `terminated` before the connection closed
+   */
+  directConnectEndedDuringHandshake: (endpoint: DirectConnectEndpoint, endedByDebugServer: boolean) => {
+    const at = `${endpoint.host}:${endpoint.port}`;
+    const listener = endpoint.listener ?? 'the debug server';
+    return endedByDebugServer
+      ? `${at} ended the debug session during the DAP handshake: it sent "terminated" and the connection closed. ` +
+        `Nothing was started for this attach, so there is nothing to retry on this side: check that ${listener} is still running there and accepts a client.`
+      : `The connection to ${at} ended during the DAP handshake, before initialization completed. ` +
+        `Nothing was started for this attach: check that ${listener} is still listening there.`;
+  },
+  /**
    * The note on a stack whose top frames the exception has already left (issue #1143)
    * Occurs when: an exception stop lists the traceback's frames above the
    * frame execution is paused in (pydevd at a user-unhandled stop): frame 0
@@ -627,6 +647,42 @@ export const ErrorMessages = {
     '(pass stopOnEntry: false to attach without pausing)',
 
   /**
+   * Warning when attach skipped its pause because the breakpoint re-send was
+   * not answered by the session that owns the runtime (issue #1146)
+   * Occurs when: The adapter may still be working in the target; a pause
+   * armed now could fire inside that work, where it is lost or freezes the target
+   * Used in: src/session/attach/attach-controller.ts
+   */
+  attachPauseNotRequested:
+    'The post-attach pause was not requested: the debug adapter\'s target session had not answered the breakpoint request, ' +
+    'and a pause armed while the adapter is still working in the program can fire inside the adapter\'s own code. ' +
+    'The program is running. The server cannot see when the adapter finishes; a breakpoint turning verified in list_breakpoints ' +
+    'is the sign that it has. pause_execution pauses the program',
+
+  /**
+   * Warning when a breakpoint request reached the adapter but the session
+   * that owns the runtime did not answer it in time (issue #1146)
+   * Occurs when: A child-mirroring adapter (js-debug) answers on its parent
+   * session only; the target's own answer is still outstanding
+   * Used in: src/session/breakpoints/breakpoint-controller.ts
+   * @param what - The file, or files, the request was for
+   */
+  breakpointTargetUnanswered: (what: string) =>
+    `The debug adapter's target session did not answer the breakpoint request for ${what} in time, ` +
+    `so whether the breakpoints are set in the program is not known; list_breakpoints turns to verified if the target reports one bound`,
+
+  /**
+   * Warning when a breakpoint request is held back for an armed pause (issue #1146)
+   * Occurs when: A pause is pending on the session (the program has run no
+   * code since it was requested) and the adapter's breakpoint work can run
+   * code in the program, where that pause would fire
+   * Used in: src/session/breakpoints/breakpoint-controller.ts
+   */
+  breakpointHeldForPendingPause:
+    'Held: a pause is pending on this session, so this breakpoint request is sent when the program stops. ' +
+    'Sending it now would make the debug adapter run its own code in the program, and the pending pause would fire inside that',
+
+  /**
    * Error message for attach verification failures
    * Occurs when: After an attach handshake, the debugger does not report any
    * threads within the verification window — either the attach is dead
@@ -761,6 +817,58 @@ export const ErrorMessages = {
     `\`${tool}\` cannot be used on session ${sessionId}: it is a child session; ` +
     `it was started by its parent (${parentSessionId}). ` +
     `Use the parent's id, or close_debug_session on the child.`,
+
+  /**
+   * The detach answer when the adapter acknowledged the detach (issue #1148)
+   * Occurs when: the adapter answered the detaching disconnect, or sent
+   * `terminated` in reply to it, and reported no exit of the program
+   * Used in: src/session/attach/attach-controller.ts
+   */
+  detachReleased: () =>
+    'Detached from process: the debug adapter confirmed the detach, and the process was left running',
+
+  /**
+   * The detach answer when the adapter reported that the program exited (issue #1148)
+   * Used in: src/session/attach/attach-controller.ts
+   */
+  detachProgramEnded: () =>
+    'Detached from process: the debug adapter reported that the program had exited, so there is no process left running',
+
+  /**
+   * The detach answer when nothing acknowledged the detach (issue #1148)
+   * Occurs when: the detaching disconnect was neither answered nor followed
+   * by `terminated` within its bound, or the worker reported nothing. The
+   * adapter is stopped all the same; what that did to the target is not
+   * something the server saw. It used to answer "process still running".
+   * Used in: src/session/attach/attach-controller.ts
+   * @param reason - Why there is no acknowledgement
+   * @param look - What a look at the target's pid showed, for a pid attach
+   */
+  detachUnconfirmed: (reason: string, look?: string) =>
+    `Detached, but the debug adapter did not confirm it (${reason}). The debugger was stopped anyway; ` +
+    `whether the process is still running is not known${look ? `: ${look}` : ''}`,
+
+  /**
+   * The close answer's warning when the detach of a borrowed program was not acknowledged (issue #1148)
+   * Used in: src/server/handlers/session-tools.ts
+   * @param reason - Why there is no acknowledgement
+   */
+  closeReleaseUnconfirmed: (reason: string) =>
+    `The debug adapter did not confirm that it released the process (${reason}); whether the process is still running is not known`,
+
+  /**
+   * Refusal of a plain detach on a session that launched its program (issue #1151)
+   * Occurs when: detach_from_process is called without terminateProcess on a
+   * session whose program it launched. A launched program ends with its
+   * session in every adapter, so there is no detach that leaves it running;
+   * the answer used to claim one. Refused before any state changes.
+   * Used in: src/session/attach/attach-controller.ts
+   */
+  detachOwnedProgramRefused: () =>
+    'detach_from_process leaves a program running, and this program was launched by this session: ' +
+    'a launched program ends with its session, so there is nothing to detach from and nothing was changed. ' +
+    'To end it now, call close_debug_session, or detach_from_process with terminateProcess: true. ' +
+    'To debug a program that must keep running afterwards, start it outside the debugger and use attach_to_process',
 
   /**
    * Hint appended to launch-toolchain failures on attach-capable languages
