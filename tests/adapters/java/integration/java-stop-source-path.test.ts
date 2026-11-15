@@ -172,6 +172,19 @@ describe('The file a Java stop reports (issue #1138) @requires-java', () => {
     return paused;
   }
 
+  /**
+   * The `App.main` frame of the paused thread. A pause lands wherever the
+   * program is: nearly always in the sleep, now and then inside a helper. The
+   * loop's own frame is on the stack either way, so the cases read that frame
+   * rather than the stop's top one.
+   */
+  async function appFrame(client: StdioClientHandle): Promise<Frame> {
+    const stack = await client.call<StackAnswer>('get_stack_trace', {});
+    const frame = stack.stackFrames.find((entry) => entry.name.includes('App.main'));
+    expect(frame, JSON.stringify(stack)).toBeDefined();
+    return frame as Frame;
+  }
+
   async function resumeToStop(client: StdioClientHandle): Promise<StopAnswer> {
     let stop = await client.call<StopAnswer>('continue_execution', {});
     if (stop.state !== 'paused') {
@@ -188,15 +201,16 @@ describe('The file a Java stop reports (issue #1138) @requires-java', () => {
 
     const paused = await pause(server);
     const shown = JSON.stringify(paused);
-    // Before the fix: "com/acme/App.java", and no context.
-    expect(samePath(paused.location?.file, appSource), shown).toBe(true);
-    expect(paused.context?.lineContent, shown).toContain('Thread.sleep(100)');
+    // Before the fix: "com/acme/App.java" (or a Helper's relative name), and no context.
+    expect(paused.location?.file, shown).toBeDefined();
+    expect(path.isAbsolute(paused.location?.file ?? ''), shown).toBe(true);
+    expect(fs.existsSync(paused.location?.file ?? ''), shown).toBe(true);
+    expect(paused.context?.lineContent, shown).toBeDefined();
 
-    const context = await server.call<ContextAnswer>('get_source_context', { file: paused.location?.file, line: paused.location?.line });
+    const main = await appFrame(server);
+    expect(samePath(main.file, appSource), JSON.stringify(main)).toBe(true);
+    const context = await server.call<ContextAnswer>('get_source_context', { file: main.file, line: main.line });
     expect(context, JSON.stringify(context)).toMatchObject({ success: true });
-
-    const stack = await server.call<StackAnswer>('get_stack_trace', {});
-    expect(stack.stackFrames.some((frame) => samePath(frame.file, appSource)), JSON.stringify(stack)).toBe(true);
   }, 120_000);
 
   it('a function-breakpoint stop answers its own class\'s file, also when a same-named class in another package has a breakpoint set by path', async () => {
@@ -215,15 +229,22 @@ describe('The file a Java stop reports (issue #1138) @requires-java', () => {
     });
     expect(launch, JSON.stringify(launch)).toMatchObject({ success: true });
     let stop = launch.state === 'paused' ? launch : await server.call<StopAnswer>('wait_for_stop', { timeout: 20_000 });
-
-    // The loop calls tick, then tock: the first stop is the line breakpoint.
     expect(stop, JSON.stringify(stop)).toMatchObject({ success: true, state: 'paused' });
-    expect(samePath(stop.location?.file, helperSource), JSON.stringify(stop)).toBe(true);
-    expect(stop.location?.line).toBe(TICK_RETURN_LINE);
 
-    stop = await resumeToStop(server);
+    // Which class the path breakpoint binds to, and so whether it stops first,
+    // is issue #1158's and not asserted here: resume until the stop is the
+    // function breakpoint in com.acme.other.Helper, and read that stop's file.
+    const inTock = async (): Promise<boolean> => {
+      const stack = await server!.call<StackAnswer>('get_stack_trace', {});
+      return stack.stackFrames[0]?.name.includes('com.acme.other.Helper.tock') === true;
+    };
+    for (let resumes = 0; resumes < 4 && !(await inTock()); resumes++) {
+      stop = await resumeToStop(server);
+    }
     const shown = JSON.stringify(stop);
-    // com.acme.other.Helper, in its own file: not the other Helper's path.
+    expect(await inTock(), shown).toBe(true);
+    // com.acme.other.Helper, in its own file: not the path the bridge keeps
+    // for a class called `Helper`.
     expect(samePath(stop.location?.file, otherHelperSource), shown).toBe(true);
     expect(stop.context?.lineContent, shown).toContain('return n - 1');
   }, 120_000);
@@ -235,10 +256,13 @@ describe('The file a Java stop reports (issue #1138) @requires-java', () => {
     const attached = await server.call<StopAnswer>('attach_to_process', { port, host: '127.0.0.1' });
     expect(attached, JSON.stringify(attached)).toMatchObject({ success: true });
 
-    const paused = attached.state === 'paused' ? attached : await pause(server);
+    if (attached.state !== 'paused') {
+      await pause(server);
+    }
     // Nothing told the session where this JVM's sources are: the name JDI
     // has, as before.
-    expect(paused.location?.file?.replace(/\\/g, '/'), JSON.stringify(paused)).toBe('com/acme/App.java');
+    const unresolved = await appFrame(server);
+    expect(unresolved.file.replace(/\\/g, '/'), JSON.stringify(unresolved)).toBe('com/acme/App.java');
 
     // A line breakpoint in App, on the call to Helper.tick. (Not in a Helper:
     // a path breakpoint on one of two same-named classes is issue #1158.)
@@ -263,10 +287,8 @@ describe('The file a Java stop reports (issue #1138) @requires-java', () => {
 
     // And the frame that was answered by its relative name while no root was
     // known is found now too: the lookup is not remembered past a new root.
-    const stack = await server.call<StackAnswer>('get_stack_trace', {});
-    const caller = stack.stackFrames.find((frame) => frame.name.includes('App.main'));
-    expect(caller, JSON.stringify(stack)).toBeDefined();
-    expect(samePath(caller?.file, appSource), JSON.stringify(stack)).toBe(true);
+    const caller = await appFrame(server);
+    expect(samePath(caller.file, appSource), JSON.stringify(caller)).toBe(true);
   }, 120_000);
 
   it('an attach that names the source root in sourcePaths answers the path at once', async () => {
@@ -276,9 +298,48 @@ describe('The file a Java stop reports (issue #1138) @requires-java', () => {
     const attached = await server.call<StopAnswer>('attach_to_process', { port, host: '127.0.0.1', sourcePaths: [sourceRoot] });
     expect(attached, JSON.stringify(attached)).toMatchObject({ success: true });
 
-    const paused = attached.state === 'paused' ? attached : await pause(server);
-    const shown = JSON.stringify(paused);
-    expect(samePath(paused.location?.file, appSource), shown).toBe(true);
-    expect(paused.context?.lineContent, shown).toContain('Thread.sleep(100)');
+    if (attached.state !== 'paused') {
+      await pause(server);
+    }
+    const main = await appFrame(server);
+    expect(samePath(main.file, appSource), JSON.stringify(main)).toBe(true);
+    const context = await server.call<ContextAnswer>('get_source_context', { file: main.file, line: main.line });
+    expect(context, JSON.stringify(context)).toMatchObject({ success: true });
+  }, 120_000);
+
+  it('a launch that names the source root in adapterLaunchConfig.sourcePaths finds a file its other roots do not hold', async () => {
+    server = await startStdioClient({ name: 'java-stop-source-launch-roots' });
+    await server.createSession('java', 'java-stop-source-launch-roots');
+    // The class is named, not a file, and the JVM runs in the classes
+    // directory: neither the program, the working directory's ancestors nor
+    // the classpath lead to src/. Only the root the caller names does.
+    const launchFrom = async (extra: Record<string, unknown>): Promise<Frame> => {
+      const launch = await server!.call<StopAnswer>('start_debugging', {
+        scriptPath: path.join(classes, 'com', 'acme', 'App.class'),
+        adapterLaunchConfig: { program: 'com.acme.App', classpath: classes, cwd: classes, ...extra },
+        dapLaunchArgs: { stopOnEntry: false }
+      });
+      expect(launch, JSON.stringify(launch)).toMatchObject({ success: true, state: 'running' });
+      await pause(server!);
+      return appFrame(server!);
+    };
+
+    const named = await launchFrom({ sourcePaths: [sourceRoot] });
+    expect(samePath(named.file, appSource), JSON.stringify(named)).toBe(true);
+  }, 120_000);
+
+  it('the same launch without sourcePaths answers the relative name: no root is guessed', async () => {
+    server = await startStdioClient({ name: 'java-stop-source-launch-no-roots' });
+    await server.createSession('java', 'java-stop-source-launch-no-roots');
+    const launch = await server.call<StopAnswer>('start_debugging', {
+      scriptPath: path.join(classes, 'com', 'acme', 'App.class'),
+      adapterLaunchConfig: { program: 'com.acme.App', classpath: classes, cwd: classes },
+      dapLaunchArgs: { stopOnEntry: false }
+    });
+    expect(launch, JSON.stringify(launch)).toMatchObject({ success: true, state: 'running' });
+    await pause(server);
+
+    const main = await appFrame(server);
+    expect(main.file.replace(/\\/g, '/'), JSON.stringify(main)).toBe('com/acme/App.java');
   }, 120_000);
 });
