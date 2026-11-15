@@ -220,7 +220,11 @@ export class FrameAnchorResolver {
     const effectiveThreadId = threadId ?? currentThreadId;
     if (typeof effectiveThreadId !== 'number') {
       this.ctx.logger.warn(`[FrameAnchor ${sessionId}] No effective thread ID to use.`);
-      return emptyResult('No stopped thread is known for this session.');
+      // With its own next step: get_local_variables adds none to a stack
+      // read that has spoken (issue #1132).
+      return emptyResult(
+        'No stopped thread is known for this session. Name one: get_stack_trace with a threadId from list_threads reads that thread\'s stack.'
+      );
     }
     // The stop this stack belongs to. A new stop landing while the stack is
     // in flight makes the frames stale; the paused-frame rule below and every
@@ -433,14 +437,29 @@ export class FrameAnchorResolver {
     const { pausedStackReadyTimeoutMs, pausedStackReadyIntervalMs } = this.ctx.tunables;
     // What an empty paused stack means under this adapter (issue #1132). Where
     // the policy says no frame will appear there is nothing to wait for: one
-    // look at the sibling threads, then the policy's sentence. Only on a
-    // pause, which is the stop that claim was measured on; any other stop
-    // with an empty stack keeps the wait and gets the policy's sentence after
-    // it. The scan's budget is a ceiling, not a wait: it returns as soon as
-    // the threads have answered, so it gets the whole window.
-    const empty = policy.describeEmptyPausedStack?.();
-    if (empty?.framesWillNotAppear && isProgramNeutralStopReason(stopAtGate?.reason)) {
-      const sibling = await this.scanSiblings(sessionId, proxyManager, threadId, policy, pausedStackReadyTimeoutMs);
+    // look at the sibling threads, then the policy's sentence.
+    //
+    // The policy's reading is for a pause, the stop it was measured on. Any
+    // other stop with an empty stack (a Dart isolate held at its start under
+    // --pause_isolates_on_start reports an entry stop with no frames) is not
+    // "idle between events": it keeps the wait and the generic sentence, as
+    // it had before the policy could speak.
+    //
+    // The scan has the whole window, since it returns as soon as the threads
+    // have answered, but each unwind only one poll interval: a sibling that
+    // neither answers nor refuses must not turn the answer that skips the
+    // wait into one that takes the wait, on every read of the stop.
+    const empty = isProgramNeutralStopReason(stopAtGate?.reason) ? policy.describeEmptyPausedStack?.() : undefined;
+    if (empty?.framesWillNotAppear) {
+      const sibling = await this.scanSiblings(
+        sessionId,
+        proxyManager,
+        threadId,
+        policy,
+        pausedStackReadyTimeoutMs,
+        undefined,
+        pausedStackReadyIntervalMs
+      );
       if (sibling) {
         return this.adoptFramedSibling(sessionId, session, proxyManager, threadId, stopAtGate, sibling);
       }
@@ -600,7 +619,8 @@ export class FrameAnchorResolver {
     stoppedFrames: DebugProtocol.StackFrame[],
     policy: AdapterPolicy,
     budgetMs: number,
-    threads?: DebugProtocol.Thread[]
+    threads?: DebugProtocol.Thread[],
+    unwindTimeoutMs: number = SIBLING_UNWIND_TIMEOUT_MS
   ): Promise<{ verdict: StopAnchorVerdict; threads: DebugProtocol.Thread[] }> {
     const listed = threads ?? await this.listThreadsForScan(sessionId, proxyManager) ?? [];
     const verdict = await selectStopAnchor({
@@ -611,7 +631,7 @@ export class FrameAnchorResolver {
       // Every listed thread, as the readiness scan always has (a .NET process
       // may list its one user thread twentieth); each unwind under its own
       // short timeout, all within the window the caller has left.
-      bounds: { maxThreads: Number.POSITIVE_INFINITY, unwindTimeoutMs: SIBLING_UNWIND_TIMEOUT_MS, budgetMs: Math.max(budgetMs, 0) },
+      bounds: { maxThreads: Number.POSITIVE_INFINITY, unwindTimeoutMs, budgetMs: Math.max(budgetMs, 0) },
       unwind: (threadId, { timeoutMs }) => this.requestRawStackFrames(sessionId, proxyManager, threadId, { timeoutMs }),
       log: (message) => this.ctx.logger.debug(`[FrameAnchor ${sessionId}] ${message}`)
     });
@@ -629,7 +649,8 @@ export class FrameAnchorResolver {
     excludeThreadId: number,
     policy: AdapterPolicy,
     budgetMs: number,
-    threads?: DebugProtocol.Thread[]
+    threads?: DebugProtocol.Thread[],
+    unwindTimeoutMs?: number
   ): Promise<SiblingStack | null> {
     const { verdict, threads: listed } = await this.verdictFor(
       sessionId,
@@ -638,7 +659,8 @@ export class FrameAnchorResolver {
       [],
       policy,
       budgetMs,
-      threads
+      threads,
+      unwindTimeoutMs
     );
     const chosen = verdict.programThreadId ?? verdict.framedSiblingId;
     if (chosen === undefined || chosen === excludeThreadId) {

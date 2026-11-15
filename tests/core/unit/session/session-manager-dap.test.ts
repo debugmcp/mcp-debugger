@@ -3695,9 +3695,10 @@ describe('SessionManager - DAP Operations', () => {
         expect(calls()).toBe(1);
       });
 
-      it('skips the wait on a pause only: any other stop with an empty stack waits, then says what the policy says', async () => {
-        // The claim that no frame will appear was measured on pauses. The
-        // helper's stop is an entry stop.
+      it('reads only a pause that way: any other stop with an empty stack waits and gets the generic sentence, as before', async () => {
+        // "Idle between events" was measured on pauses. The helper's stop is
+        // an entry stop, and a Dart isolate held at its start reports one
+        // with no frames: it is not idle, it has not begun.
         const session = await createPausedSession(sessionManager, dependencies);
         setShortReadyWindow();
         withPolicy(true);
@@ -3706,8 +3707,35 @@ describe('SessionManager - DAP Operations', () => {
         const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, { ensureStackReady: true });
 
         expect(result.frames).toEqual([]);
-        expect(result.note).toBe(IDLE);
+        expect(result.note).toMatch(/^The stopped thread reported no stack frames within 400ms/);
+        expect(result.note).not.toContain(IDLE);
         expect(calls()).toBeGreaterThan(2);
+      });
+
+      it('gives a sibling one poll interval to answer, not the window: a mute one must not bring the wait back', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        dependencies.mockProxyManager.simulateStopped(1, 'pause');
+        (sessionManager as unknown as { pausedStackReadyTimeoutMs: number }).pausedStackReadyTimeoutMs = 3000;
+        (sessionManager as unknown as { pausedStackReadyIntervalMs: number }).pausedStackReadyIntervalMs = 250;
+        withPolicy(true);
+        dependencies.mockProxyManager.dapRequestCalls = [];
+        dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+          if (command === 'stackTrace') {
+            return { success: true, body: { stackFrames: [] } };
+          }
+          if (command === 'threads') {
+            return { success: true, body: { threads: [{ id: 1, name: 'main' }, { id: 2, name: 'worker' }] } };
+          }
+          return { success: true, body: {} };
+        });
+
+        const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, { ensureStackReady: true });
+
+        expect(result.note).toBe(IDLE);
+        const siblingUnwinds = dependencies.mockProxyManager.dapRequestCalls
+          .filter((call) => call.command === 'stackTrace' && call.args?.threadId === 2);
+        expect(siblingUnwinds).toHaveLength(1);
+        expect(siblingUnwinds[0].options?.timeoutMs).toBeLessThanOrEqual(250);
       });
 
       it('get_local_variables keeps the sentence: the reason the stack is empty is not replaced by a generic one', async () => {
@@ -3746,6 +3774,7 @@ describe('SessionManager - DAP Operations', () => {
 
       it('waits as before when frames may still appear, and then says what the policy says', async () => {
         const session = await createPausedSession(sessionManager, dependencies);
+        dependencies.mockProxyManager.simulateStopped(1, 'pause');
         setShortReadyWindow();
         withPolicy(false);
         const calls = emptyStack();
