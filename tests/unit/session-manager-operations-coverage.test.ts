@@ -115,6 +115,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       isRunning: vi.fn().mockReturnValue(true),
       getCurrentThreadId: vi.fn().mockReturnValue(1),
       getPreDetachResume: vi.fn().mockReturnValue(undefined),
+      getDetachResult: vi.fn().mockReturnValue(undefined),
       sendDapRequest: vi.fn().mockResolvedValue({}),
       stop: vi.fn(),
       once: vi.fn(),
@@ -3932,8 +3933,9 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(result.success).toBe(true);
       expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('disconnect', {
         terminateDebuggee: false
-      });
-      expect(result.data?.message).toContain('process still running');
+      }, { timeoutMs: 10_000 });
+      expect(result.data?.message).toBe(ErrorMessages.detachReleased());
+
     });
 
     it('detachFromProcess should survive proxyManager being nulled during disconnect (race condition)', async () => {
@@ -3993,7 +3995,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('disconnect', { terminateDebuggee: true });
       expect(mockProxyManager.sendDapRequest).not.toHaveBeenCalledWith('disconnect', {
         terminateDebuggee: false
-      });
+      }, { timeoutMs: 10_000 });
       expect(mockProxyManager.stop).toHaveBeenCalled();
     });
 
@@ -4036,6 +4038,61 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     // ahead of every attach-mode disconnect where the policy asks and reports
     // the outcome as 'pre_detach_resume'; the session layer only sends the
     // disconnect and reads that outcome back into the detach result.
+    // Issue #1151: a session owns a program it launched and borrows one it
+    // attached to. Ending a session ends what it owns (the worker follows a
+    // launch session's disconnect with a terminating one and a tree kill), so
+    // a plain detach has nothing true to answer there: it is refused by name
+    // before anything is touched.
+    describe('a launched program ends with its session (issue #1151)', () => {
+      it('refuses a plain detach on a session that owns its program, and touches nothing', async () => {
+        mockSession.state = SessionState.PAUSED;
+        mockSession.proxyManager = mockProxyManager;
+        mockSession.programOwnership = 'owned';
+
+        const result = await operations.detachFromProcess('test-session', false);
+
+        expect(result).toEqual({
+          success: false,
+          state: SessionState.PAUSED,
+          error: ErrorMessages.detachOwnedProgramRefused()
+        });
+        expect(mockProxyManager.sendDapRequest).not.toHaveBeenCalled();
+        expect(mockProxyManager.stop).not.toHaveBeenCalled();
+        expect(mockSession.state).toBe(SessionState.PAUSED);
+        expect(mockSession.proxyManager).toBe(mockProxyManager);
+      });
+
+      it('names what to do instead: end it, or start it outside and attach', () => {
+        const message = ErrorMessages.detachOwnedProgramRefused();
+
+        expect(message).toMatch(/launched by this session/);
+        expect(message).toMatch(/close_debug_session/);
+        expect(message).toMatch(/terminateProcess: true/);
+        expect(message).toMatch(/attach_to_process/);
+      });
+
+      it('does not refuse a borrowed program', async () => {
+        mockSession.state = SessionState.PAUSED;
+        mockSession.proxyManager = mockProxyManager;
+        mockSession.programOwnership = 'borrowed';
+        mockProxyManager.sendDapRequest.mockResolvedValue({});
+
+        const result = await operations.detachFromProcess('test-session', false);
+
+        expect(result.success).toBe(true);
+        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('disconnect', { terminateDebuggee: false }, { timeoutMs: 10_000 });
+      });
+
+      it('answers a session with no program as before', async () => {
+        mockSession.proxyManager = undefined;
+        mockSession.programOwnership = 'owned';
+
+        const result = await operations.detachFromProcess('test-session', false);
+
+        expect(result).toMatchObject({ success: false, error: 'No active debug session to detach from' });
+      });
+    });
+
     describe('resume before detach (issue #763)', () => {
       const resumingPolicy = {
         getAttachBehavior: () => ({
@@ -4054,10 +4111,11 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         expect(result.success).toBe(true);
         // The session layer sends only the disconnect; the continue is the worker's.
         expect(mockProxyManager.sendDapRequest.mock.calls.map((call) => call[0])).toEqual(['disconnect']);
-        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('disconnect', { terminateDebuggee: false });
+        expect(mockProxyManager.sendDapRequest).toHaveBeenCalledWith('disconnect', { terminateDebuggee: false }, { timeoutMs: 10_000 });
         expect(result.data?.resumedBeforeDetach).toBe(true);
         expect(result.data?.warning).toBeUndefined();
-        expect(result.data?.message).toContain('process still running');
+        expect(result.data?.message).toBe(ErrorMessages.detachReleased());
+
       });
 
       it('reports nothing about a resume when no resume was called for', async () => {

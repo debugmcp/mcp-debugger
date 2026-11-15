@@ -2,7 +2,7 @@
  * DAP connection management utilities
  */
 
-import * as path from 'path';
+import { toDapSource } from '../utils/dap-source.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import {
   IDapClient,
@@ -328,14 +328,20 @@ export class DapConnectionManager {
   /**
    * Disconnect DAP client gracefully
    */
-  async disconnect(client: IDapClient | null, terminateDebuggee: boolean = true): Promise<void> {
+  async disconnect(
+    client: IDapClient | null,
+    terminateDebuggee: boolean = true
+  ): Promise<{ answered: boolean; error?: string }> {
     if (!client) {
       this.logger.info('[ConnectionManager] No active DAP client to disconnect.');
-      return;
+      return { answered: false, error: 'no DAP client' };
     }
 
     this.logger.info('[ConnectionManager] Attempting graceful DAP disconnect.');
-    
+
+    // Whether the adapter answered the request (issue #1148): the caller
+    // reports it, so a detach nobody acknowledged is not called a release.
+    let outcome: { answered: boolean; error?: string } = { answered: true };
     try {
       this.logger.info('[ConnectionManager] Sending "disconnect" request to DAP adapter...');
       await Promise.race([
@@ -348,6 +354,7 @@ export class DapConnectionManager {
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       this.logger.warn(`[ConnectionManager] Error or timeout during DAP "disconnect" request: ${message}`);
+      outcome = { answered: false, error: message };
     }
 
     // Always call the client's disconnect method to clean up
@@ -359,6 +366,7 @@ export class DapConnectionManager {
       const message = e instanceof Error ? e.message : String(e);
       this.logger.error(`[ConnectionManager] Error calling client.disconnect(): ${message}`, e);
     }
+    return outcome;
   }
 
   /**
@@ -454,7 +462,7 @@ export class DapConnectionManager {
     const sourceBreakpoints: DebugProtocol.SourceBreakpoint[] = breakpoints.map((bp) => toWireSourceBreakpoint(bp, policy));
 
     const setBreakpointsArgs: DebugProtocol.SetBreakpointsArguments = {
-      source: { path: sourcePath, name: path.basename(sourcePath) },
+      source: toDapSource(sourcePath),
       breakpoints: sourceBreakpoints
     };
 

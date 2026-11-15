@@ -66,12 +66,19 @@ async function droppingListener(how: 'hangUp' | 'reset'): Promise<{ port: number
  * on the request after it: a debug server (or a forwarder to one) that goes
  * away mid-handshake.
  */
-async function answersInitializeThenHangsUp(): Promise<{ port: number; received: () => number; close: () => Promise<void> }> {
+async function answersInitializeThenHangsUp(
+  how: 'hangUp' | 'terminated' | 'refuseConfiguration' = 'hangUp'
+): Promise<{ port: number; received: () => number; close: () => Promise<void> }> {
   let requests = 0;
   const sockets = new Set<net.Socket>();
   const listener = net.createServer((socket) => {
     sockets.add(socket);
     let buffer = Buffer.alloc(0);
+    const send = (message: Record<string, unknown>) => {
+      const frame = Buffer.from(JSON.stringify(message), 'utf8');
+      socket.write(`Content-Length: ${frame.length}\r\n\r\n`);
+      socket.write(frame);
+    };
     socket.on('data', (chunk: Buffer) => {
       buffer = Buffer.concat([buffer, chunk]);
       for (;;) {
@@ -81,8 +88,28 @@ async function answersInitializeThenHangsUp(): Promise<{ port: number; received:
         const request = JSON.parse(buffer.subarray(headerEnd + 4, headerEnd + 4 + Number(length[1])).toString('utf8'));
         buffer = buffer.subarray(headerEnd + 4 + Number(length[1]));
         requests++;
+        if (how === 'refuseConfiguration') {
+          // A debug server that takes the handshake up to configurationDone
+          // and refuses that request in DAP, in its own words.
+          const refused = request.command === 'configurationDone';
+          send({
+            seq: requests, type: 'response', request_seq: request.seq, command: request.command, success: !refused,
+            ...(refused ? { message: 'configuration refused by the server' } : { body: {} })
+          });
+          if (request.command === 'initialize') send({ seq: 100, type: 'event', event: 'initialized' });
+          continue;
+        }
         if (request.command !== 'initialize') {
-          socket.destroy();
+          if (how === 'terminated') {
+            // A debug server ending the session: the event, then the close a
+            // moment later, so the event is read before the socket goes away.
+            const event = Buffer.from(JSON.stringify({ seq: 2, type: 'event', event: 'terminated' }), 'utf8');
+            socket.write(`Content-Length: ${event.length}\r\n\r\n`);
+            socket.write(event);
+            setTimeout(() => socket.destroy(), 300);
+          } else {
+            socket.destroy();
+          }
           return;
         }
         const body = Buffer.from(JSON.stringify({
@@ -176,6 +203,43 @@ describe('A Python attach to a port that is not a debug server (issue #1139)', (
     expect(target.received()).toBe(2);
     expect(answer.message, JSON.stringify(answer)).toBe(
       'Failed to attach: Critical initialization error: DAP client disconnected ' +
+      `[direct connect to 127.0.0.1:${target.port}; no adapter process was started]`
+    );
+  }, 60_000);
+
+  it('says by endpoint that the debug server ended the session when it sends terminated and closes mid-handshake (issue #1152)', async () => {
+    // The worker shuts down on `terminated`, and its exit used to reach the
+    // parent ahead of any report: "Proxy exited during initialization" with
+    // lines of worker stderr. Whichever message comes first now, the answer
+    // names the endpoint and says nothing was started.
+    target = await answersInitializeThenHangsUp('terminated');
+    server = await startStdioClient({ name: 'attach-terminated-port' });
+    await server.createSession('python', 'attach-terminated-port');
+
+    const answer = await server.call<AttachAnswer>('attach_to_process', { port: target.port });
+
+    expect(answer.success, JSON.stringify(answer)).toBe(false);
+    expect(answer.message, JSON.stringify(answer)).toContain(
+      `127.0.0.1:${target.port} ended the debug session during the DAP handshake: it sent "terminated" and the connection closed.`
+    );
+    expect(answer.message, JSON.stringify(answer)).toContain('Nothing was started for this attach');
+    expect(answer.message).not.toContain('Proxy exited');
+    expect(answer.message).not.toContain('Stderr output');
+  }, 60_000);
+
+  it('adds the endpoint to a refusal the debug server words itself (issue #1152)', async () => {
+    // The server's own words were there and the endpoint was not: every
+    // other failed direct connection says what was dialed and that nothing
+    // was started.
+    target = await answersInitializeThenHangsUp('refuseConfiguration');
+    server = await startStdioClient({ name: 'attach-refusing-port' });
+    await server.createSession('python', 'attach-refusing-port');
+
+    const answer = await server.call<AttachAnswer>('attach_to_process', { port: target.port });
+
+    expect(answer.success, JSON.stringify(answer)).toBe(false);
+    expect(answer.message, JSON.stringify(answer)).toContain('configuration refused by the server');
+    expect(answer.message, JSON.stringify(answer)).toContain(
       `[direct connect to 127.0.0.1:${target.port}; no adapter process was started]`
     );
   }, 60_000);

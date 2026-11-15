@@ -59,6 +59,15 @@ public class JdiDapServer {
     private final ConcurrentHashMap<String, Map<String, Object>> deferredBreakpoints = new ConcurrentHashMap<>();
     // Track source paths for deferred breakpoint responses
     private final ConcurrentHashMap<String, String> sourcePathMap = new ConcurrentHashMap<>();
+    // Directories a class's source file may be under, and what each
+    // source-root-relative path resolved to under them ("" when under none)
+    // (issue #1138).
+    private final List<String> sourceRoots = new java.util.concurrent.CopyOnWriteArrayList<>();
+    // The roots a bare file name (a default-package class) is looked up
+    // under: `sourceRoots` without the ancestors the adapter climbed to. A
+    // package path under an ancestor is specific; `Util.java` is not.
+    private final List<String> defaultPackageRoots = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private final ConcurrentHashMap<String, String> resolvedSources = new ConcurrentHashMap<>();
 
     // --- Function breakpoints (issue #292) ---
     // Records for the current setFunctionBreakpoints generation, in request
@@ -323,6 +332,7 @@ public class JdiDapServer {
     }
 
     private void handleAttach(int reqSeq, Map<String, Object> args) throws Exception {
+        readSourceRoots(args);
         String host = strOr(args, "host", strOr(args, "hostName", "localhost"));
         int port = intVal(args, "port");
         if (port == 0) {
@@ -352,6 +362,7 @@ public class JdiDapServer {
     }
 
     private void handleLaunch(int reqSeq, Map<String, Object> args) throws Exception {
+        readSourceRoots(args);
         String mainClass = str(args, "mainClass");
         if (mainClass == null || mainClass.isEmpty()) {
             sendErrorResponse(reqSeq, "launch", "mainClass is required");
@@ -755,6 +766,7 @@ public class JdiDapServer {
     private Map<String, Object> setBreakpointOnClass(ReferenceType refType, int line, String condition, String sourcePath, String suspendPolicy) {
         Map<String, Object> bp = new HashMap<>();
         bp.put("id", nextBreakpointId.getAndIncrement());
+        learnSourceRoot(refType, sourcePath);
         try {
             List<Location> locs = refType.locationsOfLine(line);
             if (locs.isEmpty()) {
@@ -2136,6 +2148,25 @@ public class JdiDapServer {
         return frameIdMap.get(frameId);
     }
 
+    /**
+     * The directories a class's source file may be under (issue #1138): the
+     * adapter sends the ones the launch knows as `sourceRoots`.
+     */
+    private void readSourceRoots(Map<String, Object> args) {
+        addRoots(args.get("sourceRoots"), sourceRoots);
+        addRoots(args.get("defaultPackageRoots"), defaultPackageRoots);
+        log("Source roots: " + sourceRoots + "; for the default package: " + defaultPackageRoots);
+    }
+
+    private static void addRoots(Object roots, List<String> into) {
+        if (!(roots instanceof List)) return;
+        for (Object root : (List<?>) roots) {
+            if (root instanceof String && !((String) root).isEmpty() && !into.contains(root)) {
+                into.add((String) root);
+            }
+        }
+    }
+
     private String resolveSourcePath(Location loc) {
         try {
             String sourceName = loc.sourceName();
@@ -2144,18 +2175,101 @@ public class JdiDapServer {
             int lastSlash = className.lastIndexOf('/');
             String baseName = sourceName.replace(".java", "");
 
-            // Check if we have a known source path for this class
-            String knownPath = sourcePathMap.get(baseName);
-            if (knownPath != null) return knownPath;
+            // The path JDI knows: relative to the source root
+            // (com/acme/Helper.java, or a bare Helper.java in the default
+            // package).
+            String relative = lastSlash >= 0 ? className.substring(0, lastSlash + 1) + sourceName : sourceName;
 
-            // Try with package prefix
-            if (lastSlash >= 0) {
-                return className.substring(0, lastSlash + 1) + sourceName;
+            // A path a line breakpoint named, kept by the file's base name.
+            // It is this class's file when its tail is this class's package
+            // path; a class of the same name in another package has a file
+            // of its own (issue #1138).
+            String knownPath = sourcePathMap.get(baseName);
+            if (knownPath != null && endsWithPath(knownPath, relative)) return knownPath;
+
+            // Only a line breakpoint set by path used to say where a class's
+            // source is, so every other stop answered the relative name
+            // (issue #1138). Look it up under the roots the session knows;
+            // the first root it exists under wins, and the answer is kept
+            // per file until another root is learnt.
+            String resolved;
+            // One lock for a lookup and for learning a root: a lookup that
+            // walked the old roots must not store its miss after the request
+            // thread has learnt a new root and emptied the cache.
+            synchronized (resolvedSources) {
+                resolved = resolvedSources.get(relative);
+                if (resolved == null) {
+                    resolved = "";
+                    // A bare name is looked up only where the session points,
+                    // not in every directory above it.
+                    for (String root : (lastSlash >= 0 ? sourceRoots : defaultPackageRoots)) {
+                        File candidate = new File(root, relative);
+                        if (candidate.isFile()) {
+                            resolved = candidate.getAbsolutePath();
+                            break;
+                        }
+                    }
+                    resolvedSources.put(relative, resolved);
+                }
             }
-            return sourceName;
+            if (!resolved.isEmpty()) return resolved;
+
+            // Under no root. A file that declares a package but sits outside
+            // a package-shaped directory is still the one the breakpoint
+            // named, as before.
+            return knownPath != null ? knownPath : relative;
         } catch (AbsentInformationException e) {
             return loc.declaringType().name();
         }
+    }
+
+    /**
+     * A line breakpoint's path, on the class it is set on, shows where that
+     * class's source tree starts: the path's tail is the class's package path
+     * (com/acme/Helper.java) and what precedes it is a source root (issue
+     * #1138). It goes first, because the caller named a file under it. An
+     * attach knows no other root unless the caller passes `sourcePaths`.
+     */
+    private void learnSourceRoot(ReferenceType refType, String sourcePath) {
+        if (sourcePath == null) return;
+        try {
+            String typeName = refType.name();
+            int lastDot = typeName.lastIndexOf('.');
+            String relative = (lastDot >= 0 ? typeName.substring(0, lastDot + 1).replace('.', '/') : "") + refType.sourceName();
+            // Root plus separator plus tail: a path that is only the tail has no root to give.
+            if (sourcePath.length() <= relative.length() + 1 || !endsWithPath(sourcePath, relative)) return;
+            String root = sourcePath.substring(0, sourcePath.length() - relative.length() - 1);
+            synchronized (resolvedSources) {
+                if (!sourceRoots.isEmpty() && root.equals(sourceRoots.get(0)) &&
+                        !defaultPackageRoots.isEmpty() && root.equals(defaultPackageRoots.get(0))) return;
+                // A configured root may already be known, but the caller's
+                // breakpoint now identifies it as the active source tree.
+                // Promote it even then, ahead of other versions of the same
+                // package, and forget lookups cached under the old priority.
+                sourceRoots.remove(root);
+                sourceRoots.add(0, root);
+                defaultPackageRoots.remove(root);
+                defaultPackageRoots.add(0, root);
+                resolvedSources.clear();
+            }
+            log("Source root learnt from a breakpoint on " + typeName + ": " + root);
+        } catch (AbsentInformationException e) {
+            // No source name on this class: nothing to learn from it.
+        }
+    }
+
+    /**
+     * Whether `path` ends with the root-relative `relative` as whole path
+     * segments: separators aside, and case aside where the file system
+     * ignores it.
+     */
+    private static boolean endsWithPath(String path, String relative) {
+        String normal = path.replace('\\', '/');
+        int start = normal.length() - relative.length();
+        if (start < 0) return false;
+        boolean ignoreCase = File.separatorChar == '\\';
+        if (!normal.regionMatches(ignoreCase, start, relative, 0, relative.length())) return false;
+        return start == 0 || normal.charAt(start - 1) == '/';
     }
 
     private void clearFrameCache() {

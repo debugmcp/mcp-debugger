@@ -51,6 +51,7 @@ export type ProxyManagerMockKeys =
   | 'isRunning'
   | 'getCurrentThreadId'
   | 'getPreDetachResume'
+  | 'getDetachResult'
   | 'sendDapRequest'
   | 'stop'
   | 'once'

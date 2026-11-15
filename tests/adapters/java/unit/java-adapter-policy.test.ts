@@ -226,6 +226,28 @@ describe('JavaAdapterPolicy', () => {
       expect(JavaAdapterPolicy.isInternalFrame!({ id: 1, name: 'run', file: '/usr/lib/jdk/Thread.java', line: 0 })).toBe(true);
       expect(JavaAdapterPolicy.isInternalFrame!({ id: 1, name: 'run', file: '/opt/rt.jar/Thread.java', line: 0 })).toBe(true);
     });
+
+    it('does not take a class in a package for the JDK because its project lives under a directory called jdk (issue #1160)', () => {
+      // The bridge now answers an absolute path for every class it finds a
+      // source for (issue #1138), so the path fragment would have hidden the
+      // whole program of such a project.
+      const frame = (name: string) => ({ id: 1, name, file: '/home/user/jdk/app/src/com/acme/App.java', line: 12 });
+      expect(JavaAdapterPolicy.isInternalFrame!(frame('com.acme.App.main'))).toBe(false);
+      expect(JavaAdapterPolicy.isInternalFrame!(frame('com.acme.App$Worker.lambda$run$0'))).toBe(false);
+      // The JDK's own classes are known by name, whatever the path.
+      expect(JavaAdapterPolicy.isInternalFrame!(frame('java.lang.Thread.run'))).toBe(true);
+    });
+
+    it('keeps default-package classes under JDK-like directory names (issue #1160)', () => {
+      // The bridge always names the declaring class, including for classes
+      // in the default package. A JDK class would carry its java./jdk./etc.
+      // prefix, so Main.main is not made internal by its project directory.
+      for (const file of ['/home/user/jdk/app/Main.java', '/home/user/rt.jar/app/Main.java']) {
+        for (const name of ['Main.main', 'Main.<init>', 'Main$Worker.run']) {
+          expect(JavaAdapterPolicy.isInternalFrame!({ id: 1, name, file, line: 12 })).toBe(false);
+        }
+      }
+    });
   });
 
   describe('getInitializationBehavior', () => {
@@ -420,7 +442,8 @@ describe('JavaAdapterPolicy', () => {
     it('should filter frames with /jdk/ in path', () => {
       const frames = [
         { id: 1, name: 'com.example.App.run', file: '/app/App.java', line: 10 },
-        { id: 2, name: 'Runtime.exec', file: '/usr/lib/jdk/Runtime.java', line: 100 }
+        // No declaring class in the name: the path remains the fallback.
+        { id: 2, name: 'exec', file: '/usr/lib/jdk/Runtime.java', line: 100 }
       ];
 
       const filtered = JavaAdapterPolicy.filterStackFrames!(frames, false);
@@ -431,7 +454,7 @@ describe('JavaAdapterPolicy', () => {
     it('should filter frames with /rt.jar/ in path', () => {
       const frames = [
         { id: 1, name: 'com.example.App.run', file: '/app/App.java', line: 10 },
-        { id: 2, name: 'Object.wait', file: '/jre/lib/rt.jar/Object.java', line: 50 }
+        { id: 2, name: 'wait', file: '/jre/lib/rt.jar/Object.java', line: 50 }
       ];
 
       const filtered = JavaAdapterPolicy.filterStackFrames!(frames, false);
@@ -440,16 +463,17 @@ describe('JavaAdapterPolicy', () => {
     });
   });
 
-  // The bridge knows a class's file path only when a breakpoint was set in
-  // it; every other class is named by package path and flagged
-  // unresolvedSource when it is the kept paused frame (issues #672/#816).
+  // The bridge finds a class's file under the source roots the session knows
+  // (issue #1138); a class under none of them is named by package path and
+  // flagged unresolvedSource when it is the kept paused frame (issues
+  // #672/#816).
   describe('describeUnresolvedSource', () => {
-    it('explains a package-path label and how the bridge learns a real path', () => {
+    it('explains a package-path label and how the bridge learns a source root', () => {
       const text = JavaAdapterPolicy.describeUnresolvedSource!({
         count: 1, files: ['java/io/PrintStream.java'], attachMode: false
       });
       expect(text).toMatch(/It is a class the JDI bridge names by package path \(java\/io\/PrintStream\.java\)/);
-      expect(text).toMatch(/breakpoint set in a class's source file teaches the bridge its path/);
+      expect(text).toMatch(/under none of the source roots it knows: sourcePaths, or a line breakpoint set in a file of the same source tree, shows it a root/);
       expect(text).not.toMatch(/sourceMaps|native frames/);
     });
 

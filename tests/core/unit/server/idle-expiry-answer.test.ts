@@ -106,6 +106,10 @@ describe('what an agent sees of the idle policy (issue #1025, step 2)', () => {
         expect(describeIdleExpiry(record({ outcome: 'ended' }))).toContain(' Its program was ended. ');
         expect(describeIdleExpiry(record({ outcome: 'released' }))).toContain(' The process it was attached to was released and keeps running. ');
         expect(describeIdleExpiry(record({ outcome: 'closed' }))).toContain(' It had no running program by then. ');
+        // Issue #1148: an attached process whose detach nothing acknowledged is not called released, or ended.
+        expect(describeIdleExpiry(record({ outcome: 'unconfirmed' }))).toContain(
+          ' The debug adapter did not confirm that it released the process it was attached to, so whether that process is still running is not known. '
+        );
       });
 
       it('states the idle time in the unit of the window, never a mix', () => {

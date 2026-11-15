@@ -60,8 +60,34 @@ const pythonChildAdoption: ChildAdoptionContract = {
  */
 const PYDEVD_PAUSED_AT_NOTE = '(note: full exception trace is shown but execution is paused at:';
 
+/**
+ * What pydevd appends to the NAME of the frame execution is paused in at a
+ * user-unhandled exception stop (`pydevd_comm.py`), with the traceback's
+ * frames, the ones the exception has already left, listed above it (issue
+ * #1143). Measured on debugpy 1.8 across five pytest shapes: the marked frame
+ * is always the first live one.
+ */
+const PYDEVD_CURRENT_FRAME_MARK = ' (Current frame)';
+
 export const PythonAdapterPolicy = {
   name: 'python',
+  // A frame's name is the function's name (issue #1143). pydevd's marker
+  // comes off, and what it said becomes data: the frames above the marked
+  // one have been left by the exception (`unwound: true`), so the first
+  // frame without the flag is the live one, as on every other stop.
+  normalizeStackFrames: (frames: StackFrame[]): StackFrame[] => {
+    // A frame with no name carries no marker; the hook reads what is there.
+    const live = frames.findIndex((frame) => typeof frame.name === 'string' && frame.name.endsWith(PYDEVD_CURRENT_FRAME_MARK));
+    if (live === -1) {
+      return frames;
+    }
+    return frames.map((frame, index) => {
+      if (index < live) {
+        return { ...frame, unwound: true as const };
+      }
+      return index === live ? { ...frame, name: frame.name.slice(0, -PYDEVD_CURRENT_FRAME_MARK.length) } : frame;
+    });
+  },
   // debugpy runs the program undebugged under noDebug (verified live) and,
   // correctly, sends no `initialized`: the worker does not wait for one (#746).
   honoursNoDebug: true,

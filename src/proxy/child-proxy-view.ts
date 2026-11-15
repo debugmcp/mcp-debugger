@@ -14,7 +14,7 @@
 import { EventEmitter } from 'events';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import type { HandshakeProxy, ILogger } from '@debugmcp/shared';
-import type { ChildReportedEvent, IProxyManager, PreDetachResume, ProxyManagerEvents } from './proxy-manager.js';
+import type { ChildReportedEvent, DetachResult, IProxyManager, PreDetachResume, ProxyManagerEvents } from './proxy-manager.js';
 import type { ProxyConfig } from './proxy-config.js';
 import type { ProxyDapEventMessage, ProxyMessage, ProxyStatusMessage } from '../dap-core/types.js';
 import { CHILD_ADOPT_COMMAND, CHILD_CLOSE_COMMAND, type ChildAdoptArgs } from './dap-proxy-interfaces.js';
@@ -238,6 +238,11 @@ export class ChildProxyView extends EventEmitter implements IChildProxyView {
   }
 
   getPreDetachResume(): PreDetachResume | undefined {
+    return undefined;
+  }
+
+  /** A child's connection is closed by its own command, which answers for itself (issue #1148). */
+  getDetachResult(): DetachResult | undefined {
     return undefined;
   }
 

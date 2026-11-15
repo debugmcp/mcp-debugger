@@ -24,6 +24,7 @@ import { ErrorMessages } from '../../utils/error-messages.js';
 import {
   isProgramNeutralStopReason,
   policyUserFrames,
+  programFrames,
   selectStopAnchor,
   toStackFrame,
   USER_DIRECTED_STOP_REASONS,
@@ -31,10 +32,41 @@ import {
 } from './stop-anchor.js';
 
 /** The frame fields a tool response names when it says which frame answered. */
-export type FrameSummary = Pick<StackFrame, 'name' | 'file' | 'line'>;
+export type FrameSummary = Pick<StackFrame, 'name' | 'file' | 'line' | 'unwound' | 'unresolvedSource'>;
 
 export function frameSummary(frame: StackFrame): FrameSummary {
-  return { name: frame.name, file: frame.file, line: frame.line };
+  // `unwound` rides along (issue #1143): an answer that names a frame the
+  // exception has left says so wherever it names it. So does
+  // `unresolvedSource` (issue #1131): a `file` that is a label, not a path,
+  // is one wherever it is named, not only in get_stack_trace.
+  return {
+    name: frame.name,
+    file: frame.file,
+    line: frame.line,
+    ...(frame.unwound ? { unwound: true as const } : {}),
+    ...(frame.unresolvedSource ? { unresolvedSource: true as const } : {})
+  };
+}
+
+/** The adapter's frames as the server's, in the shape the policy gives every stack (issue #1143). */
+function framesOf(rawFrames: DebugProtocol.StackFrame[], policy: Pick<AdapterPolicy, 'normalizeStackFrames'>): StackFrame[] {
+  const frames = rawFrames.map(toStackFrame);
+  return policy.normalizeStackFrames ? policy.normalizeStackFrames(frames) : frames;
+}
+
+/**
+ * The sentence for a stack whose top frames the exception has already left
+ * (issue #1143): where it was raised, and where execution is paused.
+ */
+function describeUnwoundFrames(frames: StackFrame[]): string | undefined {
+  if (!frames[0]?.unwound) {
+    return undefined;
+  }
+  const live = frames.find((frame) => !frame.unwound);
+  return ErrorMessages.exceptionRaisedInUnwoundFrame(
+    frames[0].name,
+    live ? { name: live.name, where: `${live.file.split(/[\\/]/).pop() ?? live.file}:${live.line}` } : undefined
+  );
 }
 
 /**
@@ -58,14 +90,23 @@ export interface StackTraceResult {
   hiddenFrameCount: number;
   allFramesInternal: boolean;
   /**
-   * True when no frame of the resolved stack is one the policy calls the
-   * program's (issue #904): the stop landed outside the program — a pause
-   * between event-loop dispatches, a runtime thread no sibling could replace.
-   * Read off the per-frame classifier, so it holds for a policy whose filter
-   * hands the whole stack back when nothing survives (Java), where
-   * `allFramesInternal` stays false. Present only when true.
+   * True when no frame of the resolved stack is program code (issue #904):
+   * none is both one the policy calls the program's and one that names a
+   * source (`programFrames`, issue #1131). The stop landed where nothing can
+   * be opened at a line — a pause between event-loop dispatches, a runtime
+   * thread no sibling could replace, a language's start-up shim after a step
+   * out of `main`. Read off the per-frame classifier, so it holds for a
+   * policy whose filter hands the whole stack back when nothing survives
+   * (Java), where `allFramesInternal` stays false. Present only when true.
    */
   noProgramFrame?: boolean;
+  /**
+   * Present with `noProgramFrame` when some frame is NOT one the policy
+   * calls internal: it is counted out because it has no source (issue
+   * #1131). The sentence then says so instead of calling every frame
+   * runtime — it may be the caller's own code built without debug info.
+   */
+  sourcelessFrames?: true;
   /**
    * Present when the frame the debuggee is actually paused in was filtered
    * as internal while ancestors survived (issue #672) — see the keep/hide rule
@@ -179,7 +220,11 @@ export class FrameAnchorResolver {
     const effectiveThreadId = threadId ?? currentThreadId;
     if (typeof effectiveThreadId !== 'number') {
       this.ctx.logger.warn(`[FrameAnchor ${sessionId}] No effective thread ID to use.`);
-      return emptyResult('No stopped thread is known for this session.');
+      // With its own next step: get_local_variables adds none to a stack
+      // read that has spoken (issue #1132).
+      return emptyResult(
+        'No stopped thread is known for this session. Name one: get_stack_trace with a threadId from list_threads reads that thread\'s stack.'
+      );
     }
     // The stop this stack belongs to. A new stop landing while the stack is
     // in flight makes the frames stale; the paused-frame rule below and every
@@ -206,17 +251,18 @@ export class FrameAnchorResolver {
         note = ready.note;
         resultThreadId = ready.threadId;
       } else if (rawFrames.length === 0 && typeof threadId === 'number') {
-        note = await this.describeFramelessThread(sessionId, proxyManager, threadId, policy);
+        note = await this.describeFramelessThread(sessionId, proxyManager, threadId, policy, stopAtGate?.reason);
       } else if (
         rawFrames.length > 0 &&
         opts?.ensureStackReady &&
         isProgramNeutralStopReason(stopAtGate?.reason) &&
         this.isStoppedThread(stopAtGate, currentThreadId, effectiveThreadId) &&
-        policyUserFrames(rawFrames.map(toStackFrame), policy).length === 0
+        programFrames(rawFrames.map(toStackFrame), policy).length === 0
       ) {
-        // A pause reported on a thread whose stack is all runtime (the
-        // break-in thread Windows injects, issue #898) says nothing about
-        // where the program is; a sibling in the program's code does. Only a
+        // A pause reported on a thread whose stack has no program frame (the
+        // break-in thread Windows injects, issue #898; frames the debugger
+        // has no source for, issue #1131) says nothing about where the
+        // program is; a sibling in the program's code does. Only a
         // program-neutral stop may move: a breakpoint, step, exception or
         // entry stop belongs to the thread it was reported on. Only an
         // implicit read may move, and `ensureStackReady` is what the implicit
@@ -238,7 +284,7 @@ export class FrameAnchorResolver {
         }
       }
 
-      let frames: StackFrame[] = rawFrames.map(toStackFrame);
+      let frames: StackFrame[] = framesOf(rawFrames, policy);
       const totalFrameCount = frames.length;
       let allFramesInternal = false;
       let pausedFrame: PausedFrameDisclosure | undefined;
@@ -283,7 +329,11 @@ export class FrameAnchorResolver {
           frames = filtered;
         }
       }
-      const noProgramFrame = frames.length > 0 && policyUserFrames(frames, policy).length === 0;
+      // The filter above removes only frames the policy calls internal, and
+      // those are never program frames, so the verdict on what is shown is
+      // the verdict on the whole stack.
+      const noProgramFrame = frames.length > 0 && programFrames(frames, policy).length === 0;
+      const sourcelessFrames = noProgramFrame && policyUserFrames(frames, policy).length > 0;
 
       // An implicit read answered from a thread other than the one the stop
       // named — the attach controller or an earlier resolve moved the anchor
@@ -300,6 +350,13 @@ export class FrameAnchorResolver {
         note = `The stop was reported on thread ${stopAtGate.threadId}; inspection is anchored on thread ${resultThreadId}.`;
       }
 
+      // Where the exception was raised is not where execution is paused
+      // (issue #1143): say both, beside whatever else the read has to say.
+      const unwoundNote = describeUnwoundFrames(frames);
+      if (unwoundNote) {
+        note = note ? `${note} ${unwoundNote}` : unwoundNote;
+      }
+
       this.ctx.logger.info(
         `[FrameAnchor ${sessionId}] Resolved ${frames.length}/${totalFrameCount} frame(s) on thread ${resultThreadId}`
       );
@@ -310,6 +367,7 @@ export class FrameAnchorResolver {
         hiddenFrameCount: totalFrameCount - frames.length,
         allFramesInternal,
         ...(noProgramFrame ? { noProgramFrame } : {}),
+        ...(sourcelessFrames ? { sourcelessFrames: true as const } : {}),
         ...(pausedFrame ? { pausedFrame, pausedFrameNote } : {}),
         ...(note ? { note } : {})
       };
@@ -377,6 +435,37 @@ export class FrameAnchorResolver {
     policy: AdapterPolicy
   ): Promise<{ frames: DebugProtocol.StackFrame[]; threadId: number; note?: string }> {
     const { pausedStackReadyTimeoutMs, pausedStackReadyIntervalMs } = this.ctx.tunables;
+    // What an empty paused stack means under this adapter (issue #1132). Where
+    // the policy says no frame will appear there is nothing to wait for: one
+    // look at the sibling threads, then the policy's sentence.
+    //
+    // The policy's reading is for a pause, the stop it was measured on. Any
+    // other stop with an empty stack (a Dart isolate held at its start under
+    // --pause_isolates_on_start reports an entry stop with no frames) is not
+    // "idle between events": it keeps the wait and the generic sentence, as
+    // it had before the policy could speak.
+    //
+    // The scan has the whole window, since it returns as soon as the threads
+    // have answered, but each unwind only one poll interval: a sibling that
+    // neither answers nor refuses must not turn the answer that skips the
+    // wait into one that takes the wait, on every read of the stop.
+    const empty = isProgramNeutralStopReason(stopAtGate?.reason) ? policy.describeEmptyPausedStack?.() : undefined;
+    if (empty?.framesWillNotAppear) {
+      const sibling = await this.scanSiblings(
+        sessionId,
+        proxyManager,
+        threadId,
+        policy,
+        pausedStackReadyTimeoutMs,
+        undefined,
+        pausedStackReadyIntervalMs
+      );
+      if (sibling) {
+        return this.adoptFramedSibling(sessionId, session, proxyManager, threadId, stopAtGate, sibling);
+      }
+      this.ctx.logger.info(`[FrameAnchor ${sessionId}] Thread ${threadId} is paused with no frames: ${empty.note}`);
+      return { frames: [], threadId, note: empty.note };
+    }
     const deadline = Date.now() + pausedStackReadyTimeoutMs;
     while (Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, pausedStackReadyIntervalMs));
@@ -402,28 +491,15 @@ export class FrameAnchorResolver {
         Math.max(deadline - Date.now(), pausedStackReadyIntervalMs)
       );
       if (scanned) {
-        // A stop that landed during the scan has re-anchored the session
-        // itself; adopting now would clobber it with a stale verdict.
-        if (session.lastStop !== stopAtGate || session.state !== SessionState.PAUSED) {
-          this.ctx.logger.info(
-            `[FrameAnchor ${sessionId}] The stop changed while scanning for a framed thread; not adopting thread ${scanned.threadId}.`
-          );
-          return {
-            frames: [],
-            threadId,
-            note: 'A new stop landed while the stack was being read; ask again.'
-          };
-        }
-        proxyManager.setCurrentThreadId(scanned.threadId);
-        this.ctx.logger.info(
-          `[FrameAnchor ${sessionId}] Thread ${threadId} stayed frameless; adopted thread ${scanned.threadId}.`
-        );
-        return {
-          frames: scanned.frames,
-          threadId: scanned.threadId,
-          note: `The stopped thread ${threadId} reported no stack frames; switched to thread ${scanned.threadId}, which has one.`
-        };
+        return this.adoptFramedSibling(sessionId, session, proxyManager, threadId, stopAtGate, scanned);
       }
+    }
+    if (empty) {
+      // The policy's own reading, after the wait it did not rule out.
+      this.ctx.logger.info(
+        `[FrameAnchor ${sessionId}] Thread ${threadId} is paused with no frames after ${pausedStackReadyTimeoutMs}ms: ${empty.note}`
+      );
+      return { frames: [], threadId, note: empty.note };
     }
     this.ctx.logger.warn(
       `[FrameAnchor ${sessionId}] Stack stayed empty for ${pausedStackReadyTimeoutMs}ms on thread ${threadId}.`
@@ -432,6 +508,38 @@ export class FrameAnchorResolver {
       frames: [],
       threadId,
       note: `The stopped thread reported no stack frames within ${pausedStackReadyTimeoutMs}ms; the target may be paused in native code. Try get_stack_trace with a threadId from list_threads, or continue_execution followed by pause_execution to re-anchor the session on a reportable thread.`
+    };
+  }
+
+  /** Anchor the session on a sibling thread that has frames, unless the stop changed while it was being found. */
+  private adoptFramedSibling(
+    sessionId: string,
+    session: Pick<ManagedSession, 'state' | 'lastStop'>,
+    proxyManager: IProxyManager,
+    threadId: number,
+    stopAtGate: ManagedSession['lastStop'],
+    scanned: { threadId: number; frames: DebugProtocol.StackFrame[] }
+  ): { frames: DebugProtocol.StackFrame[]; threadId: number; note: string } {
+    // A stop that landed during the scan has re-anchored the session
+    // itself; adopting now would clobber it with a stale verdict.
+    if (session.lastStop !== stopAtGate || session.state !== SessionState.PAUSED) {
+      this.ctx.logger.info(
+        `[FrameAnchor ${sessionId}] The stop changed while scanning for a framed thread; not adopting thread ${scanned.threadId}.`
+      );
+      return {
+        frames: [],
+        threadId,
+        note: 'A new stop landed while the stack was being read; ask again.'
+      };
+    }
+    proxyManager.setCurrentThreadId(scanned.threadId);
+    this.ctx.logger.info(
+      `[FrameAnchor ${sessionId}] Thread ${threadId} stayed frameless; adopted thread ${scanned.threadId}.`
+    );
+    return {
+      frames: scanned.frames,
+      threadId: scanned.threadId,
+      note: `The stopped thread ${threadId} reported no stack frames; switched to thread ${scanned.threadId}, which has one.`
     };
   }
 
@@ -483,17 +591,23 @@ export class FrameAnchorResolver {
     }
     proxyManager.setCurrentThreadId(programThreadId);
     const reportedTop = toStackFrame(stoppedFrames[0]);
-    const landing = policyUserFrames(frames.map(toStackFrame), policy)[0] ?? toStackFrame(frames[0]);
+    const landing = programFrames(frames.map(toStackFrame), policy)[0] ?? toStackFrame(frames[0]);
     this.ctx.logger.info(
       `[FrameAnchor ${sessionId}] Stop on thread ${stoppedThreadId} has no program frame; adopted thread ${programThreadId} in '${landing.name}'.`
     );
     const count = stoppedFrames.length;
+    // Left for being runtime, or for having no source (issue #1131): a frame
+    // the policy keeps is not shown to be runtime, so the note does not say so.
+    const sourceless = policyUserFrames(stoppedFrames.map(toStackFrame), policy).length > 0;
+    const whatTheyAre = sourceless
+      ? (count === 1 ? ' has no source' : 's are all internal/runtime or have no source')
+      : `${count === 1 ? ' is' : 's are all'} internal/runtime`;
     return {
       frames,
       threadId: programThreadId,
       note:
-        `The stop was reported on thread ${threadLabel(stoppedThreadId, threads)}, whose ${count} frame${count === 1 ? ' is' : 's are all'} ` +
-        `internal/runtime (top: '${reportedTop.name}'); showing thread ${threadLabel(programThreadId, threads)}, ` +
+        `The stop was reported on thread ${threadLabel(stoppedThreadId, threads)}, whose ${count} frame${whatTheyAre} ` +
+        `(top: '${reportedTop.name}'); showing thread ${threadLabel(programThreadId, threads)}, ` +
         `which is in '${landing.name}' (${landing.file}:${landing.line}).`
     };
   }
@@ -505,7 +619,8 @@ export class FrameAnchorResolver {
     stoppedFrames: DebugProtocol.StackFrame[],
     policy: AdapterPolicy,
     budgetMs: number,
-    threads?: DebugProtocol.Thread[]
+    threads?: DebugProtocol.Thread[],
+    unwindTimeoutMs: number = SIBLING_UNWIND_TIMEOUT_MS
   ): Promise<{ verdict: StopAnchorVerdict; threads: DebugProtocol.Thread[] }> {
     const listed = threads ?? await this.listThreadsForScan(sessionId, proxyManager) ?? [];
     const verdict = await selectStopAnchor({
@@ -516,7 +631,7 @@ export class FrameAnchorResolver {
       // Every listed thread, as the readiness scan always has (a .NET process
       // may list its one user thread twentieth); each unwind under its own
       // short timeout, all within the window the caller has left.
-      bounds: { maxThreads: Number.POSITIVE_INFINITY, unwindTimeoutMs: SIBLING_UNWIND_TIMEOUT_MS, budgetMs: Math.max(budgetMs, 0) },
+      bounds: { maxThreads: Number.POSITIVE_INFINITY, unwindTimeoutMs, budgetMs: Math.max(budgetMs, 0) },
       unwind: (threadId, { timeoutMs }) => this.requestRawStackFrames(sessionId, proxyManager, threadId, { timeoutMs }),
       log: (message) => this.ctx.logger.debug(`[FrameAnchor ${sessionId}] ${message}`)
     });
@@ -534,7 +649,8 @@ export class FrameAnchorResolver {
     excludeThreadId: number,
     policy: AdapterPolicy,
     budgetMs: number,
-    threads?: DebugProtocol.Thread[]
+    threads?: DebugProtocol.Thread[],
+    unwindTimeoutMs?: number
   ): Promise<SiblingStack | null> {
     const { verdict, threads: listed } = await this.verdictFor(
       sessionId,
@@ -543,7 +659,8 @@ export class FrameAnchorResolver {
       [],
       policy,
       budgetMs,
-      threads
+      threads,
+      unwindTimeoutMs
     );
     const chosen = verdict.programThreadId ?? verdict.framedSiblingId;
     if (chosen === undefined || chosen === excludeThreadId) {
@@ -560,7 +677,8 @@ export class FrameAnchorResolver {
     sessionId: string,
     proxyManager: IProxyManager,
     threadId: number,
-    policy: AdapterPolicy
+    policy: AdapterPolicy,
+    stopReason: string | undefined
   ): Promise<string> {
     const threads = await this.listThreadsForScan(sessionId, proxyManager) ?? [];
     const label = (id: number, name?: string): string => name ? `${id} (${name})` : String(id);
@@ -578,6 +696,12 @@ export class FrameAnchorResolver {
         `Thread ${requested} reported no stack frames; thread ${label(alternative.threadId, alternative.threadName)} has frames. ` +
         `Try get_stack_trace with threadId ${alternative.threadId}.`
       );
+    }
+    // The same pause-only reading as the implicit readiness path (issue
+    // #1132): naming a thread does not make an entry stop an idle isolate.
+    const empty = isProgramNeutralStopReason(stopReason) ? policy.describeEmptyPausedStack?.() : undefined;
+    if (empty) {
+      return empty.note;
     }
     return (
       `Thread ${requested} reported no stack frames (it may be a native/runtime thread, or its stack may not have materialized yet). ` +

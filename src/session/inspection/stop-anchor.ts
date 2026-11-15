@@ -82,27 +82,47 @@ export function policyUserFrames(frames: StackFrame[], policy: AdapterPolicy): S
 }
 
 /**
- * A frame whose `file` names a source rather than a label the debugger made
- * up for native or sourceless code (`@symbol`, `<unknown_source>`,
- * `<node_internals>`). A relative label such as the JDI bridge's
- * `java/lang/Thread.java` still counts: whether it is program code is the
- * policy's call, below.
+ * A frame the debugger has a source for. Two labels stand for "none":
+ * CodeLLDB's `@symbol`, for code without debug info, and `<unknown_source>`,
+ * this server's own placeholder for a frame the adapter reported no source
+ * on (`toStackFrame`).
+ *
+ * A label the ADAPTER gave a code unit is a source without a file, and
+ * counts: Python's `<string>` and `<stdin>`, js-debug's `<eval>/VM12`. The
+ * adapter knows its lines and its variables, and it is the caller's own code
+ * as often as not (`python -c`, an embedded interpreter, an `eval`). Calling
+ * it "no source" made a `python -c` program's pause answer "no program frame
+ * is active" and dropped its locals from the snapshot. Whether a labelled
+ * frame is runtime (`<node_internals>`, `<internal:kernel>`) is the policy's
+ * call, as it is for a relative label such as the JDI bridge's
+ * `java/lang/Thread.java`.
  */
-function namesASource(file: string): boolean {
-  return file.length > 0 && !file.startsWith('@') && !file.startsWith('<');
+export function namesASource(file: string): boolean {
+  return file.length > 0 && !file.startsWith('@') && file !== '<unknown_source>';
 }
 
 /**
- * Whether a stack reaches the program: some frame both names a source and
- * is one the policy calls the program's. A path alone is not enough (the
- * JDI bridge gives a JDK frame a path; LLDB knows the Windows runtime by
- * name), and the policy alone is not enough either (its runtime patterns
- * are a list, and a thread-pool worker it has never heard of must not win
- * over the thread in `main`).
+ * The frames that are program code: ones the policy calls the program's
+ * that also name a source, so a caller can open them at a line. A path
+ * alone is not enough (the JDI bridge gives a JDK frame a path; LLDB knows
+ * the Windows runtime by name), and the policy alone is not enough either:
+ * its runtime patterns are a list, and a frame it has never heard of that
+ * the debugger can only name by symbol is not shown to be the program's. A
+ * thread-pool worker must not win over the thread in `main` (issue #904),
+ * and Rust's start-up shim must not pass for the program after a step out
+ * of `main` (issue #1131).
+ *
+ * One definition, for the thread a pause is anchored on and for the "no
+ * program frame" verdict the answers carry. What `get_stack_trace` hides is
+ * a different question and stays the policy's filter.
  */
+export function programFrames(frames: StackFrame[], policy: AdapterPolicy): StackFrame[] {
+  return policyUserFrames(frames, policy).filter((frame) => namesASource(frame.file));
+}
+
+/** Whether a stack reaches the program: it has a program frame. */
 export function reachesProgram(rawFrames: DebugProtocol.StackFrame[], policy: AdapterPolicy): boolean {
-  const frames = rawFrames.map(toStackFrame);
-  return policyUserFrames(frames, policy).some((frame) => namesASource(frame.file));
+  return programFrames(rawFrames.map(toStackFrame), policy).length > 0;
 }
 
 export interface StopAnchorBounds {

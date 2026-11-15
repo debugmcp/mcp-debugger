@@ -60,7 +60,14 @@ export async function describeStopLocation(
     // that says 'Paused'.
     const stillPaused = ctx.getSession(sessionId).state === SessionState.PAUSED;
     if (top) {
-      landing.location = { file: top.file, line: top.line, column: top.column };
+      landing.location = {
+        file: top.file,
+        line: top.line,
+        column: top.column,
+        // The flag get_stack_trace puts on the same frame (issue #1131):
+        // this `file` is a label, not a path to open.
+        ...(top.unresolvedSource ? { unresolvedSource: true as const } : {})
+      };
     }
     if (
       typeof result.threadId === 'number' &&
@@ -78,7 +85,8 @@ export async function describeStopLocation(
       // The answer shows one frame, as `location`; the rest of the thread's
       // stack, when it has one, is get_stack_trace's to list (issue #1141).
       notes.push(ErrorMessages.stopWithoutProgramFrame(result.threadId, result.totalFrameCount, top, {
-        framesUnseen: result.totalFrameCount > 1
+        framesUnseen: result.totalFrameCount > 1,
+        sourceless: result.sourcelessFrames
       }));
     }
     if (notes.length > 0) {

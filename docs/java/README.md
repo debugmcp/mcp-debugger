@@ -98,16 +98,19 @@ Key attach arguments:
 - `port` (required): JDWP debug port
 - `host`: Target hostname (default: `localhost`; `hostName` is accepted as an alias)
 - `stopOnEntry`: asks the bridge to suspend the VM on attach. The bridge's own default for this
-  argument is `false` (`JdiDapServer.java:342`), but you will normally see the session paused
+  argument is `false` (`handleAttach` in `JdiDapServer.java`), but you will normally see the session paused
   anyway: `JavaAdapterPolicy` declares `getAttachBehavior: () => ({ pauseAfterAttach: true,
   pauseAllThreads: true })`, so mcp-debugger issues a pause of its own once the attach is verified.
+- `sourcePaths`: the directories your sources start under (the parent of `com/` for a class in
+  `com.acme`). An attach spawns nothing and knows no program, so this is how it learns where a
+  stop's source file is — see [Where a stop's source file is found](#where-a-stops-source-file-is-found).
 
-Those three are the only keys the JDI bridge's **attach handler** reads. That is a statement about
-the bridge, not about `attach_to_process` as a whole — `verifyTimeout`, `breakOnExceptions` and
-`adapterConfig` are consumed by mcp-debugger's own attach controller before the bridge is
-involved, and never reach it. There is no source-path list to configure: breakpoints resolve
-classes from the `file` you give `set_breakpoint`, which may be a path or a fully-qualified
-class name.
+Those four are the only keys the JDI bridge's **attach handler** reads (`sourcePaths` reaches it
+as `sourceRoots` and `defaultPackageRoots`). That is a statement about the bridge, not about `attach_to_process` as a
+whole — `verifyTimeout`, `breakOnExceptions` and `adapterConfig` are consumed by mcp-debugger's
+own attach controller before the bridge is involved, and never reach it. Breakpoints need no
+source-path list: they resolve classes from the `file` you give `set_breakpoint`, which may be a
+path or a fully-qualified class name.
 
 ## Debugging Workflow
 
@@ -188,6 +191,22 @@ No manual breakpoint re-sends are needed — this works transparently in both la
 - **Conditions**: `condition` works exactly like line-breakpoint conditions (evaluated on hit; evaluation errors default to breaking).
 - Stops report `reason: "function breakpoint"`.
 
+## Where a stop's source file is found
+
+The JVM knows a frame's source by a path relative to its source root: `com/acme/App.java` for a class in `com.acme`, a bare `PauseTest.java` in the default package. The bridge turns that into a path you can pass to `get_source_context` or `set_breakpoint` by looking the relative path up under the source roots the session knows, and the stop answer then carries `context` and the [stale-build](#stale-builds) check like any other (issue #1138). Before, only a class that had a line breakpoint set by path reported one; a pause, a function-breakpoint stop, an exception or a step into another class answered the relative name and no `context`.
+
+The roots, in the order they are tried — the first one the file exists under wins:
+
+1. The root a line breakpoint's path shows. A breakpoint on `/proj/src/com/acme/App.java` that lands on `com.acme.App` says the tree starts at `/proj/src`, so `com.acme.Helper` is found beside it. This works for attach sessions too, and is all an attach knows unless you pass `sourcePaths`.
+2. `sourcePaths` (attach: the `attach_to_process` parameter; launch: `adapterLaunchConfig.sourcePaths`), then `adapterLaunchConfig.sourcePath` (a path list, split on the platform's separator). In a launch a relative entry is read against the launch's working directory, as a relative `classpath` entry is — and that is the script's own directory when the launch names no `cwd`, so a root written relative to the project (`src/main/java`) needs `cwd` set to the project, or an absolute path. An attach has no working directory to read it against, so give it absolute paths.
+3. Launch only: the program's directory and up to eight directories above it, when `program` is a file.
+4. Launch only: the working directory and up to eight directories above it. The working directory defaults to the script's directory, so a launch that names the class (`program: "com.acme.App"`) with `scriptPath` pointing at its source still finds the root.
+5. Launch only: the `classpath` entries that are directories (not jars), for sources that sit beside their classes.
+
+The directories *above* the program's and the working directory (3 and 4) are tried for a class in a package only: `com/acme/App.java` under an ancestor is specific enough to trust, and a bare `Util.java` is not. A default-package class is looked up where the session points — those two directories themselves, the classpath's directories, `sourcePaths`, a root a breakpoint showed — so an unrelated file of its name a few directories up is never answered as its source.
+
+What is still answered by its relative name: a class whose source is under none of these (a library from a jar, the JDK's own classes, an attach with no breakpoint set and no `sourcePaths`). The lookup under a root is exact: the whole package path must exist there. A class in a package that shares its simple name with one that has a line breakpoint, in another package, reports its own file when that file is under a root; when it is under none it still answers the breakpoint's file, because the bridge keeps a breakpoint's path by the file's base name. A default-package class of that name still borrows the path either way: its relative name is the bare file name, which any file of that name ends with. Both are issue #1158.
+
 ## Example: Launch Mode
 
 ```java
@@ -233,7 +252,7 @@ java -agentlib:jdwp=transport=dt_socket,server=y,address=5005,suspend=y \
 
 ## Stale builds
 
-The adapter never compiles your code: JDI binds a breakpoint through the `.class` file's `LineNumberTable`, while `set_breakpoint` and the stop answers echo the line from the `.java` on disk. When the source is newer than the class file, the echo names a statement that is not the one that runs. Once a launch has named the classpath, mcp-debugger compares the two: a `set_breakpoint` whose `.java` is newer than its `.class` carries a `warning` naming both files and their mtimes, and `step_*`, `wait_for_stop` and `pause_execution` carry the same sentence as `note` (issue #950). The class file is looked for under each `classpath` directory (resolved against the launch `cwd`; `.` when none is given, as the bridge defaults it) at the package path that mirrors the source's directory chain, then beside the source (a bare `javac Foo.java`). Not covered: classes inside jars, attach sessions (no classpath is known), and stops in a file no breakpoint was set in (the bridge reports those by package-relative path). Before `start_debugging` nothing names the class file; after the launch, look for it on `set_breakpoint`, on the `start_debugging` answer itself when the program is already paused when the launch answers, on `wait_for_stop`, `step_*` and `pause_execution`, and on `get_stack_trace` when its top frame is in the file (#951). Recompile with `javac -g` to clear it.
+The adapter never compiles your code: JDI binds a breakpoint through the `.class` file's `LineNumberTable`, while `set_breakpoint` and the stop answers echo the line from the `.java` on disk. When the source is newer than the class file, the echo names a statement that is not the one that runs. Once a launch has named the classpath, mcp-debugger compares the two: a `set_breakpoint` whose `.java` is newer than its `.class` carries a `warning` naming both files and their mtimes, and `step_*`, `wait_for_stop` and `pause_execution` carry the same sentence as `note` (issue #950). The class file is looked for under each `classpath` directory (resolved against the launch `cwd`; `.` when none is given, as the bridge defaults it) at the package path that mirrors the source's directory chain, then beside the source (a bare `javac Foo.java`). Not covered: classes inside jars, attach sessions (no classpath is known), and stops in a class whose source is found under no source root (the bridge reports those by package-relative path — see [Where a stop's source file is found](#where-a-stops-source-file-is-found)). Before `start_debugging` nothing names the class file; after the launch, look for it on `set_breakpoint`, on the `start_debugging` answer itself when the program is already paused when the launch answers, on `wait_for_stop`, `step_*` and `pause_execution`, and on `get_stack_trace` when its top frame is in the file (#951). Recompile with `javac -g` to clear it.
 
 ## Troubleshooting
 

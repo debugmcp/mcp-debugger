@@ -364,7 +364,7 @@ describe('SessionManager idle policy (issue #1025, step 2)', () => {
     /** Mark a row an attach root, the way attach_to_process does. */
     const markAttached = (id: string): void =>
       (sessionManager as unknown as { sessionStore: { update(id: string, patch: object): void } })
-        .sessionStore.update(id, { attachMode: true });
+        .sessionStore.update(id, { attachMode: true, programOwnership: 'borrowed' });
 
     it('says an attach root was released: its target keeps running', async () => {
       // A live session (the mock launch stands in for a connected target).
@@ -374,6 +374,18 @@ describe('SessionManager idle policy (issue #1025, step 2)', () => {
       await sessionManager.sweepIdle(WINDOW, { now: now() + WINDOW + 1 });
 
       expect(sessionManager.idleExpiryOf(rootId, undefined)?.outcome).toBe('released');
+    });
+
+    it('says neither released nor ended for an attach root whose detach nothing acknowledged (issue #1148)', async () => {
+      const rootId = await startRoot();
+      markAttached(rootId);
+      dependencies.mockProxyManager.detachResult = {
+        trigger: 'close', acknowledged: false, error: 'DAP disconnect request timed out after 1000ms'
+      };
+
+      await sessionManager.sweepIdle(WINDOW, { now: now() + WINDOW + 1 });
+
+      expect(sessionManager.idleExpiryOf(rootId, undefined)?.outcome).toBe('unconfirmed');
     });
 
     // "Its program was ended" is only true when there was one. A session the

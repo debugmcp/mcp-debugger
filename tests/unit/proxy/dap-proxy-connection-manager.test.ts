@@ -554,6 +554,21 @@ describe('DapConnectionManager', () => {
       expect(mockDapClient.disconnect).toHaveBeenCalled();
     });
 
+    it('says whether the adapter answered the disconnect (issue #1148)', async () => {
+      mockDapClient.sendRequest.mockResolvedValue(undefined);
+      await expect(connectionManager.disconnect(mockDapClient, false)).resolves.toEqual({ answered: true });
+
+      mockDapClient.sendRequest.mockRejectedValue(new Error('Disconnect failed'));
+      await expect(connectionManager.disconnect(mockDapClient, false)).resolves.toEqual({ answered: false, error: 'Disconnect failed' });
+
+      mockDapClient.sendRequest.mockImplementation(() => new Promise((resolve) => setTimeout(resolve, 2000)));
+      const slow = connectionManager.disconnect(mockDapClient, false);
+      await vi.advanceTimersByTimeAsync(1100);
+      await expect(slow).resolves.toEqual({ answered: false, error: 'DAP disconnect request timed out after 1000ms' });
+
+      await expect(connectionManager.disconnect(null, false)).resolves.toEqual({ answered: false, error: 'no DAP client' });
+    });
+
     it('should handle error during client.disconnect()', async () => {
       mockDapClient.sendRequest.mockResolvedValue(undefined);
       mockDapClient.disconnect.mockImplementation(() => {

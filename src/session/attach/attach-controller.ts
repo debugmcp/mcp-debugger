@@ -61,6 +61,17 @@ function observedAttachStopThread(session: ManagedSession): number | undefined {
   return session.state === SessionState.PAUSED ? session.lastStop?.threadId : undefined;
 }
 
+/**
+ * How long a detach waits for the adapter to acknowledge it (issue #1148).
+ * Sized by measurement: every attach-capable adapter answers a detaching
+ * disconnect in 0 to 15 ms (413 ms at most across a day of launch-mode
+ * runs), and the worker may spend up to 2 s on the resume it sends ahead of
+ * one. When it expires the adapter is stopped anyway and the answer says
+ * the detach was not confirmed. It used to wait the full request timeout,
+ * 30 s, and then answer "process still running".
+ */
+export const DETACH_ACKNOWLEDGEMENT_TIMEOUT_MS = 10_000;
+
 export class AttachController {
   constructor(
     private readonly ctx: AttachContext,
@@ -610,6 +621,13 @@ export class AttachController {
     sessionId: string,
     terminateProcess: boolean = false
   ): Promise<DebugResult<DetachResultData>> {
+    // Ownership first (issue #1151), before the in-flight claim and before
+    // anything is touched: a session ends a program it launched, so a detach
+    // that would leave it running is refused by name.
+    const session = this.ctx.getSession(sessionId);
+    if (!terminateProcess && session.proxyManager && session.programOwnership === 'owned') {
+      return { success: false, state: session.state, error: ErrorMessages.detachOwnedProgramRefused() };
+    }
     return this.inFlight.run(sessionId, 'detach', 'detach_from_process', this.ctx, () =>
       this.detach(sessionId, terminateProcess)
     );
@@ -625,7 +643,10 @@ export class AttachController {
       `[SessionManager] Detaching from process for session ${sessionId}, terminateProcess: ${terminateProcess}`
     );
 
-    if (!session.proxyManager) {
+    // A proxy that has stopped is a program this session let go of already
+    // (issue #1148): a second detach has nothing to detach from, and must not
+    // answer from what the first one saw.
+    if (!session.proxyManager || !session.proxyManager.isRunning()) {
       return {
         success: false,
         state: session.state,
@@ -635,6 +656,10 @@ export class AttachController {
 
     let resumedBeforeDetach: boolean | undefined;
     let warning: string | undefined;
+    // What became of the process, as observed (issue #1148).
+    let fate: { message: string; released?: true; processEnded?: true; warning?: string } = {
+      message: ErrorMessages.detachReleased()
+    };
     // The session tree (issue #1081): a terminating detach closes the
     // subtree; a plain one releases the children first, deepest first, so
     // each runs on undebugged, then detaches the parent.
@@ -656,12 +681,32 @@ export class AttachController {
         // the policy asks (issue #763: CodeLLDB on Windows kills a target
         // detached right after a step) and reports the outcome as the
         // 'pre_detach_resume' status, read back below for the result.
+        let disconnectFailure: string | undefined;
         try {
           await proxyManager.sendDapRequest('disconnect', {
             terminateDebuggee: false
-          });
+          }, { timeoutMs: DETACH_ACKNOWLEDGEMENT_TIMEOUT_MS });
         } catch (disconnectError) {
+          disconnectFailure = disconnectError instanceof Error ? disconnectError.message : String(disconnectError);
           this.ctx.logger.warn(`[SessionManager] Disconnect request failed, continuing with cleanup:`, disconnectError);
+        }
+        // What the adapter did with it (issue #1148), as the worker saw it:
+        // the request's own failure says nothing when `terminated` came in
+        // reply (debugpy). With no report, the request's outcome stands.
+        // Only a report of this request: a worker shutting down by itself
+        // (the adapter sent `terminated` unasked) reports its own disconnect,
+        // which says nothing about a detach that arrived as it went.
+        const reported = proxyManager.getDetachResult();
+        const report = reported?.trigger === 'detach' ? reported : undefined;
+        if (report?.debuggeeExited) {
+          fate = { message: ErrorMessages.detachProgramEnded(), processEnded: true };
+        } else if (report ? report.acknowledged : disconnectFailure === undefined) {
+          fate = { message: ErrorMessages.detachReleased(), released: true };
+        } else {
+          const unconfirmed = ErrorMessages.detachUnconfirmed(
+            report?.error ?? disconnectFailure ?? 'the debug adapter did not answer the detach'
+          );
+          fate = { message: unconfirmed, warning: unconfirmed };
         }
 
         const resume = proxyManager.getPreDetachResume();
@@ -703,11 +748,13 @@ export class AttachController {
         success: true,
         state: SessionState.STOPPED,
         data: {
-          message: terminateProcess
-            ? 'Detached and terminated process'
-            : 'Detached from process (process still running)',
+          message: terminateProcess ? 'Detached and terminated process' : fate.message,
+          ...(!terminateProcess && fate.released ? { released: true as const } : {}),
+          ...(!terminateProcess && fate.processEnded ? { processEnded: true as const } : {}),
           ...(resumedBeforeDetach !== undefined ? { resumedBeforeDetach } : {}),
-          ...(warning !== undefined ? { warning } : {}),
+          ...(!terminateProcess && (fate.warning !== undefined || warning !== undefined)
+            ? { warning: [fate.warning, warning].filter((part) => part !== undefined).join('; ') }
+            : terminateProcess && warning !== undefined ? { warning } : {}),
           ...(childrenClosed > 0 ? { childrenClosed } : {}),
           ...(childrenReleased > 0 ? { childrenReleased } : {})
         }

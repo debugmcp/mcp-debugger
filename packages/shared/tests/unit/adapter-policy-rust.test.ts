@@ -73,6 +73,23 @@ describe('RustAdapterPolicy', () => {
       const result = RustAdapterPolicy.extractLocalVariables!([frame], scopes, vars, true);
       expect(result.variables).toHaveLength(2);
     });
+
+    it('drops a variable with no name: the return value CodeLLDB shows after stepping out of a function that returns nothing (issue #1131)', () => {
+      const scopes: Record<number, DebugProtocol.Scope[]> = {
+        1: [{ name: 'Local', variablesReference: 9, expensive: false }]
+      };
+      // Measured after step_out from a Rust `main`: {"": "()"} on some runs,
+      // {"": "<Unable to determine byte size.>"} on others, type `void`.
+      const vars: Record<number, Variable[]> = {
+        9: [
+          { name: '', value: '<Unable to determine byte size.>', type: 'void', expandable: false },
+          { name: 'count', value: '3', type: 'i32', expandable: false }
+        ]
+      };
+      expect(RustAdapterPolicy.extractLocalVariables!([frame], scopes, vars).variables.map(v => v.name)).toEqual(['count']);
+      // Asked for everything the adapter reported, the caller gets everything.
+      expect(RustAdapterPolicy.extractLocalVariables!([frame], scopes, vars, true).variables).toHaveLength(2);
+    });
   });
 
   // A bare 'main' resolves to the C runtime's entry point on rust targets
@@ -556,6 +573,13 @@ describe('RustAdapterPolicy', () => {
       { desc: 'normal user frame', name: 'app::run', file: '/home/user/project/src/main.rs', internal: false },
       { desc: 'rust std frame with /rustc/ source but non-wrapper name', name: 'std::thread::sleep', file: '/rustc/abc123/library/std/src/thread/mod.rs', internal: false },
       { desc: 'user frame with no source but non-matching name', name: 'stripped_user_fn', file: '<unknown_source>', internal: false },
+      // glibc's `__` aliases of the syscall wrappers (issue #1131): the same
+      // name-plus-no-user-source rule as the wrapper itself.
+      { desc: 'glibc __ alias of a syscall wrapper with an @symbol label', name: '__nanosleep', file: '@__nanosleep', internal: true },
+      { desc: 'glibc __ alias of a syscall wrapper without source', name: '__clock_nanosleep', file: '<unknown_source>', internal: true },
+      { desc: 'glibc __ alias under the glibc build path', name: '__poll', file: './nptl/poll.c', internal: true },
+      { desc: 'user function named __read with workspace source', name: '__read', file: '/home/user/project/src/io.rs', internal: false },
+      { desc: 'a __ name that is no syscall wrapper, without source', name: '__my_helper', file: '<unknown_source>', internal: false },
       // Windows (issue #824): CodeLLDB's path-less frames carry '@symbol' in `file`.
       { desc: 'Windows: ntdll syscall stub with @symbol source', name: 'NtWaitForSingleObject', file: '@NtWaitForSingleObject', internal: true },
       { desc: 'Windows: MinGW CRT start-up with @symbol source', name: '__tmainCRTStartup', file: '@__tmainCRTStartup', internal: true },

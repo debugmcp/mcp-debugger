@@ -4,6 +4,7 @@
  * with the parent's breakpoints under the per-tree cap, and wired like a root.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { ErrorMessages } from '../../../../src/utils/error-messages.js';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import { DebugLanguage, JsDebugAdapterPolicy, SessionState, type AdapterPolicy, type DapClientBehavior } from '@debugmcp/shared';
 import { createMockDependencies, createMockEnvironment, overridePolicy } from './session-manager-test-utils.js';
@@ -639,6 +640,7 @@ describe('SessionManager child sessions (issue #1081)', () => {
     it('closing an attach root releases every descendant (targets kept) and says released', async () => {
       const { rootId, childView, grandchildView } = await tree();
       sessionManager.getSession(rootId)!.attachMode = true;
+      sessionManager.getSession(rootId)!.programOwnership = 'borrowed';
 
       const outcome = await sessionManager.closeSessionReporting(rootId);
 
@@ -673,6 +675,7 @@ describe('SessionManager child sessions (issue #1081)', () => {
     async function attachTree() {
       const rootId = await startRoot();
       sessionManager.getSession(rootId)!.attachMode = true;
+      sessionManager.getSession(rootId)!.programOwnership = 'borrowed';
       dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
       await vi.runAllTimersAsync();
       const childId = childOf(rootId)!.id;
@@ -780,11 +783,12 @@ describe('SessionManager child sessions (issue #1081)', () => {
     it('a detach with no children answers as before', async () => {
       const rootId = await startRoot();
       sessionManager.getSession(rootId)!.attachMode = true;
+      sessionManager.getSession(rootId)!.programOwnership = 'borrowed';
 
       const detached = await sessionManager.detachFromProcess(rootId);
 
       expect(detached.success).toBe(true);
-      expect(detached.data).toEqual({ message: 'Detached from process (process still running)' });
+      expect(detached.data).toEqual({ message: ErrorMessages.detachReleased(), released: true });
     });
 
     it('closing a released child preserves the release outcome and does not claim process termination', async () => {
@@ -1247,6 +1251,7 @@ describe('SessionManager child sessions (issue #1081)', () => {
     it('reads child and grandchild output from their own connections under an attach root', async () => {
       const { rootId, childId, grandchildId, childView } = await jsTree();
       sessionManager.getSession(rootId)!.attachMode = true;
+      sessionManager.getSession(rootId)!.programOwnership = 'borrowed';
       childView.simulateEvent('output', { category: 'stdout', output: 'child console output\n' });
 
       expect(sessionManager.outputOnFor(childId)).toBeUndefined();

@@ -228,6 +228,52 @@ describe.skipIf(exceptionPath === null)('pytest preset (issue #985 M1) @requires
     });
   }, 120000);
 
+  // Issue #1143: pydevd lists the frames the exception has left above the
+  // frame execution is paused in, and marks that one by appending
+  // " (Current frame)" to its name. A frame's name is the function's name:
+  // the marker comes off, the frames above it carry `unwound: true`, and the
+  // answer says in a sentence where the exception was raised and where
+  // execution is paused.
+  it('names frames by their functions, flags the ones the exception has left, and says where execution is paused', async () => {
+    type Frame = { name: string; file: string; line: number; unwound?: boolean };
+    await withSession('pytest-helper-frames', async (sessionId) => {
+      const answer = await landed(sessionId, await call('start_debugging', { sessionId, ...preset('test_assert_in_helper') }));
+      expect(answer.state, JSON.stringify(answer)).toBe('paused');
+
+      const snapshot = answer.snapshot as { frames: Frame[] };
+      expect(snapshot.frames.map((f) => [f.name, f.unwound])).toEqual([
+        ['check_positive', true],
+        ['test_assert_in_helper', undefined]
+      ]);
+      expect(answer.note, JSON.stringify(answer)).toMatch(
+        /^The exception was raised in 'check_positive', which has already unwound: its variables are readable\. Execution is paused in 'test_assert_in_helper' \(test_billing\.py:\d+\); a step continues from there\.$/
+      );
+
+      const stack = await call('get_stack_trace', { sessionId });
+      const frames = stack.stackFrames as Frame[];
+      expect(frames.slice(0, 2).map((f) => [f.name, f.unwound])).toEqual([
+        ['check_positive', true],
+        ['test_assert_in_helper', undefined]
+      ]);
+      expect(JSON.stringify(frames)).not.toContain('(Current frame)');
+      expect(stack.note).toBe(answer.note);
+
+      // The raise site's variables are what locals read, and the answer says whose they are.
+      const locals = await call('get_local_variables', { sessionId });
+      expect((locals.frame as Frame | undefined)?.name).toBe('check_positive');
+      expect((locals.frame as Frame | undefined)?.unwound).toBe(true);
+    });
+
+    // A stop whose frame 0 is live carries no flag and no such note.
+    await withSession('pytest-body-frames', async (sessionId) => {
+      const answer = await landed(sessionId, await call('start_debugging', { sessionId, ...preset('test_assert_fails') }));
+      const snapshot = answer.snapshot as { frames: Frame[] };
+      expect(snapshot.frames[0].name).toBe('test_assert_fails');
+      expect(snapshot.frames[0]).not.toHaveProperty('unwound');
+      expect(String(answer.note ?? '')).not.toContain('already unwound');
+    });
+  }, 180000);
+
   it('runs a passing test to completion with exit code 0', async () => {
     await withSession('pytest-passes', async (sessionId) => {
       const started = await call('start_debugging', { sessionId, ...preset('test_passes') });

@@ -62,6 +62,8 @@ export interface NoProgramFrameVerdict {
   threadId?: number;
   frameCount: number;
   top: FrameSummary;
+  /** Some frame is counted out for having no source, not for being runtime (issue #1131). */
+  sourceless?: true;
 }
 
 /**
@@ -76,7 +78,8 @@ export function noProgramFrameVerdict(stackResult: StackTraceResult): NoProgramF
   return {
     ...(typeof stackResult.threadId === 'number' ? { threadId: stackResult.threadId } : {}),
     frameCount: stackResult.totalFrameCount,
-    top: frameSummary(top)
+    top: frameSummary(top),
+    ...(stackResult.sourcelessFrames ? { sourceless: true as const } : {})
   };
 }
 
@@ -378,7 +381,16 @@ export abstract class SessionManagerData extends SessionManagerCore {
       const stackFrames = opts.maxFrames !== undefined ? allFrames.slice(0, opts.maxFrames) : allFrames;
       if (!stackFrames || stackFrames.length === 0) {
         this.logger.warn(`[SM getLocalVariables ${sessionId}] No stack frames available.`);
-        return { variables: [], frame: null, scopeName: null };
+        // Why the stack is empty, and what helps, is the resolver's to say
+        // and it has said it (issue #1132: a Dart isolate idle between
+        // events). Dropped here, the tool fell back on a remedy that names
+        // threads and re-pausing, which that adapter's note exists to refute.
+        return {
+          variables: [],
+          frame: null,
+          scopeName: null,
+          ...(stackResult.note ? { anchorNote: stackResult.note } : {})
+        };
       }
 
       const topFrame = stackFrames[0];
@@ -637,8 +649,14 @@ export abstract class SessionManagerData extends SessionManagerCore {
           );
         }
         if (anchorIndex > 0) {
+          // "runtime/stdlib" only where the policy says so (issue #1131). The
+          // sentence used to say it of every top frame without locals, which
+          // a frame the policy keeps is not shown to be: it may be the
+          // caller's own function before its first assignment, or code the
+          // debugger has no source for.
+          const runtime = policy.isInternalFrame?.(topFrame) === true;
           anchorNotes.push(
-            `Top frame '${topFrame.name}' has no local variables (runtime/stdlib frame); ` +
+            `Top frame '${topFrame.name}' has no local variables${runtime ? ' (runtime/stdlib frame)' : ''}; ` +
             `showing frame #${anchorIndex} '${anchorFrame.name}' instead`
           );
         }

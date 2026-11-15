@@ -109,7 +109,7 @@ describe('SessionManager - DAP Operations', () => {
       expect(dependencies.mockProxyManager.dapRequestCalls[0]).toMatchObject({
         command: 'setBreakpoints',
         args: expect.objectContaining({
-          source: { path: expect.stringContaining('test.py') }
+          source: { path: expect.stringContaining('test.py'), name: 'test.py' }
         })
       });
     });
@@ -506,7 +506,7 @@ describe('SessionManager - DAP Operations', () => {
       expect(dependencies.mockProxyManager.dapRequestCalls[0]).toMatchObject({
         command: 'setBreakpoints',
         args: expect.objectContaining({
-          source: { path: 'a.py' },
+          source: { path: 'a.py', name: 'a.py' },
           breakpoints: []
         })
       });
@@ -3029,6 +3029,58 @@ describe('SessionManager - DAP Operations', () => {
       });
     }
 
+    // Issue #1143: a policy may give the adapter's frames the shape every
+    // other adapter's have. pydevd lists the frames an exception has left
+    // above the live one and marks the live one in its NAME; the Python
+    // policy turns that into `unwound: true` on the frames above it, and the
+    // resolver says in a sentence where the exception was raised and where
+    // execution is paused.
+    describe('frames the exception has already left (issue #1143)', () => {
+      const HELPER = { id: 1, name: 'check_positive', line: 16, source: { path: '/proj/billing/proration.py' } };
+      const TEST = { id: 2, name: 'test_assert_in_helper (Current frame)', line: 20, source: { path: '/proj/tests/test_billing.py' } };
+      const usePythonFrames = () => {
+        (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => ({
+          normalizeStackFrames: PythonAdapterPolicy.normalizeStackFrames
+        });
+      };
+
+      it('flags them, takes the marker off the live frame, and says where execution is paused', async () => {
+        const session = await pausedSessionWithFrames([HELPER, TEST]);
+        usePythonFrames();
+
+        const result = await sessionManager.getStackTraceDetailed(session.id);
+
+        expect(result.frames).toEqual([
+          { id: 1, name: 'check_positive', file: '/proj/billing/proration.py', line: 16, unwound: true },
+          { id: 2, name: 'test_assert_in_helper', file: '/proj/tests/test_billing.py', line: 20 }
+        ]);
+        expect(result.note).toBe(
+          "The exception was raised in 'check_positive', which has already unwound: its variables are readable. " +
+          "Execution is paused in 'test_assert_in_helper' (test_billing.py:20); a step continues from there."
+        );
+      });
+
+      it('says nothing more when frame 0 is the live frame', async () => {
+        const session = await pausedSessionWithFrames([{ ...TEST, name: 'test_assert_fails (Current frame)' }]);
+        usePythonFrames();
+
+        const result = await sessionManager.getStackTraceDetailed(session.id);
+
+        expect(result.frames.map((f) => f.name)).toEqual(['test_assert_fails']);
+        expect(result.frames[0]).not.toHaveProperty('unwound');
+        expect(result.note).toBeUndefined();
+      });
+
+      it('leaves the frames of a policy with no such hook as the adapter sent them', async () => {
+        const session = await pausedSessionWithFrames([HELPER, TEST]);
+
+        const result = await sessionManager.getStackTraceDetailed(session.id);
+
+        expect(result.frames.map((f) => f.name)).toEqual(['check_positive', 'test_assert_in_helper (Current frame)']);
+        expect(result.note).toBeUndefined();
+      });
+    });
+
     it('reports hidden-frame counts when a policy filters internals', async () => {
       const session = await pausedSessionWithFrames(RUNTIME_FRAMES);
       stubFilteringPolicy(f => !(f.file ?? '').includes('/runtime/'));
@@ -3597,6 +3649,169 @@ describe('SessionManager - DAP Operations', () => {
       (sessionManager as unknown as { pausedStackReadyIntervalMs: number })
         .pausedStackReadyIntervalMs = 25;
     }
+
+    // Issue #1132: an empty stack on a paused thread means different things
+    // under different adapters. Under Dart it is an isolate idle in an
+    // `await`: no frame will appear however long the read waits, nothing is
+    // in native code, and re-pausing lands idle again. The policy says what
+    // it means, and whether waiting can help.
+    describe('what the policy says an empty paused stack means (issue #1132)', () => {
+      const IDLE = 'The isolate is idle between events.';
+      const withPolicy = (framesWillNotAppear: boolean) => {
+        (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => ({
+          describeEmptyPausedStack: () => ({ note: IDLE, framesWillNotAppear })
+        });
+      };
+      const emptyStack = () => {
+        let stackTraceCalls = 0;
+        dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+          if (command === 'stackTrace') {
+            stackTraceCalls++;
+            return { success: true, body: { stackFrames: [] } };
+          }
+          if (command === 'threads') {
+            return { success: true, body: { threads: [{ id: 1, name: 'main' }] } };
+          }
+          return { success: true, body: {} };
+        });
+        return () => stackTraceCalls;
+      };
+
+      it('answers at once with the policy\'s sentence when no frame will appear', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        dependencies.mockProxyManager.simulateStopped(1, 'pause');
+        // A window the test would notice: 3 s is what the answer used to cost.
+        (sessionManager as unknown as { pausedStackReadyTimeoutMs: number }).pausedStackReadyTimeoutMs = 3000;
+        withPolicy(true);
+        const calls = emptyStack();
+
+        const startedAt = Date.now();
+        const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, { ensureStackReady: true });
+
+        expect(result.frames).toEqual([]);
+        expect(result.note).toBe(IDLE);
+        expect(Date.now() - startedAt).toBeLessThan(1000);
+        // The read that came back empty; no polling of the same thread.
+        expect(calls()).toBe(1);
+      });
+
+      it('reads only a pause that way: any other stop with an empty stack waits and gets the generic sentence, as before', async () => {
+        // "Idle between events" was measured on pauses. The helper's stop is
+        // an entry stop, and a Dart isolate held at its start reports one
+        // with no frames: it is not idle, it has not begun.
+        const session = await createPausedSession(sessionManager, dependencies);
+        setShortReadyWindow();
+        withPolicy(true);
+        const calls = emptyStack();
+
+        const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, { ensureStackReady: true });
+
+        expect(result.frames).toEqual([]);
+        expect(result.note).toMatch(/^The stopped thread reported no stack frames within 400ms/);
+        expect(result.note).not.toContain(IDLE);
+        expect(calls()).toBeGreaterThan(2);
+      });
+
+      it('gives a sibling one poll interval to answer, not the window: a mute one must not bring the wait back', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        dependencies.mockProxyManager.simulateStopped(1, 'pause');
+        (sessionManager as unknown as { pausedStackReadyTimeoutMs: number }).pausedStackReadyTimeoutMs = 3000;
+        (sessionManager as unknown as { pausedStackReadyIntervalMs: number }).pausedStackReadyIntervalMs = 250;
+        withPolicy(true);
+        dependencies.mockProxyManager.dapRequestCalls = [];
+        dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+          if (command === 'stackTrace') {
+            return { success: true, body: { stackFrames: [] } };
+          }
+          if (command === 'threads') {
+            return { success: true, body: { threads: [{ id: 1, name: 'main' }, { id: 2, name: 'worker' }] } };
+          }
+          return { success: true, body: {} };
+        });
+
+        const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, { ensureStackReady: true });
+
+        expect(result.note).toBe(IDLE);
+        const siblingUnwinds = dependencies.mockProxyManager.dapRequestCalls
+          .filter((call) => call.command === 'stackTrace' && call.args?.threadId === 2);
+        expect(siblingUnwinds).toHaveLength(1);
+        expect(siblingUnwinds[0].options?.timeoutMs).toBeLessThanOrEqual(250);
+      });
+
+      it('get_local_variables keeps the sentence: the reason the stack is empty is not replaced by a generic one', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        dependencies.mockProxyManager.simulateStopped(1, 'pause');
+        withPolicy(true);
+        emptyStack();
+
+        const result = await sessionManager.getLocalVariables(session.id);
+
+        expect(result).toEqual({ variables: [], frame: null, scopeName: null, anchorNote: IDLE });
+      });
+
+      it('still adopts a sibling thread that has frames, without waiting', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        dependencies.mockProxyManager.simulateStopped(1, 'pause');
+        (sessionManager as unknown as { pausedStackReadyTimeoutMs: number }).pausedStackReadyTimeoutMs = 3000;
+        withPolicy(true);
+        dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: { threadId?: number }) => {
+          if (command === 'stackTrace') {
+            return { success: true, body: { stackFrames: args?.threadId === 2 ? [READY_FRAME] : [] } };
+          }
+          if (command === 'threads') {
+            return { success: true, body: { threads: [{ id: 1, name: 'main' }, { id: 2, name: 'worker' }] } };
+          }
+          return { success: true, body: {} };
+        });
+
+        const startedAt = Date.now();
+        const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, { ensureStackReady: true });
+
+        expect(result.frames.map((f) => f.name)).toEqual(['Program.Main']);
+        expect(result.threadId).toBe(2);
+        expect(Date.now() - startedAt).toBeLessThan(1000);
+      });
+
+      it('waits as before when frames may still appear, and then says what the policy says', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        dependencies.mockProxyManager.simulateStopped(1, 'pause');
+        setShortReadyWindow();
+        withPolicy(false);
+        const calls = emptyStack();
+
+        const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, { ensureStackReady: true });
+
+        expect(result.frames).toEqual([]);
+        expect(result.note).toBe(IDLE);
+        expect(calls()).toBeGreaterThan(2);
+      });
+
+      it('says it for a thread the caller named, too', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        dependencies.mockProxyManager.simulateStopped(1, 'pause');
+        setShortReadyWindow();
+        withPolicy(true);
+        emptyStack();
+
+        const result = await sessionManager.getStackTraceDetailed(session.id, 1);
+
+        expect(result.frames).toEqual([]);
+        expect(result.note).toBe(IDLE);
+      });
+
+      it('does not call an entry stop idle when the caller names its thread', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        setShortReadyWindow();
+        withPolicy(true);
+        emptyStack();
+
+        const result = await sessionManager.getStackTraceDetailed(session.id, 1);
+
+        expect(result.frames).toEqual([]);
+        expect(result.note).toContain('Thread 1 (main) reported no stack frames');
+        expect(result.note).not.toContain(IDLE);
+      });
+    });
 
     it('retries an empty-but-successful stack until frames appear', async () => {
       const session = await createPausedSession(sessionManager, dependencies);
@@ -5029,6 +5244,211 @@ describe('SessionManager - DAP Operations', () => {
       expect(result.note).toBeUndefined();
       expect(adopt).not.toHaveBeenCalled();
       expect(requests('threads')).toHaveLength(1);
+    });
+
+    describe('frames the debugger has no source for are not program frames (issue #1131)', () => {
+      // The measured landing of a Rust `step_out` from `main` (CodeLLDB 1.12,
+      // Windows): ten frames, every one a symbol label with no path. Four are
+      // runtime by name (the CRT start-up, the thread thunks); six match no
+      // runtime pattern, so the frame filter keeps them — and the verdict used
+      // to read "kept" as "program code".
+      const symbol = (id: number, name: string, label = name, line = 0) =>
+        ({ id, name, line, column: 0, source: { name: `@${label}`, sourceReference: 1000 + id } });
+      const RUST_STARTUP = [
+        symbol(1, 'core::ops::function::FnOnce::call_once', 'core::ops::function::FnOnce::call_once', 6),
+        symbol(2, 'std::sys::backtrace::__rust_begin_short_backtrace', '.text', 6),
+        symbol(3, 'std::rt::lang_start::{{closure}}', 'std::rt::lang_start::{{closure}}', 7),
+        symbol(4, 'std::rt::lang_start_internal', 'std::rt::lang_start_internal', 33),
+        symbol(5, 'std::rt::lang_start', '.text', 14),
+        symbol(6, 'main', 'main', 12),
+        symbol(7, '__tmainCRTStartup', '__tmainCRTStartup', 51),
+        symbol(8, 'mainCRTStartup', '.l_start', 9),
+        symbol(9, 'BaseThreadInitThunk'),
+        symbol(10, 'RtlUserThreadStart')
+      ];
+      // A program built without debug info: its own functions, named by symbol.
+      const STRIPPED = [symbol(21, 'stripped_user_fn'), symbol(22, 'stripped_caller')];
+
+      it('a step that lands where no frame has source says no program frame is active, and that the frames lack source', async () => {
+        const session = await pausedOnBreakIn('step', { [BREAK_IN_THREAD]: RUST_STARTUP });
+
+        const result = await sessionManager.getStackTraceDetailed(session.id);
+
+        expect(result.noProgramFrame).toBe(true);
+        expect(result.sourcelessFrames).toBe(true);
+        // What the stack lists is unchanged: the filter hides the four it knows by name.
+        expect(result.allFramesInternal).toBe(false);
+        expect(result.totalFrameCount).toBe(10);
+        expect(result.frames.map((frame) => frame.name)).toEqual([
+          'core::ops::function::FnOnce::call_once',
+          'std::sys::backtrace::__rust_begin_short_backtrace',
+          'std::rt::lang_start::{{closure}}',
+          'std::rt::lang_start_internal',
+          'std::rt::lang_start',
+          'main'
+        ]);
+      });
+
+      it('a stack the policy calls internal throughout carries the verdict without the no-source flag', async () => {
+        const session = await pausedOnBreakIn('step', { [BREAK_IN_THREAD]: BREAK_IN });
+
+        const result = await sessionManager.getStackTraceDetailed(session.id);
+
+        expect(result.noProgramFrame).toBe(true);
+        expect(result).not.toHaveProperty('sourcelessFrames');
+      });
+
+      it('a program built without debug info is listed as before and flagged the same way', async () => {
+        const session = await pausedOnBreakIn('breakpoint', { [BREAK_IN_THREAD]: STRIPPED });
+
+        const result = await sessionManager.getStackTraceDetailed(session.id);
+
+        expect(result.frames.map((frame) => frame.name)).toEqual(['stripped_user_fn', 'stripped_caller']);
+        expect(result.hiddenFrameCount).toBe(0);
+        expect(result.noProgramFrame).toBe(true);
+        expect(result.sourcelessFrames).toBe(true);
+      });
+
+      /** The start-up stack with a Local scope per frame, keyed by frame id. */
+      async function pausedInRustStartup(locals: Record<number, Array<{ name: string; value: string; type?: string }>>) {
+        const session = await pausedOnBreakIn('step', { [BREAK_IN_THREAD]: RUST_STARTUP });
+        const stacks = threadStacksHandler({ [BREAK_IN_THREAD]: RUST_STARTUP }, THREADS);
+        dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: unknown) => {
+          const { frameId, variablesReference } = (args ?? {}) as { frameId?: number; variablesReference?: number };
+          if (command === 'scopes') {
+            return { success: true, body: { scopes: [{ name: 'Local', variablesReference: 100 + (frameId ?? 0), expensive: false }] } };
+          }
+          if (command === 'variables') {
+            const reported = locals[(variablesReference ?? 0) - 100] ?? [];
+            return { success: true, body: { variables: reported.map((variable) => ({ variablesReference: 0, ...variable })) } };
+          }
+          return stacks(command, args);
+        });
+        return session;
+      }
+
+      it('the nameless return value is not a local: the read walks to the first frame that has one, and calls no frame runtime that the policy does not', async () => {
+        // Measured: after the step out of `main`, the top frame's only "local"
+        // is the unit value `main` returned, with an empty name.
+        const session = await pausedInRustStartup({
+          1: [{ name: '', value: '()', type: 'void' }],
+          2: [{ name: 'f', value: '(hello_world::main)', type: 'void (*)()' }]
+        });
+
+        const result = await sessionManager.getLocalVariables(session.id);
+
+        expect(result.variables.map((variable) => variable.name)).toEqual(['f']);
+        expect(result.frame).toEqual({
+          name: 'std::sys::backtrace::__rust_begin_short_backtrace', file: '@.text', line: 6, unresolvedSource: true
+        });
+        expect(result.anchorNote).toBe(
+          "Top frame 'core::ops::function::FnOnce::call_once' has no local variables; " +
+          "showing frame #1 'std::sys::backtrace::__rust_begin_short_backtrace' instead"
+        );
+        expect(result.noProgramFrame).toEqual({
+          threadId: BREAK_IN_THREAD,
+          frameCount: 10,
+          top: { name: 'core::ops::function::FnOnce::call_once', file: '@core::ops::function::FnOnce::call_once', line: 6, unresolvedSource: true },
+          sourceless: true
+        });
+      });
+
+      it('with nothing but the nameless value anywhere, the answer has no variables', async () => {
+        const session = await pausedInRustStartup({ 1: [{ name: '', value: '<Unable to determine byte size.>', type: 'void' }] });
+
+        const result = await sessionManager.getLocalVariables(session.id);
+
+        expect(result.variables).toEqual([]);
+        expect(result).not.toHaveProperty('anchorNote');
+        expect(result.noProgramFrame).toMatchObject({ sourceless: true });
+      });
+
+      it('one frame with a path is enough: the stack reaches the program', async () => {
+        const session = await pausedOnBreakIn('step', {
+          [BREAK_IN_THREAD]: [symbol(31, 'core::fmt::write'), ...IN_MAIN]
+        });
+
+        const result = await sessionManager.getStackTraceDetailed(session.id);
+
+        expect(result).not.toHaveProperty('noProgramFrame');
+        expect(result).not.toHaveProperty('sourcelessFrames');
+      });
+
+      it('a pause reported on a thread whose frames have no source moves to the sibling in main, as it does off a runtime thread', async () => {
+        const session = await pausedOnBreakIn('pause', { [BREAK_IN_THREAD]: STRIPPED, [PROGRAM_THREAD]: IN_MAIN });
+
+        const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, READY);
+
+        expect(result.threadId).toBe(PROGRAM_THREAD);
+        expect(result).not.toHaveProperty('noProgramFrame');
+        // The thread was left for having no source, and the note does not call it runtime.
+        expect(result.note).toMatch(/reported on thread 28180 \(5: tid=28180\), whose 2 frames are all internal\/runtime or have no source \(top: 'stripped_user_fn'\)/);
+        expect(result.note).toMatch(/showing thread 24604 \(1: tid=24604\), which is in 'main' \(\/proj\/examples\/cpp\/pause_test\.cpp:20\)/);
+      });
+
+      it('names the adopted thread by its first program frame, not by a frame without source above it', async () => {
+        const session = await pausedOnBreakIn('pause', {
+          [BREAK_IN_THREAD]: BREAK_IN,
+          [PROGRAM_THREAD]: [symbol(41, 'stripped_helper'), IN_MAIN[1]]
+        });
+
+        const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, READY);
+
+        expect(result.threadId).toBe(PROGRAM_THREAD);
+        expect(result.note).toMatch(/whose 4 frames are all internal\/runtime \(top: 'DbgBreakPoint'\)/);
+        expect(result.note).toMatch(/which is in 'main' \(\/proj\/examples\/cpp\/pause_test\.cpp:20\)/);
+      });
+
+      it('code the adapter names by a label of its own is program code: a Python program run from a string keeps its verdict and its thread', async () => {
+        // Measured on debugpy: `python -c` code reports its frames under
+        // '<string>'. The Python policy classifies nothing, so the verdict
+        // rests on whether the frame has a source, and it has one.
+        const fromString = [
+          { id: 51, name: 'work', line: 6, column: 1, source: { path: '<string>' } },
+          { id: 52, name: '<module>', line: 9, column: 1, source: { path: '<string>' } }
+        ];
+        const session = await pausedOnBreakIn('pause', { [BREAK_IN_THREAD]: fromString, [PROGRAM_THREAD]: IN_MAIN });
+        (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => PythonAdapterPolicy;
+
+        const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, READY);
+
+        expect(result.threadId).toBe(BREAK_IN_THREAD);
+        expect(result).not.toHaveProperty('noProgramFrame');
+        expect(result).not.toHaveProperty('sourcelessFrames');
+        expect(result.frames.map((frame) => frame.name)).toEqual(['work', '<module>']);
+        expect(requests('threads')).toHaveLength(0);
+      });
+
+      it('the walk-down note still says runtime of a top frame the policy calls internal', async () => {
+        // Java's filter hands the whole stack back when every frame is the
+        // JDK's, so an internal frame can be the top one and a lower one can
+        // hold the locals.
+        const jdkOnly = [
+          { id: 61, name: 'jdk.internal.misc.Unsafe.park', line: 0, column: 0, source: { path: 'jdk/internal/misc/Unsafe.java' } },
+          { id: 62, name: 'java.lang.Thread.run', line: 1583, column: 0, source: { path: 'java/lang/Thread.java' } }
+        ];
+        const session = await pausedOnBreakIn('step', { [BREAK_IN_THREAD]: jdkOnly });
+        (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JavaAdapterPolicy;
+        const stacks = threadStacksHandler({ [BREAK_IN_THREAD]: jdkOnly }, THREADS);
+        dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: unknown) => {
+          const { frameId, variablesReference } = (args ?? {}) as { frameId?: number; variablesReference?: number };
+          if (command === 'scopes') {
+            return { success: true, body: { scopes: [{ name: 'Local', variablesReference: 100 + (frameId ?? 0), expensive: false }] } };
+          }
+          if (command === 'variables') {
+            const reported = variablesReference === 162 ? [{ name: 'target', value: 'Worker@1f', type: 'Runnable', variablesReference: 0 }] : [];
+            return { success: true, body: { variables: reported } };
+          }
+          return stacks(command, args);
+        });
+
+        const result = await sessionManager.getLocalVariables(session.id);
+
+        expect(result.variables.map((variable) => variable.name)).toEqual(['target']);
+        expect(result.anchorNote).toBe(
+          "Top frame 'jdk.internal.misc.Unsafe.park' has no local variables (runtime/stdlib frame); showing frame #1 'java.lang.Thread.run' instead"
+        );
+      });
     });
 
     it('scans once per stop: a later read of the same stop answers from the adopted thread, and an explicit re-anchor re-adopts from memory', async () => {

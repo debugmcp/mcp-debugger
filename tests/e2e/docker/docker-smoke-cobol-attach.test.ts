@@ -128,7 +128,15 @@ describe.skipIf(process.env.SKIP_DOCKER_TESTS === 'true')('Docker: COBOL attach-
     expect(scopes.map(scope => scope.name)).toContainEqual(expect.stringMatching(/^WORKING-STORAGE of PAUSE/));
     const first = await tick();
     expect(first).toBeGreaterThanOrEqual(1);
-    expect(String((await call('evaluate_expression', { expression: 'WS-TICK' })).result)).toMatch(new RegExp(`^${first} \\(evaluated in PAUSE:`));
+    // An evaluate that names no frame is anchored on the visible COBOL frame
+    // and answers the value, as the guide says and as on Windows. On Linux
+    // glibc's `__nanosleep` used to stay visible above that frame and take
+    // the anchor, so the shim walked up and said so in the result (issue
+    // #1131 hides the alias like the wrapper it stands for).
+    expect(String((await call('evaluate_expression', { expression: 'WS-TICK' })).result)).toBe(String(first));
+    // A caller who names the raw libc frame still gets the shim's walk-up note.
+    expect(String((await call('evaluate_expression', { expression: 'WS-TICK', frameId: raw[0].id })).result))
+      .toMatch(new RegExp(`^${first} \\(evaluated in PAUSE:`));
 
     expect((await call('continue_execution')).success).toBe(true);
     await waitForState('running');

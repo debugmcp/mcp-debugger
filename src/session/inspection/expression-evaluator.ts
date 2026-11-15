@@ -173,7 +173,8 @@ export class ExpressionEvaluator {
         const top = anchor.frames[0];
         const outsideProgram = anchor.noProgramFrame && top
           ? `${ErrorMessages.stopWithoutProgramFrame(anchor.threadId, anchor.totalFrameCount, top, {
-              framesUnseen: anchor.totalFrameCount > 1
+              framesUnseen: anchor.totalFrameCount > 1,
+              sourceless: anchor.sourcelessFrames
             })} The expression was evaluated in that frame.`
           : undefined;
         const anchorNote = [anchor.note, anchor.pausedFrameNote && `${anchor.pausedFrameNote}${pausedAdvice}`, outsideProgram]

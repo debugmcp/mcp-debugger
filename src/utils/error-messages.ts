@@ -220,6 +220,40 @@ export const ErrorMessages = {
     `${endpoint.host}:${endpoint.port} never answered the DAP "initialize" request (${detail}). ${notADebugServer(endpoint)}`,
 
   /**
+   * A direct-connect attach whose connection ended during the handshake,
+   * worded by the parent (issue #1152). There is no adapter process and no
+   * worker failure to describe: what ended is the endpoint the caller
+   * named. The parent used to answer "Proxy exited during initialization"
+   * with the worker's stderr, whenever the worker's exit reached it before
+   * the worker's own report.
+   * Used in: src/proxy/proxy-manager.ts (startInitializationSequence)
+   * @param endpoint - What the worker dialed
+   * @param endedByDebugServer - The endpoint sent DAP `terminated` before the connection closed
+   */
+  directConnectEndedDuringHandshake: (endpoint: DirectConnectEndpoint, endedByDebugServer: boolean) => {
+    const at = `${endpoint.host}:${endpoint.port}`;
+    const listener = endpoint.listener ?? 'the debug server';
+    return endedByDebugServer
+      ? `${at} ended the debug session during the DAP handshake: it sent "terminated" and the connection closed. ` +
+        `Nothing was started for this attach, so there is nothing to retry on this side: check that ${listener} is still running there and accepts a client.`
+      : `The connection to ${at} ended during the DAP handshake, before initialization completed. ` +
+        `Nothing was started for this attach: check that ${listener} is still listening there.`;
+  },
+  /**
+   * The note on a stack whose top frames the exception has already left (issue #1143)
+   * Occurs when: an exception stop lists the traceback's frames above the
+   * frame execution is paused in (pydevd at a user-unhandled stop): frame 0
+   * carries `unwound: true`. Locals and evaluate read the raise site; a step
+   * continues from the live frame.
+   * Used in: src/session/inspection/frame-anchor-resolver.ts
+   * @param raised - The function the exception was raised in (frame 0)
+   * @param live - The first frame still on the call stack, when the answer shows one
+   */
+  exceptionRaisedInUnwoundFrame: (raised: string, live?: { name: string; where: string }) =>
+    `The exception was raised in '${raised}', which has already unwound: its variables are readable.` +
+    (live ? ` Execution is paused in '${live.name}' (${live.where}); a step continues from there.` : ''),
+
+  /**
    * Informational message for step operations still executing after the grace window
    * Occurs when: A step operation (stepOver, stepInto, stepOut) doesn't receive a 'stopped' event
    * within the grace window — usually because the step runs long-lived user code, which is not an error
@@ -317,22 +351,44 @@ export const ErrorMessages = {
    * stack has no more to list than the frame the sentence already names.
    * Used in: src/session/inspection/stop-location.ts,
    *   src/server/handlers/inspection-tools.ts
+   *
+   * Two wordings (issue #1131). When every frame is one the adapter's policy
+   * calls internal, they are runtime frames and the stop is outside the
+   * caller's code. When some frame is counted out only because the debugger
+   * has no source for it (a symbol label, no file at all), the sentence says
+   * that and no more: such a frame may be a runtime's or a library's, and it
+   * may be the caller's own code built without debug information, which is
+   * something they can fix.
    * @param threadId - The thread the answer is anchored on, when known
    * @param frameCount - How many frames the thread reported
    * @param top - The frame shown
    * @param opts.framesUnseen - The thread has frames this answer did not show
+   * @param opts.sourceless - Some frame is not internal by the policy's rules; it has no source
    */
   stopWithoutProgramFrame: (
     threadId: number | undefined,
     frameCount: number,
     top: { name: string; file: string; line: number },
-    opts?: { framesUnseen?: boolean }
-  ) =>
-    `No program frame is active${typeof threadId === 'number' ? ` on thread ${threadId}` : ''}: ` +
-    `${frameCount === 1 ? 'the only frame is' : `all ${frameCount} frames are`} internal/runtime ` +
-    `(top: '${top.name}' ${top.file}:${top.line}). The stop landed outside your code: ` +
-    `continue_execution and trigger activity, or set a breakpoint` +
-    (opts?.framesUnseen ? '; get_stack_trace with includeInternals: true lists the frames.' : '.'),
+    opts?: { framesUnseen?: boolean; sourceless?: boolean }
+  ) => {
+    const where = `No program frame is active${typeof threadId === 'number' ? ` on thread ${threadId}` : ''}: `;
+    const shown = `(top: '${top.name}' ${top.file}:${top.line}).`;
+    const pointer = opts?.framesUnseen ? '; get_stack_trace with includeInternals: true lists the frames.' : '.';
+    if (opts?.sourceless) {
+      return (
+        where +
+        `${frameCount === 1 ? 'the only frame has no source' : `all ${frameCount} frames are internal/runtime or have no source`} ` +
+        `${shown} Code without source is a runtime's or a library's, or your own built without debug information. ` +
+        `continue_execution and trigger activity, or set a breakpoint in a source file${pointer}`
+      );
+    }
+    return (
+      where +
+      `${frameCount === 1 ? 'the only frame is' : `all ${frameCount} frames are`} internal/runtime ` +
+      `${shown} The stop landed outside your code: ` +
+      `continue_execution and trigger activity, or set a breakpoint${pointer}`
+    );
+  },
 
   /**
    * An explicit breakOnExceptions mode the adapter cannot honour (issue #1032):
@@ -761,6 +817,58 @@ export const ErrorMessages = {
     `\`${tool}\` cannot be used on session ${sessionId}: it is a child session; ` +
     `it was started by its parent (${parentSessionId}). ` +
     `Use the parent's id, or close_debug_session on the child.`,
+
+  /**
+   * The detach answer when the adapter acknowledged the detach (issue #1148)
+   * Occurs when: the adapter answered the detaching disconnect, or sent
+   * `terminated` in reply to it, and reported no exit of the program
+   * Used in: src/session/attach/attach-controller.ts
+   */
+  detachReleased: () =>
+    'Detached from process: the debug adapter confirmed the detach, and the process was left running',
+
+  /**
+   * The detach answer when the adapter reported that the program exited (issue #1148)
+   * Used in: src/session/attach/attach-controller.ts
+   */
+  detachProgramEnded: () =>
+    'Detached from process: the debug adapter reported that the program had exited, so there is no process left running',
+
+  /**
+   * The detach answer when nothing acknowledged the detach (issue #1148)
+   * Occurs when: the detaching disconnect was neither answered nor followed
+   * by `terminated` within its bound, or the worker reported nothing. The
+   * adapter is stopped all the same; what that did to the target is not
+   * something the server saw. It used to answer "process still running".
+   * Used in: src/session/attach/attach-controller.ts
+   * @param reason - Why there is no acknowledgement
+   * @param look - What a look at the target's pid showed, for a pid attach
+   */
+  detachUnconfirmed: (reason: string, look?: string) =>
+    `Detached, but the debug adapter did not confirm it (${reason}). The debugger was stopped anyway; ` +
+    `whether the process is still running is not known${look ? `: ${look}` : ''}`,
+
+  /**
+   * The close answer's warning when the detach of a borrowed program was not acknowledged (issue #1148)
+   * Used in: src/server/handlers/session-tools.ts
+   * @param reason - Why there is no acknowledgement
+   */
+  closeReleaseUnconfirmed: (reason: string) =>
+    `The debug adapter did not confirm that it released the process (${reason}); whether the process is still running is not known`,
+
+  /**
+   * Refusal of a plain detach on a session that launched its program (issue #1151)
+   * Occurs when: detach_from_process is called without terminateProcess on a
+   * session whose program it launched. A launched program ends with its
+   * session in every adapter, so there is no detach that leaves it running;
+   * the answer used to claim one. Refused before any state changes.
+   * Used in: src/session/attach/attach-controller.ts
+   */
+  detachOwnedProgramRefused: () =>
+    'detach_from_process leaves a program running, and this program was launched by this session: ' +
+    'a launched program ends with its session, so there is nothing to detach from and nothing was changed. ' +
+    'To end it now, call close_debug_session, or detach_from_process with terminateProcess: true. ' +
+    'To debug a program that must keep running afterwards, start it outside the debugger and use attach_to_process',
 
   /**
    * Hint appended to launch-toolchain failures on attach-capable languages

@@ -549,6 +549,14 @@ export interface StackFrame {
    * (`describeUnresolvedSource`); the `get_stack_trace` note carries it.
    */
   unresolvedSource?: boolean;
+  /**
+   * True for a frame the exception at this stop has already left (issue
+   * #1143): its variables are readable, but execution is not in it and a
+   * step does not continue from it. The first frame without the flag is
+   * where the program is paused. Absent on every other frame, and on every
+   * stop whose frame 0 is live.
+   */
+  unwound?: true;
 }
 
 /**

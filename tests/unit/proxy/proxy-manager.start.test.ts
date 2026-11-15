@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
+import { ErrorMessages } from '../../../src/utils/error-messages.js';
 import { EventEmitter } from 'events';
 import path from 'path';
 import { pathToFileURL } from 'url';
@@ -711,6 +712,156 @@ describe('ProxyManager.start', () => {
   // channel has drained, so a status the worker wrote just before exiting
   // always lands before `exit` (issue #729). What remains here is a proxy that
   // exits cleanly without ever completing its start — still a failure (#596).
+  // Issue #1152: for a direct connection there is no adapter process and no
+  // worker failure to describe. What ended is the endpoint the caller named,
+  // and the parent says so itself, whichever of the worker's messages comes
+  // first. A spawned adapter's wording is untouched (the cases below this
+  // block pin it).
+  describe('a direct connection that ends during the handshake (issue #1152)', () => {
+    const listener = 'a debugpy listener (python -m debugpy --listen 127.0.0.1:5000 …)';
+    /** Run `script` once the worker has acknowledged init and said what it dialed. */
+    const duringDirectHandshake = (script: (emit: (message: Record<string, unknown>) => void) => void) => {
+      fakeProcess.sendCommand.mockImplementation((cmd: any) => {
+        if (cmd.cmd !== 'init') return;
+        setTimeout(() => {
+          const emit = (message: Record<string, unknown>) => fakeProcess.emit('message', { sessionId: cmd.sessionId, ...message });
+          emit({ type: 'status', status: 'init_received' });
+          emit({ type: 'status', status: 'direct_connect', host: '127.0.0.1', port: 5000, listener });
+          emit({ type: 'status', status: 'dap_handshake_stage', stage: 'transport_connected' });
+          // A turn later, as the worker's next message would be: start() is
+          // listening for the handshake's outcome only once the ack has landed.
+          setTimeout(() => script(emit), 0);
+        }, 0);
+      });
+    };
+    const failure = async (): Promise<string> => {
+      const error = await proxyManager.start(baseConfig).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(Error);
+      return (error as Error).message;
+    };
+
+    it('says the debug server ended the session when it sent terminated and the worker then exited', async () => {
+      duringDirectHandshake((emit) => {
+        (fakeProcess.stderr as unknown as EventEmitter).emit('data', Buffer.from('worker noise that is not the cause' + String.fromCharCode(10)));
+        emit({ type: 'dapEvent', event: 'terminated', body: {} });
+        fakeProcess.emit('exit', 0, null);
+      });
+
+      const message = await failure();
+
+      expect(message).toBe(ErrorMessages.directConnectEndedDuringHandshake({ host: '127.0.0.1', port: 5000, listener }, true));
+      expect(message).toMatch(/^127\.0\.0\.1:5000 ended the debug session during the DAP handshake/);
+      expect(message).toContain('Nothing was started for this attach');
+      expect(message).not.toContain('Proxy exited');
+      expect(message).not.toContain('worker noise');
+    });
+
+    it('names the endpoint when the connection ends with no terminated event', async () => {
+      duringDirectHandshake((emit) => {
+        emit({ type: 'status', status: 'dap_connection_closed' });
+      });
+
+      const message = await failure();
+
+      expect(message).toBe(ErrorMessages.directConnectEndedDuringHandshake({ host: '127.0.0.1', port: 5000, listener }, false));
+      expect(message).toMatch(/^The connection to 127\.0\.0\.1:5000 ended during the DAP handshake/);
+      expect(message).not.toContain('Proxy exited');
+    });
+
+    it('adds the endpoint to a worker error that does not name it, when the error comes before the exit', async () => {
+      duringDirectHandshake((emit) => {
+        emit({ type: 'error', message: 'Critical initialization error: DAP client disconnected' });
+        fakeProcess.emit('exit', 1, null);
+      });
+
+      expect(await failure()).toBe(
+        'Critical initialization error: DAP client disconnected [direct connect to 127.0.0.1:5000; no adapter process was started]'
+      );
+    });
+
+    it('leaves a worker error that already names the endpoint as it is', async () => {
+      const report = 'Critical initialization error: 127.0.0.1:5000 never answered the DAP "initialize" request (socket hang up).';
+      duringDirectHandshake((emit) => {
+        emit({ type: 'error', message: report });
+      });
+
+      expect(await failure()).toBe(report);
+    });
+
+    it('answers from the ending when it comes before the worker error', async () => {
+      duringDirectHandshake((emit) => {
+        emit({ type: 'status', status: 'dap_connection_closed' });
+        emit({ type: 'error', message: 'Critical initialization error: DAP client disconnected' });
+      });
+
+      expect(await failure()).toBe(ErrorMessages.directConnectEndedDuringHandshake({ host: '127.0.0.1', port: 5000, listener }, false));
+    });
+
+    it.each([
+      ['exited with an error code', 1, null, 'Code: 1, Signal: undefined'],
+      ['was killed', null, 'SIGKILL', 'Code: null, Signal: SIGKILL']
+    ] as const)('still describes a worker that %s as the worker, with its stderr, and says what was dialed', async (_what, code, signal, exit) => {
+      // The review's case: a crash of ours is not the endpoint hanging up,
+      // and its stack is the only evidence of it.
+      duringDirectHandshake(() => {
+        (fakeProcess.stderr as unknown as EventEmitter).emit('data', Buffer.from('TypeError: boom at worker' + String.fromCharCode(10)));
+        fakeProcess.emit('exit', code, signal);
+      });
+
+      const message = await failure();
+
+      expect(message).toContain(`Proxy exited during initialization. ${exit} [direct connect to 127.0.0.1:5000; no adapter process was started]`);
+      expect(message).toContain('TypeError: boom at worker');
+      expect(message).not.toContain('ended during the DAP handshake');
+    });
+
+    it('adds the endpoint when the error names only a longer port, and keeps the error it was given', async () => {
+      duringDirectHandshake((emit) => {
+        emit({ type: 'error', message: 'Critical initialization error: connect ECONNREFUSED 127.0.0.1:50001' });
+      });
+
+      expect(await failure()).toBe(
+        'Critical initialization error: connect ECONNREFUSED 127.0.0.1:50001 [direct connect to 127.0.0.1:5000; no adapter process was started]'
+      );
+    });
+
+    it('still words it by endpoint when this process stopped the worker in answer to terminated', async () => {
+      // What the session does on `terminated`: it stops the proxy. The exit
+      // that follows is the endpoint's ending all the same.
+      duringDirectHandshake((emit) => {
+        emit({ type: 'dapEvent', event: 'terminated', body: {} });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (proxyManager as any).isStopped = true;
+        fakeProcess.emit('exit', 0, null);
+      });
+
+      expect(await failure()).toBe(ErrorMessages.directConnectEndedDuringHandshake({ host: '127.0.0.1', port: 5000, listener }, true));
+    });
+
+    it('describes the worker, not the endpoint, when this process stopped it with no terminated from the endpoint', async () => {
+      duringDirectHandshake(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (proxyManager as any).isStopped = true;
+        fakeProcess.emit('exit', 0, null);
+      });
+
+      const message = await failure();
+
+      expect(message).toContain('Proxy exited during initialization. Code: 0');
+      expect(message).toContain('[direct connect to 127.0.0.1:5000; no adapter process was started]');
+    });
+
+    it('stops listening for terminated once the start has settled', async () => {
+      duringDirectHandshake((emit) => {
+        emit({ type: 'status', status: 'dap_connection_closed' });
+      });
+
+      await failure();
+
+      expect(proxyManager.listenerCount('terminated')).toBe(0);
+    });
+  });
+
   it('rejects when the proxy exits cleanly without completing initialization', async () => {
     fakeProcess.sendCommand.mockImplementation((cmd: any) => {
       if (cmd.cmd === 'init') {

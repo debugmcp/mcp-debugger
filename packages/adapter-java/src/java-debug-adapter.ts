@@ -32,6 +32,103 @@ import { AdapterDependencies } from '@debugmcp/shared';
 import { findJavaExecutable, findJavaWithVersion, getJavaSearchPaths } from './utils/java-utils.js';
 import { resolveJdiBridgeClassDir, ensureJdiBridge, isJdiBridgeStale } from './utils/jdi-resolver.js';
 
+/** How far above the program's (or the working) directory a source root is looked for: the stale-build check's own bound. */
+const SOURCE_ROOT_ANCESTORS = 8;
+
+/**
+ * The directories the JDI bridge may find a class's source file under (issue
+ * #1138), most specific first. The bridge reports a frame's file as JDI gives
+ * it: a path relative to the source root (`com/acme/Tick.java`, or the bare
+ * `PauseTest.java` in the default package). Only a line breakpoint set by
+ * path told it where that root is, so every other stop (a pause, a function
+ * breakpoint, an exception) answered with a name nothing could open, and no
+ * `context`. These are the places the launch already knows:
+ *
+ *   what the caller named (`sourcePaths`, then `sourcePath`);
+ *   the program's directory and its ancestors, when the program is a file;
+ *   the working directory and its ancestors (the session defaults it to the
+ *   script's directory, so a class named by `program: "com.acme.Tick"` is
+ *   still found from its source root);
+ *   the classpath's directories, where sources often sit beside classes.
+ *
+ * The bridge takes the first root the relative path exists under.
+ *
+ * Two lists come back. `all` is every root above. `direct` leaves out the
+ * directories reached only by climbing: an ancestor is a candidate source
+ * root because a package path (`com/acme/App.java`) under it is specific
+ * enough to trust, and a bare `Util.java` is not: some unrelated file of
+ * that name four directories up would be answered as the class's source.
+ * The bridge looks a default-package class up under `direct` only.
+ */
+function sourceRootsFor(known: {
+  program?: string;
+  cwd?: string;
+  classpath?: string;
+  sourcePath?: string;
+  sourcePaths?: unknown;
+}): { all: string[]; direct: string[] } {
+  const all: string[] = [];
+  const direct: string[] = [];
+  const add = (dir: string | undefined, climbed = false): void => {
+    if (!dir) {
+      return;
+    }
+    if (!all.includes(dir)) {
+      all.push(dir);
+    }
+    if (!climbed && !direct.includes(dir)) {
+      direct.push(dir);
+    }
+  };
+  const climb = (dir: string): void => {
+    let current = dir;
+    for (let level = 0; level <= SOURCE_ROOT_ANCESTORS; level++) {
+      add(current, level > 0);
+      const parent = path.dirname(current);
+      if (parent === current) {
+        return;
+      }
+      current = parent;
+    }
+  };
+
+  // A relative entry means what it means to the JVM being launched: relative
+  // to its working directory. The bridge would otherwise resolve it against
+  // its own, which is the server's. With no working directory known (an
+  // attach) a root the caller named is kept as given, and a classpath entry
+  // is skipped.
+  const cwd = known.cwd && path.isAbsolute(known.cwd) ? known.cwd : undefined;
+  const named = (entry: unknown): string | undefined => {
+    if (typeof entry !== 'string' || entry === '') {
+      return undefined;
+    }
+    return path.isAbsolute(entry) || !cwd ? entry : path.resolve(cwd, entry);
+  };
+
+  if (Array.isArray(known.sourcePaths)) {
+    for (const entry of known.sourcePaths) {
+      add(named(entry));
+    }
+  }
+  for (const entry of (known.sourcePath ?? '').split(path.delimiter)) {
+    add(named(entry));
+  }
+  if (known.program && path.isAbsolute(known.program)) {
+    climb(path.dirname(known.program));
+  }
+  if (cwd) {
+    climb(cwd);
+  }
+  for (const entry of (known.classpath ?? '').split(path.delimiter)) {
+    // An archive holds no loose sources, and `lib/*` names archives.
+    if (!entry || /\.(jar|zip)$/i.test(entry) || entry.endsWith('*')) {
+      continue;
+    }
+    add(path.isAbsolute(entry) ? entry : cwd ? path.resolve(cwd, entry) : undefined);
+  }
+  return { all, direct };
+}
+
 /**
  * Java-specific launch configuration
  */
@@ -39,6 +136,10 @@ interface JavaLaunchConfig extends LanguageSpecificLaunchConfig {
   mainClass?: string;
   classpath?: string;
   sourcePath?: string;
+  /** Directories the bridge resolves a stop's source file under (issue #1138). */
+  sourceRoots?: string[];
+  /** The ones a default-package class is looked up under: `sourceRoots` without the climbed ancestors. */
+  defaultPackageRoots?: string[];
   vmArgs?: string;
   javaPath?: string;
   [key: string]: unknown;
@@ -320,6 +421,17 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
       javaConfig.cwd = config.cwd;
     }
 
+    // Where the bridge may find a class's source file (issue #1138).
+    const sourceRoots = sourceRootsFor({
+      program,
+      cwd: config.cwd,
+      classpath,
+      sourcePath,
+      sourcePaths: (config as Record<string, unknown>).sourcePaths
+    });
+    javaConfig.sourceRoots = sourceRoots.all;
+    javaConfig.defaultPackageRoots = sourceRoots.direct;
+
     if (config.env) {
       javaConfig.env = config.env;
     }
@@ -351,6 +463,10 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
     void _request; void _attachMode; void _processId; void _processName;
     void _identifierType;
 
+    // An attach knows no program and spawns nothing: the source roots are
+    // the ones the caller named (issue #1138), none of them climbed to.
+    const attachRoots = sourceRootsFor({ sourcePaths: rest.sourcePaths }).all;
+
     // Advanced passthrough (the JDI bridge ignores keys it doesn't read) with
     // the normalized attach shape on top (issues #450/#466).
     return {
@@ -359,6 +475,8 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
       request: 'attach',
       host: (host as string | undefined) || 'localhost',
       port: port as number | undefined,
+      sourceRoots: attachRoots,
+      defaultPackageRoots: attachRoots,
     } as LanguageSpecificAttachConfig;
   }
 

@@ -22,8 +22,17 @@ import { failureResult, jsonResult, sessionErrorResultOrThrow, type ToolResult }
  * the answer on the record AND reports it, and the response says it once. A
  * record this call just created carries `messageOrigin: 'refusal'` exactly
  * when this call's re-send was refused.
+ *
+ * And only for a breakpoint that did not bind (issue #1144). `warning` is the
+ * field for something to act on; a bind that succeeded describes itself in
+ * `message` (a COBOL paragraph's "2000-COMPUTE (paragraph of HELLO) ->
+ * hello.cob:42", CodeLLDB's "Resolved locations: 1"), and repeating that in
+ * `warning` made every such breakpoint read as a problem.
  */
-function messageBesideWarning(breakpoint: { message?: string; messageOrigin?: string }): string | undefined {
+function messageBesideWarning(breakpoint: { message?: string; messageOrigin?: string; verified?: boolean }): string | undefined {
+  if (breakpoint.verified) {
+    return undefined;
+  }
   return breakpoint.messageOrigin === 'refusal' ? undefined : breakpoint.message;
 }
 

@@ -19,7 +19,7 @@
  */
 import { EventEmitter } from 'events';
 import { randomUUID } from 'node:crypto';
-import path from 'path';
+import { dapSourcePath } from '../utils/dap-source.js';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { resolveExceptionFilters } from '@debugmcp/shared';
 import type { AdapterPolicy, ChildAdoptionContract, ChildReport, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
@@ -523,7 +523,8 @@ export class ChildConnections extends EventEmitter {
   ): Promise<void> {
     const grouped = new Map<string, NonNullable<ChildAdoptArgs['breakpoints']>>();
     for (const breakpoint of breakpoints) {
-      const file = path.resolve(breakpoint.file);
+      // The form every route sends a breakpoint's file under (issue #1147).
+      const file = dapSourcePath(breakpoint.file);
       if (!grouped.has(file)) {
         grouped.set(file, []);
       }

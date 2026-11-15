@@ -114,7 +114,16 @@ Dart attaches by VM-service URI, never by process id:
 - Detach (`detach_from_process`, or closing the session) leaves the target running.
 
 After attaching to a running program the session is paused; an isolate idle in an `await` shows an
-empty stack until it next runs code.
+empty stack until it next runs code. The same holds for `pause_execution` on a program that idles
+between events, which is most Dart programs most of the time. The answer is `paused` with no
+location and a `note` that says so (issue #1132): `The isolate is idle between events (waiting in an
+`await`), so no Dart frame is on its stack; it is not in native code, and pausing again lands in the
+same idle state. To stop where the program runs next, set a breakpoint in the code that runs next
+(the loop body, a handler or a callback) and continue_execution; wait_for_stop answers when it is
+hit.` It answers in tens of milliseconds: an empty first stack read is an idle isolate (measured, ten
+pauses each: idle in an `await`, 0 frames ten times in ten; busy in a loop, its frames ten times in
+ten), so the server does not spend its 3 s readiness wait on frames that cannot appear. It used to,
+and then blamed native code and suggested re-pausing, which lands idle again.
 
 ## What works, what does not
 

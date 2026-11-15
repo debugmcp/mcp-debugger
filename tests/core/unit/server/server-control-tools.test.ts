@@ -105,6 +105,24 @@ describe('Server Control Tools Tests', () => {
       expect(content.warning).toContain(ErrorMessages.debuggerOffForLaunch);
     });
 
+    it('keeps the adapter message of a verified line breakpoint in message, out of warning (issue #1144)', async () => {
+      // CodeLLDB says "Resolved locations: 1" on a bind that worked.
+      mockSessionManager.getSession.mockReturnValue({ id: 'test-session', state: 'running', sessionLifecycle: 'ACTIVE' });
+      mockSessionManager.setBreakpoint.mockResolvedValue({
+        breakpoint: { id: 'bp-1', file: '/path/to/main.cpp', line: 10, verified: true, message: 'Resolved locations: 1' }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'set_breakpoint', arguments: { sessionId: 'test-session', file: '/path/to/main.cpp', line: 10 } }
+      });
+
+      const content = JSON.parse(result.content[0].text);
+      expect(content.verified).toBe(true);
+      expect(content.message).toBe('Resolved locations: 1');
+      expect(content).not.toHaveProperty('warning');
+    });
+
     it('says only that breakpoints cannot bind on a session that is paused — a stop did land (issue #749)', async () => {
       mockSessionManager.getSession.mockReturnValue({
         id: 'test-session',

@@ -112,6 +112,24 @@ export interface ProxyManagerEvents {
  * sender triggered it. Absent when no resume was called for. One shape with
  * the status message it comes from.
  */
+/** Whether a failure message already names the endpoint a direct connection dialed (issue #1152): the exact port, not a longer one. */
+function namesEndpoint(message: string, endpoint: { host: string; port: number }): boolean {
+  const at = `${endpoint.host}:${endpoint.port}`;
+  for (let index = message.indexOf(at); index !== -1; index = message.indexOf(at, index + 1)) {
+    const next = message.charAt(index + at.length);
+    if (next < '0' || next > '9') {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** What the adapter did with a detaching disconnect (issue #1148), as the worker reported it. */
+export type DetachResult = Omit<
+  Extract<ProxyStatusMessage, { status: 'detach_result' }>,
+  'type' | 'sessionId' | 'status' | 'data'
+>;
+
 export type PreDetachResume = Omit<
   Extract<ProxyStatusMessage, { status: 'pre_detach_resume' }>,
   'type' | 'sessionId' | 'status' | 'data'
@@ -139,6 +157,13 @@ export interface IProxyManager extends EventEmitter {
    * 'pre_detach_resume' status; undefined when no resume was called for.
    */
   getPreDetachResume(): PreDetachResume | undefined;
+  /**
+   * What the adapter did with the detaching disconnect (issue #1148), from
+   * the worker's 'detach_result' status: acknowledged (by its response, or by
+   * `terminated` sent in reply) or not, and whether the program exited.
+   * Undefined when no detaching disconnect was sent, or no report arrived.
+   */
+  getDetachResult(): DetachResult | undefined;
   /**
    * The adapter process's last stderr lines, as the worker reported them with
    * its terminal status or error report (issue #897); empty until then.
@@ -257,6 +282,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   private currentThreadId: number | null = null;
   /** The worker's pre-detach resume outcome (issue #763), once reported. */
   private preDetachResume: PreDetachResume | undefined = undefined;
+  private detachResult: DetachResult | undefined = undefined;
   private pendingDapRequests = new Map<string, {
     resolve: (response: DebugProtocol.Response) => void;
     reject: (error: Error) => void;
@@ -479,11 +505,20 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         reject(error);
       }, this.initializationTimeoutMs);
 
+      // A direct connection (issue #1152): no adapter was spawned, so an
+      // ending here is the endpoint's, and the parent words it by endpoint
+      // whichever of the worker's messages arrives first.
+      let endedByDebugServer = false;
+      const handleTerminated = () => {
+        endedByDebugServer = true;
+      };
+
       const cleanup = () => {
         clearTimeout(timeout);
         this.removeListener('initialized', handleInitialized);
         this.removeListener('error', handleError);
         this.removeListener('exit', handleExit);
+        this.removeListener('terminated', handleTerminated);
       };
 
       const handleInitialized = () => {
@@ -495,12 +530,34 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
       const handleError = (error: Error) => {
         cleanup();
+        const direct = this.initProgress.directConnect;
+        if (direct && !namesEndpoint(error.message, direct)) {
+          // The same error, so whatever it carries beside its message stays.
+          error.message = `${error.message} [direct connect to ${direct.host}:${direct.port}; no adapter process was started]`;
+        }
         reject(error);
       };
 
       const handleExit = (code: number | null, signal?: string) => {
         cleanup();
+        const direct = this.initProgress.directConnect;
+        // The endpoint's ending, not the worker's own: the worker reported
+        // the connection over (a codeless exit), or left cleanly after the
+        // endpoint's `terminated` (which this process answers by stopping
+        // the worker, so "stopped by us" is expected there). A worker that
+        // crashed or was killed, or that this process stopped with no
+        // `terminated` from the endpoint, is described as before, with the
+        // endpoint added so the answer still says what was dialed.
+        const endpointEnded =
+          direct !== undefined && !signal && (code === null || code === 0) && (endedByDebugServer || !this.isStopped);
+        if (direct && endpointEnded) {
+          reject(new Error(ErrorMessages.directConnectEndedDuringHandshake(direct, endedByDebugServer)));
+          return;
+        }
         let errorMessage = `Proxy exited during initialization. Code: ${code}, Signal: ${signal}`;
+        if (direct) {
+          errorMessage += ` [direct connect to ${direct.host}:${direct.port}; no adapter process was started]`;
+        }
         if (this.stderrBuffer.length > 0) {
           // Cap what gets embedded in the user-facing error — the full
           // buffer is already in the logs (issue #146).
@@ -520,6 +577,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       this.once('initialized', handleInitialized);
       this.once('error', handleError);
       this.once('exit', handleExit);
+      this.on('terminated', handleTerminated);
     });
   }
 
@@ -819,6 +877,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
   getPreDetachResume(): PreDetachResume | undefined {
     return this.preDetachResume;
+  }
+
+  getDetachResult(): DetachResult | undefined {
+    return this.detachResult;
   }
 
   getAdapterStderrTail(): readonly string[] {
@@ -1284,6 +1346,25 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     );
   }
 
+  /**
+   * What the adapter did with a detaching disconnect (issue #1148). The
+   * session's detach answer and the close answer say "released" from this,
+   * not from the session's mode.
+   */
+  private recordDetachResult(message: Extract<ProxyStatusMessage, { status: 'detach_result' }>): void {
+    const { trigger, acknowledged, by, debuggeeExited, error } = message;
+    this.detachResult = {
+      trigger,
+      acknowledged: acknowledged === true,
+      ...(by !== undefined ? { by } : {}),
+      ...(debuggeeExited === true ? { debuggeeExited: true } : {}),
+      ...(error !== undefined ? { error } : {})
+    };
+    this.logger.info(
+      `[ProxyManager] Detaching disconnect (${trigger}): ${acknowledged ? `acknowledged by ${by ?? 'the adapter'}` : `not acknowledged${error !== undefined ? ` — ${error}` : ''}`}`
+    );
+  }
+
   private handleProxyMessage(rawMessage: unknown): void {
     // Skip all message processing after stop() to prevent emitting events with no listeners
     if (this.isStopped) {
@@ -1294,6 +1375,12 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       const late = rawMessage as { type?: string; status?: string } | undefined;
       if (late?.type === 'status' && late.status === 'pre_detach_resume') {
         this.recordPreDetachResume(rawMessage as Extract<ProxyStatusMessage, { status: 'pre_detach_resume' }>);
+        return;
+      }
+      // And the outcome of the close path's own detaching disconnect (issue
+      // #1148): it is what the close answer's `released` is read from.
+      if (late?.type === 'status' && late.status === 'detach_result') {
+        this.recordDetachResult(rawMessage as Extract<ProxyStatusMessage, { status: 'detach_result' }>);
         return;
       }
       this.logger.debug(`[ProxyManager] Ignoring late message after stop (session ${this.sessionId})`);
@@ -1591,6 +1678,10 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
           };
         }
         this.logger.info(`[ProxyManager] Direct connect to ${message.host}:${message.port} (no adapter process)`);
+        break;
+
+      case 'detach_result':
+        this.recordDetachResult(message);
         break;
 
       case 'pre_detach_resume':

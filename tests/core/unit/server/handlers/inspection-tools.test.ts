@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
-import { DotnetAdapterPolicy, SessionLifecycleState } from '@debugmcp/shared';
+import { DotnetAdapterPolicy, SessionLifecycleState, SessionState } from '@debugmcp/shared';
 import {
   getScopesTool,
   getStackTraceTool,
@@ -289,6 +289,42 @@ describe('inspection tool handlers', () => {
       ctx.sessionManager.getLocalVariables = vi.fn();
     });
 
+    describe('a paused session whose anchored thread has no frames (issue #1132)', () => {
+      const paused = () => ctx.sessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE,
+        state: SessionState.PAUSED
+      });
+      const answer = async (result: Record<string, unknown>) => {
+        ctx.sessionManager.getLocalVariables.mockResolvedValue(result);
+        return JSON.parse((await handleGetLocalVariables(ctx, { sessionId: 'test-session' })).content[0].text);
+      };
+      const IDLE =
+        'The isolate is idle between events (waiting in an `await`), so no Dart frame is on its stack; set a breakpoint in the code that runs next.';
+
+      it('carries what the stack read said about it, and adds no remedy of its own', async () => {
+        paused();
+        const payload = await answer({ variables: [], frame: null, scopeName: null, anchorNote: IDLE });
+
+        expect(payload.note).toBe(IDLE);
+        expect(payload.message).toBe('The session is paused, but the anchored thread reported no stack frames.');
+        expect(JSON.stringify(payload)).not.toContain('list_threads');
+        expect(JSON.stringify(payload)).not.toContain('re-anchor');
+      });
+
+      it('offers the generic remedy when the stack read had nothing to say', async () => {
+        paused();
+        const payload = await answer({ variables: [], frame: null, scopeName: null });
+
+        expect(payload.message).toBe(
+          'The session is paused, but the anchored thread reported no stack frames. ' +
+          'Try get_stack_trace with a threadId from list_threads, or continue_execution ' +
+          'followed by pause_execution to re-anchor on a reportable thread.'
+        );
+        expect(payload).not.toHaveProperty('note');
+      });
+    });
+
     it('returns variables with frame and scope info', async () => {
       ctx.sessionManager.getLocalVariables.mockResolvedValue({
         variables: [{ name: 'x', value: '42' }],
@@ -350,6 +386,26 @@ describe('inspection tool handlers', () => {
           'The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint; ' +
           'get_stack_trace with includeInternals: true lists the frames. ' +
           "The variables shown belong to '__tmainCRTStartup', not to your program."
+        );
+      });
+
+      it('says the variables belong to a frame without source, not to a runtime, when that is what the stack is (issue #1131)', async () => {
+        const top = { name: 'core::ops::function::FnOnce::call_once', file: '@core::ops::function::FnOnce::call_once', line: 6, unresolvedSource: true };
+        const payload = await localsOf({
+          variables: [{ name: 'self', value: '{…}', type: 'closure' }],
+          frame: top,
+          scopeName: 'Local',
+          noProgramFrame: { threadId: 4264, frameCount: 10, top, sourceless: true }
+        });
+
+        expect(payload.noProgramFrame).toBe(true);
+        expect(payload.note).toBe(
+          "No program frame is active on thread 4264: all 10 frames are internal/runtime or have no source " +
+          "(top: 'core::ops::function::FnOnce::call_once' @core::ops::function::FnOnce::call_once:6). " +
+          "Code without source is a runtime's or a library's, or your own built without debug information. " +
+          'continue_execution and trigger activity, or set a breakpoint in a source file; ' +
+          'get_stack_trace with includeInternals: true lists the frames. ' +
+          "The variables shown belong to 'core::ops::function::FnOnce::call_once', a frame without source."
         );
       });
 

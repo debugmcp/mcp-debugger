@@ -21,6 +21,7 @@
  */
 import type { AdapterPolicy, Breakpoint, FunctionBreakpoint } from '@debugmcp/shared';
 import { normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
+import { dapSourcePath } from '../../utils/dap-source.js';
 import type { ManagedSession } from '../session-store.js';
 
 const windowsPathish = /^[a-z]:[\\/]/i;
@@ -30,16 +31,27 @@ const windowsPathish = /^[a-z]:[\\/]/i;
  * compare case-insensitively with separators folded: adapters canonicalize
  * differently (js-debug lowercases the drive letter and emits backslashes)
  * and a caller may well have asked with forward slashes (#236, #673).
+ *
+ * Each side is first given the form a breakpoint's file is sent to the
+ * adapter under (issue #1147): a path typed with a `..` segment or a doubled
+ * separator goes out resolved, the adapter answers with what it was sent, and
+ * the answer is about the file that was asked for. Without this the record
+ * reported a `boundFile` that was only another spelling of its own file.
  */
 export function samePath(a: string, b: string): boolean {
   if (a === b) {
     return true;
   }
-  if (!windowsPathish.test(a) || !windowsPathish.test(b)) {
+  const sentA = dapSourcePath(a);
+  const sentB = dapSourcePath(b);
+  if (sentA === sentB) {
+    return true;
+  }
+  if (!windowsPathish.test(sentA) || !windowsPathish.test(sentB)) {
     return false;
   }
   const fold = (p: string) => p.toLowerCase().replace(/\\/g, '/');
-  return fold(a) === fold(b);
+  return fold(sentA) === fold(sentB);
 }
 
 /**
