@@ -55,6 +55,38 @@ describe('SessionManager - Integration Tests', () => {
       expect(dependencies.mockProxyManager.stopCalls).toBe(1);
     });
 
+    describe("a 'continued' is no proof that an armed pause was consumed (issue #1146)", () => {
+      // js-debug sends `continued` for every resume, its own source-map
+      // pauses during module loading included. Clearing an armed pause on one
+      // let the real pause stop be auto-continued as an entry stop: the
+      // review's probe lost the pause in 3 runs of 8.
+      it.each([
+        ['a policy that holds breakpoint requests on the pause', { holdsBreakpointsWhilePauseArmed: true }],
+        ['any other policy', {}]
+      ] as const)('leaves the armed pause alone and tells no listener, for %s', async (_name, overrides) => {
+        overridePolicy(sessionManager, overrides);
+        const session = await sessionManager.createSession({ language: DebugLanguage.MOCK, executablePath: 'python' });
+        await sessionManager.startDebugging(session.id, 'test.py');
+        await vi.runAllTimersAsync();
+        dependencies.mockProxyManager.simulateEvent('stopped', 1, 'breakpoint');
+        await sessionManager.continue(session.id);
+        const managed = sessionManager.getSession(session.id)!;
+        expect(managed.state).toBe(SessionState.RUNNING);
+        const intent = { generation: managed.proxyGeneration ?? 0, source: 'user' as const, armedAt: Date.now() };
+        managed.pauseIntent = intent;
+        const told = vi.fn();
+        (sessionManager as unknown as {
+          onSessionStateChange(id: string, listener: () => void): () => void;
+        }).onSessionStateChange(session.id, told);
+
+        dependencies.mockProxyManager.simulateEvent('continued');
+
+        expect(managed.pauseIntent).toBe(intent);
+        expect(told).not.toHaveBeenCalled();
+        expect(managed.state).toBe(SessionState.RUNNING);
+      });
+    });
+
     it('should handle auto-continue for stopOnEntry=false', async () => {
       const session = await sessionManager.createSession({ 
         language: DebugLanguage.MOCK,

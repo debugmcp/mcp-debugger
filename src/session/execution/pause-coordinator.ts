@@ -1,7 +1,15 @@
-import { SessionState, type ILogger } from '@debugmcp/shared';
+import { SessionState, type AdapterPolicy, type ILogger } from '@debugmcp/shared';
 import type { IProxyManager } from '../../proxy/proxy-manager.js';
 import type { ManagedSession } from '../session-store.js';
-import { armPauseIntent, clearPauseIntent } from './pause-intent.js';
+import { isDapRequestTimeout } from '../dap-request-helpers.js';
+import { armPauseIntent, clearPauseIntent, getCurrentPauseIntent, type PauseIntent } from './pause-intent.js';
+
+/**
+ * How long the wake evaluation may take before the pause is requested without
+ * its answer (issue #1146). A target busy in native code answers neither; the
+ * evaluation stays queued ahead of the pause there, so the order still holds.
+ */
+const PAUSE_WAKE_TIMEOUT_MS = 1000;
 
 export type PauseOutcome =
   | { status: 'observed' }
@@ -18,17 +26,50 @@ export interface CoordinatePauseInput {
 
 export interface PauseCoordinatorContext {
   logger: ILogger;
+  selectPolicy(language: ManagedSession['language']): AdapterPolicy;
 }
 
 /**
  * Own the low-level pause race shared by pause_execution and attach.
  * Listeners and generation-scoped intent are installed before the request;
  * callers decide how the three outcomes map onto their public result shape.
+ *
+ * A pause is real or absent (issue #1146): for a policy with a wake
+ * expression the coordinator first gives the program something to run, so
+ * the pause lands on the program's own event loop instead of staying armed
+ * for whatever the debugger evaluates next.
  */
 export class PauseCoordinator {
+  /** The tail of each session's pause requests: one at a time (issue #1146). */
+  private readonly requests = new Map<string, Promise<void>>();
+
   constructor(private readonly ctx: PauseCoordinatorContext) {}
 
-  async requestPause(input: CoordinatePauseInput): Promise<PauseOutcome> {
+  /**
+   * One pause request per session at a time: a second waits for the first to
+   * answer. What a request finds armed is then always a pause whose own
+   * request was accepted or went unanswered, never one still being decided,
+   * so a refusal of this request can put it back, and the wake is never sent
+   * beside a pause another request is arming.
+   */
+  requestPause(input: CoordinatePauseInput): Promise<PauseOutcome> {
+    const sessionId = input.session.id;
+    const previous = this.requests.get(sessionId);
+    const run = previous ? previous.then(() => this.pauseOnce(input)) : this.pauseOnce(input);
+    const tail = run.then(
+      () => undefined,
+      () => undefined
+    );
+    this.requests.set(sessionId, tail);
+    void tail.then(() => {
+      if (this.requests.get(sessionId) === tail) {
+        this.requests.delete(sessionId);
+      }
+    });
+    return run;
+  }
+
+  private async pauseOnce(input: CoordinatePauseInput): Promise<PauseOutcome> {
     const { session, proxyManager, threadId, timeoutMs, source } = input;
 
     // A stop may have landed while the caller was discovering a thread.
@@ -41,7 +82,7 @@ export class PauseCoordinator {
     let stoppedSeen = false;
     let endedSeen = false;
     let resolveEvent: ((value: 'stopped' | 'ended') => void) | undefined;
-    const event = new Promise<'stopped' | 'ended'>((resolve) => {
+    let event = new Promise<'stopped' | 'ended'>((resolve) => {
       resolveEvent = resolve;
     });
     const onStopped = () => {
@@ -53,12 +94,12 @@ export class PauseCoordinator {
       resolveEvent?.('ended');
     };
 
-    // Listener registration precedes both intent and request dispatch.
+    // Listener registration precedes the wake, the intent and the request.
     proxyManager.on('stopped', onStopped);
     proxyManager.on('terminated', onEnded);
     proxyManager.on('exited', onEnded);
     proxyManager.on('exit', onEnded);
-    const intent = armPauseIntent(session, source);
+    let intent: PauseIntent | undefined;
 
     let timeout: ReturnType<typeof setTimeout> | undefined;
     const cleanup = () => {
@@ -72,12 +113,53 @@ export class PauseCoordinator {
       clearPauseIntent(session, intent);
       return { status: 'observed' };
     };
+    // A pause that was already armed when this one was asked for: its own
+    // request has answered (requests take turns), so it is still waiting in
+    // the target whatever becomes of this one.
+    const earlier = getCurrentPauseIntent(session);
     const rejected = (error: unknown, ended = false): PauseOutcome => {
       clearPauseIntent(session, intent);
+      if (!ended && earlier !== undefined && intent !== undefined) {
+        // This request replaced the earlier one's intent and was refused;
+        // the earlier pause is no less armed for that (issue #1146).
+        session.pauseIntent = earlier;
+      }
       return { status: 'rejected', error, ...(ended ? { ended: true as const } : {}) };
     };
+    /**
+     * A pause request that got no answer is not a refusal: it may still be
+     * queued in a target busy in native code, and arms when that returns.
+     * Where breakpoint requests wait on the intent (issue #1146) it stays, so
+     * they keep waiting and the stop it produces is still read as this
+     * pause. Elsewhere it is cleared as before: a stale intent would relabel
+     * some later, unrelated stop.
+     */
+    const unanswered = (error: unknown): PauseOutcome =>
+      this.holdsBreakpointsOnIntent(session) ? { status: 'rejected', error } : rejected(error);
 
     try {
+      // An intent that is still armed is a pause waiting in the target, and
+      // the wake is itself an evaluation: exactly what that pause fires in.
+      if (getCurrentPauseIntent(session) === undefined) {
+        await this.wakeBeforePause(session, proxyManager);
+        if (sessionPaused() && session.lastStop) {
+          return observed();
+        }
+        if (endedSeen) {
+          return rejected(new Error('Session ended before pause took effect'), true);
+        }
+        if (stoppedSeen) {
+          // A stop came and went during the wake: no intent was armed, so
+          // the core treated it as its own (it auto-continues a launch's
+          // entry stop). It is not this pause's answer; listen afresh.
+          stoppedSeen = false;
+          event = new Promise<'stopped' | 'ended'>((resolve) => {
+            resolveEvent = resolve;
+          });
+        }
+      }
+      intent = armPauseIntent(session, source);
+
       const request = proxyManager
         .sendDapRequest('pause', { threadId })
         .then(() => ({ kind: 'accepted' as const }))
@@ -98,7 +180,8 @@ export class PauseCoordinator {
         if (stoppedSeen || (sessionPaused() && session.lastStop)) {
           return observed();
         }
-        return rejected(first.error);
+        const message = first.error instanceof Error ? first.error.message : String(first.error);
+        return isDapRequestTimeout(message) ? unanswered(first.error) : rejected(first.error);
       }
 
       this.ctx.logger.info(
@@ -124,11 +207,55 @@ export class PauseCoordinator {
         return rejected(new Error('Session ended before pause took effect'), true);
       }
 
+      // A stop the core was still settling when the wake returned (it reads
+      // the source line of a launch's first stop before it reports it)
+      // enters PAUSED with no second event: read the state before calling
+      // the pause pending.
+      if (sessionPaused() && session.lastStop) {
+        return observed();
+      }
       // A delivered pause may stop later when the target next executes. Keep
       // this exact generation's intent armed for core stop normalization.
       return { status: 'pending' };
     } finally {
       cleanup();
+    }
+  }
+
+  /** Whether the session's policy holds breakpoint requests on an armed pause (issue #1146). Never throws. */
+  private holdsBreakpointsOnIntent(session: ManagedSession): boolean {
+    try {
+      return this.ctx.selectPolicy(session.language).holdsBreakpointsWhilePauseArmed === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Give an idle program something to run before the pause is requested
+   * (issue #1146). Never throws and never waits long: a wake that is refused
+   * or unanswered costs the pause nothing but its help.
+   */
+  private async wakeBeforePause(session: ManagedSession, proxyManager: IProxyManager): Promise<void> {
+    let expression: string | undefined;
+    try {
+      expression = this.ctx.selectPolicy(session.language).pauseWakeExpression;
+    } catch {
+      return;
+    }
+    if (!expression) {
+      return;
+    }
+    try {
+      await proxyManager.sendDapRequest(
+        'evaluate',
+        { expression, context: 'repl' },
+        { timeoutMs: PAUSE_WAKE_TIMEOUT_MS }
+      );
+    } catch (error) {
+      this.ctx.logger.info(
+        `[PauseCoordinator] Wake evaluation before pause got no usable answer for session ${session.id} (${error instanceof Error ? error.message : String(error)}); requesting the pause without it`
+      );
     }
   }
 }

@@ -925,6 +925,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     return this.sessionStore.selectPolicy(session.language);
   }
 
+
   public getSession(sessionId: string): ManagedSession | undefined {
     return this.sessionStore.get(sessionId);
   }
@@ -2112,6 +2113,11 @@ export abstract class SessionManagerCore extends EventEmitter {
         return;
       }
 
+      // An armed pause intent is left alone here (issue #1146): a
+      // `continued` is no proof that our pause was consumed. js-debug sends
+      // one for every resume, its own source-map pauses during module
+      // loading included, and clearing the intent on those let the real
+      // pause stop be auto-continued as an entry stop.
       this._updateSessionState(session, SessionState.RUNNING);
     };
     proxyManager.on('continued', handleContinued);

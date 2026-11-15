@@ -9,6 +9,7 @@
  */
 import type { SessionManagerOperations } from '../../../src/session/session-manager-operations.js';
 import type { ExecutionController } from '../../../src/session/execution/execution-controller.js';
+import type { BreakpointController } from '../../../src/session/breakpoints/breakpoint-controller.js';
 import type { DebugLauncher } from '../../../src/session/launch/debug-launcher.js';
 import type { ProxyLaunchRequest } from '../../../src/session/launch/proxy-launcher.js';
 import type { ManagedSession } from '../../../src/session/session-store.js';
@@ -45,6 +46,8 @@ export interface ProxyLauncherView {
 /** The collaborators tests reach into. Add to this rather than re-casting. */
 export interface OperationsInternals {
   execution: ExecutionController;
+  /** Spied on to model breakpoint requests held for an armed pause (issue #1146). */
+  breakpoints: BreakpointController;
   launcher: DebugLauncher;
   proxyLauncher: ProxyLauncherView;
   /** The late-bound view the collaborators get; a test subscribes to state changes through it. */
