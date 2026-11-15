@@ -63,6 +63,10 @@ public class JdiDapServer {
     // source-root-relative path resolved to under them ("" when under none)
     // (issue #1138).
     private final List<String> sourceRoots = new java.util.concurrent.CopyOnWriteArrayList<>();
+    // The roots a bare file name (a default-package class) is looked up
+    // under: `sourceRoots` without the ancestors the adapter climbed to. A
+    // package path under an ancestor is specific; `Util.java` is not.
+    private final List<String> defaultPackageRoots = new java.util.concurrent.CopyOnWriteArrayList<>();
     private final ConcurrentHashMap<String, String> resolvedSources = new ConcurrentHashMap<>();
 
     // --- Function breakpoints (issue #292) ---
@@ -2149,14 +2153,18 @@ public class JdiDapServer {
      * adapter sends the ones the launch knows as `sourceRoots`.
      */
     private void readSourceRoots(Map<String, Object> args) {
-        Object roots = args.get("sourceRoots");
+        addRoots(args.get("sourceRoots"), sourceRoots);
+        addRoots(args.get("defaultPackageRoots"), defaultPackageRoots);
+        log("Source roots: " + sourceRoots + "; for the default package: " + defaultPackageRoots);
+    }
+
+    private static void addRoots(Object roots, List<String> into) {
         if (!(roots instanceof List)) return;
         for (Object root : (List<?>) roots) {
-            if (root instanceof String && !((String) root).isEmpty() && !sourceRoots.contains(root)) {
-                sourceRoots.add((String) root);
+            if (root instanceof String && !((String) root).isEmpty() && !into.contains(root)) {
+                into.add((String) root);
             }
         }
-        log("Source roots: " + sourceRoots);
     }
 
     private String resolveSourcePath(Location loc) {
@@ -2187,7 +2195,9 @@ public class JdiDapServer {
             String resolved = resolvedSources.get(relative);
             if (resolved == null) {
                 resolved = "";
-                for (String root : sourceRoots) {
+                // A bare name is looked up only where the session points,
+                // not in every directory above it.
+                for (String root : (lastSlash >= 0 ? sourceRoots : defaultPackageRoots)) {
                     File candidate = new File(root, relative);
                     if (candidate.isFile()) {
                         resolved = candidate.getAbsolutePath();
@@ -2223,8 +2233,9 @@ public class JdiDapServer {
             // Root plus separator plus tail: a path that is only the tail has no root to give.
             if (sourcePath.length() <= relative.length() + 1 || !endsWithPath(sourcePath, relative)) return;
             String root = sourcePath.substring(0, sourcePath.length() - relative.length() - 1);
-            if (sourceRoots.contains(root)) return;
-            sourceRoots.add(0, root);
+            if (sourceRoots.contains(root) && defaultPackageRoots.contains(root)) return;
+            if (!sourceRoots.contains(root)) sourceRoots.add(0, root);
+            if (!defaultPackageRoots.contains(root)) defaultPackageRoots.add(0, root);
             // A file looked up before this root was known may be under it.
             resolvedSources.clear();
             log("Source root learnt from a breakpoint on " + typeName + ": " + root);

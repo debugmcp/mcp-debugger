@@ -328,6 +328,46 @@ describe('The file a Java stop reports (issue #1138) @requires-java', () => {
     expect(samePath(named.file, appSource), JSON.stringify(named)).toBe(true);
   }, 120_000);
 
+  it('a default-package class is not matched to a file of its name in a directory above the launch', async () => {
+    // Lone.class has no source where the launch points. An unrelated
+    // Lone.java sits two directories above the working directory, where the
+    // climb for package roots reaches: it must not be answered as the
+    // class's source.
+    const gen = path.join(root, 'gen');
+    const run = path.join(root, 'run', 'deep');
+    fs.mkdirSync(gen, { recursive: true });
+    fs.mkdirSync(run, { recursive: true });
+    const lone = path.join(gen, 'Lone.java');
+    fs.writeFileSync(lone, [
+      'public class Lone {',
+      '    public static void main(String[] args) throws InterruptedException {',
+      '        while (true) {',
+      '            Thread.sleep(100);',
+      '        }',
+      '    }',
+      '}',
+      ''
+    ].join('\n'));
+    execFileSync('javac', ['-g', '-d', classes, lone], { windowsHide: true });
+    fs.renameSync(lone, path.join(root, 'Lone.java.moved'));
+    fs.writeFileSync(path.join(root, 'Lone.java'), '// an unrelated file that happens to be called Lone.java\n');
+
+    server = await startStdioClient({ name: 'java-stop-source-bare-name' });
+    await server.createSession('java', 'java-stop-source-bare-name');
+    const launch = await server.call<StopAnswer>('start_debugging', {
+      scriptPath: path.join(classes, 'Lone.class'),
+      adapterLaunchConfig: { program: 'Lone', classpath: classes, cwd: run },
+      dapLaunchArgs: { stopOnEntry: false }
+    });
+    expect(launch, JSON.stringify(launch)).toMatchObject({ success: true, state: 'running' });
+    await pause(server);
+
+    const stack = await server.call<StackAnswer>('get_stack_trace', {});
+    const main = stack.stackFrames.find((entry) => entry.name.includes('Lone.main'));
+    expect(main, JSON.stringify(stack)).toBeDefined();
+    expect(main?.file, JSON.stringify(main)).toBe('Lone.java');
+  }, 120_000);
+
   it('the same launch without sourcePaths answers the relative name: no root is guessed', async () => {
     server = await startStdioClient({ name: 'java-stop-source-launch-no-roots' });
     await server.createSession('java', 'java-stop-source-launch-no-roots');

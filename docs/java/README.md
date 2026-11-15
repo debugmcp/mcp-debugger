@@ -203,6 +203,8 @@ The roots, in the order they are tried — the first one the file exists under w
 4. Launch only: the working directory and up to eight directories above it. The working directory defaults to the script's directory, so a launch that names the class (`program: "com.acme.App"`) with `scriptPath` pointing at its source still finds the root.
 5. Launch only: the `classpath` entries that are directories (not jars), for sources that sit beside their classes.
 
+The directories *above* the program's and the working directory (3 and 4) are tried for a class in a package only: `com/acme/App.java` under an ancestor is specific enough to trust, and a bare `Util.java` is not. A default-package class is looked up where the session points — those two directories themselves, the classpath's directories, `sourcePaths`, a root a breakpoint showed — so an unrelated file of its name a few directories up is never answered as its source.
+
 What is still answered by its relative name: a class whose source is under none of these (a library from a jar, the JDK's own classes, an attach with no breakpoint set and no `sourcePaths`). The lookup under a root is exact: the whole package path must exist there. A class that shares its simple name with one that has a line breakpoint, in another package, reports its own file when that file is under a root; when it is under none it still answers the breakpoint's file, because the bridge keeps a breakpoint's path by the file's base name (issue #1158).
 
 ## Example: Launch Mode

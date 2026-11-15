@@ -52,6 +52,13 @@ const SOURCE_ROOT_ANCESTORS = 8;
  *   the classpath's directories, where sources often sit beside classes.
  *
  * The bridge takes the first root the relative path exists under.
+ *
+ * Two lists come back. `all` is every root above. `direct` leaves out the
+ * directories reached only by climbing: an ancestor is a candidate source
+ * root because a package path (`com/acme/App.java`) under it is specific
+ * enough to trust, and a bare `Util.java` is not: some unrelated file of
+ * that name four directories up would be answered as the class's source.
+ * The bridge looks a default-package class up under `direct` only.
  */
 function sourceRootsFor(known: {
   program?: string;
@@ -59,17 +66,24 @@ function sourceRootsFor(known: {
   classpath?: string;
   sourcePath?: string;
   sourcePaths?: unknown;
-}): string[] {
-  const roots: string[] = [];
-  const add = (dir: string | undefined): void => {
-    if (dir && !roots.includes(dir)) {
-      roots.push(dir);
+}): { all: string[]; direct: string[] } {
+  const all: string[] = [];
+  const direct: string[] = [];
+  const add = (dir: string | undefined, climbed = false): void => {
+    if (!dir) {
+      return;
+    }
+    if (!all.includes(dir)) {
+      all.push(dir);
+    }
+    if (!climbed && !direct.includes(dir)) {
+      direct.push(dir);
     }
   };
   const climb = (dir: string): void => {
     let current = dir;
     for (let level = 0; level <= SOURCE_ROOT_ANCESTORS; level++) {
-      add(current);
+      add(current, level > 0);
       const parent = path.dirname(current);
       if (parent === current) {
         return;
@@ -98,7 +112,7 @@ function sourceRootsFor(known: {
     }
     add(path.isAbsolute(entry) ? entry : known.cwd && path.isAbsolute(known.cwd) ? path.resolve(known.cwd, entry) : undefined);
   }
-  return roots;
+  return { all, direct };
 }
 
 /**
@@ -110,6 +124,8 @@ interface JavaLaunchConfig extends LanguageSpecificLaunchConfig {
   sourcePath?: string;
   /** Directories the bridge resolves a stop's source file under (issue #1138). */
   sourceRoots?: string[];
+  /** The ones a default-package class is looked up under: `sourceRoots` without the climbed ancestors. */
+  defaultPackageRoots?: string[];
   vmArgs?: string;
   javaPath?: string;
   [key: string]: unknown;
@@ -392,13 +408,15 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
     }
 
     // Where the bridge may find a class's source file (issue #1138).
-    javaConfig.sourceRoots = sourceRootsFor({
+    const sourceRoots = sourceRootsFor({
       program,
       cwd: config.cwd,
       classpath,
       sourcePath,
       sourcePaths: (config as Record<string, unknown>).sourcePaths
     });
+    javaConfig.sourceRoots = sourceRoots.all;
+    javaConfig.defaultPackageRoots = sourceRoots.direct;
 
     if (config.env) {
       javaConfig.env = config.env;
@@ -431,6 +449,10 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
     void _request; void _attachMode; void _processId; void _processName;
     void _identifierType;
 
+    // An attach knows no program and spawns nothing: the source roots are
+    // the ones the caller named (issue #1138), none of them climbed to.
+    const attachRoots = sourceRootsFor({ sourcePaths: rest.sourcePaths }).all;
+
     // Advanced passthrough (the JDI bridge ignores keys it doesn't read) with
     // the normalized attach shape on top (issues #450/#466).
     return {
@@ -439,9 +461,8 @@ export class JavaDebugAdapter extends EventEmitter implements IDebugAdapter {
       request: 'attach',
       host: (host as string | undefined) || 'localhost',
       port: port as number | undefined,
-      // An attach knows no program and spawns nothing: the roots are the
-      // ones the caller named (issue #1138).
-      sourceRoots: sourceRootsFor({ sourcePaths: (rest as Record<string, unknown>).sourcePaths }),
+      sourceRoots: attachRoots,
+      defaultPackageRoots: attachRoots,
     } as LanguageSpecificAttachConfig;
   }
 

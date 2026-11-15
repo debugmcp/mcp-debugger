@@ -449,6 +449,34 @@ describe('JavaDebugAdapter', () => {
 
       expect(attach.sourceRoots).toEqual([p('src')]);
     });
+
+    describe('the roots a default-package class is looked up under', () => {
+      const both = async (config: Record<string, unknown>): Promise<{ all: string[]; direct: string[] }> => {
+        const out = await adapter.transformLaunchConfig(config as never) as unknown as { sourceRoots: string[]; defaultPackageRoots: string[] };
+        return { all: out.sourceRoots, direct: out.defaultPackageRoots };
+      };
+
+      it('are the directories the launch points at, without the ancestors it climbed to', async () => {
+        const { all, direct } = await both({ program: p('app', 'src', 'Main.java'), cwd: p('app'), classpath: 'out' });
+
+        expect(direct).toEqual([p('app', 'src'), p('app'), p('app', 'out')]);
+        // An ancestor is a root for a package path, not for a bare file name.
+        expect(all).toContain(root);
+        expect(direct).not.toContain(root);
+      });
+
+      it('include every root the caller named', async () => {
+        const { direct } = await both({ program: 'com.acme.App', sourcePaths: [p('a'), p('b')], sourcePath: p('c') });
+
+        expect(direct).toEqual([p('a'), p('b'), p('c')]);
+      });
+
+      it('for an attach are the roots the caller named', () => {
+        const attach = adapter.transformAttachConfig!({ request: 'attach', port: 5005, sourcePaths: [p('src')] } as never) as Record<string, unknown>;
+
+        expect(attach.defaultPackageRoots).toEqual([p('src')]);
+      });
+    });
   });
 
   describe('transformLaunchConfig', () => {
