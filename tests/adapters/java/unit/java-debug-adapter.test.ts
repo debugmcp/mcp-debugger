@@ -386,6 +386,71 @@ describe('JavaDebugAdapter', () => {
     });
   });
 
+  // Issue #1138: the bridge knew a class's source file only when a line
+  // breakpoint had been set in it by path. Every other stop (a pause, a
+  // function breakpoint, an exception) reported the bare `PauseTest.java`,
+  // or the package-relative `com/acme/Tick.java`: no path to open, so no
+  // `context`. The adapter hands the bridge the directories the launch
+  // already knows, and the bridge looks the file up under them.
+  describe('the source roots the bridge resolves a stop\'s file under (issue #1138)', () => {
+    const root = path.resolve(path.sep === '\\' ? 'C:\\proj' : '/proj');
+    const p = (...parts: string[]) => path.join(root, ...parts);
+    const roots = async (config: Record<string, unknown>): Promise<string[]> =>
+      (await adapter.transformLaunchConfig(config as never)).sourceRoots as string[];
+
+    it('offers the program\'s directory and its ancestors, so a class in a package is found from its source root', async () => {
+      const found = await roots({ program: p('src', 'com', 'acme', 'Tick.java'), cwd: p('src', 'com', 'acme') });
+
+      expect(found.slice(0, 4)).toEqual([p('src', 'com', 'acme'), p('src', 'com'), p('src'), root]);
+      expect(new Set(found).size).toBe(found.length);
+    });
+
+    it('puts what the caller named first: sourcePaths, then sourcePath', async () => {
+      const found = await roots({
+        program: 'com.acme.Tick',
+        cwd: p('run'),
+        sourcePaths: [p('lib-src'), p('gen')],
+        sourcePath: [p('src'), p('more')].join(path.delimiter)
+      });
+
+      expect(found.slice(0, 4)).toEqual([p('lib-src'), p('gen'), p('src'), p('more')]);
+    });
+
+    it('offers the working directory and its ancestors when the program is a class name, and classpath directories', async () => {
+      const found = await roots({
+        program: 'com.acme.Tick',
+        cwd: p('src', 'com', 'acme'),
+        classpath: [p('out'), p('lib', 'dep.jar'), 'classes'].join(path.delimiter)
+      });
+
+      expect(found).toContain(p('src'));
+      expect(found).toContain(p('out'));
+      // A relative classpath entry is resolved against the JVM's working directory; a jar holds no loose sources.
+      expect(found).toContain(p('src', 'com', 'acme', 'classes'));
+      expect(found).not.toContain(p('lib', 'dep.jar'));
+    });
+
+    it('climbs no further than eight directories', async () => {
+      const deep = p('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k');
+
+      const found = await roots({ program: path.join(deep, 'Main.java') });
+
+      expect(found).toContain(deep);
+      expect(found).toContain(p('a', 'b', 'c'));
+      expect(found).not.toContain(p('a', 'b'));
+    });
+
+    it('offers nothing it was not given', async () => {
+      expect(await roots({ program: 'Main' })).toEqual([]);
+    });
+
+    it('hands an attach the roots the caller named', () => {
+      const attach = adapter.transformAttachConfig!({ request: 'attach', port: 5005, sourcePaths: [p('src')] } as never) as Record<string, unknown>;
+
+      expect(attach.sourceRoots).toEqual([p('src')]);
+    });
+  });
+
   describe('transformLaunchConfig', () => {
     it('should transform generic config to Java-specific config', async () => {
       const transformed = await adapter.transformLaunchConfig({
