@@ -430,6 +430,34 @@ describe('JavaDebugAdapter', () => {
       expect(found).not.toContain(p('lib', 'dep.jar'));
     });
 
+    it('reads a relative root the caller named against the working directory of the launch, as the JVM would', async () => {
+      const found = await roots({
+        program: 'com.acme.Tick',
+        cwd: p('out'),
+        sourcePaths: ['gen'],
+        sourcePath: ['..' + path.sep + 'src', p('more')].join(path.delimiter)
+      });
+
+      expect(found.slice(0, 3)).toEqual([p('out', 'gen'), p('src'), p('more')]);
+    });
+
+    it('leaves the classpath\'s archives out: a jar, a zip, and a wildcard that names jars', async () => {
+      const found = await roots({
+        program: 'com.acme.Tick',
+        cwd: p('run'),
+        classpath: [p('lib', 'dep.jar'), p('lib', 'src.ZIP'), p('lib', '*'), p('classes')].join(path.delimiter)
+      });
+
+      expect(found).toContain(p('classes'));
+      expect(found.filter((entry) => entry.startsWith(p('lib')))).toEqual([]);
+    });
+
+    it('takes nothing from a working directory that is not absolute: there is no telling where it is', async () => {
+      const found = await roots({ program: 'com.acme.Tick', cwd: 'run', classpath: 'classes' });
+
+      expect(found).toEqual([]);
+    });
+
     it('climbs no further than eight directories', async () => {
       const deep = p('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k');
 

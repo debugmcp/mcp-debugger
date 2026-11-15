@@ -275,7 +275,10 @@ export async function hoistStopLanding(
     return;
   }
   response.location = location;
-  if (!hasOpenableSourcePath(location.file)) {
+  // A label is not a file to read, also when it looks like a path (a
+  // source-mapped original that is not on this host): the same rule
+  // get_stack_trace applies to its top frame (issue #1131).
+  if (location.unresolvedSource || !hasOpenableSourcePath(location.file)) {
     return;
   }
   const [context, staleBuild] = await Promise.all([

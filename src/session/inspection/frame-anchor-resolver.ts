@@ -433,10 +433,14 @@ export class FrameAnchorResolver {
     const { pausedStackReadyTimeoutMs, pausedStackReadyIntervalMs } = this.ctx.tunables;
     // What an empty paused stack means under this adapter (issue #1132). Where
     // the policy says no frame will appear there is nothing to wait for: one
-    // look at the sibling threads, then the policy's sentence.
+    // look at the sibling threads, then the policy's sentence. Only on a
+    // pause, which is the stop that claim was measured on; any other stop
+    // with an empty stack keeps the wait and gets the policy's sentence after
+    // it. The scan's budget is a ceiling, not a wait: it returns as soon as
+    // the threads have answered, so it gets the whole window.
     const empty = policy.describeEmptyPausedStack?.();
-    if (empty?.framesWillNotAppear) {
-      const sibling = await this.scanSiblings(sessionId, proxyManager, threadId, policy, pausedStackReadyIntervalMs);
+    if (empty?.framesWillNotAppear && isProgramNeutralStopReason(stopAtGate?.reason)) {
+      const sibling = await this.scanSiblings(sessionId, proxyManager, threadId, policy, pausedStackReadyTimeoutMs);
       if (sibling) {
         return this.adoptFramedSibling(sessionId, session, proxyManager, threadId, stopAtGate, sibling);
       }
@@ -573,12 +577,18 @@ export class FrameAnchorResolver {
       `[FrameAnchor ${sessionId}] Stop on thread ${stoppedThreadId} has no program frame; adopted thread ${programThreadId} in '${landing.name}'.`
     );
     const count = stoppedFrames.length;
+    // Left for being runtime, or for having no source (issue #1131): a frame
+    // the policy keeps is not shown to be runtime, so the note does not say so.
+    const sourceless = policyUserFrames(stoppedFrames.map(toStackFrame), policy).length > 0;
+    const whatTheyAre = sourceless
+      ? (count === 1 ? ' has no source' : 's are all internal/runtime or have no source')
+      : `${count === 1 ? ' is' : 's are all'} internal/runtime`;
     return {
       frames,
       threadId: programThreadId,
       note:
-        `The stop was reported on thread ${threadLabel(stoppedThreadId, threads)}, whose ${count} frame${count === 1 ? ' is' : 's are all'} ` +
-        `internal/runtime (top: '${reportedTop.name}'); showing thread ${threadLabel(programThreadId, threads)}, ` +
+        `The stop was reported on thread ${threadLabel(stoppedThreadId, threads)}, whose ${count} frame${whatTheyAre} ` +
+        `(top: '${reportedTop.name}'); showing thread ${threadLabel(programThreadId, threads)}, ` +
         `which is in '${landing.name}' (${landing.file}:${landing.line}).`
     };
   }

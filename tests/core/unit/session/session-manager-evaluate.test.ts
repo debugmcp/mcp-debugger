@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
-import { DebugLanguage, JsDebugAdapterPolicy } from '@debugmcp/shared';
+import { CppAdapterPolicy, DebugLanguage, JsDebugAdapterPolicy, type AdapterPolicy } from '@debugmcp/shared';
 import { createMockDependencies } from './session-manager-test-utils.js';
 
 function makeManager(launchArgs: { stopOnEntry: boolean } = { stopOnEntry: true }) {
@@ -219,11 +219,11 @@ describe('SessionManager.evaluateExpression default-frame resolution', () => {
     const TIMERS = { id: 7, name: 'process.processTimers', line: 527, column: 5, source: { path: '<node_internals>/internal/timers', sourceReference: 7 } };
     const NEXT_TICK = { id: 8, name: 'processTicksAndRejections', line: 103, column: 5, source: { path: '<node_internals>/internal/process/task_queues', sourceReference: 9 } };
 
-    async function pausedOutsideTheProgram(frames: unknown[]) {
+    async function pausedOutsideTheProgram(frames: unknown[], policy: AdapterPolicy = JsDebugAdapterPolicy) {
       const { sessionManager, dependencies } = makeManager({ stopOnEntry: false });
       const session = await createRunningSession(sessionManager, dependencies, { paused: false });
       dependencies.mockProxyManager.simulateStopped(1, 'pause');
-      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JsDebugAdapterPolicy;
+      (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => policy;
       const evaluated: Array<number | undefined> = [];
       dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: { frameId?: number }) => {
         if (command === 'stackTrace') {
@@ -252,6 +252,26 @@ describe('SessionManager.evaluateExpression default-frame resolution', () => {
         "No program frame is active on thread 1: the only frame is internal/runtime (top: 'process.processTimers' <node_internals>/internal/timers:527). " +
         'The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint. ' +
         'The expression was evaluated in that frame.'
+      );
+    });
+
+    it('says the frames have no source, not that they are runtime, when that is why none is program code (issue #1131)', async () => {
+      // Rust's start-up shim after a step out of main: CodeLLDB names it by symbol.
+      const callOnce = { id: 7, name: 'core::ops::function::FnOnce::call_once', line: 6, column: 0, source: { name: '@core::ops::function::FnOnce::call_once', sourceReference: 1007 } };
+      const langStart = { id: 8, name: 'std::rt::lang_start', line: 14, column: 0, source: { name: '@.text', sourceReference: 1008 } };
+      const { sessionManager, session, evaluated } = await pausedOutsideTheProgram([callOnce, langStart], CppAdapterPolicy);
+
+      const result = await sessionManager.evaluateExpression(session.id, '1 + 1');
+
+      expect(evaluated).toEqual([7]);
+      expect(result.noProgramFrame).toBe(true);
+      expect(result.frame).toMatchObject({ name: 'core::ops::function::FnOnce::call_once', unresolvedSource: true });
+      expect(result.anchorNote).toBe(
+        "No program frame is active on thread 1: all 2 frames are internal/runtime or have no source " +
+        "(top: 'core::ops::function::FnOnce::call_once' @core::ops::function::FnOnce::call_once:6). " +
+        "Code without source is a runtime's or a library's, or your own built without debug information. " +
+        'continue_execution and trigger activity, or set a breakpoint in a source file; ' +
+        'get_stack_trace with includeInternals: true lists the frames. The expression was evaluated in that frame.'
       );
     });
 

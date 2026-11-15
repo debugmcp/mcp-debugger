@@ -10,7 +10,7 @@
  * caller a `file` is a label rather than a path.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { CppAdapterPolicy, JavaAdapterPolicy, SessionState, type StackFrame } from '@debugmcp/shared';
+import { CppAdapterPolicy, JavaAdapterPolicy, JsDebugAdapterPolicy, PythonAdapterPolicy, SessionState, type StackFrame } from '@debugmcp/shared';
 import { frameSummary, type StackTraceResult } from '../../../../../src/session/inspection/frame-anchor-resolver.js';
 import { programFrames } from '../../../../../src/session/inspection/stop-anchor.js';
 import {
@@ -43,6 +43,18 @@ describe('programFrames (issue #1131)', () => {
     expect(programFrames([frame(1, 'core::ops::function::FnOnce::call_once', file)], CppAdapterPolicy)).toEqual([]);
   });
 
+  it.each([
+    ['Python code run from a string', '<string>', PythonAdapterPolicy],
+    ['Python code typed at a prompt', '<stdin>', PythonAdapterPolicy],
+    ['JavaScript run through eval', '<eval>/VM12', JsDebugAdapterPolicy]
+  ])('keeps %s: the adapter named the code unit, so it has a source, only no file', (_what, file, policy) => {
+    expect(names(programFrames([frame(1, 'work', file)], policy))).toEqual(['work']);
+  });
+
+  it('leaves a labelled runtime frame to the policy', () => {
+    expect(programFrames([frame(1, 'processTimers', '<node_internals>/internal/timers')], JsDebugAdapterPolicy)).toEqual([]);
+  });
+
   it('drops a frame the policy calls internal although it has a path', () => {
     expect(programFrames([frame(1, '__libc_start_main', './nptl/libc_start_call_main.c')], CppAdapterPolicy)).toEqual([]);
   });
@@ -69,6 +81,12 @@ describe('frameSummary (issue #1131)', () => {
 
   it('adds nothing for a frame with a path', () => {
     expect(frameSummary(frame(2, 'main', '/proj/src/main.rs'))).toEqual({ name: 'main', file: '/proj/src/main.rs', line: 6 });
+  });
+
+  it('says when the exception has already left the frame (issue #1143)', () => {
+    expect(frameSummary(frame(3, 'check_positive', '/proj/billing.py', { unwound: true }))).toEqual({
+      name: 'check_positive', file: '/proj/billing.py', line: 6, unwound: true
+    });
   });
 });
 

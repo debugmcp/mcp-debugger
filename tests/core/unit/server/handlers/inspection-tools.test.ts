@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
-import { DotnetAdapterPolicy, SessionLifecycleState } from '@debugmcp/shared';
+import { DotnetAdapterPolicy, SessionLifecycleState, SessionState } from '@debugmcp/shared';
 import {
   getScopesTool,
   getStackTraceTool,
@@ -287,6 +287,42 @@ describe('inspection tool handlers', () => {
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
       ctx.sessionManager.getLocalVariables = vi.fn();
+    });
+
+    describe('a paused session whose anchored thread has no frames (issue #1132)', () => {
+      const paused = () => ctx.sessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE,
+        state: SessionState.PAUSED
+      });
+      const answer = async (result: Record<string, unknown>) => {
+        ctx.sessionManager.getLocalVariables.mockResolvedValue(result);
+        return JSON.parse((await handleGetLocalVariables(ctx, { sessionId: 'test-session' })).content[0].text);
+      };
+      const IDLE =
+        'The isolate is idle between events (waiting in an `await`), so no Dart frame is on its stack; set a breakpoint in the code that runs next.';
+
+      it('carries what the stack read said about it, and adds no remedy of its own', async () => {
+        paused();
+        const payload = await answer({ variables: [], frame: null, scopeName: null, anchorNote: IDLE });
+
+        expect(payload.note).toBe(IDLE);
+        expect(payload.message).toBe('The session is paused, but the anchored thread reported no stack frames.');
+        expect(JSON.stringify(payload)).not.toContain('list_threads');
+        expect(JSON.stringify(payload)).not.toContain('re-anchor');
+      });
+
+      it('offers the generic remedy when the stack read had nothing to say', async () => {
+        paused();
+        const payload = await answer({ variables: [], frame: null, scopeName: null });
+
+        expect(payload.message).toBe(
+          'The session is paused, but the anchored thread reported no stack frames. ' +
+          'Try get_stack_trace with a threadId from list_threads, or continue_execution ' +
+          'followed by pause_execution to re-anchor on a reportable thread.'
+        );
+        expect(payload).not.toHaveProperty('note');
+      });
     });
 
     it('returns variables with frame and scope info', async () => {

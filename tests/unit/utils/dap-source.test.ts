@@ -20,6 +20,12 @@ describe('the DAP source a breakpoint is sent under (issue #1147)', () => {
     expect(toDapSource('C:/proj/src/PauseTest.cs')).toEqual({ path: 'C:\\proj\\src\\PauseTest.cs', name: 'PauseTest.cs' });
   });
 
+  it.runIf(onWindows)('knows a host path by a drive letter in either case, and by a UNC root', () => {
+    expect(dapSourcePath('c:/proj/src/../src/PauseTest.cs')).toBe('c:\\proj\\src\\PauseTest.cs');
+    expect(dapSourcePath('//server/share/proj/../proj/PauseTest.cs')).toBe('\\\\server\\share\\proj\\PauseTest.cs');
+    expect(dapSourcePath('\\\\server\\share\\proj\\PauseTest.cs')).toBe('\\\\server\\share\\proj\\PauseTest.cs');
+  });
+
   it.runIf(onWindows)('passes a path of another system through as given: it names a file on the target, not here', () => {
     // A remote attach: the debuggee's own POSIX path. path.resolve would
     // have made it C:\app\src\main.py, a file that exists nowhere.

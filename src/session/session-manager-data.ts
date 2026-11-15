@@ -381,7 +381,16 @@ export abstract class SessionManagerData extends SessionManagerCore {
       const stackFrames = opts.maxFrames !== undefined ? allFrames.slice(0, opts.maxFrames) : allFrames;
       if (!stackFrames || stackFrames.length === 0) {
         this.logger.warn(`[SM getLocalVariables ${sessionId}] No stack frames available.`);
-        return { variables: [], frame: null, scopeName: null };
+        // Why the stack is empty, and what helps, is the resolver's to say
+        // and it has said it (issue #1132: a Dart isolate idle between
+        // events). Dropped here, the tool fell back on a remedy that names
+        // threads and re-pausing, which that adapter's note exists to refute.
+        return {
+          variables: [],
+          frame: null,
+          scopeName: null,
+          ...(stackResult.note ? { anchorNote: stackResult.note } : {})
+        };
       }
 
       const topFrame = stackFrames[0];

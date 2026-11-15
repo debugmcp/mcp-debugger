@@ -92,25 +92,39 @@ function sourceRootsFor(known: {
     }
   };
 
+  // A relative entry means what it means to the JVM being launched: relative
+  // to its working directory. The bridge would otherwise resolve it against
+  // its own, which is the server's. With no working directory known (an
+  // attach) a root the caller named is kept as given, and a classpath entry
+  // is skipped.
+  const cwd = known.cwd && path.isAbsolute(known.cwd) ? known.cwd : undefined;
+  const named = (entry: unknown): string | undefined => {
+    if (typeof entry !== 'string' || entry === '') {
+      return undefined;
+    }
+    return path.isAbsolute(entry) || !cwd ? entry : path.resolve(cwd, entry);
+  };
+
   if (Array.isArray(known.sourcePaths)) {
     for (const entry of known.sourcePaths) {
-      add(typeof entry === 'string' ? entry : undefined);
+      add(named(entry));
     }
   }
   for (const entry of (known.sourcePath ?? '').split(path.delimiter)) {
-    add(entry);
+    add(named(entry));
   }
   if (known.program && path.isAbsolute(known.program)) {
     climb(path.dirname(known.program));
   }
-  if (known.cwd && path.isAbsolute(known.cwd)) {
-    climb(known.cwd);
+  if (cwd) {
+    climb(cwd);
   }
   for (const entry of (known.classpath ?? '').split(path.delimiter)) {
+    // An archive holds no loose sources, and `lib/*` names archives.
     if (!entry || /\.(jar|zip)$/i.test(entry) || entry.endsWith('*')) {
       continue;
     }
-    add(path.isAbsolute(entry) ? entry : known.cwd && path.isAbsolute(known.cwd) ? path.resolve(known.cwd, entry) : undefined);
+    add(path.isAbsolute(entry) ? entry : cwd ? path.resolve(cwd, entry) : undefined);
   }
   return { all, direct };
 }

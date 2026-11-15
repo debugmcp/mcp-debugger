@@ -82,14 +82,23 @@ export function policyUserFrames(frames: StackFrame[], policy: AdapterPolicy): S
 }
 
 /**
- * A frame whose `file` names a source rather than a label the debugger made
- * up for native or sourceless code (`@symbol`, `<unknown_source>`,
- * `<node_internals>`). A relative label such as the JDI bridge's
- * `java/lang/Thread.java` still counts: whether it is program code is the
- * policy's call, below.
+ * A frame the debugger has a source for. Two labels stand for "none":
+ * CodeLLDB's `@symbol`, for code without debug info, and `<unknown_source>`,
+ * this server's own placeholder for a frame the adapter reported no source
+ * on (`toStackFrame`).
+ *
+ * A label the ADAPTER gave a code unit is a source without a file, and
+ * counts: Python's `<string>` and `<stdin>`, js-debug's `<eval>/VM12`. The
+ * adapter knows its lines and its variables, and it is the caller's own code
+ * as often as not (`python -c`, an embedded interpreter, an `eval`). Calling
+ * it "no source" made a `python -c` program's pause answer "no program frame
+ * is active" and dropped its locals from the snapshot. Whether a labelled
+ * frame is runtime (`<node_internals>`, `<internal:kernel>`) is the policy's
+ * call, as it is for a relative label such as the JDI bridge's
+ * `java/lang/Thread.java`.
  */
 export function namesASource(file: string): boolean {
-  return file.length > 0 && !file.startsWith('@') && !file.startsWith('<');
+  return file.length > 0 && !file.startsWith('@') && file !== '<unknown_source>';
 }
 
 /**

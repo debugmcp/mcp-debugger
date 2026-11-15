@@ -105,6 +105,23 @@ describe('DapProxyWorker breakpoint events without source (issue #790)', () => {
     expect((forwardedBreakpointEvents()[0].breakpoint as Sent).source).toEqual({ path: FILE });
   });
 
+  it('sends a launch breakpoint on a path of another system as given (issue #1147)', async () => {
+    // The debuggee's own path in a remote attach: not a path of this machine, so the machine's
+    // spelling is not applied to it. path.resolve made a C: path of the POSIX one.
+    const foreign = process.platform === 'win32' ? '/app/src/main.py' : 'C:\\proj\\src\\main.py';
+    const payload = {
+      cmd: 'init', sessionId: 's', executablePath: 'python', adapterHost: '127.0.0.1', adapterPort: 1, logDir: 'C:\\logs',
+      scriptPath: FILE, stopOnEntry: false, initialBreakpoints: [{ file: foreign, line: 7 }]
+    } as unknown as ProxyInitPayload;
+    const w = worker as unknown as Record<string, unknown>;
+    w.currentInitPayload = payload;
+
+    await (w.runConfigurationPhase as (p: ProxyInitPayload, c: unknown, cm: unknown) => Promise<void>)(payload, mockDapClient, w.connectionManager);
+
+    const setBreakpoints = (w.connectionManager as { setBreakpoints: ReturnType<typeof vi.fn> }).setBreakpoints;
+    expect(setBreakpoints.mock.calls.map((call) => call[1])).toEqual([foreign]);
+  });
+
   // The Dart adapter resolves a re-sent set in the same chunk as its response (measured: the
   // `breakpoint` events for the fresh ids carry the response's timestamp), so they reach the
   // worker before the response promise settles — before the ids are known. Held until the

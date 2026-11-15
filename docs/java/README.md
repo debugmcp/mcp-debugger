@@ -98,7 +98,7 @@ Key attach arguments:
 - `port` (required): JDWP debug port
 - `host`: Target hostname (default: `localhost`; `hostName` is accepted as an alias)
 - `stopOnEntry`: asks the bridge to suspend the VM on attach. The bridge's own default for this
-  argument is `false` (`JdiDapServer.java:348`), but you will normally see the session paused
+  argument is `false` (`handleAttach` in `JdiDapServer.java`), but you will normally see the session paused
   anyway: `JavaAdapterPolicy` declares `getAttachBehavior: () => ({ pauseAfterAttach: true,
   pauseAllThreads: true })`, so mcp-debugger issues a pause of its own once the attach is verified.
 - `sourcePaths`: the directories your sources start under (the parent of `com/` for a class in
@@ -106,7 +106,7 @@ Key attach arguments:
   stop's source file is — see [Where a stop's source file is found](#where-a-stops-source-file-is-found).
 
 Those four are the only keys the JDI bridge's **attach handler** reads (`sourcePaths` reaches it
-as `sourceRoots`). That is a statement about the bridge, not about `attach_to_process` as a
+as `sourceRoots` and `defaultPackageRoots`). That is a statement about the bridge, not about `attach_to_process` as a
 whole — `verifyTimeout`, `breakOnExceptions` and `adapterConfig` are consumed by mcp-debugger's
 own attach controller before the bridge is involved, and never reach it. Breakpoints need no
 source-path list: they resolve classes from the `file` you give `set_breakpoint`, which may be a
@@ -198,14 +198,14 @@ The JVM knows a frame's source by a path relative to its source root: `com/acme/
 The roots, in the order they are tried — the first one the file exists under wins:
 
 1. The root a line breakpoint's path shows. A breakpoint on `/proj/src/com/acme/App.java` that lands on `com.acme.App` says the tree starts at `/proj/src`, so `com.acme.Helper` is found beside it. This works for attach sessions too, and is all an attach knows unless you pass `sourcePaths`.
-2. `sourcePaths` (attach: the `attach_to_process` parameter; launch: `adapterLaunchConfig.sourcePaths`), then `adapterLaunchConfig.sourcePath` (a path list, split on the platform's separator).
+2. `sourcePaths` (attach: the `attach_to_process` parameter; launch: `adapterLaunchConfig.sourcePaths`), then `adapterLaunchConfig.sourcePath` (a path list, split on the platform's separator). In a launch a relative entry is read against the launch's working directory, as a relative `classpath` entry is; an attach has no working directory to read it against, so give it absolute paths.
 3. Launch only: the program's directory and up to eight directories above it, when `program` is a file.
 4. Launch only: the working directory and up to eight directories above it. The working directory defaults to the script's directory, so a launch that names the class (`program: "com.acme.App"`) with `scriptPath` pointing at its source still finds the root.
 5. Launch only: the `classpath` entries that are directories (not jars), for sources that sit beside their classes.
 
 The directories *above* the program's and the working directory (3 and 4) are tried for a class in a package only: `com/acme/App.java` under an ancestor is specific enough to trust, and a bare `Util.java` is not. A default-package class is looked up where the session points — those two directories themselves, the classpath's directories, `sourcePaths`, a root a breakpoint showed — so an unrelated file of its name a few directories up is never answered as its source.
 
-What is still answered by its relative name: a class whose source is under none of these (a library from a jar, the JDK's own classes, an attach with no breakpoint set and no `sourcePaths`). The lookup under a root is exact: the whole package path must exist there. A class that shares its simple name with one that has a line breakpoint, in another package, reports its own file when that file is under a root; when it is under none it still answers the breakpoint's file, because the bridge keeps a breakpoint's path by the file's base name (issue #1158).
+What is still answered by its relative name: a class whose source is under none of these (a library from a jar, the JDK's own classes, an attach with no breakpoint set and no `sourcePaths`). The lookup under a root is exact: the whole package path must exist there. A class in a package that shares its simple name with one that has a line breakpoint, in another package, reports its own file when that file is under a root; when it is under none it still answers the breakpoint's file, because the bridge keeps a breakpoint's path by the file's base name. A default-package class of that name still borrows the path either way: its relative name is the bare file name, which any file of that name ends with. Both are issue #1158.
 
 ## Example: Launch Mode
 

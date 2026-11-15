@@ -3679,6 +3679,7 @@ describe('SessionManager - DAP Operations', () => {
 
       it('answers at once with the policy\'s sentence when no frame will appear', async () => {
         const session = await createPausedSession(sessionManager, dependencies);
+        dependencies.mockProxyManager.simulateStopped(1, 'pause');
         // A window the test would notice: 3 s is what the answer used to cost.
         (sessionManager as unknown as { pausedStackReadyTimeoutMs: number }).pausedStackReadyTimeoutMs = 3000;
         withPolicy(true);
@@ -3694,8 +3695,35 @@ describe('SessionManager - DAP Operations', () => {
         expect(calls()).toBe(1);
       });
 
+      it('skips the wait on a pause only: any other stop with an empty stack waits, then says what the policy says', async () => {
+        // The claim that no frame will appear was measured on pauses. The
+        // helper's stop is an entry stop.
+        const session = await createPausedSession(sessionManager, dependencies);
+        setShortReadyWindow();
+        withPolicy(true);
+        const calls = emptyStack();
+
+        const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, { ensureStackReady: true });
+
+        expect(result.frames).toEqual([]);
+        expect(result.note).toBe(IDLE);
+        expect(calls()).toBeGreaterThan(2);
+      });
+
+      it('get_local_variables keeps the sentence: the reason the stack is empty is not replaced by a generic one', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        dependencies.mockProxyManager.simulateStopped(1, 'pause');
+        withPolicy(true);
+        emptyStack();
+
+        const result = await sessionManager.getLocalVariables(session.id);
+
+        expect(result).toEqual({ variables: [], frame: null, scopeName: null, anchorNote: IDLE });
+      });
+
       it('still adopts a sibling thread that has frames, without waiting', async () => {
         const session = await createPausedSession(sessionManager, dependencies);
+        dependencies.mockProxyManager.simulateStopped(1, 'pause');
         (sessionManager as unknown as { pausedStackReadyTimeoutMs: number }).pausedStackReadyTimeoutMs = 3000;
         withPolicy(true);
         dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: { threadId?: number }) => {
@@ -5310,7 +5338,73 @@ describe('SessionManager - DAP Operations', () => {
 
         expect(result.threadId).toBe(PROGRAM_THREAD);
         expect(result).not.toHaveProperty('noProgramFrame');
+        // The thread was left for having no source, and the note does not call it runtime.
+        expect(result.note).toMatch(/reported on thread 28180 \(5: tid=28180\), whose 2 frames are all internal\/runtime or have no source \(top: 'stripped_user_fn'\)/);
         expect(result.note).toMatch(/showing thread 24604 \(1: tid=24604\), which is in 'main' \(\/proj\/examples\/cpp\/pause_test\.cpp:20\)/);
+      });
+
+      it('names the adopted thread by its first program frame, not by a frame without source above it', async () => {
+        const session = await pausedOnBreakIn('pause', {
+          [BREAK_IN_THREAD]: BREAK_IN,
+          [PROGRAM_THREAD]: [symbol(41, 'stripped_helper'), IN_MAIN[1]]
+        });
+
+        const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, READY);
+
+        expect(result.threadId).toBe(PROGRAM_THREAD);
+        expect(result.note).toMatch(/whose 4 frames are all internal\/runtime \(top: 'DbgBreakPoint'\)/);
+        expect(result.note).toMatch(/which is in 'main' \(\/proj\/examples\/cpp\/pause_test\.cpp:20\)/);
+      });
+
+      it('code the adapter names by a label of its own is program code: a Python program run from a string keeps its verdict and its thread', async () => {
+        // Measured on debugpy: `python -c` code reports its frames under
+        // '<string>'. The Python policy classifies nothing, so the verdict
+        // rests on whether the frame has a source, and it has one.
+        const fromString = [
+          { id: 51, name: 'work', line: 6, column: 1, source: { path: '<string>' } },
+          { id: 52, name: '<module>', line: 9, column: 1, source: { path: '<string>' } }
+        ];
+        const session = await pausedOnBreakIn('pause', { [BREAK_IN_THREAD]: fromString, [PROGRAM_THREAD]: IN_MAIN });
+        (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => PythonAdapterPolicy;
+
+        const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, READY);
+
+        expect(result.threadId).toBe(BREAK_IN_THREAD);
+        expect(result).not.toHaveProperty('noProgramFrame');
+        expect(result).not.toHaveProperty('sourcelessFrames');
+        expect(result.frames.map((frame) => frame.name)).toEqual(['work', '<module>']);
+        expect(requests('threads')).toHaveLength(0);
+      });
+
+      it('the walk-down note still says runtime of a top frame the policy calls internal', async () => {
+        // Java's filter hands the whole stack back when every frame is the
+        // JDK's, so an internal frame can be the top one and a lower one can
+        // hold the locals.
+        const jdkOnly = [
+          { id: 61, name: 'jdk.internal.misc.Unsafe.park', line: 0, column: 0, source: { path: 'jdk/internal/misc/Unsafe.java' } },
+          { id: 62, name: 'java.lang.Thread.run', line: 1583, column: 0, source: { path: 'java/lang/Thread.java' } }
+        ];
+        const session = await pausedOnBreakIn('step', { [BREAK_IN_THREAD]: jdkOnly });
+        (sessionManager as unknown as { selectPolicy: () => unknown }).selectPolicy = () => JavaAdapterPolicy;
+        const stacks = threadStacksHandler({ [BREAK_IN_THREAD]: jdkOnly }, THREADS);
+        dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: unknown) => {
+          const { frameId, variablesReference } = (args ?? {}) as { frameId?: number; variablesReference?: number };
+          if (command === 'scopes') {
+            return { success: true, body: { scopes: [{ name: 'Local', variablesReference: 100 + (frameId ?? 0), expensive: false }] } };
+          }
+          if (command === 'variables') {
+            const reported = variablesReference === 162 ? [{ name: 'target', value: 'Worker@1f', type: 'Runnable', variablesReference: 0 }] : [];
+            return { success: true, body: { variables: reported } };
+          }
+          return stacks(command, args);
+        });
+
+        const result = await sessionManager.getLocalVariables(session.id);
+
+        expect(result.variables.map((variable) => variable.name)).toEqual(['target']);
+        expect(result.anchorNote).toBe(
+          "Top frame 'jdk.internal.misc.Unsafe.park' has no local variables (runtime/stdlib frame); showing frame #1 'java.lang.Thread.run' instead"
+        );
       });
     });
 

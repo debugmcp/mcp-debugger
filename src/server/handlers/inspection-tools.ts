@@ -438,9 +438,14 @@ export async function handleGetLocalVariables(ctx: ToolContext, args: { sessionI
         // paused while list_debug_sessions said paused (issue #465).
         const sessionState = ctx.sessionManager.getSession(args.sessionId)?.state;
         response.message = sessionState === SessionState.PAUSED
-          ? 'The session is paused, but the anchored thread reported no stack frames. ' +
-            'Try get_stack_trace with a threadId from list_threads, or continue_execution ' +
-            'followed by pause_execution to re-anchor on a reportable thread.'
+          ? 'The session is paused, but the anchored thread reported no stack frames.' +
+            // The stack read's own note, when it has one, says why and what
+            // helps under this adapter (issue #1132), and is in `note`. The
+            // generic remedy is for a read that had nothing to say.
+            (result.anchorNote
+              ? ''
+              : ' Try get_stack_trace with a threadId from list_threads, or continue_execution ' +
+                'followed by pause_execution to re-anchor on a reportable thread.')
           // With the why, when the launch runs with the debugger off (issue #749).
           : ErrorMessages.noStackFramesNotPaused(debuggerOffWhyFor(ctx, args.sessionId));
       } else if (!result.scopeName) {

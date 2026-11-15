@@ -88,6 +88,18 @@ describe('DartAdapterPolicy', () => {
     expect(DartAdapterPolicy.getLocalScopeName()).toEqual(['Locals']);
   });
 
+  it('says what an empty paused stack is under Dart, and that waiting cannot fill it (issue #1132)', () => {
+    // Measured on Dart 3.13, ten pauses each: an isolate idle in an `await`
+    // answers its first stack read with no frames, a busy one with its frames.
+    const reading = DartAdapterPolicy.describeEmptyPausedStack!();
+
+    expect(reading.framesWillNotAppear).toBe(true);
+    expect(reading.note).toContain('idle between events');
+    expect(reading.note).toContain('set a breakpoint');
+    // The advice the generic sentence gives, none of which holds for Dart.
+    expect(reading.note).not.toMatch(/list_threads|threadId|followed by pause_execution/);
+  });
+
   it('treats <asynchronous gap> label frames and SDK-internal frames as non-user frames', () => {
     const gap = frame(2, '<asynchronous gap>', undefined, { presentationHint: 'label' } as Partial<StackFrame>);
     const sdk = frame(3, '_RawReceivePort._handleMessage', 'C:\\sdk\\dart-sdk\\lib\\_internal\\vm\\lib\\isolate_patch.dart');

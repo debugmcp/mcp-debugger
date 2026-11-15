@@ -2192,19 +2192,25 @@ public class JdiDapServer {
             // (issue #1138). Look it up under the roots the session knows;
             // the first root it exists under wins, and the answer is kept
             // per file until another root is learnt.
-            String resolved = resolvedSources.get(relative);
-            if (resolved == null) {
-                resolved = "";
-                // A bare name is looked up only where the session points,
-                // not in every directory above it.
-                for (String root : (lastSlash >= 0 ? sourceRoots : defaultPackageRoots)) {
-                    File candidate = new File(root, relative);
-                    if (candidate.isFile()) {
-                        resolved = candidate.getAbsolutePath();
-                        break;
+            String resolved;
+            // One lock for a lookup and for learning a root: a lookup that
+            // walked the old roots must not store its miss after the request
+            // thread has learnt a new root and emptied the cache.
+            synchronized (resolvedSources) {
+                resolved = resolvedSources.get(relative);
+                if (resolved == null) {
+                    resolved = "";
+                    // A bare name is looked up only where the session points,
+                    // not in every directory above it.
+                    for (String root : (lastSlash >= 0 ? sourceRoots : defaultPackageRoots)) {
+                        File candidate = new File(root, relative);
+                        if (candidate.isFile()) {
+                            resolved = candidate.getAbsolutePath();
+                            break;
+                        }
                     }
+                    resolvedSources.put(relative, resolved);
                 }
-                resolvedSources.put(relative, resolved);
             }
             if (!resolved.isEmpty()) return resolved;
 
@@ -2233,11 +2239,13 @@ public class JdiDapServer {
             // Root plus separator plus tail: a path that is only the tail has no root to give.
             if (sourcePath.length() <= relative.length() + 1 || !endsWithPath(sourcePath, relative)) return;
             String root = sourcePath.substring(0, sourcePath.length() - relative.length() - 1);
-            if (sourceRoots.contains(root) && defaultPackageRoots.contains(root)) return;
-            if (!sourceRoots.contains(root)) sourceRoots.add(0, root);
-            if (!defaultPackageRoots.contains(root)) defaultPackageRoots.add(0, root);
-            // A file looked up before this root was known may be under it.
-            resolvedSources.clear();
+            synchronized (resolvedSources) {
+                if (sourceRoots.contains(root) && defaultPackageRoots.contains(root)) return;
+                if (!sourceRoots.contains(root)) sourceRoots.add(0, root);
+                if (!defaultPackageRoots.contains(root)) defaultPackageRoots.add(0, root);
+                // A file looked up before this root was known may be under it.
+                resolvedSources.clear();
+            }
             log("Source root learnt from a breakpoint on " + typeName + ": " + root);
         } catch (AbsentInformationException e) {
             // No source name on this class: nothing to learn from it.

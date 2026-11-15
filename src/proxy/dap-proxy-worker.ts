@@ -1658,7 +1658,8 @@ export class DapProxyWorker {
 
       const entryLine = await this.resolveEntryBreakpointLine(initPayload);
       if (entryLine !== undefined) {
-        const programPath = path.resolve(initPayload.scriptPath);
+        // Keyed as the user's own breakpoints on the program are, so the two share one set.
+        const programPath = dapSourcePath(initPayload.scriptPath);
         const entry: InitialBreakpointEntry = { file: initPayload.scriptPath, line: entryLine };
         entryEntries.add(entry);
         this.entryBreakpoint = { file: programPath, line: entryLine };
