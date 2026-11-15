@@ -363,6 +363,21 @@ describe('execution tool handlers', () => {
           expect(ctx.buildStaleness.check).not.toHaveBeenCalled();
         });
       }
+
+      // A path-shaped label is still a label (issue #1131): a source-mapped
+      // original the adapter could not find on this host looks like a file
+      // and is flagged, as get_stack_trace flags it and skips the same reads.
+      it(`${tool} reads neither for a location flagged unresolvedSource, although it looks like a path`, async () => {
+        ctx.buildStaleness = { check: vi.fn().mockResolvedValue(evidence) };
+        const flagged = { file: '/app/src/gone.ts', line: 7, unresolvedSource: true };
+
+        const payload = JSON.parse((await answer({ message: 'Paused', location: flagged })).content[0].text);
+
+        expect(payload.location).toEqual(flagged);
+        expect(payload).not.toHaveProperty('context');
+        expect(ctx.lineReader.getLineContext).not.toHaveBeenCalled();
+        expect(ctx.buildStaleness.check).not.toHaveBeenCalled();
+      });
     }
   });
 
