@@ -226,6 +226,20 @@ describe('JavaAdapterPolicy', () => {
       expect(JavaAdapterPolicy.isInternalFrame!({ id: 1, name: 'run', file: '/usr/lib/jdk/Thread.java', line: 0 })).toBe(true);
       expect(JavaAdapterPolicy.isInternalFrame!({ id: 1, name: 'run', file: '/opt/rt.jar/Thread.java', line: 0 })).toBe(true);
     });
+
+    it('does not take a class in a package for the JDK because its project lives under a directory called jdk (issue #1160)', () => {
+      // The bridge now answers an absolute path for every class it finds a
+      // source for (issue #1138), so the path fragment would have hidden the
+      // whole program of such a project.
+      const frame = (name: string) => ({ id: 1, name, file: '/home/user/jdk/app/src/com/acme/App.java', line: 12 });
+      expect(JavaAdapterPolicy.isInternalFrame!(frame('com.acme.App.main'))).toBe(false);
+      expect(JavaAdapterPolicy.isInternalFrame!(frame('com.acme.App$Worker.lambda$run$0'))).toBe(false);
+      // The JDK's own classes are known by name, whatever the path.
+      expect(JavaAdapterPolicy.isInternalFrame!(frame('java.lang.Thread.run'))).toBe(true);
+      // A default-package class carries no package in its name: the fragment
+      // still decides for it (the part of #1160 that stays open).
+      expect(JavaAdapterPolicy.isInternalFrame!(frame('Main.main'))).toBe(true);
+    });
   });
 
   describe('getInitializationBehavior', () => {

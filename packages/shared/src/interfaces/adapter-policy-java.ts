@@ -343,7 +343,14 @@ export const JavaAdapterPolicy = {
     if (looksLikeFqcn && JDK_INTERNAL_PREFIXES.some(p => filePath.startsWith(p))) {
       return true;
     }
-    return filePath.includes('/jdk/') || filePath.includes('/rt.jar/');
+    // The path fragments are a fallback for a frame whose name says nothing
+    // about its package. A name that carries one (`com.acme.App.main`) and
+    // none of the JDK's prefixes is program code wherever its file lives:
+    // a project under a directory called `jdk` was otherwise classified as
+    // the JDK itself, frame by frame, now that the bridge answers a path for
+    // every class it finds a source for (issues #1138, #1160).
+    const namesAPackage = frameName.split('.').length > 2;
+    return !namesAPackage && (filePath.includes('/jdk/') || filePath.includes('/rt.jar/'));
   },
 
   getAdapterSpawnConfig: (payload) => {
