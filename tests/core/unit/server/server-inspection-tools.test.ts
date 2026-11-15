@@ -492,6 +492,34 @@ describe('Server Inspection Tools Tests', () => {
       expect(plain).not.toHaveProperty('noProgramFrame');
     });
 
+    it('says no program frame is active when the frames it lists have no source, beside the hidden-frames note (issue #1131)', async () => {
+      mockSessionManager.getSession.mockReturnValue({ proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) } });
+      // The Rust start-up landing: six frames listed, four hidden as runtime,
+      // none with a path. The filter did not hide everything, so the
+      // "all frames are internal" sentence does not fire; this one must.
+      mockSessionManager.getStackTraceDetailed.mockResolvedValue({
+        frames: [
+          { id: 1, name: 'core::ops::function::FnOnce::call_once', file: '@core::ops::function::FnOnce::call_once', line: 6, unresolvedSource: true },
+          { id: 2, name: 'std::rt::lang_start_internal', file: '@std::rt::lang_start_internal', line: 33, unresolvedSource: true }
+        ],
+        threadId: 4264, totalFrameCount: 6, hiddenFrameCount: 4, allFramesInternal: false, noProgramFrame: true, sourcelessFrames: true
+      });
+
+      const content = JSON.parse((await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'get_stack_trace', arguments: { sessionId: 'test-session' } }
+      })).content[0].text);
+
+      expect(content.noProgramFrame).toBe(true);
+      expect(content.note).toContain('4 internal frame(s) hidden — pass includeInternals: true to see them.');
+      expect(content.note).toContain(
+        "No program frame is active on thread 4264: all 6 frames are internal/runtime or have no source " +
+        "(top: 'core::ops::function::FnOnce::call_once' @core::ops::function::FnOnce::call_once:6)."
+      );
+      // The hidden-frames note already says how to list the rest: no second pointer at this tool.
+      expect(content.note).not.toContain('lists the frames');
+    });
+
     it('never tells a caller who passed includeInternals: true to pass it (issue #1141)', async () => {
       mockSessionManager.getSession.mockReturnValue({ proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) } });
       const frames = [

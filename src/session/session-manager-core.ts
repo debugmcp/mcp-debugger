@@ -130,7 +130,7 @@ export interface DebugResultData extends ProxyFailureDiagnostics {
  * too, so the wire shape is exactly what the five hand-copied literals this
  * replaces produced.
  */
-export type StopLocation = Pick<StackFrame, 'file' | 'line' | 'column'>;
+export type StopLocation = Pick<StackFrame, 'file' | 'line' | 'column' | 'unresolvedSource'>;
 
 /**
  * What a location-bearing answer (pause, step, wait_for_stop, and a launch

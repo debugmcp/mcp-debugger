@@ -88,21 +88,32 @@ export function policyUserFrames(frames: StackFrame[], policy: AdapterPolicy): S
  * `java/lang/Thread.java` still counts: whether it is program code is the
  * policy's call, below.
  */
-function namesASource(file: string): boolean {
+export function namesASource(file: string): boolean {
   return file.length > 0 && !file.startsWith('@') && !file.startsWith('<');
 }
 
 /**
- * Whether a stack reaches the program: some frame both names a source and
- * is one the policy calls the program's. A path alone is not enough (the
- * JDI bridge gives a JDK frame a path; LLDB knows the Windows runtime by
- * name), and the policy alone is not enough either (its runtime patterns
- * are a list, and a thread-pool worker it has never heard of must not win
- * over the thread in `main`).
+ * The frames that are program code: ones the policy calls the program's
+ * that also name a source, so a caller can open them at a line. A path
+ * alone is not enough (the JDI bridge gives a JDK frame a path; LLDB knows
+ * the Windows runtime by name), and the policy alone is not enough either:
+ * its runtime patterns are a list, and a frame it has never heard of that
+ * the debugger can only name by symbol is not shown to be the program's. A
+ * thread-pool worker must not win over the thread in `main` (issue #904),
+ * and Rust's start-up shim must not pass for the program after a step out
+ * of `main` (issue #1131).
+ *
+ * One definition, for the thread a pause is anchored on and for the "no
+ * program frame" verdict the answers carry. What `get_stack_trace` hides is
+ * a different question and stays the policy's filter.
  */
+export function programFrames(frames: StackFrame[], policy: AdapterPolicy): StackFrame[] {
+  return policyUserFrames(frames, policy).filter((frame) => namesASource(frame.file));
+}
+
+/** Whether a stack reaches the program: it has a program frame. */
 export function reachesProgram(rawFrames: DebugProtocol.StackFrame[], policy: AdapterPolicy): boolean {
-  const frames = rawFrames.map(toStackFrame);
-  return policyUserFrames(frames, policy).some((frame) => namesASource(frame.file));
+  return programFrames(rawFrames.map(toStackFrame), policy).length > 0;
 }
 
 export interface StopAnchorBounds {

@@ -138,8 +138,15 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
     // issue #900), or a Java stack its filter handed back whole. Every frame
     // is in this answer, so the sentence never points back at this tool
     // (issue #1141).
-    if (stackTrace.noProgramFrame && stackTrace.hiddenFrameCount === 0 && stackTrace.frames[0]) {
-      notes.push(ErrorMessages.stopWithoutProgramFrame(stackTrace.threadId, stackTrace.totalFrameCount, stackTrace.frames[0]));
+    //
+    // And when frames were hidden but the ones listed have no source (issue
+    // #1131: Rust's start-up shim after a step out of `main`): the hidden-frames
+    // note above speaks only for the frames it hid, and already says how to
+    // list them.
+    if (stackTrace.noProgramFrame && stackTrace.frames[0] && (stackTrace.hiddenFrameCount === 0 || stackTrace.sourcelessFrames)) {
+      notes.push(ErrorMessages.stopWithoutProgramFrame(stackTrace.threadId, stackTrace.totalFrameCount, stackTrace.frames[0], {
+        sourceless: stackTrace.sourcelessFrames
+      }));
     }
     // Frames whose file is a label rather than an openable path (issue #655):
     // say so once, so an agent does not feed them to get_source_context. What
@@ -399,14 +406,16 @@ export async function handleGetLocalVariables(ctx: ToolContext, args: { sessionI
     // names the frame the variables came from, which is not the stack's top
     // after a walk-down, and is left out when there is nothing shown to name.
     if (result.noProgramFrame) {
-      const { threadId, frameCount, top } = result.noProgramFrame;
+      const { threadId, frameCount, top, sourceless } = result.noProgramFrame;
       response.noProgramFrame = true;
+      // A frame without source is not shown to be a runtime's (issue #1131):
+      // say what is known about it.
       const whose = result.variables.length > 0 && result.frame
-        ? ` The variables shown belong to '${result.frame.name}', not to your program.`
+        ? ` The variables shown belong to '${result.frame.name}', ${sourceless ? 'a frame without source' : 'not to your program'}.`
         : '';
       response.note = joinSentences(
         result.anchorNote,
-        ErrorMessages.stopWithoutProgramFrame(threadId, frameCount, top, { framesUnseen: frameCount > 1 }) + whose
+        ErrorMessages.stopWithoutProgramFrame(threadId, frameCount, top, { framesUnseen: frameCount > 1, sourceless }) + whose
       );
     }
 

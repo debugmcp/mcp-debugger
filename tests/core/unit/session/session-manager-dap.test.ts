@@ -5175,6 +5175,145 @@ describe('SessionManager - DAP Operations', () => {
       expect(requests('threads')).toHaveLength(1);
     });
 
+    describe('frames the debugger has no source for are not program frames (issue #1131)', () => {
+      // The measured landing of a Rust `step_out` from `main` (CodeLLDB 1.12,
+      // Windows): ten frames, every one a symbol label with no path. Four are
+      // runtime by name (the CRT start-up, the thread thunks); six match no
+      // runtime pattern, so the frame filter keeps them — and the verdict used
+      // to read "kept" as "program code".
+      const symbol = (id: number, name: string, label = name, line = 0) =>
+        ({ id, name, line, column: 0, source: { name: `@${label}`, sourceReference: 1000 + id } });
+      const RUST_STARTUP = [
+        symbol(1, 'core::ops::function::FnOnce::call_once', 'core::ops::function::FnOnce::call_once', 6),
+        symbol(2, 'std::sys::backtrace::__rust_begin_short_backtrace', '.text', 6),
+        symbol(3, 'std::rt::lang_start::{{closure}}', 'std::rt::lang_start::{{closure}}', 7),
+        symbol(4, 'std::rt::lang_start_internal', 'std::rt::lang_start_internal', 33),
+        symbol(5, 'std::rt::lang_start', '.text', 14),
+        symbol(6, 'main', 'main', 12),
+        symbol(7, '__tmainCRTStartup', '__tmainCRTStartup', 51),
+        symbol(8, 'mainCRTStartup', '.l_start', 9),
+        symbol(9, 'BaseThreadInitThunk'),
+        symbol(10, 'RtlUserThreadStart')
+      ];
+      // A program built without debug info: its own functions, named by symbol.
+      const STRIPPED = [symbol(21, 'stripped_user_fn'), symbol(22, 'stripped_caller')];
+
+      it('a step that lands where no frame has source says no program frame is active, and that the frames lack source', async () => {
+        const session = await pausedOnBreakIn('step', { [BREAK_IN_THREAD]: RUST_STARTUP });
+
+        const result = await sessionManager.getStackTraceDetailed(session.id);
+
+        expect(result.noProgramFrame).toBe(true);
+        expect(result.sourcelessFrames).toBe(true);
+        // What the stack lists is unchanged: the filter hides the four it knows by name.
+        expect(result.allFramesInternal).toBe(false);
+        expect(result.totalFrameCount).toBe(10);
+        expect(result.frames.map((frame) => frame.name)).toEqual([
+          'core::ops::function::FnOnce::call_once',
+          'std::sys::backtrace::__rust_begin_short_backtrace',
+          'std::rt::lang_start::{{closure}}',
+          'std::rt::lang_start_internal',
+          'std::rt::lang_start',
+          'main'
+        ]);
+      });
+
+      it('a stack the policy calls internal throughout carries the verdict without the no-source flag', async () => {
+        const session = await pausedOnBreakIn('step', { [BREAK_IN_THREAD]: BREAK_IN });
+
+        const result = await sessionManager.getStackTraceDetailed(session.id);
+
+        expect(result.noProgramFrame).toBe(true);
+        expect(result).not.toHaveProperty('sourcelessFrames');
+      });
+
+      it('a program built without debug info is listed as before and flagged the same way', async () => {
+        const session = await pausedOnBreakIn('breakpoint', { [BREAK_IN_THREAD]: STRIPPED });
+
+        const result = await sessionManager.getStackTraceDetailed(session.id);
+
+        expect(result.frames.map((frame) => frame.name)).toEqual(['stripped_user_fn', 'stripped_caller']);
+        expect(result.hiddenFrameCount).toBe(0);
+        expect(result.noProgramFrame).toBe(true);
+        expect(result.sourcelessFrames).toBe(true);
+      });
+
+      /** The start-up stack with a Local scope per frame, keyed by frame id. */
+      async function pausedInRustStartup(locals: Record<number, Array<{ name: string; value: string; type?: string }>>) {
+        const session = await pausedOnBreakIn('step', { [BREAK_IN_THREAD]: RUST_STARTUP });
+        const stacks = threadStacksHandler({ [BREAK_IN_THREAD]: RUST_STARTUP }, THREADS);
+        dependencies.mockProxyManager.setDapRequestHandler(async (command: string, args?: unknown) => {
+          const { frameId, variablesReference } = (args ?? {}) as { frameId?: number; variablesReference?: number };
+          if (command === 'scopes') {
+            return { success: true, body: { scopes: [{ name: 'Local', variablesReference: 100 + (frameId ?? 0), expensive: false }] } };
+          }
+          if (command === 'variables') {
+            const reported = locals[(variablesReference ?? 0) - 100] ?? [];
+            return { success: true, body: { variables: reported.map((variable) => ({ variablesReference: 0, ...variable })) } };
+          }
+          return stacks(command, args);
+        });
+        return session;
+      }
+
+      it('the nameless return value is not a local: the read walks to the first frame that has one, and calls no frame runtime that the policy does not', async () => {
+        // Measured: after the step out of `main`, the top frame's only "local"
+        // is the unit value `main` returned, with an empty name.
+        const session = await pausedInRustStartup({
+          1: [{ name: '', value: '()', type: 'void' }],
+          2: [{ name: 'f', value: '(hello_world::main)', type: 'void (*)()' }]
+        });
+
+        const result = await sessionManager.getLocalVariables(session.id);
+
+        expect(result.variables.map((variable) => variable.name)).toEqual(['f']);
+        expect(result.frame).toEqual({
+          name: 'std::sys::backtrace::__rust_begin_short_backtrace', file: '@.text', line: 6, unresolvedSource: true
+        });
+        expect(result.anchorNote).toBe(
+          "Top frame 'core::ops::function::FnOnce::call_once' has no local variables; " +
+          "showing frame #1 'std::sys::backtrace::__rust_begin_short_backtrace' instead"
+        );
+        expect(result.noProgramFrame).toEqual({
+          threadId: BREAK_IN_THREAD,
+          frameCount: 10,
+          top: { name: 'core::ops::function::FnOnce::call_once', file: '@core::ops::function::FnOnce::call_once', line: 6, unresolvedSource: true },
+          sourceless: true
+        });
+      });
+
+      it('with nothing but the nameless value anywhere, the answer has no variables', async () => {
+        const session = await pausedInRustStartup({ 1: [{ name: '', value: '<Unable to determine byte size.>', type: 'void' }] });
+
+        const result = await sessionManager.getLocalVariables(session.id);
+
+        expect(result.variables).toEqual([]);
+        expect(result).not.toHaveProperty('anchorNote');
+        expect(result.noProgramFrame).toMatchObject({ sourceless: true });
+      });
+
+      it('one frame with a path is enough: the stack reaches the program', async () => {
+        const session = await pausedOnBreakIn('step', {
+          [BREAK_IN_THREAD]: [symbol(31, 'core::fmt::write'), ...IN_MAIN]
+        });
+
+        const result = await sessionManager.getStackTraceDetailed(session.id);
+
+        expect(result).not.toHaveProperty('noProgramFrame');
+        expect(result).not.toHaveProperty('sourcelessFrames');
+      });
+
+      it('a pause reported on a thread whose frames have no source moves to the sibling in main, as it does off a runtime thread', async () => {
+        const session = await pausedOnBreakIn('pause', { [BREAK_IN_THREAD]: STRIPPED, [PROGRAM_THREAD]: IN_MAIN });
+
+        const result = await sessionManager.getStackTraceDetailed(session.id, undefined, false, READY);
+
+        expect(result.threadId).toBe(PROGRAM_THREAD);
+        expect(result).not.toHaveProperty('noProgramFrame');
+        expect(result.note).toMatch(/showing thread 24604 \(1: tid=24604\), which is in 'main' \(\/proj\/examples\/cpp\/pause_test\.cpp:20\)/);
+      });
+    });
+
     it('scans once per stop: a later read of the same stop answers from the adopted thread, and an explicit re-anchor re-adopts from memory', async () => {
       const session = await pausedOnBreakIn();
       await sessionManager.getStackTraceDetailed(session.id, undefined, false, READY);

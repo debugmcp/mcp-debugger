@@ -201,6 +201,14 @@ export function extractLldbLocalVariables(
         return false;
       }
 
+      // A variable with no name is not one (issue #1131): CodeLLDB shows the
+      // value a function returned after a step out, and for one that returns
+      // nothing (Rust's `()`) the entry is nameless, typed `void`, and reads
+      // `()` or `<Unable to determine byte size.>`. Nothing can address it.
+      if (name === '') {
+        return false;
+      }
+
       return true;
     });
   }
@@ -379,6 +387,9 @@ export function isLldbInternalFrame(frame: StackFrame): boolean {
   const nameMatches =
     LIBC_RUNTIME_NAME_PATTERNS.some((pattern) => pattern.test(name)) ||
     SYSCALL_WRAPPER_NAMES.has(name) ||
+    // glibc's own alias of a wrapper: `__nanosleep`, `__clock_nanosleep`,
+    // `__poll` (issue #1131).
+    (name.startsWith('__') && SYSCALL_WRAPPER_NAMES.has(name.slice(2))) ||
     WINDOWS_RUNTIME_NAME_PATTERNS.some((pattern) => pattern.test(name));
   return nameMatches && isSystemOrMissingSource(frame.file);
 }

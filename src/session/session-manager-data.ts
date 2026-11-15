@@ -62,6 +62,8 @@ export interface NoProgramFrameVerdict {
   threadId?: number;
   frameCount: number;
   top: FrameSummary;
+  /** Some frame is counted out for having no source, not for being runtime (issue #1131). */
+  sourceless?: true;
 }
 
 /**
@@ -76,7 +78,8 @@ export function noProgramFrameVerdict(stackResult: StackTraceResult): NoProgramF
   return {
     ...(typeof stackResult.threadId === 'number' ? { threadId: stackResult.threadId } : {}),
     frameCount: stackResult.totalFrameCount,
-    top: frameSummary(top)
+    top: frameSummary(top),
+    ...(stackResult.sourcelessFrames ? { sourceless: true as const } : {})
   };
 }
 
@@ -637,8 +640,14 @@ export abstract class SessionManagerData extends SessionManagerCore {
           );
         }
         if (anchorIndex > 0) {
+          // "runtime/stdlib" only where the policy says so (issue #1131). The
+          // sentence used to say it of every top frame without locals, which
+          // a frame the policy keeps is not shown to be: it may be the
+          // caller's own function before its first assignment, or code the
+          // debugger has no source for.
+          const runtime = policy.isInternalFrame?.(topFrame) === true;
           anchorNotes.push(
-            `Top frame '${topFrame.name}' has no local variables (runtime/stdlib frame); ` +
+            `Top frame '${topFrame.name}' has no local variables${runtime ? ' (runtime/stdlib frame)' : ''}; ` +
             `showing frame #${anchorIndex} '${anchorFrame.name}' instead`
           );
         }

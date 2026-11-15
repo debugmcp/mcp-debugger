@@ -353,6 +353,26 @@ describe('inspection tool handlers', () => {
         );
       });
 
+      it('says the variables belong to a frame without source, not to a runtime, when that is what the stack is (issue #1131)', async () => {
+        const top = { name: 'core::ops::function::FnOnce::call_once', file: '@core::ops::function::FnOnce::call_once', line: 6, unresolvedSource: true };
+        const payload = await localsOf({
+          variables: [{ name: 'self', value: '{…}', type: 'closure' }],
+          frame: top,
+          scopeName: 'Local',
+          noProgramFrame: { threadId: 4264, frameCount: 10, top, sourceless: true }
+        });
+
+        expect(payload.noProgramFrame).toBe(true);
+        expect(payload.note).toBe(
+          "No program frame is active on thread 4264: all 10 frames are internal/runtime or have no source " +
+          "(top: 'core::ops::function::FnOnce::call_once' @core::ops::function::FnOnce::call_once:6). " +
+          "Code without source is a runtime's or a library's, or your own built without debug information. " +
+          'continue_execution and trigger activity, or set a breakpoint in a source file; ' +
+          'get_stack_trace with includeInternals: true lists the frames. ' +
+          "The variables shown belong to 'core::ops::function::FnOnce::call_once', a frame without source."
+        );
+      });
+
       it('names the frame the variables came from when the read walked down from the top', async () => {
         const lower = { name: 'java.lang.Thread.run', file: 'java/lang/Thread.java', line: 1583 };
         const top = { name: 'jdk.internal.misc.Unsafe.park', file: 'jdk/internal/misc/Unsafe.java', line: 0 };

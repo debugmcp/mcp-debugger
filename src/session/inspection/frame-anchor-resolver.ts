@@ -24,6 +24,7 @@ import { ErrorMessages } from '../../utils/error-messages.js';
 import {
   isProgramNeutralStopReason,
   policyUserFrames,
+  programFrames,
   selectStopAnchor,
   toStackFrame,
   USER_DIRECTED_STOP_REASONS,
@@ -31,12 +32,20 @@ import {
 } from './stop-anchor.js';
 
 /** The frame fields a tool response names when it says which frame answered. */
-export type FrameSummary = Pick<StackFrame, 'name' | 'file' | 'line' | 'unwound'>;
+export type FrameSummary = Pick<StackFrame, 'name' | 'file' | 'line' | 'unwound' | 'unresolvedSource'>;
 
 export function frameSummary(frame: StackFrame): FrameSummary {
   // `unwound` rides along (issue #1143): an answer that names a frame the
-  // exception has left says so wherever it names it.
-  return { name: frame.name, file: frame.file, line: frame.line, ...(frame.unwound ? { unwound: true as const } : {}) };
+  // exception has left says so wherever it names it. So does
+  // `unresolvedSource` (issue #1131): a `file` that is a label, not a path,
+  // is one wherever it is named, not only in get_stack_trace.
+  return {
+    name: frame.name,
+    file: frame.file,
+    line: frame.line,
+    ...(frame.unwound ? { unwound: true as const } : {}),
+    ...(frame.unresolvedSource ? { unresolvedSource: true as const } : {})
+  };
 }
 
 /** The adapter's frames as the server's, in the shape the policy gives every stack (issue #1143). */
@@ -81,14 +90,23 @@ export interface StackTraceResult {
   hiddenFrameCount: number;
   allFramesInternal: boolean;
   /**
-   * True when no frame of the resolved stack is one the policy calls the
-   * program's (issue #904): the stop landed outside the program — a pause
-   * between event-loop dispatches, a runtime thread no sibling could replace.
-   * Read off the per-frame classifier, so it holds for a policy whose filter
-   * hands the whole stack back when nothing survives (Java), where
-   * `allFramesInternal` stays false. Present only when true.
+   * True when no frame of the resolved stack is program code (issue #904):
+   * none is both one the policy calls the program's and one that names a
+   * source (`programFrames`, issue #1131). The stop landed where nothing can
+   * be opened at a line — a pause between event-loop dispatches, a runtime
+   * thread no sibling could replace, a language's start-up shim after a step
+   * out of `main`. Read off the per-frame classifier, so it holds for a
+   * policy whose filter hands the whole stack back when nothing survives
+   * (Java), where `allFramesInternal` stays false. Present only when true.
    */
   noProgramFrame?: boolean;
+  /**
+   * Present with `noProgramFrame` when some frame is NOT one the policy
+   * calls internal: it is counted out because it has no source (issue
+   * #1131). The sentence then says so instead of calling every frame
+   * runtime — it may be the caller's own code built without debug info.
+   */
+  sourcelessFrames?: true;
   /**
    * Present when the frame the debuggee is actually paused in was filtered
    * as internal while ancestors survived (issue #672) — see the keep/hide rule
@@ -235,11 +253,12 @@ export class FrameAnchorResolver {
         opts?.ensureStackReady &&
         isProgramNeutralStopReason(stopAtGate?.reason) &&
         this.isStoppedThread(stopAtGate, currentThreadId, effectiveThreadId) &&
-        policyUserFrames(rawFrames.map(toStackFrame), policy).length === 0
+        programFrames(rawFrames.map(toStackFrame), policy).length === 0
       ) {
-        // A pause reported on a thread whose stack is all runtime (the
-        // break-in thread Windows injects, issue #898) says nothing about
-        // where the program is; a sibling in the program's code does. Only a
+        // A pause reported on a thread whose stack has no program frame (the
+        // break-in thread Windows injects, issue #898; frames the debugger
+        // has no source for, issue #1131) says nothing about where the
+        // program is; a sibling in the program's code does. Only a
         // program-neutral stop may move: a breakpoint, step, exception or
         // entry stop belongs to the thread it was reported on. Only an
         // implicit read may move, and `ensureStackReady` is what the implicit
@@ -306,7 +325,11 @@ export class FrameAnchorResolver {
           frames = filtered;
         }
       }
-      const noProgramFrame = frames.length > 0 && policyUserFrames(frames, policy).length === 0;
+      // The filter above removes only frames the policy calls internal, and
+      // those are never program frames, so the verdict on what is shown is
+      // the verdict on the whole stack.
+      const noProgramFrame = frames.length > 0 && programFrames(frames, policy).length === 0;
+      const sourcelessFrames = noProgramFrame && policyUserFrames(frames, policy).length > 0;
 
       // An implicit read answered from a thread other than the one the stop
       // named — the attach controller or an earlier resolve moved the anchor
@@ -340,6 +363,7 @@ export class FrameAnchorResolver {
         hiddenFrameCount: totalFrameCount - frames.length,
         allFramesInternal,
         ...(noProgramFrame ? { noProgramFrame } : {}),
+        ...(sourcelessFrames ? { sourcelessFrames: true as const } : {}),
         ...(pausedFrame ? { pausedFrame, pausedFrameNote } : {}),
         ...(note ? { note } : {})
       };
@@ -544,7 +568,7 @@ export class FrameAnchorResolver {
     }
     proxyManager.setCurrentThreadId(programThreadId);
     const reportedTop = toStackFrame(stoppedFrames[0]);
-    const landing = policyUserFrames(frames.map(toStackFrame), policy)[0] ?? toStackFrame(frames[0]);
+    const landing = programFrames(frames.map(toStackFrame), policy)[0] ?? toStackFrame(frames[0]);
     this.ctx.logger.info(
       `[FrameAnchor ${sessionId}] Stop on thread ${stoppedThreadId} has no program frame; adopted thread ${programThreadId} in '${landing.name}'.`
     );

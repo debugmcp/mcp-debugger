@@ -331,22 +331,44 @@ export const ErrorMessages = {
    * stack has no more to list than the frame the sentence already names.
    * Used in: src/session/inspection/stop-location.ts,
    *   src/server/handlers/inspection-tools.ts
+   *
+   * Two wordings (issue #1131). When every frame is one the adapter's policy
+   * calls internal, they are runtime frames and the stop is outside the
+   * caller's code. When some frame is counted out only because the debugger
+   * has no source for it (a symbol label, no file at all), the sentence says
+   * that and no more: such a frame may be a runtime's or a library's, and it
+   * may be the caller's own code built without debug information, which is
+   * something they can fix.
    * @param threadId - The thread the answer is anchored on, when known
    * @param frameCount - How many frames the thread reported
    * @param top - The frame shown
    * @param opts.framesUnseen - The thread has frames this answer did not show
+   * @param opts.sourceless - Some frame is not internal by the policy's rules; it has no source
    */
   stopWithoutProgramFrame: (
     threadId: number | undefined,
     frameCount: number,
     top: { name: string; file: string; line: number },
-    opts?: { framesUnseen?: boolean }
-  ) =>
-    `No program frame is active${typeof threadId === 'number' ? ` on thread ${threadId}` : ''}: ` +
-    `${frameCount === 1 ? 'the only frame is' : `all ${frameCount} frames are`} internal/runtime ` +
-    `(top: '${top.name}' ${top.file}:${top.line}). The stop landed outside your code: ` +
-    `continue_execution and trigger activity, or set a breakpoint` +
-    (opts?.framesUnseen ? '; get_stack_trace with includeInternals: true lists the frames.' : '.'),
+    opts?: { framesUnseen?: boolean; sourceless?: boolean }
+  ) => {
+    const where = `No program frame is active${typeof threadId === 'number' ? ` on thread ${threadId}` : ''}: `;
+    const shown = `(top: '${top.name}' ${top.file}:${top.line}).`;
+    const pointer = opts?.framesUnseen ? '; get_stack_trace with includeInternals: true lists the frames.' : '.';
+    if (opts?.sourceless) {
+      return (
+        where +
+        `${frameCount === 1 ? 'the only frame has no source' : `all ${frameCount} frames are internal/runtime or have no source`} ` +
+        `${shown} Code without source is a runtime's or a library's, or your own built without debug information. ` +
+        `continue_execution and trigger activity, or set a breakpoint in a source file${pointer}`
+      );
+    }
+    return (
+      where +
+      `${frameCount === 1 ? 'the only frame is' : `all ${frameCount} frames are`} internal/runtime ` +
+      `${shown} The stop landed outside your code: ` +
+      `continue_execution and trigger activity, or set a breakpoint${pointer}`
+    );
+  },
 
   /**
    * An explicit breakOnExceptions mode the adapter cannot honour (issue #1032):
