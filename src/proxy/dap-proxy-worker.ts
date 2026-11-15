@@ -2879,9 +2879,13 @@ export class DapProxyWorker {
     const detaching = (payload.dapArgs as { terminateDebuggee?: boolean } | undefined)?.terminateDebuggee === false;
     if (detaching) {
       await this.resumeBeforeDetach('detach');
-      this.beginDetach('detach');
     }
     await this.childConnections?.releaseAllHeld('root disconnect');
+    // A held child's release can wait for a throwaway attach. A terminated
+    // event during that wait precedes this disconnect and cannot acknowledge it.
+    if (detaching) {
+      this.beginDetach('detach');
+    }
     if (this.isAttachMode) {
       this.dapDisconnectSent = true;
     }

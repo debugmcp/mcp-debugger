@@ -4028,6 +4028,33 @@ describe('DapProxyWorker', () => {
         expect(results()).toEqual([{ trigger: 'shutdown', acknowledged: true, by: 'response', debuggeeExited: undefined, error: undefined }]);
       });
 
+      it('does not count a terminated during held-child release as an acknowledgement of the unsent detach', async () => {
+        const order: string[] = [];
+        const sendRequest = vi.fn().mockImplementation(async () => {
+          order.push('disconnect');
+          throw new Error('DAP client disconnected');
+        });
+        wire(sendRequest);
+        // js-debug can wait for a throwaway attach while releasing a held
+        // child. A root termination during that wait precedes its disconnect.
+        (worker as any).childConnections = {
+          clientOf: vi.fn().mockReturnValue(undefined),
+          closeAll: vi.fn().mockResolvedValue(undefined),
+          releaseAllHeld: vi.fn().mockImplementation(async () => {
+            order.push('release');
+            (worker as any).noteTerminatedDuringDetach();
+          })
+        };
+
+        await detach('detach-during-child-release');
+
+        expect(order).toEqual(['release', 'disconnect']);
+        expect(results()).toEqual([{
+          trigger: 'detach', acknowledged: false, by: undefined,
+          debuggeeExited: undefined, error: 'DAP client disconnected'
+        }]);
+      });
+
       it('reports once: a session-sent detach is not reported again by the close that follows', async () => {
         wire();
 
