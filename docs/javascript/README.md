@@ -151,10 +151,13 @@ ES2017 costs four unmapped `__awaiter` stops before its first line (issue #687).
 that shape, which is how a `step_into` on a `require` line was lost too. (The cause is in V8: the return replayed
 after the `finally` block carries no source position, so it is not a place a step can stop; issue #1173.)
 
-So where a step can be lost that way, the server sets temporary breakpoints on the frame the step returns to, and
-whichever pauses first is the landing. That is something the server does in your process: up to 24 temporary
-breakpoints per guarded frame, for the length of one step, removed when the step ends, however it ends. Where they
-cannot be set the step goes on with V8 alone.
+So where a step can be lost that way, the server sets temporary breakpoints on every break location of the frame
+the step returns to, and whichever pauses first is the landing: the caller's next break location after the call
+(the next statement, or the next call in the same statement; V8's own step-out, where it does not lose the step,
+can stop once more on the call's own line first). That is something the server does in your process: a breakpoint
+on each break location of one function, for the length of one step, removed when the step ends, however it ends.
+A function with more than 100 break locations is not guarded, and where the breakpoints cannot be set the step
+goes on with V8 alone.
 
 They are set only where a hit there proves the step came back:
 
@@ -164,14 +167,20 @@ They are set only where a hit there proves the step came back:
   suspending at an `await` or `yield`, and a breakpoint below would then stop the step in the caller while it is
   still on its way to the next line, or in another call of the same function. So those steps are V8's own.
 - **The frame it returns to stays on the stack** until it reaches one of them: a plain function does; an `async`
-  one does unless the statement making the call awaits (`const got = await inner(id)` suspends the caller as soon
-  as the call returns, and another call of the same function can take its place).
+  one does unless the statement making the call awaits or yields (`const got = await inner(id)` suspends the
+  caller as soon as the call returns, and another call of the same function can take its place), or the function
+  suspends with no keyword there (`for await`, `await using`, a `return` in an async generator).
+- **Every break location of that frame, or none**: a breakpoint on part of a function can miss the place control
+  comes back to (a loop's top, the code after a long `else`) and stop later, in another iteration or another
+  call.
 - **Never on the frame being stepped in**: a function that returns to itself (recursion) gets none for `step_over`
   and `step_into`.
 
-What that leaves lost, as in 0.26.0: a step V8 loses in an `async` function or a generator, and a step out of a
-plain function whose caller awaits the call. Such a step answers `pending: true`, and its sentence names the case.
-A breakpoint on the line you expected the step to reach stops there.
+What that leaves lost, as in 0.26.0: a step V8 loses in an `async` function or a generator, a step out of a
+plain function whose caller awaits the call, and one out of a plain function whose caller has more than 100 break
+locations. Such a step runs on: while the program keeps running it answers `pending: true`, with a sentence that
+names these cases; when the program ends first it answers `Step completed as session exited.` A breakpoint on the
+line you expected the step to reach stops there (issue #1174).
 
 Not covered: a `step_over` across the first load of a module that has a breakpoint in it still runs on (issue
 #1162; js-debug pauses at the module's entry to bind the breakpoint, and V8 drops the step at any pause). A

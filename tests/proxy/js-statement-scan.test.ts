@@ -6,7 +6,7 @@
  * scan must err toward "it can": that costs a rescue, never a wrong landing.
  */
 import { describe, it, expect } from 'vitest';
-import { statementCanSuspend } from '../../src/proxy/js-statement-scan.js';
+import { functionKind, statementCanSuspend } from '../../src/proxy/js-statement-scan.js';
 
 /** The source, and the 0-based line and column of the call marked `@` (the marker is removed). */
 function at(source: string): { lines: string[]; line: number; column: number } {
@@ -53,9 +53,32 @@ describe('statementCanSuspend', () => {
       ['a yield', 'function* g() {\n  const got = yield @inner(id);\n}'],
       ['a for await loop anywhere in the function', 'async function f() {\n  for await (const x of xs) {\n    @inner(x);\n  }\n}'],
       ['an await using anywhere in the function', 'async function f() {\n  await using h = open();\n  @inner(1);\n}'],
-      ['a nested async callback that awaits', 'async function f() {\n  @inner(items.map(async (i) => { await send(i); }));\n}']
+      ['a nested async callback that awaits', 'async function f() {\n  @inner(items.map(async (i) => { await send(i); }));\n}'],
+      ['an await around a spread object', 'async function f(id) {\n  const v = await {\n    ...{ a: @work(id) }\n  };\n}'],
+      ['an await before an object argument that closes on its own line', 'async function f(id) {\n  const v = await wrap(function () {\n    return 1;\n  }\n  , @work(id));\n}'],
+      ['an await before an arrow argument', 'async function f(id) {\n  const v = await both(() => {\n    return 1;\n  }, @work(id));\n}'],
+      ['a line that ends in await', 'async function f(id) {\n  const v = await\n    @work(id);\n}']
     ])('%s', (_what, source) => {
       expect(suspends(source)).toBe(true);
+    });
+  });
+
+  describe('an async generator', () => {
+    it('awaits the value it returns: a return of the call can suspend', () => {
+      const { lines, line, column } = at('async function* g(id) {\n  noop();\n  return @work(id);\n}');
+      expect(statementCanSuspend(lines, line, column, 0, lines.length - 1, { asyncGenerator: true })).toBe(true);
+      expect(statementCanSuspend(lines, line, column, 0, lines.length - 1)).toBe(false);
+    });
+
+    it('reads a return that ends its line as part of the statement on the next', () => {
+      const { lines, line, column } = at('async function* g(id) {\n  noop();\n  return (\n    @work(id));\n}');
+      expect(statementCanSuspend(lines, line, column, 0, lines.length - 1, { asyncGenerator: true })).toBe(true);
+    });
+  });
+
+  describe('a block comment', () => {
+    it('is not read as code', () => {
+      expect(suspends('async function f(id) {\n  /* await later */ const v = @work(id);\n}')).toBe(false);
     });
   });
 
@@ -64,6 +87,9 @@ describe('statementCanSuspend', () => {
       ['a template literal with an expression', 'async function f() {\n  const got = @inner(`${id}`);\n}'],
       ['a string that does not end on its line', 'async function f() {\n  const got = @inner("a\\\n b");\n}'],
       ['a regular expression literal', 'async function f() {\n  const got = @inner(/;/.test(id));\n}'],
+      ['a regular expression with slashes after a paren', 'async function f(id, s) {\n  if (s) /\\/\\//.test(s) && await use(@work(id));\n}'],
+      ['a template that spans lines', 'async function f(id) {\n  const css = await `\n  .a { color: ${@work(id)}; }\n`;\n}'],
+      ['a block comment that hides an await', 'async function f(id) {\n  const v = /* x */ await /* y */ @work(id);\n}'],
       ['a call outside the function', 'const got = @inner(id);']
     ])('%s', (_what, source) => {
       const { lines, line, column } = at(source);
@@ -75,5 +101,77 @@ describe('statementCanSuspend', () => {
       const body = Array.from({ length: 60 }, (_, i) => `    arg${i},`).join('\n');
       expect(suspends(`async function f() {\n  const got = use(\n${body}\n    @inner(id));\n}`)).toBe(true);
     });
+  });
+});
+
+/**
+ * What a function is, read from the header V8's functionLocation points at:
+ * the parameter list of a function or a method, the first token of an arrow.
+ * Columns below are where V8 points (measured on Node 24 for the first
+ * group; the rest follow the same rule).
+ */
+describe('functionKind', () => {
+  /** The header, with the position V8 points at marked `@` (the marker is removed). */
+  function kindOf(source: string): { async: boolean; generator: boolean } | null {
+    const { lines, line, column } = at(source);
+    return functionKind(lines, line, column);
+  }
+  const plain = { async: false, generator: false };
+  const isAsync = { async: true, generator: false };
+  const generator = { async: false, generator: true };
+  const asyncGenerator = { async: true, generator: true };
+
+  it.each([
+    ['function plainDecl@() { }', plain],
+    ['const plainExpr = function @() { };', plain],
+    ['const plainArrow = @() => { };', plain],
+    ['async function asyncDecl@() { }', isAsync],
+    ['const asyncExpr = async function @() { };', isAsync],
+    ['const asyncArrow = @async () => { };', isAsync],
+    ['const asyncArrowBare = @async a => { };', isAsync],
+    ['function* genDecl@() { }', generator],
+    ['const genExpr = function* @() { };', generator],
+    ['async function* asyncGen@() { }', asyncGenerator],
+    ['  method@() { }', plain],
+    ['  async asyncMethod@() { }', isAsync],
+    ['  *genMethod@() { }', generator],
+    ['  async *asyncGenMethod@() { }', asyncGenerator],
+    ['  static async staticAsync@() { }', isAsync],
+    ['  get prop@() { return 1; }', plain],
+    ['  objPlain@() { },', plain],
+    ['  arrowProp: @async () => { }', isAsync],
+    ['Module.prototype.require = function@(id) {', plain],
+    ['run(function inner@() { }, async function next() { });', plain],
+    ['run(function inner() { }, async function next@() { });', isAsync],
+    ['  constructor@(a) { }', plain],
+    ['  #secret@() { }', plain],
+    ['  async #secret@() { }', isAsync],
+    ['  async() { }'.replace('()', '@()'), plain]
+  ])('%s', (source, expected) => {
+    expect(kindOf(source)).toEqual(expected);
+  });
+
+  it.each([
+    ['a string key holding a colon', "  async 'GET /users/:id'@(req) { }", isAsync],
+    ['a string key holding a comma', "  async 'a,b'@(x) { }", isAsync],
+    ['a computed key holding a colon', "  async [Symbol.for('a:b')]@(x) { }", isAsync],
+    ['a generator with a computed key holding a comma', "  *[Symbol.for('g,h')]@() { }", generator],
+    ['a static async computed key', "  static async ['s:A']@(x) { }", isAsync],
+    ['an async generator computed key', '  async *[Symbol.asyncIterator]@() { }', asyncGenerator],
+    ['a plain string key holding the word async', "  'async (x)'@(x) { }", plain]
+  ])('a key the old read lost: %s', (_what, source, expected) => {
+    expect(kindOf(source)).toEqual(expected);
+  });
+
+  it.each([
+    ['a function header split across lines', 'async function\nname@(x) { }', isAsync],
+    ['a generator header split across lines', 'function*\nname@() { }', generator],
+    ['a comment inside the header', 'async /* the handler */ function handler@(req) { }', isAsync]
+  ])('reads %s', (_what, source, expected) => {
+    expect(kindOf(source)).toEqual(expected);
+  });
+
+  it('does not know a header it cannot read with confidence: a computed key with a template expression', () => {
+    expect(kindOf('  async [`k${1}`]@(x) { }')).toBeNull();
   });
 });

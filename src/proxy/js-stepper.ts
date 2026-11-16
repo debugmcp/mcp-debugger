@@ -58,9 +58,20 @@
  *
  *     (b) The frame guarded is on the stack and stays there until it
  *         reaches a net position. A plain function does. One that can
- *         suspend does unless the statement making the call awaits or
- *         yields: then it can leave the stack before any position, another
- *         call of the same function can take its depth, and no net is set.
+ *         suspend does unless it can suspend between the call returning
+ *         and its next break location: V8 puts one at every statement's
+ *         start and every call, so only when the calling statement awaits
+ *         or yields, or the function suspends with no keyword there (`for
+ *         await`, `await using`, an async generator's `return`). Then it can
+ *         leave the stack before any position, another call of the same
+ *         function can take its depth, and no net is set.
+ *
+ *     (c) The net covers every break position of the frame it guards, or
+ *         there is none: a hit is then the first position control reaches
+ *         in that activation. A function with more than `netSize`
+ *         positions is not netted. A rescue lands at the caller's next
+ *         break location after the call; V8's own step-out, when it does
+ *         not lose the step, can stop once more on the call's own line.
  *
  *   Nothing is ever guarded that is not on the stack (no net on an awaiting
  *   function), and nothing is decided on a pause's reason, which does not
@@ -102,7 +113,7 @@
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { createLogger } from '../utils/logger.js';
 import { ErrorMessages } from '../utils/error-messages.js';
-import { statementCanSuspend } from './js-statement-scan.js';
+import { functionKind, statementCanSuspend, type FunctionKind } from './js-statement-scan.js';
 
 // redirectable: re-pointed into the per-session proxy log at worker init (#519)
 const logger = createLogger('js-stepper', { redirectable: true });
@@ -125,7 +136,13 @@ export interface JsStepperTunables {
   budget: number;
   /** CDP step commands in one chain, all told. */
   commandCap: number;
-  /** Break positions in one net. A breakpoint in a big function is slow to set (1000 took 2.4 s). */
+  /**
+   * The most break positions a net may have. A net covers every position of
+   * the function it guards, or the function is not netted: a net on part of
+   * it can miss the position control comes back to (a loop's back edge, the
+   * code after a long else) and fire later, in another iteration or another
+   * call. A breakpoint is slow to set in a big function (1000 took 2.4 s).
+   */
   netSize: number;
   /** Re-issued commands on a net position that is not a landing (recursion; the origin statement). */
   reissueCap: number;
@@ -138,7 +155,7 @@ export interface JsStepperTunables {
 export const DEFAULT_JS_STEPPER_TUNABLES: JsStepperTunables = {
   budget: 24,
   commandCap: 128,
-  netSize: 24,
+  netSize: 100,
   reissueCap: 24,
   settleCeilingMs: 2000,
   verdictCeilingMs: 2000
@@ -324,7 +341,7 @@ export class JsStepper {
   /** Scripts js-debug marked "Skipped by skipFiles": a script-level verdict, not asked again. */
   private readonly skippedScripts = new Set<string>();
   /** Whether a function can suspend, by its header: read once per function. */
-  private readonly suspending = new Map<string, boolean>();
+  private readonly kinds = new Map<string, FunctionKind | null>();
   /** Whether a function's text names a construct that closes through a finally. */
   private readonly closing = new Map<string, boolean>();
   /** What each pause's top frame returns to: asked of js-debug once per pause. */
@@ -936,19 +953,8 @@ export class JsStepper {
     return all;
   }
 
-  /** At most `netSize` positions, from the frame's own position on. */
-  private window(all: CdpBreakLocation[], here: CdpLocation): CdpBreakLocation[] {
-    const size = this.tunables.netSize;
-    if (all.length <= size) {
-      return all;
-    }
-    const at = all.findIndex((location) => sameOrAfter(location, here));
-    const from = at === -1 ? 0 : at;
-    const part = all.slice(from, from + size);
-    return part.length === size ? part : [...part, ...all.slice(0, size - part.length)];
-  }
-
-  private async arm(all: CdpBreakLocation[], here: CdpLocation, net: Omit<Net, 'ids'>): Promise<boolean> {
+  /** A net on every one of `all`, the break positions of the function it guards. */
+  private async arm(all: CdpBreakLocation[], net: Omit<Net, 'ids'>): Promise<boolean> {
     if (this.nets.some((existing) => existing.fn === net.fn && existing.depth === net.depth)) {
       return true;
     }
@@ -957,7 +963,7 @@ export class JsStepper {
       return false;
     }
     const answers = await Promise.all(
-      this.window(all, here).map((location) =>
+      all.map((location) =>
         cdp
           .send<{ breakpointId?: string }>('Debugger.setBreakpoint', {
             location: { scriptId: location.scriptId, lineNumber: location.lineNumber, columnNumber: location.columnNumber ?? 0 }
@@ -1008,29 +1014,33 @@ export class JsStepper {
    * scripts too. Doubt reads as "can suspend": no net. Never throws.
    */
   private async canSuspend(frame: CdpCallFrame): Promise<boolean> {
+    const kind = await this.kindOf(frame);
+    return kind === null || kind.async || kind.generator;
+  }
+
+  /**
+   * What the frame's function is, by `functionKind`; null when that is not
+   * known with confidence, and for a module's own code (which may await at
+   * its top level). Read once per function. Never throws.
+   */
+  private async kindOf(frame: CdpCallFrame): Promise<FunctionKind | null> {
     const key = fnKey(frame);
-    const known = this.suspending.get(key);
-    if (known !== undefined) {
-      return known;
+    if (this.kinds.has(key)) {
+      return this.kinds.get(key) ?? null;
     }
-    let suspends = true;
+    let kind: FunctionKind | null = null;
     try {
       const scopes = frame.scopeChain ?? [];
       const firstFunctionScope = scopes.find((scope) => scope.type === 'local' || scope.type === 'module');
       const at = frame.functionLocation;
-      if (firstFunctionScope?.type === 'module') {
-        suspends = true;
-      } else if (at) {
-        const line = (await this.linesOf(at.scriptId))[at.lineNumber];
-        if (line !== undefined) {
-          suspends = suspendsByHeader(line, at.columnNumber ?? 0);
-        }
+      if (firstFunctionScope?.type !== 'module' && at) {
+        kind = functionKind(await this.linesOf(at.scriptId), at.lineNumber, at.columnNumber ?? 0);
       }
     } catch (err) {
       logger.debug(`[JsStepper] could not read a function's header: ${errorText(err)}`);
     }
-    this.suspending.set(key, suspends);
-    return suspends;
+    this.kinds.set(key, kind);
+    return kind;
   }
 
   /**
@@ -1051,7 +1061,10 @@ export class JsStepper {
       const lines = await this.linesOf(here.scriptId);
       const from = Math.min(frame.functionLocation?.lineNumber ?? all[0].lineNumber, all[0].lineNumber);
       const to = all[all.length - 1].lineNumber;
-      return statementCanSuspend(lines, here.lineNumber, here.columnNumber ?? 0, from, to);
+      const kind = await this.kindOf(frame);
+      return statementCanSuspend(lines, here.lineNumber, here.columnNumber ?? 0, from, to, {
+        asyncGenerator: kind === null || (kind.async && kind.generator)
+      });
     } catch (err) {
       logger.debug(`[JsStepper] could not read the calling statement: ${errorText(err)}`);
       return true;
@@ -1126,7 +1139,12 @@ export class JsStepper {
       if ((await this.canSuspend(frame)) && (await this.callStatementSuspends(frame))) {
         return;
       }
-      await this.arm(await this.locationsOf(frame), frame.location, {
+      // (c) Every position of it, or none.
+      const all = await this.locationsOf(frame);
+      if (all.length === 0 || all.length > this.tunables.netSize) {
+        return;
+      }
+      await this.arm(all, {
         name: frame.functionName || '(anonymous)',
         fn: fnKey(frame),
         depth: frames.length - target.index
@@ -1194,21 +1212,4 @@ export class JsStepper {
     }
     return markOf(awaiter) === 'deemphasize' ? { kind: 'nothing' } : { kind: 'awaiter', parent };
   }
-}
-
-/**
- * Whether the function whose header is at `column` of `line` is async or a
- * generator. V8's functionLocation points at the parameter list of a function
- * or a method, with `[static] [async] [function] [*] [get|set] name` right
- * before it, and at the first token of an arrow, which is `async` itself for
- * an async one. Erring toward "it can suspend" is the safe side: a plain
- * method named `async`, or a comment before the header, reads as one that can.
- */
-export function suspendsByHeader(line: string, column: number): boolean {
-  if (/^async\b/.test(line.slice(column))) {
-    return true;
-  }
-  // The header's own tokens: what stands between the last delimiter and the parameter list.
-  const header = line.slice(0, column).split(/[=,:(;{}?!&|]/).pop() ?? '';
-  return /\basync\b/.test(header) || header.includes('*');
 }
