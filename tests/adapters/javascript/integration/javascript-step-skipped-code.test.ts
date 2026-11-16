@@ -171,9 +171,15 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
       expectLanding(await step('step_over'), 'after withFinally');
     }, 60000);
 
-    it('step_out of an async function lands in its awaiter', async () => {
+    it('step_out of an async function with that shape is the engine\'s own, and the engine loses it (#1174)', async () => {
       await pausedAt('async return inside try-finally');
-      expectLanding(await step('step_out'), 'after the await');
+      // A temporary breakpoint below a function that can suspend cannot tell
+      // it returning from it pausing at an await: the server sets none, and
+      // the step is lost as it was before the server had a stepper. If this
+      // starts landing, V8 has fixed it (#1173): update the docs.
+      const answer = await step('step_out');
+      expect(answer, JSON.stringify(answer)).toMatchObject({ success: true });
+      expect(answer.state, JSON.stringify(answer)).not.toBe('paused');
     }, 60000);
   });
 
@@ -245,11 +251,11 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
       expectAsyncLanding(await step('step_over'), 'an await inside the try');
       expectAsyncLanding(await step('step_over'), 'the return inside the try');
       expectAsyncLanding(await step('step_over'), 'the finally block of an async function');
-      // Off the finally block V8 loses the step; it is caught at the awaiting
-      // function, and the answer says what that can and cannot promise.
+      // Off the finally block of an async function V8 loses the step, and the
+      // server does not rescue it (#1174): the program runs on to its end.
       const out = await step('step_over');
-      expectAsyncLanding(out, 'after closing');
-      expect(out.message).toBe(`Stepped over. ${ErrorMessages.stepCaughtWhereItReturns('main')}`);
+      expect(out, JSON.stringify(out)).toMatchObject({ success: true });
+      expect(out.state, JSON.stringify(out)).not.toBe('paused');
     }, 60000);
 
     it('step_over on a statement that awaits on a later line stays in the function: its caller runs on, and is not where the step stops', async () => {
