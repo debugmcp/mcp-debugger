@@ -706,9 +706,9 @@ The step is not cancelled: the session becomes `"paused"` on its own when it com
 The adapter may append one sentence to that message saying what the step is waiting for. The JavaScript adapter
 does so for a launch that steps through skipped code (issues #678, #1130): a step issued from skipped code names
 the frame and says a step does not stop there, and any other pending step says it left the frame it started in
-and has not stopped in your program since (a function Node called returned to the event loop, the line is
-waiting on work in flight, or the engine lost the step: an `await` that was the last thing a function did before
-it left through `try … finally`). So match a pending step by its `pending: true` flag, not by the message text.
+and has not stopped in your program since (a function Node called returned to the event loop, or the line is
+waiting on work in flight). An attach that steps through skipped code (`smartStep: true`) gets no such sentence.
+So match a pending step by its `pending: true` flag, not by the message text.
 
 Once a stop has been observed, the stop path owns the answer — a step that demonstrably landed is never reported as pending afterwards, at the cost of the response then being bounded by the stack-trace round trip rather than by the ~5s window. If the debuggee ends while the step is in flight the result is still a success, with a terminal `state` and a message such as `"Step completed as session terminated."`.
 
@@ -742,10 +742,11 @@ Same ~5s wait and `pending: true` contract as step_over — see [Pending steps](
 - A line whose call stays in skipped code (Node internals, `node_modules`, files on `skipFiles`) for the whole
   walk lands on the next line, and the message says what is known: `Stepped into. step_into walked 25 engine steps
   into the call on that line and was still in skipped code (Node internals, node_modules, or files on skipFiles),
-  so it stepped back out and the rest of the line ran as a step over runs it. Code of yours that the call reaches
-  further in (a module it loads, a late callback) ran without stopping: a breakpoint there stops in it. To stop
-  inside the skipped code instead, turn stepping through it off: justMyCode: false on a launch, smartStep: false
-  on a launch or an attach.` A `console.log` and a `require` answer this way.
+  so it stepped back out and the rest of the line ran as a step over runs it. Code of yours that the call runs
+  further in (a module it loads) or only schedules (a timer or promise callback) does not stop the step: a
+  breakpoint there stops in it. To stop inside the skipped code instead, turn stepping through it off:
+  justMyCode: false on a launch, smartStep: false on a launch or an attach.` A `console.log`, a `require` and a
+  `setTimeout` line answer this way.
 - A line that calls native code only (`JSON.stringify`) has nothing to walk into: a plain `Stepped into` on the
   next line.
 - A call that only starts a later task (`setTimeout`, a `.then` callback) is not followed: the step lands on the
@@ -777,15 +778,17 @@ Same ~5s wait and `pending: true` contract as step_over — see [Pending steps](
 **JavaScript** (a launch that steps through skipped code, the default; issues #1130, #1161):
 
 - Out of an `async` function the event loop resumed, the step lands in the function that awaits it, in the
-  call that awaited.
-- When that `async` function has a `finally` clause, the engine can lose the step, so the server catches it
-  at the awaiting function instead, in whichever call of that function runs next, and the message says so:
-  `Stepped out. The engine loses a step that leaves a function through try...finally, so this step was caught
-  where the awaiting function, handler, next ran. If several calls of handler are in flight, this stop may be
-  in another call's continuation than the one that awaited the function you stepped out of: check its
-  variables.`
+  call that awaited: that is the engine's own step.
+- The engine can lose a step that leaves a function through `try … finally`. Where the function has a `finally`
+  clause and cannot suspend before it exits, the server catches the step with temporary breakpoints on the function
+  it returns to. When those cannot name one call (that function was waiting at an `await`), the stop is in
+  whichever call of it runs next, and the message says so: `Stepped out. This step was caught by a temporary
+  breakpoint in handler, the function it returns to, because the engine can lose a step that leaves a function
+  through try...finally. handler was waiting at an await meanwhile, so if several calls of handler are in flight
+  this stop may be in another of them than the one the step returns to: check its variables.` The same sentence
+  can follow a `step_over` or `step_into` that leaves such a function.
 - Out of a function that nothing of your program called or awaits (a timer callback, a `.then` callback, a
-  request handler) there is nowhere to land: the program is resumed, and the answer is the next stop or
+  request handler) there is nowhere of its own to land: the program is resumed, and the answer is the next stop or
   `pending: true`.
 
 See [Stepping and pausing inside dependencies](javascript/README.md#stepping-and-pausing-inside-dependencies-justmycode-skipfiles).

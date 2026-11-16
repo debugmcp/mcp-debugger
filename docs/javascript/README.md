@@ -115,12 +115,12 @@ What a step does when the session steps through skipped code (the launch default
 | Step | From | Lands |
 |---|---|---|
 | `step_into` | a line that calls your function through skipped code (`emitter.emit` to a listener, an array callback, a route handler from inside express) | in that function |
-| `step_into` | a line whose call stays in skipped code for the whole walk (`console.log`, a `require`) | on the next line. The message says how many engine steps the walk took, and that code of yours the call reaches further in (the module a `require` loads, a late callback) ran without stopping |
+| `step_into` | a line whose call stays in skipped code for the whole walk (`console.log`, a `require`, `setTimeout`) | on the next line. The message says how many engine steps the walk took, and that code of yours the call runs further in (the module a `require` loads) or only schedules (a timer callback) does not stop the step |
 | `step_into` | a line that calls native code only (`JSON.stringify`) | on the next line, as a plain `Stepped into`: there is nothing to walk into |
-| `step_into` | a line that only starts a later task (`setTimeout`, a `.then` callback) | on the next line; a breakpoint in the callback stops there |
+| `step_into` | a line that only starts a later task (`setTimeout`, a `.then` callback) | on the next line, never in the callback some time later; a breakpoint in the callback stops there |
 | `step_over`, `step_out` | a frame whose caller is skipped code, with your code further down the stack | in that frame of yours |
 | `step_out` | an `async` function the event loop resumed | in the function that awaits it, in the call that awaited |
-| `step_over`, `step_out` | the last line of a function that nothing of yours called or awaits (a request handler, a timer callback, a `.then` callback) | nowhere: nothing of your program is on the stack, so the program is resumed. The answer is the next stop if one comes while the step waits (a breakpoint, the program's end), and `pending: true` with a sentence saying so if none does |
+| `step_over`, `step_out` | the last line of a function that nothing of yours called or awaits (a request handler, a timer callback, a `.then` callback) | nowhere of its own: nothing of your program is on the stack. If another callback of yours is already queued behind a `.then` callback, V8's step stops in it; otherwise the program is resumed, and the answer is the next stop if one comes while the step waits (a breakpoint, the program's end), or `pending: true` if none does (on a launch, with a sentence saying the step left its frame) |
 | any step | skipped code (a breakpoint inside a dependency) | `step_into` walks on into your handler; `step_over` and `step_out` run on as in the row above. `justMyCode: false` steps inside that code |
 
 A breakpoint or an exception reached during a step stops as itself. A `debugger;` statement reached during a step is
@@ -147,30 +147,39 @@ ES2017 costs four unmapped `__awaiter` stops before its first line (issue #687).
 **Steps V8 itself loses** (issue #1161). V8 can lose a step that leaves a function through a `return` written
 inside `try … finally` (measured on V8 12.4, 13.6 and 14.6 with a bare CDP client): a `step_out` of such a function,
 or a `step_over` off its `finally` block, used to answer `Step completed as session exited.` Node's own module
-loader has that shape, which is how a `step_into` on a `require` line was lost too. So where a step can leave a
-frame that way, the server does not count on V8 alone to come back to the frame below: it sets temporary
-breakpoints on that frame (the nearest frame of your program down the stack), and whichever pauses first is the
-landing. That is something the server does in your process: up to 24 temporary breakpoints per guarded frame, for
-the length of one step. They are set for every `step_out`, for a `step_over` or `step_into` from a function whose
-text has a `finally` clause, and for a step that walks through skipped code, and they are removed when the step
-ends, however it ends. Where they cannot be set (V8 gives no break positions for Node's own scripts) the step goes
-on with V8 alone.
+loader has that shape, which is how a `step_into` on a `require` line was lost too. So where V8 can lose a step, the
+server does not count on V8 alone to come back to the frame below: it sets temporary breakpoints on that frame (the
+nearest frame of your program down the stack), and whichever pauses first is the landing. That is something the
+server does in your process: up to 24 temporary breakpoints per guarded frame, for the length of one step, removed
+when the step ends, however it ends. Where they cannot be set (V8 gives no break positions for Node's own scripts)
+the step goes on with V8 alone.
 
-What that leaves to V8, on purpose:
+One rule says when they are set, for all three steps:
 
-- **Recursion.** A function that returns to itself gets no such breakpoints for `step_over` and `step_into`: they
-  would sit in the frame being stepped in.
-- **A function that can suspend** (`await` or `yield` in its text). A `step_over` or `step_into` there is guarded
-  only on a `return` line and from its `finally` on, and never on a line that itself awaits or yields: on such a
-  line the function suspends, its caller runs on, and a breakpoint in the caller would stop the step there instead
-  of on the next line. So a `step_over` on an `await` that is the last thing a function does before it leaves
-  through `finally` is V8's own, and V8 can lose it: the program runs on.
-- **The function awaiting an `async` one.** An `async` function the event loop resumed returns to the function that
-  awaits it, which is not on the stack. V8's own step finds the call that awaited. Only where V8 loses the step
-  (`finally` in the function being left) does the server guard the awaiting function, and there it can only guard
-  the *function*: the step stops in whichever call of it runs next, and the answer says so (`… this stop may be in
-  another call's continuation than the one that awaited the function you stepped out of: check its variables.`).
-  With one call in flight, that is the right one.
+- **From your own code**, only when the function has a `finally` clause and, from the paused line, cannot suspend
+  before it exits: no `await` or `yield` ahead, and no loop above that leads back to one. A function that suspends
+  does not return to its caller: the caller runs on, and a breakpoint there would stop the step in the caller while
+  V8 is still on its way to the next line. And V8 keeps a step across an `await` (measured: it lands in the awaiting
+  function even when the function then leaves through `finally`), so there is nothing to rescue. This reads the
+  function's text; it is not a parse, and it errs toward V8's own step.
+- **From skipped code** (a step that walks through Node's code or a dependency), always. That code is not read, and
+  wherever control comes down from it, your frame below is the landing.
+- **Never on the frame being stepped in**: a function that returns to itself (recursion) gets none for `step_over`
+  and `step_into`.
+
+The breakpoints are kept with the depth of the frame they guard, which names that one call while it stays on the
+stack. Two cases have no such frame. There the step stops in whichever call of the function runs next, and the
+answer says so (`This step was caught by a temporary breakpoint in handler, the function it returns to, … if
+several calls of handler are in flight this stop may be in another of them than the one the step returns to: check
+its variables.`):
+
+- the guarded frame was itself waiting at an `await` for the call the step leaves (`const got = await inner(id)`):
+  it leaves the stack before anything stops;
+- the function the step returns to was never on the stack: the one awaiting an `async` function the event loop
+  resumed. V8's own step finds the call that awaited, so that function is guarded only where the loss is known from
+  the text.
+
+With one call in flight the stop is the right one (issue #1166).
 
 Not covered: a `step_over` across the first load of a module that has a breakpoint in it still runs on (issue
 #1162; js-debug pauses at the module's entry to bind the breakpoint, and V8 drops the step at any pause). A
