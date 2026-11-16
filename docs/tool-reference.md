@@ -706,8 +706,10 @@ The step is not cancelled: the session becomes `"paused"` on its own when it com
 The adapter may append one sentence to that message saying what the step is waiting for. The JavaScript adapter
 does so for a launch that steps through skipped code (issues #678, #1130): a step issued from skipped code names
 the frame and says a step does not stop there, and any other pending step says it left the frame it started in
-and has not stopped in your program since (a function Node called returned to the event loop, or the line is
-waiting on work in flight). An attach that steps through skipped code (`smartStep: true`) gets no such sentence.
+and has not stopped in your program since (a function Node called returned to the event loop, the line is
+waiting on work in flight, or the engine lost the step: V8 loses one that leaves an `async` function or a
+generator through `try … finally`, a `for … of` loop or a `using` declaration, and the server rescues only
+plain functions). An attach that steps through skipped code (`smartStep: true`) gets no such sentence.
 So match a pending step by its `pending: true` flag, not by the message text.
 
 Once a stop has been observed, the stop path owns the answer — a step that demonstrably landed is never reported as pending afterwards, at the cost of the response then being bounded by the stack-trace round trip rather than by the ~5s window. If the debuggee ends while the step is in flight the result is still a success, with a terminal `state` and a message such as `"Step completed as session terminated."`.
@@ -779,14 +781,12 @@ Same ~5s wait and `pending: true` contract as step_over — see [Pending steps](
 
 - Out of an `async` function the event loop resumed, the step lands in the function that awaits it, in the
   call that awaited: that is the engine's own step.
-- The engine can lose a step that leaves a function through `try … finally`. Where the function has a `finally`
-  clause and cannot suspend before it exits, the server catches the step with temporary breakpoints on the function
-  it returns to. When those cannot name one call (that function was waiting at an `await`), the stop is in
-  whichever call of it runs next, and the message says so: `Stepped out. This step was caught by a temporary
-  breakpoint in handler, the function it returns to, because the engine can lose a step that leaves a function
-  through try...finally. handler was waiting at an await meanwhile, so if several calls of handler are in flight
-  this stop may be in another of them than the one the step returns to: check its variables.` The same sentence
-  can follow a `step_over` or `step_into` that leaves such a function.
+- The engine loses a step that leaves a function through `try … finally` (also a `return` out of `for … of`,
+  and a function with a `using` declaration). Out of a plain function the server catches it with temporary
+  breakpoints on the caller, so the step lands there. Out of an `async` function or a generator it does not: a
+  breakpoint below a function that can suspend cannot tell the function returning from it pausing at an `await`.
+  Such a step stays lost, as in 0.26.0, and answers `pending: true`; a breakpoint on the caller's next line stops
+  there.
 - Out of a function that nothing of your program called or awaits (a timer callback, a `.then` callback, a
   request handler) there is nowhere of its own to land: the program is resumed, and the answer is the next stop or
   `pending: true`.

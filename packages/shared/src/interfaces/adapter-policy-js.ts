@@ -450,7 +450,9 @@ export const JsDebugAdapterPolicy = {
         'dapLaunchArgs.justMyCode: false (or adapterLaunchConfig.smartStep: false) to step inside that code.';
     }
     return 'The step left the frame it started in and has not stopped in your program since: a function that Node ' +
-      'called returned to the event loop, or the line is waiting on work still in flight. The program is running; ' +
+      'called returned to the event loop, the line is waiting on work still in flight, or the engine lost the step ' +
+      '(V8 loses one that leaves an async function or a generator through try...finally, a for...of loop or a ' +
+      'using declaration; a breakpoint on the line you expected it to reach stops there). The program is running; ' +
       'wait_for_stop answers when the step lands, a breakpoint is hit, or the program ends.';
   },
 
