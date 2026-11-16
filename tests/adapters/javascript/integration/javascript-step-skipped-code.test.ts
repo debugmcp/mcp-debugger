@@ -249,7 +249,28 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
       // function, and the answer says what that can and cannot promise.
       const out = await step('step_over');
       expectAsyncLanding(out, 'after closing');
-      expect(out.message).toBe(`Stepped over. ${ErrorMessages.stepCaughtAtAwaitingFunction('main')}`);
+      expect(out.message).toBe(`Stepped over. ${ErrorMessages.stepCaughtWhereItReturns('main')}`);
+    }, 60000);
+
+    it('step_over on a statement that awaits on a later line stays in the function: its caller runs on, and is not where the step stops', async () => {
+      await asyncPausedAt('a statement that awaits on later lines');
+      // The function has a finally clause above, and the paused line itself
+      // awaits nothing. A temporary breakpoint on the caller stopped the step
+      // at the caller's next statement, the moment this function suspended.
+      const answer = await step('step_over');
+      expectAsyncLanding(answer, 'the second await of the statement');
+      expect(answer.message).toBe('Stepped over');
+    }, 60000);
+
+    it('step_out of an async function still in its first run lands in the call that awaits it, with other calls in flight', async () => {
+      await asyncPausedAt('in early, before its first await', { condition: 'id === 2' });
+      const answer = await step('step_out');
+      expectAsyncLanding(answer, 'the continuation of relay');
+      // A temporary breakpoint on `relay`, kept by depth, stopped in relay(3)
+      // as it was entered: relay(2) had left the stack at its own await.
+      const id = await server!.call<ToolAnswer & { result?: string }>('evaluate_expression', { expression: 'id' });
+      expect(id.result, JSON.stringify(id)).toBe('2');
+      expect(answer.message).toBe('Stepped out');
     }, 60000);
 
     it('step_out of a .then callback resumes the program: what registered the callback is not what it returns to', async () => {

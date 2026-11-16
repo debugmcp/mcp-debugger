@@ -44,7 +44,11 @@ interface ScriptedPause {
    * (the default: the function on top returns to it), `Promise.then`,
    * `Timeout` (it only scheduled the code on top).
    */
-  asyncParent?: { fn: string; script?: string; line: number; col?: number; skipped?: boolean; description?: string };
+  asyncParent?: {
+    fn: string; script?: string; line: number; col?: number; skipped?: boolean; description?: string;
+    /** `await` links with no frames before the one that has the awaiter (V8 lists them for later awaits). */
+    emptyLinks?: number;
+  };
 }
 
 interface ArmedBreakpoint {
@@ -198,20 +202,19 @@ class Engine extends EventEmitter {
         functionLocation: { scriptId: f.script ?? 'app', lineNumber: fnLineOf(f), columnNumber: 0 },
         location: { scriptId: f.script ?? 'app', lineNumber: f.line, columnNumber: f.col ?? 0 }
       })),
-      ...(pause.asyncParent
-        ? {
-            asyncStackTrace: {
-              description: pause.asyncParent.description ?? 'await',
-              callFrames: [{
-                functionName: pause.asyncParent.fn,
-                scriptId: pause.asyncParent.script ?? 'app',
-                lineNumber: pause.asyncParent.line,
-                columnNumber: pause.asyncParent.col ?? 0
-              }]
-            }
-          }
-        : {})
+      ...(pause.asyncParent ? { asyncStackTrace: this.asyncTrace(pause.asyncParent) } : {})
     };
+  }
+
+  private asyncTrace(parent: NonNullable<ScriptedPause['asyncParent']>): Record<string, unknown> {
+    let trace: Record<string, unknown> = {
+      description: parent.description ?? 'await',
+      callFrames: [{ functionName: parent.fn, scriptId: parent.script ?? 'app', lineNumber: parent.line, columnNumber: parent.col ?? 0 }]
+    };
+    for (let i = 0; i < (parent.emptyLinks ?? 0); i++) {
+      trace = { description: 'await', callFrames: [], parent: trace };
+    }
+    return trace;
   }
 
   /** js-debug's `stackTrace` answer for the pause V8 is in. */
@@ -235,6 +238,9 @@ class Engine extends EventEmitter {
     });
     const frames = pause.frames.map(mark);
     if (pause.asyncParent) {
+      for (let i = 0; i < (pause.asyncParent.emptyLinks ?? 0); i++) {
+        frames.push({ id: 890 + i, name: 'await', line: 0, column: 0, presentationHint: 'label' });
+      }
       frames.push({ id: 900, name: pause.asyncParent.description ?? 'await', line: 0, column: 0, presentationHint: 'label' });
       frames.push(mark(pause.asyncParent, 901));
     }
@@ -271,8 +277,35 @@ describe('JsStepper (issue #1130)', () => {
     await tick(12);
   }
 
+  /** Lines set in each script's text so far in this test (0-based). */
+  let written: Map<string, Map<number, string>>;
+
+  /** Set lines of a script's text, keeping the ones set before. */
+  function sourceWith(lines: Record<number, string>, script = 'app'): void {
+    const known = written.get(script) ?? new Map<number, string>();
+    written.set(script, known);
+    for (const [line, text] of Object.entries(lines)) {
+      known.set(Number(line), text);
+    }
+    const source = Array.from({ length: 2000 }, () => 'x();');
+    for (const [line, text] of known) {
+      source[line] = text;
+    }
+    engine.sources.set(script, source.join('\n'));
+  }
+
+  /**
+   * The frame, with a `finally` clause in its function's text below its
+   * line and nothing that suspends: the shape V8 loses a leaving step on.
+   */
+  function lossy(frame: Frame): Frame {
+    sourceWith({ [frame.line + 5]: '} finally { done(); }' }, frame.script ?? 'app');
+    return frame;
+  }
+
   beforeEach(() => {
     engine = new Engine();
+    written = new Map();
     delivered = [];
     seen = [];
     stepper = new JsStepper({
@@ -382,9 +415,10 @@ describe('JsStepper (issue #1130)', () => {
       ];
       await stepper.request('stepIn', { threadId: 1 });
       await settled();
-      // One levels-1 question for the node script, one for the landing; the
-      // levels-80 one is the net's look at the whole stack.
-      expect(engine.stackTraceCalls.filter((levels) => levels === 1)).toHaveLength(2);
+      // One levels-1 question for the frame the step starts from, one for
+      // the node script, one for the landing; the longer one is the look at
+      // the whole stack for the net.
+      expect(engine.stackTraceCalls.filter((levels) => levels === 1)).toHaveLength(3);
     });
 
     it('asks again each time for a frame skipped for its position, not its script', async () => {
@@ -397,7 +431,7 @@ describe('JsStepper (issue #1130)', () => {
       ];
       await stepper.request('stepIn', { threadId: 1 });
       await settled();
-      expect(engine.stackTraceCalls.filter((levels) => levels === 1)).toHaveLength(3);
+      expect(engine.stackTraceCalls.filter((levels) => levels === 1)).toHaveLength(4);
       expect(stopped()).toMatchObject({ reason: 'step' });
     });
 
@@ -541,7 +575,7 @@ describe('JsStepper (issue #1130)', () => {
 
   describe('nets: a step never counts on V8 alone to come back to a frame (issue #1161)', () => {
     it('step_out arms the frame it returns to before the first command, and lands by the net when V8 never pauses', async () => {
-      engine.pauseAt({ frames: frames(app('withFinally', 5), app('caller', 14)) });
+      engine.pauseAt({ frames: frames(lossy(app('withFinally', 5)), app('caller', 14)) });
       // V8's step-out is lost; the next thing V8 says is the net's breakpoint.
       engine.script = [{ frames: frames(app('caller', 15)), reason: 'other', hits: (armed) => [armed[1].id] }];
       await stepper.request('stepOut', { threadId: 1 });
@@ -595,7 +629,7 @@ describe('JsStepper (issue #1130)', () => {
 
     it('a net hit deeper than the frame it guards is not a landing: a step-out of a recursive function steps out again', async () => {
       const start = fnLineOf(app('down', 0));
-      engine.pauseAt({ frames: frames(app('down', start + 3), app('down', start + 5), app('main', 10)) });
+      engine.pauseAt({ frames: frames(lossy(app('down', start + 3)), app('down', start + 5), app('main', 10)) });
       engine.script = [
         // The frame being left runs on to its own finally block: a net position, one frame too deep.
         { frames: frames(app('down', start + 7), app('down', start + 5), app('main', 10)), reason: 'ambiguous', hits: (armed) => [armed[0].id] },
@@ -611,7 +645,7 @@ describe('JsStepper (issue #1130)', () => {
     it('caps a net, and wraps to the function\'s start when the frame is near its end', async () => {
       const start = fnLineOf(app('wrap', 0));
       engine.positions.set(`app:${start}`, Array.from({ length: 300 }, (_, i) => ({ lineNumber: start + i })));
-      engine.pauseAt({ frames: frames(app('leaf', 5), app('wrap', start + 290)) });
+      engine.pauseAt({ frames: frames(lossy(app('leaf', 5)), app('wrap', start + 290)) });
       engine.script = [{ frames: frames(app('wrap', start + 291)) }];
       await stepper.request('stepOut', { threadId: 1 });
       await settled();
@@ -627,7 +661,7 @@ describe('JsStepper (issue #1130)', () => {
     it('caps a net, and takes it from the frame\'s own position on', async () => {
       const start = fnLineOf(app('big', 0));
       engine.positions.set(`app:${start}`, Array.from({ length: 300 }, (_, i) => ({ lineNumber: start + i })));
-      engine.pauseAt({ frames: frames(app('leaf', 5), app('big', start + 200)) });
+      engine.pauseAt({ frames: frames(lossy(app('leaf', 5)), app('big', start + 200)) });
       engine.script = [{ frames: frames(app('big', start + 201)) }];
       await stepper.request('stepOut', { threadId: 1 });
       await settled();
@@ -645,7 +679,7 @@ describe('JsStepper (issue #1130)', () => {
       const moduleStart = fnLineOf(app('(module)', 0));
       engine.positions.set(`app:${moduleStart}`, [{ lineNumber: moduleStart + 1 }, { lineNumber: moduleStart + 2 }]);
       engine.positions.set('app:900', [{ lineNumber: 900 }, { lineNumber: 901 }, { lineNumber: 902 }]);
-      engine.pauseAt({ frames: frames(app('callee', 5), app('(module)', 900, { fnLine: moduleStart })) });
+      engine.pauseAt({ frames: frames(lossy(app('callee', 5)), app('(module)', 900, { fnLine: moduleStart })) });
       engine.script = [{ frames: frames(app('(module)', 901, { fnLine: moduleStart })) }];
       await stepper.request('stepOut', { threadId: 1 });
       await settled();
@@ -682,7 +716,7 @@ describe('JsStepper (issue #1130)', () => {
       });
       stepper.attachCdp(engine);
       stepper.setEnabled(true);
-      engine.pauseAt({ frames: frames(app('leaf', 5), app('caller', 14)) });
+      engine.pauseAt({ frames: frames(lossy(app('leaf', 5)), app('caller', 14)) });
       await stepper.request('stepOut', { threadId: 1 });
       await settled();
       expect(stopped()).toMatchObject({ reason: 'exception' });
@@ -727,10 +761,11 @@ describe('JsStepper (issue #1130)', () => {
     it('asks again while js-debug says it is not paused yet', async () => {
       engine.pauseAt({ frames: frames(app('main', 10)) });
       engine.script = [{ frames: frames(app('main', 11)) }];
-      engine.stackTraceFailures = 2;
       await stepper.request('next', { threadId: 1 });
+      engine.stackTraceFailures = 2;
       await settled();
-      expect(engine.stackTraceCalls).toEqual([1, 1, 1]);
+      // One for the frame the step started from, three for the landing.
+      expect(engine.stackTraceCalls).toEqual([1, 1, 1, 1]);
       expect(stopped()).toMatchObject({ reason: 'step' });
     });
 
@@ -761,7 +796,7 @@ describe('JsStepper (issue #1130)', () => {
 
   describe('what ends a step still in flight', () => {
     async function stepOutAndRun(): Promise<void> {
-      engine.pauseAt({ frames: frames(app('work', 9), app('main', 14)) });
+      engine.pauseAt({ frames: frames(lossy(app('work', 9)), app('main', 14)) });
       engine.script = ['runs'];
       await stepper.request('stepOut', { threadId: 1 });
       await tick(10);
@@ -838,15 +873,6 @@ describe('JsStepper (issue #1130)', () => {
     stepper.setEnabled(true);
   }
 
-  /** The text of a script, with these 0-based lines set. */
-  function sourceWith(lines: Record<number, string>, script = 'app'): void {
-    const source = Array.from({ length: 2000 }, () => 'x();');
-    for (const [line, text] of Object.entries(lines)) {
-      source[Number(line)] = text;
-    }
-    engine.sources.set(script, source.join('\n'));
-  }
-
   /** How many net breakpoints were set in V8 when each step command went out. */
   function armedAtEachStep(): number[] {
     const counts: number[] = [];
@@ -866,7 +892,7 @@ describe('JsStepper (issue #1130)', () => {
 
     it('serves the step with V8 alone when V8 refuses break positions for the frame it returns to', async () => {
       engine.refuse.add('node:timers');
-      engine.pauseAt({ frames: frames(app('onTimer', 5), timers('listOnTimeout', 605), timers('processTimers', 541)) });
+      engine.pauseAt({ frames: frames(lossy(app('onTimer', 5)), timers('listOnTimeout', 605), timers('processTimers', 541)) });
       engine.script = [{ frames: frames(timers('listOnTimeout', 609), timers('processTimers', 541)) }];
 
       const response = await stepper.request('stepOut', { threadId: 1 });
@@ -905,7 +931,7 @@ describe('JsStepper (issue #1130)', () => {
     });
 
     it('a first command V8 refuses leaves no net behind', async () => {
-      engine.pauseAt({ frames: frames(app('leaf', 5), app('caller', 14)) });
+      engine.pauseAt({ frames: frames(lossy(app('leaf', 5)), app('caller', 14)) });
       engine.failOnce = 'Debugger.stepOut';
       await expect(stepper.request('stepOut', { threadId: 1 })).rejects.toThrow(/refused/);
       // The net on the caller was set before the command, and is gone.
@@ -916,7 +942,7 @@ describe('JsStepper (issue #1130)', () => {
 
     it('counts a net with no breakpoint set as no net', async () => {
       engine.failAlways.add('Debugger.setBreakpoint');
-      engine.pauseAt({ frames: frames(app('leaf', 5), app('caller', 14)) });
+      engine.pauseAt({ frames: frames(lossy(app('leaf', 5)), app('caller', 14)) });
       engine.script = ['runs'];
       await stepper.request('stepOut', { threadId: 1 });
       await tick(5);
@@ -968,7 +994,7 @@ describe('JsStepper (issue #1130)', () => {
 
     it('nets the awaiting function only where V8 loses the step (`finally` in the function left), and says the stop may be another call\'s', async () => {
       const start = fnLineOf(app('innerF', 0));
-      sourceWith({ [start + 1]: 'try {', [start + 2]: '  await gate; return tag;', [start + 3]: '} finally { noop(); }' });
+      sourceWith({ [start + 1]: 'try { await gate;', [start + 2]: '  const tag = id; return tag;', [start + 3]: '} finally { noop(); }' });
       engine.pauseAt({ frames: frames(app('innerF', start + 2)), asyncParent: { fn: 'handler', line: 9, col: 14 } });
       // V8's step-out is lost; the next thing V8 says is the net in `handler`.
       engine.script = [{ frames: frames(app('handler', 10)), reason: 'other', hits: (armed) => [armed[0].id] }];
@@ -977,13 +1003,13 @@ describe('JsStepper (issue #1130)', () => {
       // Asked from the awaiter's own position, since its frame is not on the stack.
       const asked = engine.calls.filter((c) => c.method === 'Debugger.getPossibleBreakpoints').map((c) => c.params.start);
       expect(asked).toContainEqual({ scriptId: 'app', lineNumber: 9, columnNumber: 14 });
-      expect(stopped()).toMatchObject({ reason: 'step', text: ErrorMessages.stepCaughtAtAwaitingFunction('handler') });
+      expect(stopped()).toMatchObject({ reason: 'step', text: ErrorMessages.stepCaughtWhereItReturns('handler') });
       expect(engine.armed).toEqual([]);
     });
 
     it('nets no awaiter that is skipped code', async () => {
       const start = fnLineOf(app('innerG', 0));
-      sourceWith({ [start + 1]: 'try {', [start + 2]: '  await gate; return tag;', [start + 3]: '} finally { noop(); }' });
+      sourceWith({ [start + 1]: 'try { await gate;', [start + 2]: '  const tag = id; return tag;', [start + 3]: '} finally { noop(); }' });
       engine.pauseAt({ frames: frames(app('innerG', start + 2)), asyncParent: { fn: 'libRun', line: 9, script: 'lib', skipped: true } });
       engine.script = ['runs'];
       await stepper.request('stepOut', { threadId: 1 });
@@ -1156,7 +1182,7 @@ describe('JsStepper (issue #1130)', () => {
 
   describe('edges the mutation pass found unpinned', () => {
     it('a new step gives up the one in flight: its nets are gone before the new command', async () => {
-      engine.pauseAt({ frames: frames(app('work', 9), app('main', 14)) });
+      engine.pauseAt({ frames: frames(lossy(app('work', 9)), app('main', 14)) });
       engine.script = ['runs'];
       await stepper.request('stepOut', { threadId: 1 });
       await tick(10);
@@ -1232,8 +1258,8 @@ describe('JsStepper (issue #1130)', () => {
       stepper.setEnabled(true);
       engine.pauseAt({ frames: frames(app('main', 10)) });
       engine.script = [{ frames: frames(node('log', 1), app('main', 10)) }];
-      gated = true;
       await stepper.request('stepIn', { threadId: 1 });
+      gated = true;
       await tick(10);
       // js-debug has not answered about the landing yet, and the caller continues.
       await stepper.beforeRequest('continue');
@@ -1256,7 +1282,7 @@ describe('JsStepper (issue #1130)', () => {
     });
 
     it('a net at the landing\'s own depth guards nothing below it: the stack is gone, and the program resumes', async () => {
-      engine.pauseAt({ frames: frames(app('work', 9), app('main', 14)) });
+      engine.pauseAt({ frames: frames(lossy(app('work', 9)), app('main', 14)) });
       // V8's step-out comes back in the next task: Node's own code, nothing of the program under it.
       engine.script = [{ frames: frames(node('processTicksAndRejections', 70)) }, 'runs'];
       await stepper.request('stepOut', { threadId: 1 });
@@ -1348,7 +1374,7 @@ describe('JsStepper (issue #1130)', () => {
     });
 
     it('waits for js-debug\'s own verdict on a pause that is not the stepper\'s, however its earlier reports stand', async () => {
-      engine.pauseAt({ frames: frames(app('work', 9), app('main', 14)) });
+      engine.pauseAt({ frames: frames(lossy(app('work', 9)), app('main', 14)) });
       engine.script = ['runs'];
       await stepper.request('stepOut', { threadId: 1 });
       await tick(10);
@@ -1381,6 +1407,275 @@ describe('JsStepper (issue #1130)', () => {
       await stepper.request('next', { threadId: 1 });
       await settled();
       expect(reportsSeenAtDelivery).toBe(1);
+    });
+  });
+
+  // ----- the one rule for where a net is set (what the second review found) -----
+
+  describe('rule (a): a net only where V8 can lose the step and the frame cannot suspend first', () => {
+    it('sets none for a step out of a function with no finally clause: V8 does not lose that step', async () => {
+      engine.pauseAt({ frames: frames(app('plainOut', 5), app('caller', 14)) });
+      engine.script = [{ frames: frames(app('caller', 15)) }];
+      await stepper.request('stepOut', { threadId: 1 });
+      await settled();
+      expect(setBreakpoints()).toBe(0);
+      expect(stopped()).toMatchObject({ reason: 'step' });
+    });
+
+    it('sets none when the statement awaits on a later line: the function suspends, and its caller runs on', async () => {
+      const start = fnLineOf(app('load', 0));
+      sourceWith({
+        [start + 1]: 'try { noop(); } finally { noop(); }',
+        [start + 2]: 'return {',
+        [start + 3]: '  user: await getUser(first),',
+        [start + 4]: '};'
+      });
+      engine.pauseAt({ frames: frames(app('load', start + 2), app('caller', 14)) });
+      engine.script = [{ frames: frames(app('caller', 15)) }];
+      await stepper.request('next', { threadId: 1 });
+      await settled();
+      expect(setBreakpoints()).toBe(0);
+    });
+
+    it('sets none when a loop above leads back to an await, and one when no loop does', async () => {
+      const start = fnLineOf(app('looped', 0));
+      sourceWith({
+        [start + 1]: 'for (const x of xs) {',
+        [start + 2]: '  await tick();',
+        [start + 3]: '  const tag = x;',
+        [start + 4]: '}',
+        [start + 5]: 'try { return 1; } finally { done(); }'
+      });
+      // The same text without the loop (the stepper reads a script's text once).
+      const other = fnLineOf(app('straight', 0));
+      sourceWith({
+        [other + 1]: 'await ready;',
+        [other + 3]: 'const tag = x;',
+        [other + 5]: 'try { return 1; } finally { done(); }'
+      });
+      engine.pauseAt({ frames: frames(app('looped', start + 3), app('caller', 14)) });
+      engine.script = [{ frames: frames(app('caller', 15)) }];
+      await stepper.request('stepOut', { threadId: 1 });
+      await settled();
+      expect(setBreakpoints()).toBe(0);
+
+      // Without the loop nothing can suspend it before it exits.
+      engine.calls.length = 0;
+      engine.pauseAt({ frames: frames(app('straight', other + 3), app('caller', 14)) });
+      engine.script = [{ frames: frames(app('caller', 15)), reason: 'other', hits: (armed) => [armed[0].id] }];
+      await stepper.request('stepOut', { threadId: 1 });
+      await settled();
+      expect(setBreakpoints()).toBeGreaterThan(0);
+      expect(engine.armed).toEqual([]);
+    });
+
+    it('reads a yield ahead as a suspension too', async () => {
+      const start = fnLineOf(app('gen', 0));
+      sourceWith({ [start + 1]: 'try { noop(); } finally { noop(); }', [start + 4]: 'yield value;' });
+      engine.pauseAt({ frames: frames(app('gen', start + 2), app('caller', 14)) });
+      engine.script = [{ frames: frames(app('caller', 15)) }];
+      await stepper.request('stepOut', { threadId: 1 });
+      await settled();
+      expect(setBreakpoints()).toBe(0);
+    });
+
+    it.each([
+      ['the word in a comment', '// and finally we are done'],
+      ['a promise chain', 'work().finally(() => done());']
+    ])('does not take %s for a finally clause', async (_what, text) => {
+      const start = fnLineOf(app('wordy', 0));
+      sourceWith({ [start + 4]: text });
+      engine.pauseAt({ frames: frames(app('wordy', start + 2), app('caller', 14)) });
+      engine.script = [{ frames: frames(app('caller', 15)) }];
+      await stepper.request('stepOut', { threadId: 1 });
+      await settled();
+      expect(setBreakpoints()).toBe(0);
+    });
+
+    it.each([
+      ['after the closing brace', '} finally {'],
+      ['before its own brace', 'finally {'],
+      ['alone on its line', '  finally']
+    ])('reads a finally clause written %s', async (_what, text) => {
+      const start = fnLineOf(app('claused', 0));
+      sourceWith({ [start + 4]: text });
+      engine.pauseAt({ frames: frames(app('claused', start + 2), app('caller', 14)) });
+      engine.script = [{ frames: frames(app('caller', 15)) }];
+      await stepper.request('stepOut', { threadId: 1 });
+      await settled();
+      expect(setBreakpoints()).toBeGreaterThan(0);
+    });
+
+    it('does not take what only scheduled a function that can lose the step for its awaiter', async () => {
+      // A `.then` callback with a finally clause: its async parent registered it, and is not what it returns to.
+      engine.pauseAt({ frames: frames(lossy(app('onDone', 3))), asyncParent: { fn: 'work', line: 7, description: 'Promise.then' } });
+      engine.script = ['runs'];
+      await stepper.request('stepOut', { threadId: 1 });
+      await tick(5);
+      expect(setBreakpoints()).toBe(0);
+      await stepper.beforeRequest('continue');
+    });
+
+    it('finds the awaiter behind the empty links V8 lists for the function\'s later awaits', async () => {
+      const start = fnLineOf(app('later', 0));
+      sourceWith({ [start + 1]: 'try { await a; await b;', [start + 2]: '  return tag;', [start + 3]: '} finally { noop(); }' });
+      engine.pauseAt({ frames: frames(app('later', start + 2)), asyncParent: { fn: 'handler', line: 9, col: 14, emptyLinks: 2 } });
+      engine.script = [{ frames: frames(app('handler', 10)), reason: 'other', hits: (armed) => [armed[0].id] }];
+      await stepper.request('stepOut', { threadId: 1 });
+      await settled();
+      expect(setBreakpoints()).toBeGreaterThan(0);
+      expect(stopped()).toMatchObject({ reason: 'step', text: ErrorMessages.stepCaughtWhereItReturns('handler') });
+    });
+
+    it('steps out with V8 alone, and does not resume, when js-debug never says what is below', async () => {
+      // A first step teaches the stepper that Node's script is skipped.
+      engine.pauseAt({ frames: frames(app('main', 10)) });
+      engine.script = [{ frames: frames(node('log', 1), app('main', 10)) }, { frames: frames(app('main', 11)) }];
+      await stepper.request('stepIn', { threadId: 1 });
+      await settled();
+      delivered.length = 0;
+      engine.calls.length = 0;
+
+      engine.pauseAt({ frames: frames(app('listener', 40), node('emit', 7), app('main', 10)) });
+      engine.script = [{ frames: frames(node('emit', 8), app('main', 10)) }, { frames: frames(app('main', 11)) }];
+      await stepper.request('next', { threadId: 1 });
+      engine.stackTraceFailures = 1e6;
+      await settled();
+      expect(commands()).toEqual(['Debugger.stepOver', 'Debugger.stepOut']);
+      expect(stopped()).toMatchObject({ reason: 'step' });
+    });
+  });
+
+  describe('rule (b): a net that cannot name one call says so', () => {
+    it('says the stop may be another call\'s when the frame it guards was waiting at an await', async () => {
+      // handler awaits the call: it suspends as soon as the call returns, and leaves the stack.
+      sourceWith({ 14: 'const got = await inner(id);' });
+      engine.pauseAt({ frames: frames(lossy(app('innerSync', 30)), app('handler', 14)) });
+      engine.script = [{ frames: frames(app('handler', 15)), reason: 'other', hits: (armed) => [armed[1].id] }];
+      await stepper.request('stepOut', { threadId: 1 });
+      await settled();
+      expect(stopped()).toMatchObject({ reason: 'step', text: ErrorMessages.stepCaughtWhereItReturns('handler') });
+    });
+
+    it('says nothing when the frame it guards stays on the stack', async () => {
+      sourceWith({ 14: 'const got = inner(id);' });
+      engine.pauseAt({ frames: frames(lossy(app('innerSync', 30)), app('handler', 14)) });
+      engine.script = [{ frames: frames(app('handler', 15)), reason: 'other', hits: (armed) => [armed[1].id] }];
+      await stepper.request('stepOut', { threadId: 1 });
+      await settled();
+      expect(stopped()).toMatchObject({ reason: 'step' });
+      expect(stopped().text).toBeUndefined();
+    });
+  });
+
+  describe('more edges the second mutation pass found unpinned', () => {
+    it('reports a pause taken on one of its own net positions as the pause, though js-debug calls it a breakpoint', async () => {
+      engine.pauseAt({ frames: frames(lossy(app('work', 9)), app('main', 14)) });
+      engine.script = ['runs'];
+      await stepper.request('stepOut', { threadId: 1 });
+      await tick(10);
+      await stepper.beforeRequest('pause');
+      engine.arrive({ frames: frames(app('main', 15)), reason: 'other', hits: [engine.armed[0].id] });
+      await settled();
+      expect(delivered).toHaveLength(1);
+      expect(stopped()).toMatchObject({ reason: 'pause', description: 'Paused' });
+      expect(stopped().hitBreakpointIds).toBeUndefined();
+      expect(engine.armed).toEqual([]);
+    });
+
+    it('sends nothing more when the pause is asked for while a landing is being judged, and reports that landing as the pause', async () => {
+      let gated = false;
+      let release: () => void = () => undefined;
+      stepper = new JsStepper({
+        target: {
+          sendRequest: async (_c: string, args?: unknown) => {
+            if (gated) {
+              await new Promise<void>((resolve) => {
+                release = resolve;
+              });
+            }
+            return engine.stackTrace((args as { levels: number }).levels) as never;
+          }
+        },
+        deliver: (event) => delivered.push(event),
+        tunables: { settleCeilingMs: 150, verdictCeilingMs: 150 }
+      });
+      engine.onDap = (event) => {
+        seen.push({ event: event.event, withheld: stepper.withholds(event) });
+      };
+      stepper.attachCdp(engine);
+      stepper.setEnabled(true);
+      engine.pauseAt({ frames: frames(app('main', 10)) });
+      engine.script = [{ frames: frames(node('log', 1), app('main', 10)) }];
+      await stepper.request('stepIn', { threadId: 1 });
+      gated = true;
+      await tick(10);
+      await stepper.beforeRequest('pause');
+      gated = false;
+      release();
+      await settled();
+      expect(commands()).toEqual(['Debugger.stepInto']);
+      expect(delivered).toHaveLength(1);
+      expect(stopped()).toMatchObject({ reason: 'pause' });
+      expect(engine.armed).toEqual([]);
+    });
+
+    it('reports where it is when V8 refuses the resume of a stack that is gone', async () => {
+      engine.pauseAt({ frames: frames(app('handler', 20), node('emit', 7), node('parserOnIncoming', 3)) });
+      engine.script = [{ frames: frames(node('emit', 8), node('parserOnIncoming', 3)) }];
+      engine.failOnce = 'Debugger.resume';
+      await stepper.request('stepOut', { threadId: 1 });
+      await settled();
+      expect(delivered).toHaveLength(1);
+      expect(stopped()).toMatchObject({ reason: 'step' });
+    });
+
+    it('owes a late report that names no breakpoint only to a step that kept a net\'s pause, and only for a while', async () => {
+      // (The stepper reads a script's text once: the function of the second step is written first.)
+      const work = lossy(app('work', 9));
+      // A step with no net: a `breakpoint` naming none right after it is somebody else's stop.
+      engine.pauseAt({ frames: frames(app('main', 10)) });
+      engine.script = [{ frames: frames(app('main', 11)) }];
+      engine.onDap = (event) => {
+        if (event.event !== 'stopped') stepper.withholds(event);
+      };
+      await stepper.request('next', { threadId: 1 });
+      await settled();
+      expect(stepper.describe().owed).toBe(1);
+      expect(stepper.withholds({ seq: 0, type: 'event', event: 'stopped', body: { reason: 'breakpoint', threadId: 1, hitBreakpointIds: [] } })).toBe(false);
+
+      // A step that landed by its net owes exactly that.
+      engine.pauseAt({ frames: frames(work, app('main', 14)) });
+      engine.script = [{ frames: frames(app('main', 15)), reason: 'other', hits: (armed) => [armed[0].id] }];
+      await stepper.request('stepOut', { threadId: 1 });
+      await settled();
+      expect(stepper.describe().owed).toBe(1);
+      expect(stepper.withholds({ seq: 0, type: 'event', event: 'stopped', body: { reason: 'breakpoint', threadId: 1, hitBreakpointIds: [7] } })).toBe(false);
+      expect(stepper.withholds({ seq: 0, type: 'event', event: 'stopped', body: { reason: 'breakpoint', threadId: 1, hitBreakpointIds: [] } })).toBe(true);
+
+      // And not for ever: past the ceiling nothing is owed.
+      engine.pauseAt({ frames: frames(app('main', 20)) });
+      engine.script = [{ frames: frames(app('main', 21)) }];
+      await stepper.request('next', { threadId: 1 });
+      await settled();
+      await tick(200);
+      expect(stepper.withholds({ seq: 0, type: 'event', event: 'stopped', body: { reason: 'pause', threadId: 1 } })).toBe(false);
+    });
+
+    it('says how far the walk went only for a step back in the very frame it left: not a deeper call of the same function', async () => {
+      withTunables({ budget: 1 });
+      const start = fnLineOf(app('recur', 0));
+      engine.pauseAt({ frames: frames(app('recur', start + 1), app('main', 10)) });
+      engine.script = [
+        { frames: frames(node('log', 1), app('recur', start + 1), app('main', 10)) },
+        { frames: frames(node('log', 2), app('recur', start + 1), app('main', 10)) },
+        // Stepped out: Node's code had called recur again, one frame deeper.
+        { frames: frames(app('recur', start + 3), node('cb', 4), app('recur', start + 1), app('main', 10)), reason: 'ambiguous', hits: (armed) => [armed[0].id] }
+      ];
+      await stepper.request('stepIn', { threadId: 1 });
+      await settled();
+      expect(stopped()).toMatchObject({ reason: 'step' });
+      expect(stopped().text).toBeUndefined();
     });
   });
 

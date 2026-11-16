@@ -34,6 +34,41 @@ async function closing() {
   }
 }
 
+async function getUser(id) {
+  await sleep(5);
+  return { id };
+}
+
+async function load(id) {
+  try {
+    globalThis.loading = id;
+  } finally {
+    globalThis.loading = 0;
+  }
+  const first = id + 1;
+  return { // MARK: a statement that awaits on later lines
+    user: await getUser(first),
+    posts: await getUser(first + 1), // MARK: the second await of the statement
+  };
+}
+
+let releaseEarly;
+const earlyGate = new Promise((resolve) => {
+  releaseEarly = resolve;
+});
+
+async function early(id) {
+  const tag = id; // MARK: in early, before its first await
+  await earlyGate;
+  return tag;
+}
+
+async function relay(id) {
+  const got = await early(id);
+  const out = got * 10; // MARK: the continuation of relay
+  return out;
+}
+
 function onDone(value) {
   const seen = value; // MARK: in a then callback
   return seen;
@@ -50,6 +85,15 @@ async function main() {
   await all;
   await closing(); // MARK: awaits closing
   const afterClosing = 1; // MARK: after closing
+  // The caller does not await the call at once: it runs on while load is suspended.
+  const loading = load(1);
+  const marker = 2; // MARK: the statement of the caller after load
+  await loading;
+  // Three calls of relay in flight at once, each awaiting its own early.
+  const relays = Promise.all([relay(1), relay(2), relay(3)]);
+  releaseEarly();
+  await relays;
+  globalThis.marker = marker;
   Promise.resolve(7).then(onDone);
   setTimeout(onTimer, 10);
   await sleep(150);

@@ -24,34 +24,40 @@
  *   a timer tick later, which costs 12 ms a landing on Windows.
  *
  *   NETS. V8 loses a step in two measured ways: when a frame is left through
- *   a `return` inside try...finally (issue #1161), and when js-debug resumes
- *   a pause of its own, a module-entry breakpoint, while the step is in
- *   flight (issue #1162). So where a step can leave a frame that way, it
- *   does not count on V8 alone to come BACK to the frame below. A net is a
- *   capped set of temporary CDP breakpoints on the break positions of a
- *   program frame the step returns to, kept with the stack depth of the
- *   activation it guards. Any position there is where V8's own step-out
- *   would stop, so a hit at that depth is a landing.
+ *   a `return` inside try...finally within the run the step began in (issue
+ *   #1161), and when js-debug resumes a pause of its own, a module-entry
+ *   breakpoint, while the step is in flight (issue #1162). A net is a capped
+ *   set of temporary CDP breakpoints on the break positions of the frame a
+ *   step returns to, kept with the stack depth of the activation it guards.
+ *   Any position there is where V8's own step-out would stop, so a hit at
+ *   that depth is a landing.
  *
- *   A net is a safeguard, never a condition: when one cannot be set (V8
- *   refuses break positions for Node's own scripts, which are program code
- *   on a skip list that leaves them out) the step goes on with V8 alone.
+ *   ONE RULE says where a net is set, and it is applied in one place, before
+ *   every command that can leave the frame on top (`guard`):
  *
- *   When: every step-out; a step-over or step-in from a function whose text
- *   has `finally`; a step that walks through skipped code. In a function
- *   that can SUSPEND (`await`, `yield` in its text) a step-over or step-in
- *   is netted only where it can leave through `finally`: on a `return`
- *   line, and from the first `finally` on. Anywhere else the function may
- *   merely suspend, its caller runs on, and a net there would stop in the
- *   caller while the step is still on its way to the next line.
+ *     (a) Only where V8 can lose the step, and the frame cannot hand control
+ *         down without returning. For a frame of the program that is read
+ *         from its text: a `finally` clause, and from the paused line no way
+ *         to suspend before the function exits (no `await` or `yield` ahead,
+ *         and no loop that leads back to one). A function that suspends does
+ *         not return: its caller runs on, and a net below would stop there
+ *         while V8's own step is still on its way; and V8 keeps a step across
+ *         an `await`, so nothing needs rescuing. Skipped code is netted
+ *         without being read (V8 refuses the break positions of Node's own
+ *         scripts, and Node's module loader has the shape): whichever way
+ *         control comes down from it, the program frame below is the landing.
  *
- *   An async function the event loop resumed returns to its AWAITER, which
- *   is not on the stack (the pause's async parent, when V8 calls the link
- *   `await`; a `Promise.then` or timer parent only scheduled the code).
- *   V8's own async step finds the one awaiting call. A net there can only
- *   guard the awaiter's FUNCTION, and stops in whichever call of it runs
- *   next. So the awaiter is netted only where V8 loses the step (`finally`
- *   in the function being left), and a landing by that net says so.
+ *     (b) A net names an activation only while that activation stays on the
+ *         stack. A guarded frame that is itself waiting at an `await` when
+ *         the step leaves has left the stack by the time anything stops, and
+ *         an awaiter (the function awaiting an async one the event loop
+ *         resumed: the pause's async parent, when V8 calls the link `await`)
+ *         was never on it. There the net guards the FUNCTION, stops in
+ *         whichever call of it runs next, and the landing says so. An
+ *         awaiter is netted only where the loss is known from the text.
+ *
+ *   A net is a safeguard, never a condition: when one cannot be set the step
+ *   goes on with V8 alone.
  *
  *   No net is put on the frame being stepped IN. V8 says `ambiguous` for any
  *   breakpoint hit while a step is in flight, and it exposes no statement
@@ -174,8 +180,14 @@ interface CdpPaused {
   callFrames: CdpCallFrame[];
   reason: string;
   hitBreakpoints?: string[];
-  /** `description` is V8's name for the link: `await`, `Promise.then`, `Timeout`, ... */
-  asyncStackTrace?: { description?: string; callFrames?: CdpAsyncFrame[] };
+  asyncStackTrace?: CdpAsyncTrace;
+}
+
+/** One link of V8's async stack. `description` names it: `await`, `Promise.then`, `Timeout`, ... */
+interface CdpAsyncTrace {
+  description?: string;
+  callFrames?: CdpAsyncFrame[];
+  parent?: CdpAsyncTrace;
 }
 
 interface Net {
@@ -185,8 +197,12 @@ interface Net {
   fn: string;
   /** The stack depth of the guarded activation; Infinity for an awaiter, which resumes at any depth. */
   depth: number;
-  /** Set on an awaiter's net: the function's name. Such a net guards the function, not one call of it. */
-  awaiter?: string;
+  /**
+   * Set when the net cannot name one call of the function: the function's
+   * name. An awaiter is not on the stack; a guarded frame waiting at an
+   * `await` has left it by the time anything stops.
+   */
+  anotherCall?: string;
   ids: Set<string>;
 }
 
@@ -194,25 +210,34 @@ type Inbox =
   | { type: 'paused'; pause: CdpPaused }
   | { type: 'resumed' };
 
-/**
- * What the code on top returns to: something of the program's that now has a
- * net; something of the program's without one (V8's own step goes on alone);
- * or nothing of the program's at all.
- */
-type ReturnTarget = 'armed' | 'unguarded' | 'nothing-below';
+/** What the code on top of a pause returns to. */
+type ReturnTarget =
+  /** A frame of the program on the stack, at this index. */
+  | { kind: 'frame'; index: number }
+  /** The function of the program awaiting it, which is not on the stack. */
+  | { kind: 'awaiter'; parent: CdpAsyncFrame }
+  /** Nothing of the program's. */
+  | { kind: 'nothing' }
+  /** js-debug did not say, or the stack is deeper than was asked about. */
+  | { kind: 'unknown' };
 
 /** What a function's text says about how a step can leave it. */
 interface FunctionShape {
-  /** `finally` in its text: the shape V8 loses a leaving step on (issue #1161). */
+  /** A `finally` clause in its text: the shape V8 loses a leaving step on (issue #1161). */
   hasFinally: boolean;
-  /** 0-based script line of the first `finally`. */
-  finallyLine: number;
-  /** `await` or `yield` in its text: it can hand control to its caller without returning. */
-  suspends: boolean;
+  /** 0-based script lines its text runs from and to. */
+  from: number;
+  to: number;
 }
 
 /** How many frames of a stack js-debug is asked to mark, at most. */
 const MAX_MARKED_FRAMES = 200;
+
+/** How far past the sync frames js-debug is asked: the labels of the async segments and the awaiter's frame. */
+const ASYNC_MARKS = 12;
+
+/** A loop on a line of source: the only way execution goes back up a function's text. */
+const LOOPS = /\b(for|while|do)\b/;
 
 /**
  * A `finally` clause on a line of source: after the closing brace of a try
@@ -247,14 +272,14 @@ interface Chain {
   walkedBeforeSteppingOut: number;
   /** Every command the chain may send is spent and skipped code is still on top. */
   capped: boolean;
-  /** What the skipped code on top returns to, as last looked at. */
-  below: ReturnTarget | null;
+  /** A step-in's walk found nothing of the program below the skipped code: not looked at again while it walks. */
+  walkHasNothingBelow: boolean;
   /** The caller asked for a pause during the chain: the next stop is theirs. */
   pauseRequested: boolean;
   /** That pause was taken on no breakpoint of js-debug's: it is reported as the pause it is. */
   pauseTaken: boolean;
-  /** The landing came by an awaiter's net: the awaiting function's name. */
-  caughtAtAwaiter: string | null;
+  /** The landing came by a net that cannot name one call: the guarded function's name. */
+  caughtInFunction: string | null;
   /** Whether any pause the chain kept was a net's: what a late report of it looks like. */
   netHits: boolean;
   startedAt: number;
@@ -262,7 +287,8 @@ interface Chain {
 
 type Verdict =
   | { kind: 'wait' }
-  | { kind: 'command'; command: string }
+  /** `skipped`: the frame the command steps from is skipped code. */
+  | { kind: 'command'; command: string; skipped: boolean }
   | { kind: 'landing'; by: string }
   | { kind: 'real-stop' }
   | { kind: 'left-stack' };
@@ -311,7 +337,9 @@ export class JsStepper {
   private owedNetHit = false;
   /** Scripts js-debug marked "Skipped by skipFiles": a script-level verdict, not asked again. */
   private readonly skippedScripts = new Set<string>();
-  private readonly shapes = new Map<string, FunctionShape>();
+  private readonly shapes = new Map<string, FunctionShape | null>();
+  /** What each pause's top frame returns to: asked of js-debug once per pause. */
+  private readonly targets = new WeakMap<CdpPaused, ReturnTarget>();
   private readonly sources = new Map<string, string[]>();
 
   constructor(options: JsStepperOptions) {
@@ -395,25 +423,19 @@ export class JsStepper {
       unwinding: false,
       walkedBeforeSteppingOut: 0,
       capped: false,
-      below: null,
+      walkHasNothingBelow: false,
       pauseRequested: false,
       pauseTaken: false,
-      caughtAtAwaiter: null,
+      caughtInFunction: null,
       netHits: false,
       startedAt: Date.now()
     };
     this.chain = chain;
     this.owed = 0;
 
-    // A net before the first command only where V8 can lose the step by
-    // LEAVING the origin frame (issue #1161): a step-out always, a step-over
-    // or step-in where it can leave through `finally`. Not when it returns
-    // to itself: that net would sit in the frame being stepped in. Neither
-    // call can fail the step: a net is a safeguard.
     try {
-      if (kind === 'out' || await this.canLeaveThroughFinally(top)) {
-        await this.armReturnTarget(chain, origin, kind === 'out' ? null : chain.originFn);
-      }
+      // The one rule, before the first command as before every other.
+      await this.guard(chain, origin, await this.isSkipped(chain, origin));
       await this.sendStep(chain, CDP_COMMAND[kind]);
     } catch (err) {
       await this.disarmAll();
@@ -521,6 +543,18 @@ export class JsStepper {
             await this.finish(chain, 'cancelled');
             return;
           }
+          if (chain.pauseRequested) {
+            // The caller asked for a pause while this landing was being
+            // judged: V8 is paused, and this stop is theirs.
+            chain.pauseTaken = true;
+            await this.finish(chain, 'real-stop');
+            return;
+          }
+          await this.guard(chain, pause, verdict.skipped);
+          if (chain.cancelled) {
+            await this.finish(chain, 'cancelled');
+            return;
+          }
           await this.sendStep(chain, verdict.command);
           continue;
         }
@@ -608,37 +642,28 @@ export class JsStepper {
     }
 
     if (skipped) {
-      const guarded = (): boolean => this.nets.some((net) => net.depth < depth || net.depth === Infinity);
       // A step-in walks on while it has budget, with or without anything
       // below: a step issued inside a dependency reaches the program's
       // handler by calls, not returns (issue #687).
-      const walking = chain.kind === 'in' && chain.spent < this.tunables.budget;
-      // Before anything else, a net on what this code returns to. A walk
-      // looks once (nothing of the program comes to be below without the
-      // walk landing in it first); a landing that has to step out looks for
-      // itself, because the awaiter of one frame is not the awaiter of the next.
-      if (!guarded() && (chain.below === null || !walking)) {
-        chain.below = await this.armReturnTarget(chain, pause, null);
-      }
-      if (walking) {
+      if (chain.kind === 'in' && chain.spent < this.tunables.budget) {
         chain.spent++;
-        return { kind: 'command', command: CDP_COMMAND.in };
+        return { kind: 'command', command: CDP_COMMAND.in, skipped: true };
       }
-      // It has to step out now. With nothing of the program below, the stack
-      // the step started on is gone.
-      if (!guarded() && chain.below === 'nothing-below') {
+      // It has to step out now. With nothing of the program below (no frame,
+      // no awaiter), the stack the step started on is gone.
+      if (!this.guardedBelow(depth) && (await this.returnTarget(chain, pause)).kind === 'nothing') {
         return { kind: 'left-stack' };
       }
       if (chain.kind === 'in' && chain.walkedBeforeSteppingOut === 0) {
         chain.walkedBeforeSteppingOut = chain.commands.filter((sent) => sent === CDP_COMMAND.in).length;
       }
-      return { kind: 'command', command: CDP_COMMAND.out };
+      return { kind: 'command', command: CDP_COMMAND.out, skipped: true };
     }
 
     // Program code on top.
     if (chain.unwinding) {
       return depth > chain.originDepth
-        ? { kind: 'command', command: CDP_COMMAND.out }
+        ? { kind: 'command', command: CDP_COMMAND.out, skipped: false }
         : { kind: 'landing', by: 'V8 step-outs after a net was dropped (recursion)' };
     }
     const backOnOriginStatement = depth === chain.originDepth && fnKey(top) === chain.originFn && top.location.lineNumber === chain.originLine;
@@ -647,7 +672,7 @@ export class JsStepper {
       // again: that enters the line's next call, or moves on.
       if (chain.kind === 'in' && backOnOriginStatement && chain.reissues < this.tunables.reissueCap) {
         chain.reissues++;
-        return { kind: 'command', command: CDP_COMMAND.in };
+        return { kind: 'command', command: CDP_COMMAND.in, skipped: false };
       }
       return { kind: 'landing', by: 'V8 step' };
     }
@@ -660,7 +685,7 @@ export class JsStepper {
         // The frame being left is the same function as its caller (recursion)
         // and is still running: step out again.
         chain.reissues++;
-        return { kind: 'command', command: CDP_COMMAND.out };
+        return { kind: 'command', command: CDP_COMMAND.out, skipped: false };
       }
       // The net fired in a deeper activation than the one it guards. Drop it;
       // V8's own step-outs from here, until the depth is the origin's.
@@ -671,16 +696,17 @@ export class JsStepper {
       if (depth <= chain.originDepth) {
         return { kind: 'landing', by: 'net dropped (recursion)' };
       }
-      return { kind: 'command', command: CDP_COMMAND.out };
+      return { kind: 'command', command: CDP_COMMAND.out, skipped: false };
     }
     // Control is back in a frame a net guards: where V8's own step-out would stop.
     if (chain.kind === 'in' && backOnOriginStatement && chain.reissues < this.tunables.reissueCap) {
       chain.reissues++;
-      return { kind: 'command', command: CDP_COMMAND.in };
+      return { kind: 'command', command: CDP_COMMAND.in, skipped: false };
     }
-    // An awaiter's net guards the function, not the one call that awaited.
-    chain.caughtAtAwaiter = guarding.find((net) => net.awaiter !== undefined)?.awaiter ?? null;
-    return { kind: 'landing', by: pause.reason === 'ambiguous' ? 'net, with a V8 step in flight' : 'net, V8 had lost the step' };
+    // A net that cannot name one call of the function it guards says so.
+    chain.caughtInFunction = guarding.find((net) => net.anotherCall !== undefined)?.anotherCall ?? null;
+    // The pause's reason does not say whether V8 had lost the step: it is logged, and nothing is decided on it.
+    return { kind: 'landing', by: `net (${pause.reason})` };
   }
 
   /**
@@ -759,7 +785,9 @@ export class JsStepper {
     }
   }
 
-  private async finish(chain: Chain, ender: 'landing' | 'real-stop' | 'left-stack' | 'cancelled' | 'error', by?: string): Promise<void> {
+  private async finish(chain: Chain, ended: 'landing' | 'real-stop' | 'left-stack' | 'cancelled' | 'error', why?: string): Promise<void> {
+    let ender = ended;
+    let by = why;
     // Where the step is, for what its answer may say about it.
     const landed = this.current;
     const backInOriginFrame = landed !== null && landed.callFrames.length === chain.originDepth &&
@@ -772,6 +800,11 @@ export class JsStepper {
         await this.cdp?.send('Debugger.resume', {});
       } catch (err) {
         logger.warn(`[JsStepper] resume after leaving the stack failed: ${errorText(err)}`);
+        if (this.current !== null) {
+          // V8 is still paused: the caller hears of the stop it can see.
+          ender = 'landing';
+          by = 'where it was: V8 refused the resume';
+        }
       }
     }
     const reports = ender === 'landing' || ender === 'real-stop';
@@ -814,18 +847,27 @@ export class JsStepper {
           ...this.landingNote(chain, backInOriginFrame)
         }
       });
+    } else if (ender === 'real-stop' && chain.pauseTaken) {
+      // The pause the caller asked for. js-debug may call it a breakpoint
+      // that names none (it was taken on a net's position), or may not have
+      // reported it yet: it leaves as the pause it is.
+      const body = { ...((chain.lastStopped?.body ?? {}) as Record<string, unknown>) };
+      delete body.hitBreakpointIds;
+      delete body.text;
+      this.deliver({
+        seq: 0,
+        type: 'event',
+        event: 'stopped',
+        body: {
+          allThreadsStopped: false,
+          ...body,
+          threadId: (body.threadId as number | undefined) ?? chain.threadId ?? 0,
+          reason: 'pause',
+          description: 'Paused'
+        }
+      });
     } else if (ender === 'real-stop' && chain.lastStopped) {
-      const stop = chain.lastStopped;
-      if (chain.pauseTaken) {
-        // The pause the caller asked for. js-debug may call it a breakpoint
-        // that names none (it was taken on a net's position): it leaves as
-        // the pause it is.
-        const body = { ...((stop.body ?? {}) as Record<string, unknown>) };
-        delete body.hitBreakpointIds;
-        this.deliver({ ...stop, body: { ...body, reason: 'pause', description: 'Paused' } });
-      } else {
-        this.deliver(stop);
-      }
+      this.deliver(chain.lastStopped);
     }
   }
 
@@ -838,8 +880,8 @@ export class JsStepper {
     if (chain.capped) {
       return { text: ErrorMessages.stepStillInSkippedCode(chain.commands.length) };
     }
-    if (chain.caughtAtAwaiter !== null) {
-      return { text: ErrorMessages.stepCaughtAtAwaitingFunction(chain.caughtAtAwaiter) };
+    if (chain.caughtInFunction !== null) {
+      return { text: ErrorMessages.stepCaughtWhereItReturns(chain.caughtInFunction) };
     }
     if (chain.walkedBeforeSteppingOut > 0 && backInOriginFrame) {
       return { text: ErrorMessages.stepIntoReachedNoProgramCode(chain.walkedBeforeSteppingOut) };
@@ -953,31 +995,26 @@ export class JsStepper {
 
   /**
    * What the text of the frame's function says about how a step can leave
-   * it. Read from the function's own lines only. Never throws: a text that
-   * cannot be read is a function with nothing to guard.
+   * it; null when it cannot be read (V8 refuses the break positions of
+   * Node's own scripts). The text is the function's own lines, nested
+   * functions and comments included: a text test, not a parse. Never throws.
    */
-  private async shapeOf(frame: CdpCallFrame): Promise<FunctionShape> {
+  private async shapeOf(frame: CdpCallFrame): Promise<FunctionShape | null> {
     const key = fnKey(frame);
-    const known = this.shapes.get(key);
-    if (known) {
-      return known;
+    if (this.shapes.has(key)) {
+      return this.shapes.get(key) ?? null;
     }
-    let shape: FunctionShape = { hasFinally: false, finallyLine: -1, suspends: false };
+    let shape: FunctionShape | null = null;
     try {
       const lines = await this.linesOf(frame.location.scriptId);
       const all = await this.locationsOf(frame);
       if (all.length > 0) {
         const from = Math.min(frame.functionLocation?.lineNumber ?? all[0].lineNumber, all[0].lineNumber);
-        const text = lines.slice(from, all[all.length - 1].lineNumber + 1);
-        const at = text.findIndex((line) => FINALLY_CLAUSE.test(line));
-        shape = {
-          hasFinally: at !== -1,
-          finallyLine: at === -1 ? -1 : from + at,
-          suspends: text.some((line) => SUSPENDS.test(line))
-        };
+        const to = all[all.length - 1].lineNumber;
+        shape = { hasFinally: lines.slice(from, to + 1).some((line) => FINALLY_CLAUSE.test(line)), from, to };
       }
     } catch (err) {
-      logger.warn(`[JsStepper] could not read the function's text: ${errorText(err)}`);
+      logger.debug(`[JsStepper] could not read the function's text: ${errorText(err)}`);
     }
     this.shapes.set(key, shape);
     return shape;
@@ -994,102 +1031,144 @@ export class JsStepper {
   }
 
   /**
-   * Whether a step-over or step-in from this frame's position can leave the
-   * function through `finally`, the shape V8 loses the step on (issue #1161).
-   * In a function that cannot suspend, anywhere: the frame below is only
-   * reached by returning. In one that can (`await`, `yield`), only on a
-   * `return` line and from the first `finally` on, and never on a line
-   * that itself awaits or yields: there the function suspends first, its
-   * caller runs on, and a net below would stop in the caller while the
-   * step is still on its way to the next line. (So a step over an `await`
-   * that is the last thing a function does before it leaves through
-   * `finally` is V8's own, and V8 loses it.)
+   * Rule (a), for a frame of the program: whether V8 can lose a step that
+   * leaves this frame from its paused line (issue #1161). Its function has a
+   * `finally` clause, and from here it cannot suspend before it exits: no
+   * `await` or `yield` from the paused line to its end, and no loop above
+   * that leads back to one. A function that can still suspend is V8's own:
+   * measured, V8 keeps a step across an `await` and lands in the awaiting
+   * function even when the function then leaves through `finally`.
    */
-  private async canLeaveThroughFinally(frame: CdpCallFrame): Promise<boolean> {
+  private async canLoseALeavingStep(frame: CdpCallFrame): Promise<boolean> {
     const shape = await this.shapeOf(frame);
-    if (!shape.hasFinally) {
+    if (!shape?.hasFinally) {
       return false;
     }
-    if (!shape.suspends) {
-      return true;
-    }
+    const lines = this.sources.get(frame.location.scriptId) ?? [];
     const line = frame.location.lineNumber;
-    const text = this.sources.get(frame.location.scriptId)?.[line] ?? '';
-    if (SUSPENDS.test(text)) {
+    if (lines.slice(line, shape.to + 1).some((text) => SUSPENDS.test(text))) {
       return false;
     }
-    return line >= shape.finallyLine || /\breturn\b/.test(text);
+    const above = lines.slice(shape.from, line);
+    return !(above.some((text) => LOOPS.test(text)) && above.some((text) => SUSPENDS.test(text)));
+  }
+
+  /** Whether a net guards something below a pause of this depth. */
+  private guardedBelow(depth: number): boolean {
+    return this.nets.some((net) => net.depth < depth || net.depth === Infinity);
   }
 
   /**
-   * Arm a net on what the top frame of `pause` returns to.
-   *
-   * The nearest program frame below, by js-debug's marks: that activation,
-   * by its depth. With none on the stack, the awaiter of an async function
-   * the event loop resumed (the async parent, when V8 calls the link
-   * `await`): V8's own async step finds that one call, so it is netted only
-   * where V8 loses the step, `finally` in the function being left, and that
-   * net guards the awaiter's function in whichever call runs next.
-   *
-   * Never throws. A net is a safeguard: whatever goes wrong (V8 refuses
-   * break positions for Node's own scripts; js-debug does not answer), the
-   * answer is `unguarded` and V8's own step goes on alone.
+   * THE ONE RULE (see the head of this file), applied before every command
+   * that can leave the frame on top of `pause`: a net on what that frame
+   * returns to, where V8 can lose the step. Never throws: a net is a
+   * safeguard, and without one V8's own step goes on alone.
    */
-  private async armReturnTarget(chain: Chain, pause: CdpPaused, notFn: string | null): Promise<ReturnTarget> {
+  private async guard(chain: Chain, pause: CdpPaused, skipped: boolean): Promise<void> {
     try {
       const frames = pause.callFrames;
-      // Every sync frame, the label of the first async segment, and its first frame.
-      const marks = await this.marks(chain, Math.min(frames.length + 2, MAX_MARKED_FRAMES));
-      if (typeof marks === 'string') {
-        logger.warn(`[JsStepper] could not read the stack's marks (${marks}); V8's own step goes on alone`);
-        return 'unguarded';
+      const top = frames[0];
+      if (this.guardedBelow(frames.length) || (skipped && chain.walkHasNothingBelow)) {
+        return;
       }
-      // js-debug lists the sync frames, then a label frame per async segment.
-      const firstLabel = marks.findIndex((frame) => markOf(frame) === 'label');
-      const sync = firstLabel === -1 ? marks : marks.slice(0, firstLabel);
-      for (let i = 1; i < Math.min(sync.length, frames.length); i++) {
-        if (markOf(sync[i]) === 'deemphasize') {
-          continue;
-        }
-        if (notFn && fnKey(frames[i]) === notFn) {
+      // (a) A frame of the program is read. Skipped code is not.
+      if (!skipped && !(await this.canLoseALeavingStep(top))) {
+        return;
+      }
+      const target = await this.returnTarget(chain, pause);
+      if (target.kind === 'frame') {
+        const frame = frames[target.index];
+        if (chain.kind !== 'out' && fnKey(frame) === fnKey(top)) {
           // It returns to itself (recursion): a net would sit in the frame being stepped in.
-          return 'unguarded';
+          return;
         }
-        const armed = await this.arm(await this.locationsOf(frames[i]), frames[i].location, {
-          name: frames[i].functionName || '(anonymous)',
-          fn: fnKey(frames[i]),
-          depth: frames.length - i
+        const name = frame.functionName || '(anonymous)';
+        // (b) A guarded frame waiting at an await leaves the stack before anything stops.
+        const waiting = SUSPENDS.test((await this.linesOf(frame.location.scriptId))[frame.location.lineNumber] ?? '');
+        await this.arm(await this.locationsOf(frame), frame.location, {
+          name,
+          fn: fnKey(frame),
+          depth: frames.length - target.index,
+          ...(waiting ? { anotherCall: name } : {})
         });
-        return armed ? 'armed' : 'unguarded';
+      } else if (target.kind === 'awaiter') {
+        // (b) An awaiter's net can never name the call: only where the loss is known from the text.
+        if (skipped && !(await this.canLoseALeavingStep(top))) {
+          return;
+        }
+        const parent = target.parent;
+        const start: CdpLocation = { scriptId: parent.scriptId, lineNumber: parent.lineNumber, columnNumber: parent.columnNumber };
+        const name = parent.functionName || '(anonymous)';
+        await this.arm(await this.possible(start), start, {
+          name: `${name} (awaiter)`,
+          fn: `async:${parent.scriptId}:${parent.lineNumber}:${parent.columnNumber}`,
+          depth: Infinity,
+          anotherCall: name
+        });
+      } else if (target.kind === 'nothing' && skipped && chain.kind === 'in') {
+        // Nothing of the program comes to be below without the walk landing in it first.
+        chain.walkHasNothingBelow = true;
       }
-      if (firstLabel === -1 && sync.length < frames.length) {
-        // A deeper stack than was asked about: what is under it is not known.
-        return 'unguarded';
-      }
-      // No program frame below on this stack.
-      const parent = pause.asyncStackTrace?.callFrames?.[0];
-      const firstAsync = firstLabel === -1 ? undefined : marks[firstLabel + 1];
-      const awaitedByTheProgram = pause.asyncStackTrace?.description === 'await' && parent !== undefined &&
-        firstAsync !== undefined && markOf(firstAsync) !== 'deemphasize' && markOf(firstAsync) !== 'label';
-      if (!awaitedByTheProgram) {
-        return 'nothing-below';
-      }
-      if (!(await this.shapeOf(frames[0])).hasFinally) {
-        // V8's own async step finds the one awaiting call.
-        return 'unguarded';
-      }
-      const start: CdpLocation = { scriptId: parent.scriptId, lineNumber: parent.lineNumber, columnNumber: parent.columnNumber };
-      const name = parent.functionName || '(anonymous)';
-      const armed = await this.arm(await this.possible(start), start, {
-        name: `${name} (awaiter)`,
-        fn: `async:${parent.scriptId}:${parent.lineNumber}:${parent.columnNumber}`,
-        depth: Infinity,
-        awaiter: name
-      });
-      return armed ? 'armed' : 'unguarded';
     } catch (err) {
       logger.warn(`[JsStepper] no net for this step, V8's own step goes on alone: ${errorText(err)}`);
-      return 'unguarded';
     }
+  }
+
+  /** What the top frame of `pause` returns to; js-debug is asked once per pause. Never throws. */
+  private async returnTarget(chain: Chain, pause: CdpPaused): Promise<ReturnTarget> {
+    const known = this.targets.get(pause);
+    if (known) {
+      return known;
+    }
+    let target: ReturnTarget = { kind: 'unknown' };
+    try {
+      target = await this.findReturnTarget(chain, pause);
+    } catch (err) {
+      logger.warn(`[JsStepper] could not tell what the stack returns to: ${errorText(err)}`);
+    }
+    this.targets.set(pause, target);
+    return target;
+  }
+
+  /**
+   * The nearest frame of the program below the top one, by js-debug's marks.
+   * With none on the stack, the function awaiting an async one the event
+   * loop resumed: the first frame of V8's async stack, when every link down
+   * to it is an `await` (a `Promise.then` or timer link only scheduled the
+   * code on top) and js-debug marks it program code.
+   */
+  private async findReturnTarget(chain: Chain, pause: CdpPaused): Promise<ReturnTarget> {
+    const frames = pause.callFrames;
+    const asked = Math.min(frames.length + ASYNC_MARKS, MAX_MARKED_FRAMES);
+    const marks = await this.marks(chain, asked);
+    if (typeof marks === 'string') {
+      logger.warn(`[JsStepper] could not read the stack's marks (${marks})`);
+      return { kind: 'unknown' };
+    }
+    // js-debug lists the sync frames, then a label frame per async segment and that segment's frames.
+    const firstLabel = marks.findIndex((frame) => markOf(frame) === 'label');
+    const sync = firstLabel === -1 ? marks : marks.slice(0, firstLabel);
+    for (let i = 1; i < Math.min(sync.length, frames.length); i++) {
+      if (markOf(sync[i]) !== 'deemphasize') {
+        return { kind: 'frame', index: i };
+      }
+    }
+    if (firstLabel === -1) {
+      // No async part was listed: the stack ends here, unless it is deeper than was asked about.
+      return marks.length >= asked ? { kind: 'unknown' } : { kind: 'nothing' };
+    }
+    let link = pause.asyncStackTrace;
+    while (link && link.description === 'await' && !link.callFrames?.length) {
+      link = link.parent;
+    }
+    const parent = link?.description === 'await' ? link.callFrames?.[0] : undefined;
+    if (!parent) {
+      return { kind: 'nothing' };
+    }
+    const awaiter = marks.slice(firstLabel).find((frame) => markOf(frame) !== 'label');
+    if (!awaiter) {
+      return { kind: 'unknown' };
+    }
+    return markOf(awaiter) === 'deemphasize' ? { kind: 'nothing' } : { kind: 'awaiter', parent };
   }
 }

@@ -306,23 +306,25 @@ export const ErrorMessages = {
       : `${stepped} in ${steps} steps: this adapter stops once per expression on a line, so the step was repeated until the line changed.`,
 
   /**
-   * The sentence on a step that left an async function through try...finally and
-   * was caught at the awaiting function (issues #1130, #1161)
-   * Occurs when: V8 loses a step that leaves a function through `finally`, so
-   * the proxy's JavaScript stepper set its net on the function that awaits it.
-   * An awaiter is not on the stack, so the net guards the FUNCTION: with
-   * several calls of it in flight, the one that ran next is where the step
-   * stopped. The caller must not take its variables for the awaited call's
-   * without looking.
+   * The sentence on a step caught by a temporary breakpoint that cannot name
+   * one call of the function it is in (issues #1130, #1161)
+   * Occurs when: the engine can lose a step that leaves a function through
+   * try...finally, so the proxy's JavaScript stepper set temporary
+   * breakpoints on the function the step returns to. That function was
+   * waiting at an `await` (its frame was not on the stack, or left it before
+   * anything stopped), so the breakpoints guard the FUNCTION: with several
+   * calls of it in flight, the one that ran next is where the step stopped.
+   * It does not say the engine lost this step: that cannot be told.
    * Used in: src/proxy/js-stepper.ts (the `text` of the step's stopped
    * event), appended to the step's message by
    * src/session/execution/execution-controller.ts
-   * @param awaiter - The awaiting function's name
+   * @param fn - The name of the function the step returns to
    */
-  stepCaughtAtAwaitingFunction: (awaiter: string) =>
-    `The engine loses a step that leaves a function through try...finally, so this step was caught where the ` +
-    `awaiting function, ${awaiter}, next ran. If several calls of ${awaiter} are in flight, this stop may be in ` +
-    `another call's continuation than the one that awaited the function you stepped out of: check its variables.`,
+  stepCaughtWhereItReturns: (fn: string) =>
+    `This step was caught by a temporary breakpoint in ${fn}, the function it returns to, because the engine can ` +
+    `lose a step that leaves a function through try...finally. ${fn} was waiting at an await meanwhile, so if ` +
+    `several calls of ${fn} are in flight this stop may be in another of them than the one the step returns to: ` +
+    'check its variables.',
 
   /**
    * The sentence on a step_into that reached no code of the program (issue #1130)
@@ -340,8 +342,9 @@ export const ErrorMessages = {
   stepIntoReachedNoProgramCode: (stepIns: number) =>
     `step_into walked ${stepIns} engine steps into the call on that line and was still in skipped code ` +
     '(Node internals, node_modules, or files on skipFiles), so it stepped back out and the rest of the line ran ' +
-    'as a step over runs it. Code of yours that the call reaches further in (a module it loads, a late callback) ' +
-    'ran without stopping: a breakpoint there stops in it. To stop inside the skipped code instead, turn ' +
+    'as a step over runs it. Code of yours that the call runs further in (a module it loads) or only schedules ' +
+    '(a timer or promise callback) does not stop the step: a breakpoint there stops in it. To stop inside the ' +
+    'skipped code instead, turn ' +
     'stepping through it off: justMyCode: false on a launch, smartStep: false on a launch or an attach.',
 
   /**
