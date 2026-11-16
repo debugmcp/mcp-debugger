@@ -306,6 +306,33 @@ export const ErrorMessages = {
       : `${stepped} in ${steps} steps: this adapter stops once per expression on a line, so the step was repeated until the line changed.`,
 
   /**
+   * The sentence on a step_into whose line called only skipped code (issue #1130)
+   * Occurs when: the proxy's JavaScript stepper walked into the call, found
+   * nothing of the program's within its budget and came back out. The line
+   * ran as a step over would have run it, and the caller should know that
+   * was not a refusal to step in.
+   * Used in: src/proxy/js-stepper.ts (the `text` of the step's stopped
+   * event), appended to the step's message by
+   * src/session/execution/execution-controller.ts
+   */
+  stepIntoFoundOnlySkippedCode: () =>
+    'The call on that line ran only skipped code (Node internals, node_modules, or files on skipFiles), ' +
+    'so there was nothing of your program to step into and the line ran as a step over. ' +
+    'dapLaunchArgs.justMyCode: false steps into that code.',
+
+  /**
+   * The sentence on a step that is still in skipped code after every engine
+   * step its chain may take (issue #1130)
+   * Occurs when: the proxy's JavaScript stepper reached its command cap.
+   * It stops where it is rather than run on.
+   * Used in: src/proxy/js-stepper.ts
+   * @param commands - How many engine steps the chain took
+   */
+  stepStillInSkippedCode: (commands: number) =>
+    `The step is still in skipped code after ${commands} engine steps, so it stopped here rather than run on. ` +
+    'step_out or continue_execution goes on; a breakpoint in your own code is the reliable way back.',
+
+  /**
    * Informational message for pause requests not yet honored within the grace window
    * Occurs when: A pause request is acknowledged but no 'stopped' event arrives within the grace
    * window — the target may be blocked in native code or a syscall, which is not an error

@@ -561,6 +561,16 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
       this.parentStart = command === 'attach'
         ? { request: command, ...intent, attachArguments }
         : { request: command, ...intent };
+
+      // The start request's `smartStep` is the session's choice, not the
+      // adapter's setting (issue #1130): the proxy's stepper steps through
+      // skipped code, and the adapter's own stepper stays off whatever was
+      // asked, because it loses steps and re-steps a statement at a time.
+      if (this.dapBehavior.stepsThroughSkippedCode && this.childSessionManager && args !== null && typeof args === 'object') {
+        const start = args as Record<string, unknown>;
+        this.childSessionManager.setStepThroughSkippedCode(start.smartStep === true);
+        args = { ...start, smartStep: false };
+      }
     }
 
     // CDP-delivered function breakpoints (issue #295): the adapter has no
@@ -683,6 +693,14 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
       
       if (this.activeChild) {
         try {
+          // A step of a session that steps through skipped code is the proxy
+          // stepper's (issue #1130); any other request may end a step in flight.
+          const stepped = manager?.stepRequest(command, args);
+          if (stepped) {
+            logger.info(`[MinimalDapClient] '${command}' served by the proxy stepper`);
+            return (await stepped) as T;
+          }
+          await manager?.beforeChildRequest(command);
           logger.info(`[MinimalDapClient] Dispatching '${command}' to child session`);
           return await this.activeChild.sendRequest<T>(command, args as unknown, timeoutMs);
         } catch (err) {

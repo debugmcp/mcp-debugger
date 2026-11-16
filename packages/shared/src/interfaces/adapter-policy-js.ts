@@ -1428,6 +1428,9 @@ export const JsDebugAdapterPolicy = {
       // JavaScript-specific child session behaviors
       mirrorBreakpointsToChild: true,
       pauseAfterChildAttach: true,
+      // js-debug's smart stepper stays off; the proxy's own stepper serves
+      // the steps of a session whose effective `smartStep` is on (issue #1130).
+      stepsThroughSkippedCode: true,
       // js-debug's only word on a condition (or compiled logpoint) that
       // does not parse is a stderr output line during setBreakpoints or
       // the child attach; the proxy correlates it (issue #853)

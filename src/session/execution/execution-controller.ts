@@ -396,7 +396,10 @@ export class ExecutionController {
           success(message, landing, stop);
           return;
         }
-        success(options.successMessage, landing);
+        // What the step itself has to say about how it landed (the JavaScript
+        // stepper: the line called only skipped code; issue #1130).
+        const stepNote = ownStop?.reason === 'step' ? ownStop.text : undefined;
+        success(stepNote ? `${options.successMessage}. ${stepNote}` : options.successMessage, landing);
       };
 
       const onTerminated = () => success(terminatedMessage);
