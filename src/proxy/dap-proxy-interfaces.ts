@@ -282,6 +282,12 @@ export interface IDapClient {
    * has no child sessions — nothing to flush (issue #378).
    */
   flushChildEvents?(): Promise<void> | undefined;
+  /**
+   * Whether the session steps through skipped code, as its start request
+   * said (issue #1130). Optional: only MinimalDapClient implements it, and
+   * it answers undefined for an adapter with no proxy stepper.
+   */
+  stepsThroughSkippedCode?(): boolean | undefined;
 }
 
 /**

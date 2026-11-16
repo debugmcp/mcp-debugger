@@ -1927,6 +1927,66 @@ describe('SessionManager - DAP Operations', () => {
       expect(data.message).toBe('Stepped over');
     });
 
+    // The JavaScript stepper reports a landing as reason `step` and puts what
+    // it has to say about it (the line called only skipped code) in the
+    // event's `text`. A literal here: the sentence is the stepper's, and any
+    // text a `step` stop carries is appended.
+    const STEP_NOTE = 'The line called only code this session skips; the step is back in the frame it started in.';
+
+    it.each([
+      ['step_over', 'next', 'Stepped over', (id: string) => sessionManager.stepOver(id)],
+      ['step_into', 'stepIn', 'Stepped into', (id: string) => sessionManager.stepInto(id)],
+      ['step_out', 'stepOut', 'Stepped out', (id: string) => sessionManager.stepOut(id)]
+    ] as const)('%s appends what the step itself says about its landing to the completion wording (issue #1130)', async (_tool, command, stepped, step) => {
+      const session = await createPausedSession(sessionManager, dependencies);
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (sent: string) => {
+        if (sent === command) {
+          process.nextTick(() => {
+            dependencies.mockProxyManager.simulateStopped(1, 'step', { reason: 'step', threadId: 1, text: STEP_NOTE });
+          });
+        }
+        return { success: true };
+      });
+
+      const stepPromise = step(session.id);
+      await vi.runAllTimersAsync();
+      const result = await stepPromise;
+
+      expect(result.success).toBe(true);
+      const data = result.data as { message?: string; stopReason?: string; pending?: boolean };
+      expect(data.pending).toBeUndefined();
+      // Still the step's own stop: no stopReason, the note after the wording.
+      expect(data.stopReason).toBeUndefined();
+      expect(data.message).toBe(`${stepped}. ${STEP_NOTE}`);
+    });
+
+    it.each([
+      // A breakpoint or an exception names itself; its text is not the step's to repeat.
+      ['breakpoint', ErrorMessages.stepStoppedOn('Stepped over', 'breakpoint')],
+      ['exception', ErrorMessages.stepStoppedOn('Stepped over', 'exception')],
+      // Any other stop keeps the plain wording.
+      ['pause', 'Stepped over']
+    ])("appends the text of the step's own stop only: a '%s' stop that carries one keeps its wording (issue #1130)", async (reason, wording) => {
+      const session = await createPausedSession(sessionManager, dependencies);
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (sent: string) => {
+        if (sent === 'next') {
+          process.nextTick(() => {
+            dependencies.mockProxyManager.simulateStopped(1, reason, { reason, threadId: 1, text: STEP_NOTE });
+          });
+        }
+        return { success: true };
+      });
+
+      const stepPromise = sessionManager.stepOver(session.id);
+      await vi.runAllTimersAsync();
+      const result = await stepPromise;
+
+      const data = result.data as { message?: string; stopReason?: string };
+      expect(data.stopReason).toBe(reason);
+      expect(data.message).toBe(wording);
+      expect(data.message).not.toContain(STEP_NOTE);
+    });
+
     it('should treat termination during step as a successful completion', async () => {
       const session = await createPausedSession(sessionManager, dependencies);
       

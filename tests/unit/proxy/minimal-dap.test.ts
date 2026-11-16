@@ -3,13 +3,14 @@ import net from 'net';
 import fs from 'fs';
 import { EventEmitter } from 'events';
 import { MinimalDapClient } from '../../../src/proxy/minimal-dap.js';
-import type {
+import {
   ChildSessionManager,
-  ChildSessionOptions
+  type ChildSessionOptions
 } from '../../../src/proxy/child-session-manager.js';
+import type { CdpProxyClient } from '../../../src/proxy/cdp-proxy-client.js';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { JsDebugAdapterPolicy } from '@debugmcp/shared';
-import type { ChildSessionConfig, DapClientBehavior, ReverseRequestResult } from '@debugmcp/shared';
+import type { AdapterPolicy, ChildSessionConfig, DapClientBehavior, ReverseRequestResult } from '@debugmcp/shared';
 import { createMockDapClient } from '../../test-utils/mocks/dap-client.js';
 
 // Mock the net module
@@ -2491,14 +2492,37 @@ describe('MinimalDapClient', () => {
         port: 9229, customAdapterOption: 'preserved'
       });
       await client.sendRequest('attach', args);
+      // The snapshot is what the child session sends again, so it carries the
+      // one key the proxy owns as the adapter was sent it (issue #1130).
       expect(options.getParentStart!()).toEqual({
         request: 'attach', stopOnEntry: false,
-        attachArguments: { localRoot: '/app', sourceMaps: false, port: 9229, customAdapterOption: 'preserved' }
+        attachArguments: { localRoot: '/app', sourceMaps: false, port: 9229, customAdapterOption: 'preserved', smartStep: false }
       });
       const sent = JSON.parse(mockSocket.write.mock.calls.at(-1)[0].toString().split('\r\n\r\n')[1]);
       // Everything the caller sent, plus the one key the proxy owns: the
       // adapter's own stepper is always off (issue #1130).
       expect(sent.arguments).toEqual({ ...args, smartStep: false });
+    });
+
+    it.each([
+      ['asked for smartStep', { smartStep: true }],
+      ['refused smartStep', { smartStep: false }],
+      ['said nothing of smartStep', {}]
+    ])("keeps the adapter's stepper off in what an attach's child session sends again, when the caller %s (issue #1130)", async (_case, asked) => {
+      await client.sendRequest('attach', { request: 'attach', port: 9229, localRoot: '/app', ...asked });
+
+      // The override is applied before the snapshot: the child's attach is
+      // built from these arguments, and must not turn js-debug's stepper on.
+      const start = options.getParentStart!();
+      expect(start).toEqual({ request: 'attach', attachArguments: { port: 9229, localRoot: '/app', smartStep: false } });
+      // What the policy makes of them for the target's own connection.
+      const childStart = JsDebugAdapterPolicy.buildChildStartArgs(
+        'target-1',
+        { type: 'pwa-node', name: 'target', __pendingTargetId: 'target-1' },
+        start?.request === 'attach' ? start.attachArguments : undefined
+      );
+      expect(childStart.command).toBe('attach');
+      expect(childStart.args).toMatchObject({ __pendingTargetId: 'target-1', localRoot: '/app', smartStep: false });
     });
 
     it.each([
@@ -2530,7 +2554,7 @@ describe('MinimalDapClient', () => {
       const previous = options.getParentStart!();
       await client.sendRequest('launch', { stopOnEntry: true });
       expect(options.getParentStart!()).toEqual({ request: 'launch', stopOnEntry: true });
-      expect(previous).toEqual({ request: 'attach', stopOnEntry: false, attachArguments: { localRoot: '/old' } });
+      expect(previous).toEqual({ request: 'attach', stopOnEntry: false, attachArguments: { localRoot: '/old', smartStep: false } });
     });
 
     it('re-emits childCreated as child-adopted (issue #704)', () => {
@@ -2765,6 +2789,244 @@ describe('MinimalDapClient', () => {
       await expect(routed.sendRequest('pause', { threadId: 0 })).rejects.toThrow(/no debug target|ended or disconnected/);
       expect(write).not.toHaveBeenCalled();
       routed.shutdown();
+    });
+  });
+
+  /**
+   * js-debug's own stepper is off for every session, and the proxy's serves
+   * the steps of a session whose start request asked for `smartStep` (issue
+   * #1130). This client owns three pieces of that: the start request's
+   * `smartStep` (the session's choice, never the adapter's setting), the
+   * order a child-routed request passes the stepper in, and the answer a
+   * forked child's stepper takes the root's choice from.
+   */
+  describe('the proxy stepper (issue #1130)', () => {
+    /** One adapter connection: it answers every request, and records it. */
+    interface AdapterSocket {
+      requests: DebugProtocol.Request[];
+      /** An event, or a reverse request, from the adapter. */
+      push(message: Record<string, unknown>): void;
+    }
+
+    /** The target's CDP socket, handed to the real child-session manager: every command is answered. */
+    class FakeCdpClient extends EventEmitter {
+      readonly sent: string[] = [];
+      private open = false;
+
+      async connect(): Promise<void> {
+        this.open = true;
+      }
+
+      async send(method: string): Promise<unknown> {
+        this.sent.push(method);
+        return {};
+      }
+
+      isConnected(): boolean {
+        return this.open;
+      }
+
+      dispose(): void {
+        this.open = false;
+      }
+
+      /** V8 pauses in `f`, as CDP reports it. */
+      paused(): void {
+        this.emit('cdp-event', 'Debugger.paused', {
+          reason: 'other',
+          callFrames: [{ functionName: 'f', location: { scriptId: '1', lineNumber: 1, columnNumber: 0 } }]
+        });
+      }
+    }
+
+    /** A policy with js-debug's child sessions whose adapter does its own stepping. */
+    const ownStepperPolicy: AdapterPolicy = {
+      ...JsDebugAdapterPolicy,
+      getDapClientBehavior: () => ({ ...JsDebugAdapterPolicy.getDapClientBehavior(), stepsThroughSkippedCode: undefined })
+    };
+
+    /** In connection order: the root's, then the program target's. */
+    let adapterSockets: AdapterSocket[];
+    /** Response bodies by command; anything else is answered with an empty body. */
+    let answers: Record<string, unknown>;
+
+    beforeEach(() => {
+      adapterSockets = [];
+      answers = {};
+      vi.mocked(net.createConnection).mockImplementation((_target: unknown, callback?: () => void) => {
+        const socket = createMockSocket();
+        const requests: DebugProtocol.Request[] = [];
+        const push = (message: Record<string, unknown>): void => {
+          socket.emit('data', createDapMessage({ seq: 0, ...message }));
+        };
+        socket.write.mockImplementation((frame: Buffer | string, cb?: (err?: Error | null) => void) => {
+          cb?.(null);
+          const message = JSON.parse(frame.toString().split('\r\n\r\n')[1]) as DebugProtocol.ProtocolMessage;
+          if (message.type === 'request') {
+            const request = message as DebugProtocol.Request;
+            requests.push(request);
+            queueMicrotask(() => {
+              push({ type: 'response', request_seq: request.seq, command: request.command, success: true, body: answers[request.command] ?? {} });
+              // js-debug announces `initialized` after initialize, and again after a target's attach.
+              if (request.command === 'initialize' || request.command === 'attach') {
+                push({ type: 'event', event: 'initialized' });
+              }
+            });
+          }
+          return true;
+        });
+        adapterSockets.push({ requests, push });
+        if (callback) {
+          setImmediate(callback);
+        }
+        return socket;
+      });
+    });
+
+    it.each<[string, AdapterPolicy | undefined]>([
+      ['has child sessions but an adapter that does its own stepping', ownStepperPolicy],
+      ['has no child sessions', undefined]
+    ])('leaves the start request as the caller sent it for a policy that %s', async (_case, policy) => {
+      client = new MinimalDapClient('localhost', 5678, policy);
+      await client.connect();
+
+      await client.sendRequest('launch', { request: 'launch', program: '/app/main.js', smartStep: true });
+      await client.sendRequest('attach', { request: 'attach', port: 9229, smartStep: true });
+
+      // smartStep is that adapter's own setting: nothing is forced off, and
+      // there is no proxy stepper whose choice could be asked for.
+      expect(adapterSockets[0].requests.map((request) => request.arguments)).toEqual([
+        { request: 'launch', program: '/app/main.js', smartStep: true },
+        { request: 'attach', port: 9229, smartStep: true }
+      ]);
+      expect(client.stepsThroughSkippedCode()).toBeUndefined();
+    });
+
+    it("answers the session's choice as its start request left it, a launch's or an attach's", async () => {
+      // The real child-session manager and its stepper answer.
+      client = new MinimalDapClient('localhost', 5678, JsDebugAdapterPolicy);
+      await client.connect();
+      // Before any start request: a stepper, not yet asked for.
+      expect(client.stepsThroughSkippedCode()).toBe(false);
+
+      await client.sendRequest('launch', { request: 'launch', program: '/app/main.js', smartStep: true });
+      expect(client.stepsThroughSkippedCode()).toBe(true);
+
+      await client.sendRequest('attach', { request: 'attach', port: 9229 });
+      expect(client.stepsThroughSkippedCode()).toBe(false);
+
+      await client.sendRequest('attach', { request: 'attach', port: 9229, smartStep: true });
+      expect(client.stepsThroughSkippedCode()).toBe(true);
+      // js-debug's own stepper was never turned on.
+      expect(adapterSockets[0].requests.map((request) => (request.arguments as { smartStep?: unknown }).smartStep)).toEqual([false, false, false]);
+    });
+
+    describe('a request routed to the child session', () => {
+      /** A client whose child session is `childClient`; `parentWrite` is its own (the parent's) socket. */
+      const routedTo = (stubManager: ChildSessionManagerStub, childClient: MinimalDapClient): { routed: MinimalDapClient; parentWrite: Mock } => {
+        const routed = new MinimalDapClient('localhost', 5678, JsDebugAdapterPolicy, {
+          childSessionManagerFactory: () => stubManager
+        });
+        const parentWrite = vi.fn();
+        const internals = routed as unknown as { socket: net.Socket; activeChild: MinimalDapClient | null };
+        internals.socket = { destroyed: false, write: parentWrite, end: vi.fn(), destroy: vi.fn() } as unknown as net.Socket;
+        internals.activeChild = childClient;
+        return { routed, parentWrite };
+      };
+
+      it('is offered to the proxy stepper first: a step it serves never reaches the child session', async () => {
+        const stubManager = createChildSessionManagerStub();
+        stubManager.shouldRouteToChild.mockReturnValue(true);
+        const served: DebugProtocol.Response = { type: 'response', seq: 0, request_seq: -1, command: 'next', success: true, body: {} };
+        stubManager.stepRequest.mockReturnValue(Promise.resolve(served));
+        const childClient = { sendRequest: vi.fn().mockResolvedValue({ success: true }) } as unknown as MinimalDapClient;
+        const { routed, parentWrite } = routedTo(stubManager, childClient);
+
+        const result = await routed.sendRequest<DebugProtocol.Response>('next', { threadId: 1 });
+
+        expect(stubManager.stepRequest).toHaveBeenCalledExactlyOnceWith('next', { threadId: 1 });
+        expect(result).toBe(served);
+        expect(childClient.sendRequest).not.toHaveBeenCalled();
+        // Its own step ends nothing: no request-before hook, nothing on the parent socket.
+        expect(stubManager.beforeChildRequest).not.toHaveBeenCalled();
+        expect(parentWrite).not.toHaveBeenCalled();
+        routed.shutdown();
+      });
+
+      it('that the stepper does not serve passes it before it goes out, and waits for it', async () => {
+        const stubManager = createChildSessionManagerStub();
+        stubManager.shouldRouteToChild.mockReturnValue(true);
+        let stepGivenUp!: () => void;
+        stubManager.beforeChildRequest.mockImplementation(() => new Promise<void>((resolve) => { stepGivenUp = resolve; }));
+        const childResponse = { seq: 1, type: 'response', request_seq: 1, command: 'continue', success: true };
+        const childClient = { sendRequest: vi.fn().mockResolvedValue(childResponse) } as unknown as MinimalDapClient;
+        const { routed } = routedTo(stubManager, childClient);
+
+        const sending = routed.sendRequest<DebugProtocol.Response>('continue', { threadId: 1 });
+        await new Promise((resolve) => setImmediate(resolve));
+
+        // The stepper was asked whether it serves the request, said no, and
+        // is given the request to end a step in flight: nothing is sent yet.
+        expect(stubManager.stepRequest).toHaveBeenCalledExactlyOnceWith('continue', { threadId: 1 });
+        expect(stubManager.beforeChildRequest).toHaveBeenCalledExactlyOnceWith('continue');
+        expect(childClient.sendRequest).not.toHaveBeenCalled();
+
+        stepGivenUp();
+        await expect(sending).resolves.toBe(childResponse);
+        expect(childClient.sendRequest).toHaveBeenCalledExactlyOnceWith('continue', { threadId: 1 }, 30000);
+        routed.shutdown();
+      });
+    });
+
+    it('end to end with the real child-session manager and stepper: an attach that asked for smartStep', async () => {
+      const cdp = new FakeCdpClient();
+      answers.requestCDPProxy = { host: '127.0.0.1', port: 9333, path: '/cdp-of-the-target' };
+      client = new MinimalDapClient('localhost', 5678, JsDebugAdapterPolicy, {
+        childSessionManagerFactory: (opts) => new ChildSessionManager({ ...opts, cdpClientFactory: () => cdp as unknown as CdpProxyClient })
+      });
+      const stops: unknown[] = [];
+      client.on('stopped', (body: unknown) => stops.push(body));
+      const adopted = new Promise<void>((resolve) => client.once('child-adopted', () => resolve()));
+      await client.connect();
+
+      await client.sendRequest('attach', { type: 'pwa-node', request: 'attach', port: 9229, localRoot: '/app', smartStep: true });
+
+      // The session chose to step through skipped code; js-debug's stepper stays off.
+      expect(client.stepsThroughSkippedCode()).toBe(true);
+      expect(adapterSockets[0].requests.at(-1)?.arguments).toEqual({ type: 'pwa-node', request: 'attach', port: 9229, localRoot: '/app', smartStep: false });
+
+      // js-debug reports the target; the manager adopts it on a connection of its own.
+      adapterSockets[0].push({
+        seq: 90, type: 'request', command: 'startDebugging',
+        arguments: { request: 'attach', configuration: { type: 'pwa-node', name: 'target', __pendingTargetId: 'target-1' } }
+      });
+      await adopted;
+      await vi.waitFor(() => expect(cdp.sent).toContain('Debugger.enable'));
+      const target = adapterSockets[1];
+
+      // The target's attach repeats the root's arguments, and must not turn
+      // js-debug's stepper back on.
+      expect(target.requests.find((request) => request.command === 'attach')?.arguments).toMatchObject({
+        request: 'attach', __pendingTargetId: 'target-1', localRoot: '/app', smartStep: false
+      });
+
+      // A step: served over the CDP socket, never sent to js-debug.
+      cdp.paused();
+      const stepped = await client.sendRequest<DebugProtocol.Response>('next', { threadId: 1 });
+      expect(stepped).toMatchObject({ command: 'next', success: true });
+      expect(cdp.sent).toContain('Debugger.stepOver');
+      expect(target.requests.map((request) => request.command)).not.toContain('next');
+
+      // While the step is in flight its pauses are the stepper's...
+      target.push({ type: 'event', event: 'stopped', body: { reason: 'pause', threadId: 1 } });
+      await client.flushChildEvents();
+      expect(stops).toEqual([]);
+
+      // ...and a continue gives the step up before it goes out: the next stop is the program's own.
+      await client.sendRequest('continue', { threadId: 1 });
+      expect(target.requests.at(-1)).toMatchObject({ command: 'continue', arguments: { threadId: 1 } });
+      target.push({ type: 'event', event: 'stopped', body: { reason: 'breakpoint', threadId: 1, hitBreakpointIds: [4] } });
+      await vi.waitFor(() => expect(stops).toEqual([{ reason: 'breakpoint', threadId: 1, hitBreakpointIds: [4] }]));
     });
   });
 

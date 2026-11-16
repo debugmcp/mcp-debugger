@@ -766,7 +766,9 @@ export class DapProxyWorker {
             port: spawnConfig.port,
             adapterId: this.adapterPolicy.getDapAdapterConfiguration().type,
             breakOnExceptions: payload.breakOnExceptions,
-            launchConfig: payload.launchConfig
+            launchConfig: payload.launchConfig,
+            // The root's own start request decides, a launch's or an attach's (issue #1130).
+            stepsThroughSkippedCode: () => this.dapClient?.stepsThroughSkippedCode?.()
           }
         });
         this.childConnections.attach(this.dapClient, payload.sessionId);

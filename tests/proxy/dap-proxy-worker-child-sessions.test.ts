@@ -66,16 +66,19 @@ describe('DapProxyWorker child sessions (issue #1081)', () => {
     adapterCommand: { command: 'python', args: ['-m', 'debugpy.adapter'] }
   };
 
-  async function connectUnder(policy: typeof PythonAdapterPolicy | typeof JsDebugAdapterPolicy): Promise<void> {
+  async function connectUnder(
+    policy: typeof PythonAdapterPolicy | typeof JsDebugAdapterPolicy,
+    init: ProxyInitPayload = payload
+  ): Promise<void> {
     (worker as any).logger = mockLogger;
     (worker as any).processManager = processStub;
     (worker as any).connectionManager = connectionStub;
     (worker as any).adapterPolicy = policy;
     (worker as any).adapterState = policy.createInitialState();
-    (worker as any).currentInitPayload = payload;
-    (worker as any).currentSessionId = payload.sessionId;
+    (worker as any).currentInitPayload = init;
+    (worker as any).currentSessionId = init.sessionId;
     (worker as any).state = ProxyState.INITIALIZING;
-    await (worker as any).startAdapterAndConnect(payload);
+    await (worker as any).startAdapterAndConnect(init);
   }
 
   const statuses = (status: string): StatusMessage[] =>
@@ -411,5 +414,148 @@ describe('DapProxyWorker child sessions (issue #1081)', () => {
     await vi.waitFor(() => expect(worker.getState()).toBe(ProxyState.TERMINATED), { timeout: 3000 });
     expect(processStub.shutdown).toHaveBeenCalledTimes(1);
     expect(responseTo('failed-adopt')).toMatchObject({ success: false, sessionId: 'child-1', error: 'child exited during attach' });
+  });
+
+  /**
+   * The proxy's own stepper for a js-debug child (issue #1130), through the
+   * worker's real ChildConnections and the real stepper. The worker has no
+   * seam for the child's CDP socket (ChildConnections opens a CdpProxyClient,
+   * which opens the Node global WebSocket), so the global is the fake here:
+   * it answers every command, and the test sends V8's events.
+   */
+  describe("a js-debug child's steps and its proxy stepper (issue #1130)", () => {
+    class FakeCdpSocket {
+      static opened: FakeCdpSocket[] = [];
+      onopen: (() => void) | null = null;
+      onmessage: ((event: { data: unknown }) => void) | null = null;
+      onclose: (() => void) | null = null;
+      onerror: ((event: { message?: string }) => void) | null = null;
+      readonly sent: string[] = [];
+
+      constructor(readonly url: string) {
+        FakeCdpSocket.opened.push(this);
+        queueMicrotask(() => this.onopen?.());
+      }
+
+      send(data: string): void {
+        const { id, method } = JSON.parse(data) as { id: number; method: string };
+        this.sent.push(method);
+        queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ id, result: {} }) }));
+      }
+
+      close(): void {
+        this.onclose?.();
+      }
+
+      /** V8 pauses in `f`, as CDP reports it. */
+      paused(): void {
+        this.onmessage?.({
+          data: JSON.stringify({
+            method: 'Debugger.paused',
+            params: { reason: 'other', callFrames: [{ functionName: 'f', location: { scriptId: '1', lineNumber: 1, columnNumber: 0 } }] }
+          })
+        });
+      }
+    }
+
+    const forkConfiguration = { type: 'pwa-node', name: 'child.js [7]', __pendingTargetId: 'fork-1' };
+
+    /** The child's `stopped` events the parent process was sent. */
+    const childStops = (): unknown[] =>
+      send.mock.calls
+        .map(([m]) => m)
+        .filter((m): m is DapEventMessage => m.type === 'dapEvent' && m.sessionId === 'child-1' && m.event === 'stopped')
+        .map((m) => m.body);
+
+    beforeEach(() => {
+      FakeCdpSocket.opened = [];
+      vi.stubGlobal('WebSocket', FakeCdpSocket);
+      childClient.sendRequest.mockImplementation(async (command: string) =>
+        command === 'requestCDPProxy'
+          ? { body: { host: '127.0.0.1', port: 9333, path: '/cdp-of-the-fork' } }
+          : { type: 'response', success: true, command, body: {} });
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    /**
+     * A js-debug root, a fork adopted as `child-1`, its stepper on the fork's
+     * CDP socket, and V8 paused in the fork's program code.
+     */
+    async function pausedFork(start: { rootSteps?: boolean; smartStep?: boolean }): Promise<FakeCdpSocket> {
+      if (start.rootSteps !== undefined) {
+        // What MinimalDapClient answers from the root's own start request.
+        rootClient.stepsThroughSkippedCode = () => start.rootSteps;
+      }
+      await connectUnder(
+        JsDebugAdapterPolicy,
+        start.smartStep === undefined ? payload : { ...payload, launchConfig: { smartStep: start.smartStep } }
+      );
+      rootClient.emit('child-report', {
+        request: { seq: 9, type: 'request', command: 'startDebugging', arguments: { request: 'launch', configuration: forkConfiguration } },
+        report: { targetId: 'fork-1', name: 'child.js [7]', configuration: forkConfiguration }
+      });
+      const reportId = statuses('child_reported')[0].reportId as string;
+      const adopting = worker.handleCommand({ cmd: 'dap', sessionId: 'child-1', requestId: 'adopt-fork', dapCommand: CHILD_ADOPT_COMMAND, dapArgs: { reportId } });
+      await new Promise((resolve) => setImmediate(resolve));
+      childClient.emit('initialized');
+      await adopting;
+      // The stepper is opened after the adoption answers.
+      await vi.waitFor(() => expect(FakeCdpSocket.opened[0]?.sent).toContain('Debugger.enable'));
+      const socket = FakeCdpSocket.opened[0];
+      socket.paused();
+      return socket;
+    }
+
+    const stepTheFork = (requestId: string): Promise<void> =>
+      worker.handleCommand({ cmd: 'dap', sessionId: 'child-1', requestId, dapCommand: 'next', dapArgs: { threadId: 1 } });
+
+    // The child's stepper takes over the choice of the root's own start
+    // request, which the root's client answers; the init payload's launch
+    // configuration only when that client cannot say.
+    it.each<[string, { rootSteps?: boolean; smartStep?: boolean }]>([
+      ['the root steps through skipped code (an attach root: no smartStep in the payload)', { rootSteps: true }],
+      ["the root's client cannot say and the payload's launch configuration asked for smartStep", { smartStep: true }]
+    ])("the child's stepper serves its step over the child's CDP socket when %s", async (_case, start) => {
+      const socket = await pausedFork(start);
+      expect(socket.url).toBe('ws://127.0.0.1:9333/cdp-of-the-fork');
+
+      await stepTheFork('step-1');
+
+      // One engine step over CDP, answered on the child's envelope; js-debug is never sent the `next`.
+      expect(socket.sent).toContain('Debugger.stepOver');
+      expect(childClient.sendRequest).not.toHaveBeenCalledWith('next', expect.anything(), expect.anything());
+      expect(responseTo('step-1')).toMatchObject({ success: true, sessionId: 'child-1', response: { command: 'next', success: true } });
+    });
+
+    it("the child's step is js-debug's own when the root does not step through skipped code, whatever the payload asked", async () => {
+      const socket = await pausedFork({ rootSteps: false, smartStep: true });
+
+      await stepTheFork('step-2');
+
+      expect(childClient.sendRequest).toHaveBeenCalledWith('next', { threadId: 1 }, undefined);
+      expect(socket.sent).not.toContain('Debugger.stepOver');
+      expect(responseTo('step-2')).toMatchObject({ success: true, sessionId: 'child-1' });
+    });
+
+    it("any other request for the child passes its stepper first: a continue ends a step in flight, an evaluate does not", async () => {
+      await pausedFork({ rootSteps: true });
+      await stepTheFork('step-3');
+
+      await worker.handleCommand({ cmd: 'dap', sessionId: 'child-1', requestId: 'eval-3', dapCommand: 'evaluate', dapArgs: { expression: 'x' } });
+      childClient.emit('stopped', { reason: 'pause', threadId: 1 });
+      // Still the step's own pause: withheld.
+      expect(childClient.sendRequest).toHaveBeenCalledWith('evaluate', { expression: 'x' }, undefined);
+      expect(childStops()).toEqual([]);
+
+      await worker.handleCommand({ cmd: 'dap', sessionId: 'child-1', requestId: 'continue-3', dapCommand: 'continue', dapArgs: { threadId: 1 } });
+      childClient.emit('stopped', { reason: 'breakpoint', threadId: 1, hitBreakpointIds: [4] });
+      // The step was given up before the continue went out: this stop is the program's own.
+      expect(childClient.sendRequest).toHaveBeenCalledWith('continue', { threadId: 1 }, undefined);
+      expect(childStops()).toEqual([{ reason: 'breakpoint', threadId: 1, hitBreakpointIds: [4] }]);
+      expect(responseTo('continue-3')).toMatchObject({ success: true, sessionId: 'child-1' });
+    });
   });
 });

@@ -46,6 +46,8 @@ export interface ChildSessionOptions {
   port: number;
   /** DI seam for tests; only consulted when the policy delivers function breakpoints via CDP (issue #295). */
   cdpBridgeFactory?: () => CdpFunctionBreakpointBridge;
+  /** DI seam for tests: the CDP socket the default bridge opens, which the proxy stepper shares (issue #1130). */
+  cdpClientFactory?: () => CdpProxyClient;
   /**
    * Read once per adoption (#712). Start intent never modifies parentConfig (#730).
    */
@@ -214,7 +216,7 @@ export class ChildSessionManager extends EventEmitter {
       // One CDP socket per target: the bridge opens it, the stepper listens on it too.
       this.cdpBridge = options.cdpBridgeFactory?.() ?? new CdpFunctionBreakpointBridge({
         clientFactory: () => {
-          const client = new CdpProxyClient();
+          const client = options.cdpClientFactory?.() ?? new CdpProxyClient();
           this.stepper?.attachCdp(client);
           return client;
         }
@@ -326,6 +328,14 @@ export class ChildSessionManager extends EventEmitter {
   setStepThroughSkippedCode(enabled: boolean): void {
     this.stepper?.setEnabled(enabled);
     logger.info(`[ChildSessionManager:${this.instanceId}] stepping through skipped code: ${enabled ? 'the proxy stepper' : 'off'}`);
+  }
+
+  /**
+   * The session's choice as it stands, for a forked child's stepper to take
+   * over. Undefined when this manager has no stepper (another adapter).
+   */
+  isSteppingThroughSkippedCode(): boolean | undefined {
+    return this.stepper?.isEnabled();
   }
 
   /**

@@ -59,6 +59,12 @@ export interface ChildAdoptionDeps {
   breakOnExceptions?: 'uncaught' | 'all' | 'none';
   launchConfig?: LanguageSpecificLaunchConfig;
   initializedTimeoutMs?: number;
+  /**
+   * Whether the root session steps through skipped code (issue #1130), as its
+   * own start request said: a launch's or an attach's. A child's stepper
+   * takes that choice over. Undefined (or absent) when the root cannot say.
+   */
+  stepsThroughSkippedCode?: () => boolean | undefined;
 }
 
 export interface ChildConnectionsOptions {
@@ -438,8 +444,12 @@ export class ChildConnections extends EventEmitter {
       target: { sendRequest: (command, args, timeoutMs) => client.sendRequest(command, args, timeoutMs) as Promise<never> },
       deliver: (event) => this.sendEvent(sessionId, event.event, event.body)
     });
-    // The session's choice is the root's: the start request's `smartStep`.
-    stepper.setEnabled((deps.launchConfig as { smartStep?: unknown } | undefined)?.smartStep === true);
+    // The session's choice is the root's: its start request's `smartStep`, a
+    // launch's or an attach's. The launch configuration is the fallback for a
+    // root that cannot say.
+    stepper.setEnabled(
+      deps.stepsThroughSkippedCode?.() ?? (deps.launchConfig as { smartStep?: unknown } | undefined)?.smartStep === true
+    );
     connection.stepper = stepper;
     try {
       const response = (await client.sendRequest('requestCDPProxy', {}, 5000)) as { body?: { host?: string; port?: number; path?: string } };

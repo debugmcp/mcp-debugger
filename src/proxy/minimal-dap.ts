@@ -210,6 +210,16 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
   }
 
   /**
+   * Whether this session steps through skipped code, as its start request
+   * said (a launch's or an attach's `smartStep`, issue #1130). A forked
+   * child's stepper takes the root's choice over. Undefined when this client
+   * has no proxy stepper to ask: the caller falls back to what it knows.
+   */
+  stepsThroughSkippedCode(): boolean | undefined {
+    return this.childSessionManager?.isSteppingThroughSkippedCode();
+  }
+
+  /**
    * Handle raw data using the same algorithm as vscode's ProtocolServer
    * (extracted to DapFrameDecoder). This ensures compatibility and proper
    * message boundaries.
@@ -554,6 +564,18 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
     // only carries {type, name, __pendingTargetId} — request mode and
     // stopOnEntry never round-trip through the adapter (issue #124).
     if (command === 'attach' || command === 'launch') {
+      // The start request's `smartStep` is the session's choice, not the
+      // adapter's setting (issue #1130): the proxy's stepper steps through
+      // skipped code, and the adapter's own stepper stays off whatever was
+      // asked, because it loses steps and re-steps a statement at a time.
+      // Before the snapshot below: an attach's child session sends these
+      // arguments again, and they must not turn that stepper back on.
+      if (this.dapBehavior.stepsThroughSkippedCode && this.childSessionManager && args !== null && typeof args === 'object') {
+        const start = args as Record<string, unknown>;
+        this.childSessionManager.setStepThroughSkippedCode(start.smartStep === true);
+        args = { ...start, smartStep: false };
+      }
+
       const { request: _request, stopOnEntry, ...attachArguments } =
         (args as Record<string, unknown> | undefined) ?? {};
       void _request;
@@ -561,16 +583,6 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
       this.parentStart = command === 'attach'
         ? { request: command, ...intent, attachArguments }
         : { request: command, ...intent };
-
-      // The start request's `smartStep` is the session's choice, not the
-      // adapter's setting (issue #1130): the proxy's stepper steps through
-      // skipped code, and the adapter's own stepper stays off whatever was
-      // asked, because it loses steps and re-steps a statement at a time.
-      if (this.dapBehavior.stepsThroughSkippedCode && this.childSessionManager && args !== null && typeof args === 'object') {
-        const start = args as Record<string, unknown>;
-        this.childSessionManager.setStepThroughSkippedCode(start.smartStep === true);
-        args = { ...start, smartStep: false };
-      }
     }
 
     // CDP-delivered function breakpoints (issue #295): the adapter has no

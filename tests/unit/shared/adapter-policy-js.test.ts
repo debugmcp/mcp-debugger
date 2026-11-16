@@ -209,6 +209,16 @@ describe('JsDebugAdapterPolicy', () => {
         expect(text).not.toMatch(/smart-stepper/);
       });
 
+      it('reads a bare node: frame as Node\'s own code too: the form js-debug has not rewritten to <node_internals>', () => {
+        const bareInternalFrame = { id: 4, name: 'processTicksAndRejections', file: 'node:internal/process/task_queues', line: 95 };
+        const text = hook({ operation: 'step', attachMode: false, launch: {}, fromFrame: bareInternalFrame });
+        expect(text).toMatch(/issued from skipped code \(node:internal\/process\/task_queues:95\)/);
+        expect(text).not.toMatch(/left the frame it started in/);
+        // Under the same rule as the rewritten form: only while this launch skips Node's own code.
+        expect(hook({ operation: 'step', attachMode: false, launch: launch(undefined, { skipFiles: ['**/node_modules/**'] }), fromFrame: bareInternalFrame }))
+          .toMatch(/left the frame it started in/);
+      });
+
       it('says of a pending step from the program\'s own code that it ran off the stack or is waiting on work in flight', () => {
         for (const fromFrame of [userFrame, undefined]) {
           const text = hook({ operation: 'step', attachMode: false, launch: {}, ...(fromFrame ? { fromFrame } : {}) });

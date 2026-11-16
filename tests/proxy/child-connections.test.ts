@@ -5,8 +5,10 @@
  * the child itself); a report nobody answers is released by a safety timer.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { EventEmitter } from 'events';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { ChildConnections, type ChildAdoptionDeps } from '../../src/proxy/child-connections.js';
+import type { CdpProxyClient } from '../../src/proxy/cdp-proxy-client.js';
 import type { IDapClientFactory, StatusMessage } from '../../src/proxy/dap-proxy-interfaces.js';
 import { createMockDapClient } from '../test-utils/mocks/dap-client.js';
 import { JsDebugAdapterPolicy, PythonAdapterPolicy, type AdapterPolicy } from '@debugmcp/shared';
@@ -822,5 +824,269 @@ describe('ChildConnections under the throwaway-attach lever (js-debug, issue #10
     expect(grandchildClient.shutdown).toHaveBeenCalledWith('release complete');
     expect(releaseClient.shutdown).toHaveBeenCalledWith('release complete');
     expect(connections.liveCount()).toBe(0);
+  });
+});
+
+/**
+ * The proxy's own stepper for an adopted child (issue #1130): js-debug's is
+ * kept off, so a child of that adapter gets a JsStepper over its own CDP
+ * socket. The stepper here is the real one; the socket is the fake below,
+ * handed in through `cdpClientFactory`, and the test plays V8 and js-debug.
+ */
+describe("ChildConnections: an adopted child's proxy stepper (issue #1130)", () => {
+  /** The child's CDP socket (js-debug's `requestCDPProxy`): every command is answered, the test sends V8's events. */
+  class FakeCdpClient extends EventEmitter {
+    readonly sent: string[] = [];
+    connectedTo: { host: string; port: number; path: string } | null = null;
+    disposed = false;
+
+    async connect(host: string, port: number, path: string): Promise<void> {
+      this.connectedTo = { host, port, path };
+    }
+
+    async send(method: string): Promise<unknown> {
+      this.sent.push(method);
+      return {};
+    }
+
+    isConnected(): boolean {
+      return this.connectedTo !== null && !this.disposed;
+    }
+
+    dispose(): void {
+      this.disposed = true;
+    }
+
+    /** V8 pauses in `f`, as CDP reports it. */
+    paused(reason: string, line: number): void {
+      this.emit('cdp-event', 'Debugger.paused', {
+        reason,
+        callFrames: [{ functionName: 'f', location: { scriptId: '1', lineNumber: line, columnNumber: 0 } }]
+      });
+    }
+
+    resumed(): void {
+      this.emit('cdp-event', 'Debugger.resumed', {});
+    }
+  }
+
+  interface StepperSetup {
+    policy?: AdapterPolicy;
+    launchConfig?: Record<string, unknown>;
+    /** What the root's own start request said. Left out: nothing is wired to ask the root. */
+    rootSteps?: () => boolean | undefined;
+  }
+
+  const sent: Array<Record<string, unknown>> = [];
+  const logger = { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() };
+  const cdpAddress = { host: '127.0.0.1', port: 9333, path: '/cdp-of-the-child' };
+  const jsConfiguration = { type: 'pwa-node', name: 'child.js [4242]', __pendingTargetId: 'a1b2c3d4e5f60718293a4b5c' };
+  const jsReport = { targetId: 'a1b2c3d4e5f60718293a4b5c', name: 'child.js [4242]', configuration: jsConfiguration };
+  const STEP = { threadId: 1 };
+  let root: ReturnType<typeof createMockDapClient>;
+  let childClient: ReturnType<typeof createMockDapClient>;
+  let cdpClients: FakeCdpClient[];
+  let connections: ChildConnections;
+
+  /** The child's events the parent process was sent, in order. */
+  const childEvents = () =>
+    sent.filter((m) => m.type === 'dapEvent' && m.sessionId === 'child-1').map((m) => ({ event: m.event, body: m.body }));
+
+  function build(setup: StepperSetup = {}): void {
+    sent.length = 0;
+    cdpClients = [];
+    root = createMockDapClient();
+    childClient = createMockDapClient();
+    childClient.sendRequest.mockImplementation(async (command: string) => {
+      if (command === 'requestCDPProxy') {
+        return { body: cdpAddress };
+      }
+      if (command === 'stackTrace') {
+        // js-debug's frame for the pause, unmarked: program code.
+        return { success: true, body: { stackFrames: [{ id: 1, name: 'f', line: 3, column: 1 }] } };
+      }
+      return { body: {} };
+    });
+    let resolveAttach: () => void = () => undefined;
+    const connectionManager = {
+      initializeSession: vi.fn(async () => ({ supportsConfigurationDoneRequest: true })),
+      sendAttachRequest: vi.fn(() => new Promise<void>((resolve) => { resolveAttach = resolve; })),
+      setExceptionBreakpoints: vi.fn(async () => ({ body: {} })),
+      setBreakpoints: vi.fn(async () => ({ body: { breakpoints: [] } })),
+      sendConfigurationDone: vi.fn(async () => { resolveAttach(); }),
+      disconnect: vi.fn(async () => {})
+    };
+    connections = new ChildConnections({
+      messageSender: { send: (message: unknown) => { sent.push(message as Record<string, unknown>); } },
+      logger,
+      cdpClientFactory: () => {
+        const cdp = new FakeCdpClient();
+        cdpClients.push(cdp);
+        return cdp as unknown as CdpProxyClient;
+      },
+      adoption: {
+        dapClientFactory: { create: vi.fn(() => childClient) } as unknown as IDapClientFactory,
+        connectionManager: connectionManager as unknown as ChildAdoptionDeps['connectionManager'],
+        policy: setup.policy ?? JsDebugAdapterPolicy,
+        host: '127.0.0.1',
+        port: 9229,
+        adapterId: 'pwa-node',
+        breakOnExceptions: 'none',
+        ...(setup.launchConfig ? { launchConfig: setup.launchConfig as never } : {}),
+        ...(setup.rootSteps ? { stepsThroughSkippedCode: setup.rootSteps } : {})
+      }
+    });
+    connections.attach(root, 'js-root');
+  }
+
+  /** Report a child on the root and adopt it as `child-1`. */
+  async function adoptChild(reported: { request: DebugProtocol.Request; report: typeof jsReport | typeof report } = {
+    request: { seq: 7, type: 'request', command: 'startDebugging', arguments: { request: 'launch', configuration: jsConfiguration } },
+    report: jsReport
+  }): Promise<void> {
+    root.emit('child-report', reported);
+    const reportId = sent.filter((m) => m.status === 'child_reported').at(-1)!.reportId as string;
+    const adopting = connections.adopt('child-1', { reportId, breakpoints: [] });
+    await new Promise((resolve) => setImmediate(resolve));
+    childClient.emit('initialized');
+    await adopting;
+  }
+
+  /** The stepper is opened after the adoption answers: wait until it is listening on the child's socket. */
+  async function stepperOnItsSocket(): Promise<FakeCdpClient> {
+    await vi.waitFor(() => expect(cdpClients[0]?.sent).toContain('Debugger.enable'));
+    return cdpClients[0];
+  }
+
+  /** An adopted child whose stepper is on its socket and has seen V8 pause in program code. */
+  async function pausedChild(setup: StepperSetup = { rootSteps: () => true }): Promise<FakeCdpClient> {
+    build(setup);
+    await adoptChild();
+    const cdp = await stepperOnItsSocket();
+    cdp.paused('other', 1);
+    return cdp;
+  }
+
+  it("opens the stepper on the child's own CDP socket, and it serves the child's steps", async () => {
+    build({ rootSteps: () => true });
+    await adoptChild();
+    const cdp = await stepperOnItsSocket();
+
+    // The socket is the one js-debug hands out for this target, subscribed to V8's pauses.
+    expect(childClient.sendRequest).toHaveBeenCalledWith('requestCDPProxy', {}, 5000);
+    expect(cdpClients).toHaveLength(1);
+    expect(cdp.connectedTo).toEqual(cdpAddress);
+    expect(cdp.sent).toEqual(['JsDebug.subscribe', 'Debugger.enable']);
+    // Running, there is nothing to step from: the request is the adapter's.
+    expect(connections.stepRequest('child-1', 'next', STEP)).toBeNull();
+
+    cdp.paused('other', 1);
+    const stepped = connections.stepRequest('child-1', 'next', STEP);
+
+    expect(stepped).not.toBeNull();
+    await expect(stepped).resolves.toMatchObject({ type: 'response', command: 'next', success: true });
+    // One engine step over the CDP socket; js-debug is never sent the `next`.
+    expect(cdp.sent).toContain('Debugger.stepOver');
+    expect(childClient.sendRequest).not.toHaveBeenCalledWith('next', expect.anything(), expect.anything());
+    // Not a step, or not a session of this worker: the adapter's as it is.
+    expect(connections.stepRequest('child-1', 'evaluate', { expression: 'x' })).toBeNull();
+    expect(connections.stepRequest('nobody', 'next', STEP)).toBeNull();
+  });
+
+  it('opens no stepper for a child of an adapter that does its own stepping', async () => {
+    build({ policy: PythonAdapterPolicy, rootSteps: () => true });
+    await adoptChild({ request: startDebugging(7), report });
+
+    expect(connections.has('child-1')).toBe(true);
+    expect(childClient.sendRequest).not.toHaveBeenCalledWith('requestCDPProxy', expect.anything(), expect.anything());
+    expect(cdpClients).toHaveLength(0);
+    expect(connections.stepRequest('child-1', 'next', STEP)).toBeNull();
+  });
+
+  // The child's stepper takes the root's choice over: the root's own start
+  // request (a launch's or an attach's `smartStep`), and the launch
+  // configuration only when the root cannot say.
+  it.each<[string, StepperSetup, boolean]>([
+    ['the root steps through skipped code and the configuration has no smartStep (an attach root)', { rootSteps: () => true, launchConfig: { request: 'attach', port: 9229 } }, true],
+    ['the root does not, though the configuration asked for smartStep', { rootSteps: () => false, launchConfig: { smartStep: true } }, false],
+    ['the root cannot say and the configuration asked for smartStep', { rootSteps: () => undefined, launchConfig: { smartStep: true } }, true],
+    ['the root cannot say and the configuration did not ask', { rootSteps: () => undefined, launchConfig: { smartStep: false } }, false],
+    ['nothing is wired to ask the root and the configuration asked for smartStep', { launchConfig: { smartStep: true } }, true],
+    ['nothing is wired to ask the root and there is no configuration', {}, false]
+  ])("takes the session's choice from the root: %s", async (_case, setup, serves) => {
+    await pausedChild(setup);
+
+    const stepped = connections.stepRequest('child-1', 'next', STEP);
+
+    expect(stepped !== null).toBe(serves);
+    await stepped;
+  });
+
+  it("withholds the child's stopped and continued events while a step is in flight, and reports one stopped for the step", async () => {
+    const cdp = await pausedChild();
+    await connections.stepRequest('child-1', 'next', STEP);
+
+    // V8 resumes and lands on the next line; js-debug reports both, the
+    // landing as a pause it did not ask for.
+    cdp.resumed();
+    childClient.emit('continued', { threadId: 1, allThreadsContinued: false });
+    cdp.paused('step', 2);
+    childClient.emit('stopped', { reason: 'pause', description: 'Paused on debugger statement', threadId: 1 });
+    await vi.waitFor(() => expect(childEvents()).not.toHaveLength(0));
+
+    // One `stopped`, the stepper's, under the child's session; nothing of js-debug's.
+    expect(childEvents()).toEqual([
+      { event: 'stopped', body: expect.objectContaining({ reason: 'step', threadId: 1 }) }
+    ]);
+
+    // With no step in flight the child's events are forwarded as they are.
+    sent.length = 0;
+    childClient.emit('continued', { threadId: 1, allThreadsContinued: true });
+    childClient.emit('stopped', { reason: 'breakpoint', threadId: 1, hitBreakpointIds: [4] });
+    expect(childEvents()).toEqual([
+      { event: 'continued', body: { threadId: 1, allThreadsContinued: true } },
+      { event: 'stopped', body: { reason: 'breakpoint', threadId: 1, hitBreakpointIds: [4] } }
+    ]);
+  });
+
+  it('a request that resumes the child ends a step in flight; any other request leaves it', async () => {
+    await pausedChild();
+    await connections.stepRequest('child-1', 'next', STEP);
+
+    await connections.beforeRequest('child-1', 'threads');
+    childClient.emit('stopped', { reason: 'pause', threadId: 1 });
+    // Still the step's: withheld.
+    expect(childEvents()).toEqual([]);
+
+    await connections.beforeRequest('child-1', 'continue');
+    childClient.emit('stopped', { reason: 'breakpoint', threadId: 1, hitBreakpointIds: [4] });
+    // The step was given up: the stop is the program's own.
+    expect(childEvents()).toEqual([
+      { event: 'stopped', body: { reason: 'breakpoint', threadId: 1, hitBreakpointIds: [4] } }
+    ]);
+    // A session this worker does not know has nothing to end.
+    await expect(connections.beforeRequest('nobody', 'continue')).resolves.toBeUndefined();
+  });
+
+  it("close() takes the stepper off the child's CDP socket and closes the socket", async () => {
+    const cdp = await pausedChild();
+    expect(cdp.listenerCount('cdp-event')).toBe(1);
+
+    await connections.close('child-1', { terminateDebuggee: true });
+
+    // By close() itself: this client never reports its connection closed.
+    expect(cdp.listenerCount('cdp-event')).toBe(0);
+    expect(cdp.disposed).toBe(true);
+  });
+
+  it("a child connection that closes by itself takes its stepper and CDP socket down with it", async () => {
+    const cdp = await pausedChild();
+    expect(cdp.listenerCount('cdp-event')).toBe(1);
+
+    childClient.emit('close');
+
+    expect(cdp.listenerCount('cdp-event')).toBe(0);
+    expect(cdp.disposed).toBe(true);
+    expect(connections.has('child-1')).toBe(false);
   });
 });

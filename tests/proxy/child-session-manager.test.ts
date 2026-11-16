@@ -9,6 +9,7 @@ import type { AdapterPolicy, ParentStart, ReverseRequestResult } from '@debugmcp
 import { JsDebugAdapterPolicy, PythonAdapterPolicy, DefaultAdapterPolicy } from '@debugmcp/shared';
 import { ChildSessionManager } from '../../src/proxy/child-session-manager.js';
 import type { CdpFunctionBreakpointBridge } from '../../src/proxy/cdp-function-breakpoint-bridge.js';
+import type { CdpProxyClient } from '../../src/proxy/cdp-proxy-client.js';
 // Mock MinimalDapClient
 class MockMinimalDapClient extends EventEmitter {
   // Knobs for death-aware adoption tests (issue #248); reset in beforeEach
@@ -48,6 +49,13 @@ class MockMinimalDapClient extends EventEmitter {
   // compiles the breakpoints it buffered on a pending-target connection while
   // answering attach, and reports their syntax errors then (issue #853)
   static stderrOnAttach: string[] = [];
+  // When set, returned verbatim for 'requestCDPProxy': the address js-debug
+  // hands out for the target's raw CDP socket. Unset, the answer is `{}` and
+  // the CDP bridge finds no socket to open.
+  static cdpProxyResponse: unknown | undefined = undefined;
+  // When set, returned verbatim for 'stackTrace' (js-debug's frames, with its
+  // marks, for the pause the target is in; the proxy stepper asks, issue #1130)
+  static stackTraceResponse: unknown | undefined = undefined;
 
   host: string;
   port: number;
@@ -113,6 +121,12 @@ class MockMinimalDapClient extends EventEmitter {
         return MockMinimalDapClient.threadsResponse;
       }
       return { body: { threads: [{ id: 1, name: 'main' }] } };
+    }
+    if (command === 'requestCDPProxy' && MockMinimalDapClient.cdpProxyResponse !== undefined) {
+      return MockMinimalDapClient.cdpProxyResponse;
+    }
+    if (command === 'stackTrace' && MockMinimalDapClient.stackTraceResponse !== undefined) {
+      return MockMinimalDapClient.stackTraceResponse;
     }
     if (command === 'setBreakpoints') {
       for (const output of MockMinimalDapClient.stderrOnSetBreakpoints) {
@@ -199,6 +213,8 @@ describe('ChildSessionManager', () => {
     MockMinimalDapClient.shutdownThrows = false;
     MockMinimalDapClient.stderrOnSetBreakpoints = [];
     MockMinimalDapClient.stderrOnAttach = [];
+    MockMinimalDapClient.cdpProxyResponse = undefined;
+    MockMinimalDapClient.stackTraceResponse = undefined;
   });
 
   describe('JavaScript policy (multi-session)', () => {
@@ -1598,6 +1614,279 @@ describe('ChildSessionManager', () => {
       expect(bridge.detachCalls).toBe(1);
       await mgr.shutdown();
       expect(bridge.detachCalls).toBe(2);
+    });
+  });
+
+  /**
+   * The proxy's own stepper for the program's target (issue #1130): js-debug's
+   * is kept off, and a session that asked for `smartStep` has its steps served
+   * over the target's CDP socket, the one the function-breakpoint bridge
+   * opens. The stepper and the bridge are the real ones here; the socket is
+   * the fake below, handed in through `cdpClientFactory`, and the test plays
+   * V8 (the socket's events) and js-debug (the child's DAP events).
+   */
+  describe('the proxy stepper of the program target (issue #1130)', () => {
+    class FakeCdpClient extends EventEmitter {
+      readonly sent: string[] = [];
+      /** Results by method; any other command is answered `{}`. */
+      answers: Record<string, unknown> = {};
+      private open = false;
+
+      async connect(): Promise<void> {
+        this.open = true;
+      }
+
+      async send(method: string): Promise<unknown> {
+        this.sent.push(method);
+        return this.answers[method] ?? {};
+      }
+
+      isConnected(): boolean {
+        return this.open;
+      }
+
+      dispose(): void {
+        this.open = false;
+      }
+
+      /** V8 pauses, as CDP reports it: in `fn` (default `f`), which `f` called when it is another. */
+      paused(pause: { reason: string; line: number; fn?: string; hitBreakpoints?: string[] }): void {
+        const frame = (functionName: string, lineNumber: number) =>
+          ({ functionName, location: { scriptId: '1', lineNumber, columnNumber: 0 } });
+        this.emit('cdp-event', 'Debugger.paused', {
+          reason: pause.reason,
+          ...(pause.hitBreakpoints ? { hitBreakpoints: pause.hitBreakpoints } : {}),
+          callFrames: pause.fn ? [frame(pause.fn, pause.line), frame('f', 1)] : [frame('f', pause.line)]
+        });
+      }
+
+      resumed(): void {
+        this.emit('cdp-event', 'Debugger.resumed', {});
+      }
+    }
+
+    const STEP = { threadId: 1 };
+    const dapEvent = (event: string, body: Record<string, unknown>): DebugProtocol.Event => ({ seq: 0, type: 'event', event, body });
+    /** js-debug's sessions and CDP bridge, with an adapter that does its own stepping. */
+    const ownStepperPolicy: AdapterPolicy = {
+      ...JsDebugAdapterPolicy,
+      getDapClientBehavior: () => ({ ...JsDebugAdapterPolicy.getDapClientBehavior(), stepsThroughSkippedCode: undefined })
+    };
+    let cdpClients: FakeCdpClient[];
+
+    function makeManager(policy: AdapterPolicy = JsDebugAdapterPolicy): ChildSessionManager {
+      return new ChildSessionManager({
+        policy,
+        host: 'localhost',
+        port: 9229,
+        cdpClientFactory: () => {
+          const cdp = new FakeCdpClient();
+          cdpClients.push(cdp);
+          return cdp as unknown as CdpProxyClient;
+        }
+      });
+    }
+
+    /** Adopt the program's target: its CDP socket is open when this returns. */
+    async function adoptTarget(mgr: ChildSessionManager): Promise<{ child: MockMinimalDapClient; cdp: FakeCdpClient }> {
+      vi.useFakeTimers();
+      try {
+        const adoption = mgr.createChildSession({
+          pendingId: 'stepper-target',
+          host: 'localhost',
+          port: 9229,
+          parentConfig: { type: 'pwa-node' }
+        });
+        await vi.advanceTimersByTimeAsync(20000);
+        await adoption;
+      } finally {
+        vi.useRealTimers();
+      }
+      return { child: MockMinimalDapClient.lastInstance!, cdp: cdpClients[cdpClients.length - 1] };
+    }
+
+    /**
+     * A session that chose to step through skipped code, its target adopted
+     * and paused in program code. `forwarded` is what the parent connection is
+     * handed from here on.
+     */
+    async function steppingTarget(): Promise<{
+      mgr: ChildSessionManager;
+      child: MockMinimalDapClient;
+      cdp: FakeCdpClient;
+      forwarded: DebugProtocol.Event[];
+    }> {
+      const mgr = makeManager();
+      // The start request comes before the target exists.
+      mgr.setStepThroughSkippedCode(true);
+      const { child, cdp } = await adoptTarget(mgr);
+      const forwarded: DebugProtocol.Event[] = [];
+      mgr.on('childEvent', (evt: DebugProtocol.Event) => forwarded.push(evt));
+      cdp.paused({ reason: 'other', line: 1 });
+      return { mgr, child, cdp, forwarded };
+    }
+
+    beforeEach(() => {
+      cdpClients = [];
+      MockMinimalDapClient.cdpProxyResponse = { body: { host: '127.0.0.1', port: 9333, path: '/cdp-of-the-target' } };
+      // js-debug's frame for a pause, unmarked: program code.
+      MockMinimalDapClient.stackTraceResponse = { success: true, body: { stackFrames: [{ id: 1, name: 'f', line: 3, column: 1 }] } };
+    });
+
+    it("serves the target's steps over the CDP socket the bridge opens, once the session chose to step through skipped code", async () => {
+      const mgr = makeManager();
+      // A stepper from the start, not asked for yet.
+      expect(mgr.isSteppingThroughSkippedCode()).toBe(false);
+      mgr.setStepThroughSkippedCode(true);
+      expect(mgr.isSteppingThroughSkippedCode()).toBe(true);
+
+      const { child, cdp } = await adoptTarget(mgr);
+      // One CDP socket per target: the bridge's, and the stepper listens on it too.
+      expect(cdpClients).toHaveLength(1);
+      expect(cdp.listenerCount('cdp-event')).toBe(2);
+      // Running, there is nothing to step from: the request is the adapter's.
+      expect(mgr.stepRequest('next', STEP)).toBeNull();
+
+      cdp.paused({ reason: 'other', line: 1 });
+      const stepped = mgr.stepRequest('next', STEP);
+
+      expect(stepped).not.toBeNull();
+      await expect(stepped).resolves.toMatchObject({ type: 'response', command: 'next', success: true });
+      // One engine step over the CDP socket; js-debug is never sent the `next`.
+      expect(cdp.sent).toContain('Debugger.stepOver');
+      expect(child.requests.map((r) => r.command)).not.toContain('next');
+      // Not a step: the adapter's as it is.
+      expect(mgr.stepRequest('evaluate', { expression: 'x' })).toBeNull();
+    });
+
+    it("leaves the steps to js-debug until the session asks, and again when it stops asking", async () => {
+      const mgr = makeManager();
+      const { cdp } = await adoptTarget(mgr);
+      cdp.paused({ reason: 'other', line: 1 });
+
+      // Never asked: plain steps.
+      expect(mgr.stepRequest('next', STEP)).toBeNull();
+      expect(cdp.sent).not.toContain('Debugger.stepOver');
+
+      mgr.setStepThroughSkippedCode(true);
+      await mgr.stepRequest('next', STEP);
+      expect(cdp.sent).toContain('Debugger.stepOver');
+
+      mgr.setStepThroughSkippedCode(false);
+      expect(mgr.isSteppingThroughSkippedCode()).toBe(false);
+      expect(mgr.stepRequest('next', STEP)).toBeNull();
+    });
+
+    it('builds no stepper for a policy whose adapter does its own stepping', async () => {
+      // No child sessions of this kind at all (Python): nothing to ask, nothing to serve.
+      const python = makeManager(PythonAdapterPolicy);
+      python.setStepThroughSkippedCode(true);
+      expect(python.isSteppingThroughSkippedCode()).toBeUndefined();
+      expect(python.stepRequest('next', STEP)).toBeNull();
+      await expect(python.beforeChildRequest('continue')).resolves.toBeUndefined();
+
+      // js-debug's sessions and bridge without the pin: the socket is the bridge's alone.
+      const ownStepper = makeManager(ownStepperPolicy);
+      ownStepper.setStepThroughSkippedCode(true);
+      const { cdp } = await adoptTarget(ownStepper);
+      cdp.paused({ reason: 'other', line: 1 });
+      expect(cdp.listenerCount('cdp-event')).toBe(1);
+      expect(ownStepper.isSteppingThroughSkippedCode()).toBeUndefined();
+      expect(ownStepper.stepRequest('next', STEP)).toBeNull();
+    });
+
+    it("withholds the target's stopped and continued events while a step is in flight, and reports one stopped for the step", async () => {
+      const { mgr, child, cdp, forwarded } = await steppingTarget();
+      await mgr.stepRequest('next', STEP);
+
+      // V8 resumes and lands on the next line; js-debug reports both, the
+      // landing as a pause it did not ask for.
+      cdp.resumed();
+      child.emit('event', dapEvent('continued', { threadId: 1, allThreadsContinued: false }));
+      cdp.paused({ reason: 'step', line: 2 });
+      child.emit('event', dapEvent('stopped', { reason: 'pause', description: 'Paused on debugger statement', threadId: 1 }));
+      await vi.waitFor(() => expect(forwarded).not.toHaveLength(0));
+      await mgr.flushEvents();
+
+      // One `stopped`, the stepper's; nothing of js-debug's.
+      expect(forwarded).toEqual([
+        expect.objectContaining({ event: 'stopped', body: expect.objectContaining({ reason: 'step', threadId: 1 }) })
+      ]);
+
+      // With no step in flight the target's events are forwarded as they are.
+      forwarded.length = 0;
+      const resumed = dapEvent('continued', { threadId: 1, allThreadsContinued: true });
+      const breakpointStop = dapEvent('stopped', { reason: 'breakpoint', threadId: 1, hitBreakpointIds: [4] });
+      child.emit('event', resumed);
+      child.emit('event', breakpointStop);
+      await mgr.flushEvents();
+      expect(forwarded).toEqual([resumed, breakpointStop]);
+    });
+
+    it('a request that resumes the target ends a step in flight; any other request leaves it', async () => {
+      const { mgr, child, forwarded } = await steppingTarget();
+      await mgr.stepRequest('next', STEP);
+
+      await mgr.beforeChildRequest('threads');
+      child.emit('event', dapEvent('stopped', { reason: 'pause', threadId: 1 }));
+      await mgr.flushEvents();
+      // Still the step's: withheld.
+      expect(forwarded).toEqual([]);
+
+      await mgr.beforeChildRequest('continue');
+      const breakpointStop = dapEvent('stopped', { reason: 'breakpoint', threadId: 1, hitBreakpointIds: [4] });
+      child.emit('event', breakpointStop);
+      await mgr.flushEvents();
+      // The step was given up: the stop is the program's own.
+      expect(forwarded).toEqual([breakpointStop]);
+    });
+
+    it("hands the stepper's own report to the function-breakpoint bridge like any stop of the target", async () => {
+      const { mgr, child, cdp, forwarded } = await steppingTarget();
+      cdp.answers = {
+        'Runtime.evaluate': { result: { type: 'function', objectId: 'greet-object' } },
+        'Debugger.setBreakpointOnFunctionCall': { breakpointId: 'fn-call:1' }
+      };
+      const { breakpoints: [armed] } = await mgr.syncFunctionBreakpoints([{ name: 'greet' }]);
+      expect(armed).toMatchObject({ verified: true });
+      await mgr.stepRequest('next', STEP);
+
+      // The step runs into the armed function: V8 pauses on the bridge's
+      // breakpoint, which js-debug reports as a breakpoint that names none.
+      // The step ends there, and the stop the stepper hands on is that one.
+      cdp.resumed();
+      cdp.paused({ reason: 'other', line: 10, fn: 'greet', hitBreakpoints: ['fn-call:1'] });
+      child.emit('event', dapEvent('stopped', { reason: 'breakpoint', threadId: 1, hitBreakpointIds: [] }));
+      await vi.waitFor(() => expect(forwarded).not.toHaveLength(0));
+      await mgr.flushEvents();
+
+      // Through the bridge: named as the function breakpoint it is.
+      expect(forwarded).toHaveLength(1);
+      expect(forwarded[0]).toMatchObject({
+        event: 'stopped',
+        body: { reason: 'function breakpoint', threadId: 1, hitBreakpointIds: [armed.id] }
+      });
+    });
+
+    it("takes the stepper off the target's CDP socket when the target's connection closes", async () => {
+      const { mgr, child, cdp } = await steppingTarget();
+      expect(cdp.listenerCount('cdp-event')).toBe(2);
+
+      child.emit('close');
+
+      // The bridge's listener and the stepper's are both gone.
+      expect(cdp.listenerCount('cdp-event')).toBe(0);
+      expect(mgr.stepRequest('next', STEP)).toBeNull();
+    });
+
+    it("takes the stepper off the target's CDP socket on shutdown", async () => {
+      const { mgr, cdp } = await steppingTarget();
+      expect(cdp.listenerCount('cdp-event')).toBe(2);
+
+      await mgr.shutdown();
+
+      expect(cdp.listenerCount('cdp-event')).toBe(0);
+      expect(mgr.stepRequest('next', STEP)).toBeNull();
     });
   });
 
