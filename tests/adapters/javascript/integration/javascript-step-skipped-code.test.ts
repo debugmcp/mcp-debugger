@@ -92,12 +92,13 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
   }
 
   describe('step_into (issue #1130)', () => {
-    it('lands on the next line when the line calls only Node\'s own code, and says so: the first console.log of the process', async () => {
+    it('lands on the next line when the walk into the call stays in Node\'s own code, and says how far it went: the first console.log of the process', async () => {
       await pausedAt('the first console.log');
       const answer = await step('step_into');
       // js-debug's own stepper lost this step: "Step completed as session exited."
       expectLanding(answer, 'after the first console.log');
-      expect(answer.message).toContain(ErrorMessages.stepIntoFoundOnlySkippedCode());
+      // The first command and the whole budget, 25 step-ins, before it stepped out.
+      expect(answer.message).toBe(`Stepped into. ${ErrorMessages.stepIntoReachedNoProgramCode(25)}`);
     }, 60000);
 
     it('enters a function of the program that a builtin calls', async () => {
@@ -183,6 +184,91 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
       expect(answer, JSON.stringify(answer)).toMatchObject({ success: true, state: 'paused' });
       expect(answer.location?.file ?? '', JSON.stringify(answer)).toMatch(/node_internals|^node:/);
       expect(answer.message).toBe('Stepped into');
+    }, 60000);
+  });
+
+  describe('async functions, callbacks the program only scheduled, and a caller\'s own skip list', () => {
+    const ASYNC_FIXTURE = path.resolve(here, '../../../fixtures/javascript/step-skipped-code/async-steps.cjs');
+    const ASYNC_LINES = fs.readFileSync(ASYNC_FIXTURE, 'utf8').split('\n');
+    const at = (marker: string): number => {
+      const index = ASYNC_LINES.findIndex((line) => line.includes(`// MARK: ${marker}`));
+      if (index === -1) {
+        throw new Error(`no line marked "${marker}" in the async fixture`);
+      }
+      return index + 1;
+    };
+
+    async function asyncPausedAt(marker: string, options: { condition?: string; launchArgs?: Record<string, unknown> } = {}): Promise<void> {
+      server = await startStdioClient({ name: 'js-stepper-async' });
+      await server.createSession('javascript', 'js-stepper-async');
+      const set = await server.call('set_breakpoint', {
+        file: ASYNC_FIXTURE,
+        line: at(marker),
+        ...(options.condition ? { condition: options.condition } : {})
+      });
+      expect(set.success, JSON.stringify(set)).toBe(true);
+      let stop = await server.call<StopAnswer>('start_debugging', {
+        scriptPath: ASYNC_FIXTURE,
+        ...(options.launchArgs ? { dapLaunchArgs: options.launchArgs } : {})
+      });
+      expect(stop.success, JSON.stringify(stop)).toBe(true);
+      if (stop.state !== 'paused') {
+        stop = await server.call<StopAnswer>('wait_for_stop', { timeout: 20000 });
+      }
+      expect(stop, JSON.stringify(stop)).toMatchObject({ success: true, state: 'paused' });
+      expect(stop.location?.line, JSON.stringify(stop)).toBe(at(marker));
+    }
+
+    function expectAsyncLanding(answer: StopAnswer & { ms: number }, marker: string): void {
+      expect(answer, JSON.stringify(answer)).toMatchObject({ success: true, state: 'paused' });
+      expect(answer.pending, JSON.stringify(answer)).toBeUndefined();
+      expect(answer.location?.file ?? '', JSON.stringify(answer)).toMatch(/async-steps\.cjs$/);
+      expect(answer.location?.line, JSON.stringify(answer)).toBe(at(marker));
+      expect(answer.ms, `took ${answer.ms} ms: ${JSON.stringify(answer)}`).toBeLessThan(PROMPT_MS);
+    }
+
+    it('step_out of an async function lands in the call that awaited it, with other calls of the same function in flight', async () => {
+      await asyncPausedAt('in inner, after the gate', { condition: 'id === 2' });
+      const answer = await step('step_out');
+      expectAsyncLanding(answer, 'the continuation of handler');
+      // A temporary breakpoint on `handler` stopped in handler(1), whose
+      // continuation was queued first. V8's own step finds handler(2).
+      const id = await server!.call<ToolAnswer & { result?: string }>('evaluate_expression', { expression: 'id' });
+      expect(id.result, JSON.stringify(id)).toBe('2');
+      expect(answer.message).toBe('Stepped out');
+    }, 60000);
+
+    it('step_over on an await lands on the next line of the same function, though the function has a finally clause', async () => {
+      await asyncPausedAt('an await before the try');
+      // With a temporary breakpoint on the caller, the step stopped there the
+      // moment this function suspended.
+      expectAsyncLanding(await step('step_over'), 'an await inside the try');
+      expectAsyncLanding(await step('step_over'), 'the return inside the try');
+      expectAsyncLanding(await step('step_over'), 'the finally block of an async function');
+      // Off the finally block V8 loses the step; it is caught at the awaiting
+      // function, and the answer says what that can and cannot promise.
+      const out = await step('step_over');
+      expectAsyncLanding(out, 'after closing');
+      expect(out.message).toBe(`Stepped over. ${ErrorMessages.stepCaughtAtAwaitingFunction('main')}`);
+    }, 60000);
+
+    it('step_out of a .then callback resumes the program: what registered the callback is not what it returns to', async () => {
+      await asyncPausedAt('in a then callback');
+      const answer = await step('step_out');
+      // Nothing of the program is on the stack and nothing awaits the
+      // callback: the program runs to its end, 150 ms later.
+      expect(answer, JSON.stringify(answer)).toMatchObject({ success: true });
+      expect(answer.state, JSON.stringify(answer)).not.toBe('paused');
+    }, 60000);
+
+    it('steps with V8 alone where Node\'s own code is program code: a skip list without <node_internals>', async () => {
+      await asyncPausedAt('in a timer callback', { launchArgs: { skipFiles: ['**/node_modules/**'] } });
+      const answer = await step('step_out');
+      // V8 gives no break positions for Node's own scripts, so there is no
+      // temporary breakpoint to set on the timer code this returns to. The
+      // step used to fail for it, and leave the session in `error`.
+      expect(answer, JSON.stringify(answer)).toMatchObject({ success: true, state: 'paused' });
+      expect(answer.location?.file ?? '', JSON.stringify(answer)).toMatch(/timers/);
     }, 60000);
   });
 });

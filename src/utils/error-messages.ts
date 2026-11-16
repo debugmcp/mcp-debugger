@@ -306,19 +306,43 @@ export const ErrorMessages = {
       : `${stepped} in ${steps} steps: this adapter stops once per expression on a line, so the step was repeated until the line changed.`,
 
   /**
-   * The sentence on a step_into whose line called only skipped code (issue #1130)
-   * Occurs when: the proxy's JavaScript stepper walked into the call, found
-   * nothing of the program's within its budget and came back out. The line
-   * ran as a step over would have run it, and the caller should know that
-   * was not a refusal to step in.
+   * The sentence on a step that left an async function through try...finally and
+   * was caught at the awaiting function (issues #1130, #1161)
+   * Occurs when: V8 loses a step that leaves a function through `finally`, so
+   * the proxy's JavaScript stepper set its net on the function that awaits it.
+   * An awaiter is not on the stack, so the net guards the FUNCTION: with
+   * several calls of it in flight, the one that ran next is where the step
+   * stopped. The caller must not take its variables for the awaited call's
+   * without looking.
    * Used in: src/proxy/js-stepper.ts (the `text` of the step's stopped
    * event), appended to the step's message by
    * src/session/execution/execution-controller.ts
+   * @param awaiter - The awaiting function's name
    */
-  stepIntoFoundOnlySkippedCode: () =>
-    'The call on that line ran only skipped code (Node internals, node_modules, or files on skipFiles), ' +
-    'so there was nothing of your program to step into and the line ran as a step over. ' +
-    'dapLaunchArgs.justMyCode: false steps into that code.',
+  stepCaughtAtAwaitingFunction: (awaiter: string) =>
+    `The engine loses a step that leaves a function through try...finally, so this step was caught where the ` +
+    `awaiting function, ${awaiter}, next ran. If several calls of ${awaiter} are in flight, this stop may be in ` +
+    `another call's continuation than the one that awaited the function you stepped out of: check its variables.`,
+
+  /**
+   * The sentence on a step_into that reached no code of the program (issue #1130)
+   * Occurs when: the proxy's JavaScript stepper walked into the call on the
+   * line, stayed in skipped code for its whole budget, stepped back out and
+   * landed in the frame the step started in. It says what is known: how far
+   * the walk went. Not that the call reaches nothing of the program's: a
+   * module the line loads, a late callback, ran during the step out. The
+   * remedy is worded for a launch and an attach alike.
+   * Used in: src/proxy/js-stepper.ts (the `text` of the step's stopped
+   * event), appended to the step's message by
+   * src/session/execution/execution-controller.ts
+   * @param stepIns - How many engine step-ins the walk took before it stepped out
+   */
+  stepIntoReachedNoProgramCode: (stepIns: number) =>
+    `step_into walked ${stepIns} engine steps into the call on that line and was still in skipped code ` +
+    '(Node internals, node_modules, or files on skipFiles), so it stepped back out and the rest of the line ran ' +
+    'as a step over runs it. Code of yours that the call reaches further in (a module it loads, a late callback) ' +
+    'ran without stopping: a breakpoint there stops in it. To stop inside the skipped code instead, turn ' +
+    'stepping through it off: justMyCode: false on a launch, smartStep: false on a launch or an attach.',
 
   /**
    * The sentence on a step that is still in skipped code after every engine
