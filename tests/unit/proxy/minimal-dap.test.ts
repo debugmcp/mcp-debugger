@@ -53,6 +53,9 @@ describe('MinimalDapClient', () => {
     getChildTargetState: Mock<ChildSessionManager['getChildTargetState']>;
     shutdown: Mock<ChildSessionManager['shutdown']>;
     flushEvents: Mock<ChildSessionManager['flushEvents']>;
+    stepRequest: Mock<ChildSessionManager['stepRequest']>;
+    beforeChildRequest: Mock<ChildSessionManager['beforeChildRequest']>;
+    setStepThroughSkippedCode: Mock<ChildSessionManager['setStepThroughSkippedCode']>;
   };
 
   const createChildSessionManagerStub = (): ChildSessionManagerStub => {
@@ -67,6 +70,11 @@ describe('MinimalDapClient', () => {
     emitter.getChildTargetState = vi.fn().mockReturnValue('none');
     emitter.shutdown = vi.fn().mockResolvedValue(undefined);
     emitter.flushEvents = vi.fn().mockReturnValue(Promise.resolve());
+    // The proxy stepper (issue #1130): off unless a case turns it on, so a
+    // step goes to the child as it is.
+    emitter.stepRequest = vi.fn<ChildSessionManager['stepRequest']>().mockReturnValue(null);
+    emitter.beforeChildRequest = vi.fn<ChildSessionManager['beforeChildRequest']>().mockResolvedValue(undefined);
+    emitter.setStepThroughSkippedCode = vi.fn<ChildSessionManager['setStepThroughSkippedCode']>();
     return emitter;
   };
 
@@ -2488,7 +2496,27 @@ describe('MinimalDapClient', () => {
         attachArguments: { localRoot: '/app', sourceMaps: false, port: 9229, customAdapterOption: 'preserved' }
       });
       const sent = JSON.parse(mockSocket.write.mock.calls.at(-1)[0].toString().split('\r\n\r\n')[1]);
-      expect(sent.arguments).toEqual(args);
+      // Everything the caller sent, plus the one key the proxy owns: the
+      // adapter's own stepper is always off (issue #1130).
+      expect(sent.arguments).toEqual({ ...args, smartStep: false });
+    });
+
+    it.each([
+      ['launch', { request: 'launch', program: '/app/main.js', smartStep: true }, true],
+      ['launch', { request: 'launch', program: '/app/main.js', smartStep: false }, false],
+      ['attach', { request: 'attach', port: 9229, smartStep: true }, true],
+      ['attach', { request: 'attach', port: 9229 }, false]
+    ] as const)('reads the %s request\'s smartStep as the session\'s choice and keeps the adapter\'s stepper off (issue #1130)', async (command, start, chose) => {
+      const manager = (client as unknown as { childSessionManager: ChildSessionManagerStub }).childSessionManager;
+      manager.setStepThroughSkippedCode = vi.fn();
+      const args = Object.freeze({ ...start });
+      await client.sendRequest(command, args);
+      // The session's choice goes to the proxy's stepper...
+      expect(manager.setStepThroughSkippedCode).toHaveBeenCalledWith(chose);
+      // ...and js-debug never gets its own stepper turned on, whatever was asked.
+      const sent = JSON.parse(mockSocket.write.mock.calls.at(-1)[0].toString().split('\r\n\r\n')[1]);
+      expect(sent.arguments.smartStep).toBe(false);
+      expect(sent.arguments).toEqual({ ...start, smartStep: false });
     });
 
     it.each(['attach', 'launch'] as const)('ignores nonboolean entry intent for %s', async command => {

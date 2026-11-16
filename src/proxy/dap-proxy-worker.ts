@@ -2038,7 +2038,15 @@ export class DapProxyWorker {
   /** A child session's DAP request, answered on the child's envelope (issue #1081). */
   private async forwardToChild(childClient: IDapClient, payload: DapCommandPayload): Promise<void> {
     try {
-      const response = await childClient.sendRequest(payload.dapCommand, payload.dapArgs, payload.timeoutMs);
+      // A step of a child that steps through skipped code is its proxy
+      // stepper's (issue #1130); any other request may end a step in flight.
+      const stepped = this.childConnections?.stepRequest(payload.sessionId, payload.dapCommand, payload.dapArgs);
+      if (!stepped) {
+        await this.childConnections?.beforeRequest(payload.sessionId, payload.dapCommand);
+      }
+      const response = stepped
+        ? await stepped
+        : await childClient.sendRequest(payload.dapCommand, payload.dapArgs, payload.timeoutMs);
       this.sendDapResponse(payload.requestId, true, response, undefined, payload.sessionId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
