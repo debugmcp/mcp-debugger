@@ -189,6 +189,8 @@ interface Chain {
   steppedOutOfSkipped: boolean;
   /** Every command the chain may send is spent and skipped code is still on top. */
   capped: boolean;
+  /** The stack holds no frame of the program below the skipped code on top (looked at once). */
+  nothingBelow: boolean;
   startedAt: number;
 }
 
@@ -326,6 +328,7 @@ export class JsStepper {
       unwinding: false,
       steppedOutOfSkipped: false,
       capped: false,
+      nothingBelow: false,
       startedAt: Date.now()
     };
     this.chain = chain;
@@ -513,13 +516,24 @@ export class JsStepper {
 
     if (skipped) {
       // Before anything else, a net on the program frame this code returns to.
-      const guarded = this.nets.some((net) => net.depth < depth || net.depth === Infinity);
-      if (!guarded && !(await this.armReturnTarget(pause, null))) {
-        return { kind: 'left-stack' };
+      let guarded = this.nets.some((net) => net.depth < depth || net.depth === Infinity);
+      if (!guarded && !chain.nothingBelow) {
+        guarded = await this.armReturnTarget(pause, null);
+        // Nothing of the program can come to be below without the chain
+        // landing in it first: one look per chain.
+        chain.nothingBelow = !guarded;
       }
+      // A step-in walks on while it has budget, with or without anything
+      // below: a step issued inside a dependency reaches the program's
+      // handler by calls, not returns (issue #687).
       if (chain.kind === 'in' && !chain.unwinding && chain.spent < this.tunables.budget) {
         chain.spent++;
         return { kind: 'command', command: CDP_COMMAND.in };
+      }
+      // It has to step out now. With nothing of the program below, the stack
+      // the step started on is gone.
+      if (!guarded) {
+        return { kind: 'left-stack' };
       }
       if (chain.kind === 'in') {
         chain.steppedOutOfSkipped = true;

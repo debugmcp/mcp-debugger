@@ -407,21 +407,21 @@ export const JsDebugAdapterPolicy = {
     hasNoSource(frame.file || '') && (frame.line ?? 0) === 0,
 
   /**
-   * Why a launch-mode pause or step may never stop (issue #678). js-debug's
-   * smart-stepper (`smartStep`, on by default while justMyCode is true) keeps
-   * stepping — in the direction that was asked for, step-out after 256 tries —
-   * while the program is in a frame the skip list blackboxes, and Node
-   * internals are on the default list: on an idle server every pause lands
-   * there, and a request path enters user code by calls, not returns, so
-   * neither the pause nor a step issued from a skipped frame lands. Measured
-   * on the #686 build: default skip list + smartStep:false → the pause landed;
-   * internals-only skip list + smartStep:true → the chase, with node_modules
-   * NOT blackboxed. So the hints key on the effective smartStep plus whether
-   * the frame in question is skipped, both from the helpers the launch
-   * transform uses. A caller's own glob (`**\/vendor/**`) is not matched — this
-   * package has no glob matcher, and an over-match would be a false hint — so
-   * a step from such a frame gets silence. Attach sessions default neither key
-   * (#513) and get nothing here.
+   * What a launch-mode step that has not landed is waiting for (issues #678,
+   * #1130). The proxy's own stepper serves the steps of a session whose
+   * effective `smartStep` is on: it never stops in skipped code, it steps out
+   * toward the nearest frame of the program below, and with none below it
+   * resumes the program (the stack the step started on is gone). So a step
+   * still pending after the grace window has run off the program's stack, or
+   * is waiting on work in flight. A step issued from skipped code (a
+   * breakpoint inside a dependency) gets the sentence that names the frame
+   * and the switch that steps inside that code; the frame is matched with the
+   * helpers the launch transform uses, and a caller's own glob
+   * (`**\/vendor/**`) is not matched, since this package has no glob matcher.
+   * A pause gets nothing: js-debug's stepper, which stepped away from a pause
+   * that landed in skipped code, is off (the pending pause has its own
+   * wording, issue #1146). Attach sessions default neither key (#513) and get
+   * nothing here.
    */
   describePendingStop: (info: PendingStopContext): string | undefined => {
     if (info.attachMode) {
@@ -431,34 +431,27 @@ export const JsDebugAdapterPolicy = {
     if (!resolveJsLaunchSmartStep(merged)) {
       return undefined;
     }
-    const internalsSkipped = jsLaunchSkipsNodeInternals(merged);
+    // A pause is never stepped away from any more: it lands where the
+    // program is, in Node's own code if that is where it is.
     if (info.operation === 'pause') {
-      return internalsSkipped
-        ? "js-debug's smart-stepper is on for this launch (smartStep: true, the default while justMyCode is true) and " +
-          'Node internals are skipped, so a pause that lands in internals — where an idle server always is — is ' +
-          'stepped through instead of reported and may never land. Set a breakpoint in your own code, or relaunch ' +
-          'with dapLaunchArgs.justMyCode: false (or adapterLaunchConfig.smartStep: false) to pause where the program is.'
-        : undefined;
-    }
-    const frame = info.fromFrame;
-    if (!frame) {
       return undefined;
     }
-    const file = frame.file || '';
-    const where = `${file}:${frame.line}`;
-    if (internalsSkipped && (file.includes('<node_internals>') || file.startsWith('node:'))) {
-      return `The step was issued from a skipped frame in Node internals (${where}); js-debug's smart-stepper keeps ` +
-        'stepping while the program is in skipped code, so on a request path the step may never land. Use ' +
-        'continue_execution with a breakpoint in your own code, or relaunch with adapterLaunchConfig.smartStep: false ' +
-        'to stop in the next frame V8 does not skip.';
+    const frame = info.fromFrame;
+    const file = frame?.file || '';
+    const fromSkippedCode = frame !== undefined && (
+      (jsLaunchSkipsNodeInternals(merged) && (file.includes('<node_internals>') || file.startsWith('node:'))) ||
+      (jsLaunchBlackboxesNodeModules(merged) && NODE_MODULES_SEGMENT.test(file))
+    );
+    if (fromSkippedCode) {
+      return `The step was issued from skipped code (${file}:${frame.line}), and a step does not stop in skipped code: ` +
+        "it runs until your program's code is on top again. That has not happened: either nothing of your program " +
+        "was below that frame, so the step ended in Node's event loop and the program is running, or the call is " +
+        'still in flight. It stops at the next breakpoint in your own code. Relaunch with ' +
+        'dapLaunchArgs.justMyCode: false (or adapterLaunchConfig.smartStep: false) to step inside that code.';
     }
-    if (jsLaunchBlackboxesNodeModules(merged) && NODE_MODULES_SEGMENT.test(file)) {
-      return `The step was issued from a skipped frame (${where}); this launch blackboxes node_modules ` +
-        "(justMyCode: true) and js-debug's smart-stepper keeps stepping while the program is in skipped code, so on " +
-        'a request path the step may never land. Relaunch with dapLaunchArgs.justMyCode: false to step through ' +
-        'dependencies.';
-    }
-    return undefined;
+    return 'The step left the frame it started in and nothing of your program has run since: a function that Node ' +
+      'called returned to the event loop, or the line is waiting on work still in flight. The program is running; ' +
+      'wait_for_stop answers when the step lands or a breakpoint is hit.';
   },
 
   /**

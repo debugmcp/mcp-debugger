@@ -437,6 +437,56 @@ describe('JsStepper (issue #1130)', () => {
     });
   });
 
+  describe('a step issued inside skipped code, with nothing of the program below (issue #687)', () => {
+    const express = (line: number): Frame => ({ fn: 'handle', line, script: 'express', skipped: true });
+
+    it('step_into walks on into the program\'s handler: a request path enters it by calls, not returns', async () => {
+      engine.pauseAt({ frames: frames(express(177), node('emit', 7), node('parserOnIncoming', 3)) });
+      engine.script = [
+        { frames: frames(node('Url', 77), express(177), node('emit', 7)) },
+        { frames: frames(node('Url', 78), express(177), node('emit', 7)) },
+        { frames: frames(app('handler', 16), express(250), node('emit', 7)) }
+      ];
+      await stepper.request('stepIn', { threadId: 1 });
+      await settled();
+      expect(commands()).toEqual(['Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepInto']);
+      expect(stopped()).toMatchObject({ reason: 'step' });
+      // Nothing to guard: no frame of the program was below. One look at the stack, not one per landing.
+      expect(setBreakpoints()).toBe(0);
+      expect(engine.stackTraceCalls.filter((levels) => levels > 1)).toHaveLength(1);
+    });
+
+    it('step_into resumes the program only once its budget is spent', async () => {
+      stepper = new JsStepper({
+        target: { sendRequest: async (_c: string, args?: unknown) => engine.stackTrace((args as { levels: number }).levels) as never },
+        deliver: (event) => delivered.push(event),
+        tunables: { budget: 2, settleCeilingMs: 150, verdictCeilingMs: 150 }
+      });
+      stepper.attachCdp(engine);
+      stepper.setEnabled(true);
+      engine.pauseAt({ frames: frames(express(177), node('emit', 7)) });
+      engine.script = [
+        { frames: frames(node('Url', 77), express(177), node('emit', 7)) },
+        { frames: frames(node('Url', 78), express(177), node('emit', 7)) },
+        { frames: frames(node('Url', 79), express(177), node('emit', 7)) },
+        'runs'
+      ];
+      await stepper.request('stepIn', { threadId: 1 });
+      await settled();
+      expect(commands()).toEqual(['Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepInto', 'Debugger.resume']);
+      expect(delivered).toEqual([]);
+    });
+
+    it('step_over resumes at once: it would have to step out, and there is nowhere of the program\'s to step out to', async () => {
+      engine.pauseAt({ frames: frames(express(177), node('emit', 7)) });
+      engine.script = [{ frames: frames(node('emit', 8)) }, 'runs'];
+      await stepper.request('next', { threadId: 1 });
+      await settled();
+      expect(commands()).toEqual(['Debugger.stepOver', 'Debugger.resume']);
+      expect(delivered).toEqual([]);
+    });
+  });
+
   describe('a step over or out that returns into skipped code', () => {
     it('steps out toward the nearest program frame below, at once', async () => {
       engine.pauseAt({ frames: frames(app('listener', 40), node('emit', 7), app('main', 10)) });
