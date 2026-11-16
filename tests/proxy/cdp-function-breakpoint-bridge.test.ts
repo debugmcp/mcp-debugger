@@ -11,6 +11,8 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { CdpFunctionBreakpointBridge, MAX_SCRIPT_URLS } from '../../src/proxy/cdp-function-breakpoint-bridge.js';
 import { JS_LOGPOINT_BINDING } from '@debugmcp/shared';
@@ -776,6 +778,16 @@ describe('CdpFunctionBreakpointBridge', () => {
       expect(urls.has('s0')).toBe(false);
       expect(urls.has(`s${overshoot - 1}`)).toBe(false);
       expect(urls.get(`s${MAX_SCRIPT_URLS + overshoot - 1}`)).toBe(`file:///f${MAX_SCRIPT_URLS + overshoot - 1}.js`);
+    });
+  });
+
+  describe('the source file', () => {
+    it('holds no raw NUL byte: the key separator is written as an escape', () => {
+      // A literal NUL made git treat the file as binary (no diff, no blame)
+      // and made text tools refuse to edit it. The separator is the same
+      // character at run time; the keyed cases above pin that.
+      const source = readFileSync(fileURLToPath(new URL('../../src/proxy/cdp-function-breakpoint-bridge.ts', import.meta.url)), 'utf8');
+      expect(source.includes(String.fromCharCode(0))).toBe(false);
     });
   });
 });
