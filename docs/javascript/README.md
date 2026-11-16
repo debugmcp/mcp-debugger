@@ -97,41 +97,72 @@ The JavaScript adapter automatically configures:
 
 ### Stepping and pausing inside dependencies (`justMyCode`, `skipFiles`)
 
-js-debug has no `justMyCode` key of its own; the launch transform turns the intent into two js-debug keys:
-`skipFiles` (V8 blackboxing — `node_modules` is on the list while `justMyCode` is true, Node internals always) and
-`smartStep`, whose stepper **keeps stepping while the program is in a skipped frame** — in the direction you asked
-for, falling back to step-out — instead of reporting the stop. On a server every pause lands in Node internals, and
-a request path enters your code by calls, not returns, so with the stepper on neither a pause nor a `step_over` /
-`step_out` issued from a skipped frame lands (issue #678); a `step_into` still reaches the next call into your
-code. `justMyCode: false` turns the stepper off and takes `node_modules` off the list. What that means in practice:
+js-debug has no `justMyCode` key of its own; the launch transform turns the intent into two keys: `skipFiles`, the
+code a step does not stop in (Node internals always, `node_modules` while `justMyCode` is true), and `smartStep`,
+whether steps step through skipped code at all. `justMyCode: false` takes `node_modules` off the list and turns
+that stepping off.
 
-| Launch | `skipFiles` sent | `smartStep` | A breakpoint inside a dependency | `step_over` from that breakpoint | `pause_execution` on an idle server |
-|---|---|---|---|---|---|
-| default (`justMyCode: true`) | `<node_internals>/**`, `**/node_modules/**` | `true` | fires; frame 0 is the dependency frame | may never land on a request path (`pending: true`; the message names the skipped frame, the stepper and the remedy) | may never land (`pending: true`; the message names the stepper and the remedy) |
-| `dapLaunchArgs: { justMyCode: false }` | `<node_internals>/**` | `false` | fires | lands on the next line of the dependency | lands as soon as any JavaScript runs (the next request or timer), in an internal frame if that is where it is (the stack response marks it). With the smart-stepper off, steps also stop in unmapped generated helpers it used to skip |
-| `dapLaunchArgs: { skipFiles: [...] }` | exactly your list | follows `justMyCode` unless set | fires | lands unless the frame is on your list and the stepper is on | may never land while the stepper is on and `<node_internals>/**` is on your list |
-| `adapterLaunchConfig: { smartStep: false }` (default list) | `<node_internals>/**`, `**/node_modules/**` | `false` | fires | lands in the next frame V8 does not skip (an internals frame on a request path) | lands, in an internals frame |
+**The server steps through skipped code itself** (issue #1130). js-debug's own smart stepper did it before, and is
+now off for every session whatever `smartStep` says: it re-stepped with a flag that moves the step to a later task
+and loses it (a `step_into` on the first `console.log` of a process ended the session), and it took one engine step
+per statement of the skipped code (131 for one `console.log`, about 6 s on a Linux host). `smartStep` is read as the
+session's choice instead, and a session that chose it has its steps served by the server over js-debug's raw CDP
+socket. What "skipped" means is still js-debug's own verdict on the frame, so `justMyCode`, your own `skipFiles` and
+source maps (an unmapped helper of a source-mapped file) all count.
+
+What a step does when the session steps through skipped code (the launch default):
+
+| Step | From | Lands |
+|---|---|---|
+| `step_into` | a line that calls your function through skipped code (`emitter.emit` to a listener, an array callback, a route handler from inside express) | in that function |
+| `step_into` | a line that calls only skipped code (`console.log`, `require`, `JSON.stringify`) | on the next line; the message says the line called only skipped code |
+| `step_into` | a line that only starts a later task (`setTimeout`, a promise callback) | on the next line; a breakpoint in the callback stops there |
+| `step_over`, `step_out` | a frame whose caller is skipped code, with your code further down the stack | in that frame of yours |
+| `step_over`, `step_out` | the last line of a function Node called (a request handler, a timer callback) | nowhere: nothing of your program is on the stack, so the program is resumed and the answer is `pending: true` with a sentence saying so; the next breakpoint stops it |
+| any step | skipped code (a breakpoint inside a dependency) | `step_into` walks on into your handler; `step_over` and `step_out` run on as in the row above. `justMyCode: false` steps inside that code |
+
+A breakpoint, an exception or a `debugger;` statement reached during a step stops as itself. A pause is never stepped
+away from: it lands where the program is, in Node's own code if that is where it is (the stack response marks the
+frame).
+
+| Launch | `skipFiles` sent | Steps through skipped code | `step_over` from a breakpoint inside a dependency |
+|---|---|---|---|
+| default (`justMyCode: true`) | `<node_internals>/**`, `**/node_modules/**` | yes | runs on (`pending: true`; the message names the skipped frame and the remedy) |
+| `dapLaunchArgs: { justMyCode: false }` | `<node_internals>/**` | no | lands on the next line of the dependency |
+| `dapLaunchArgs: { skipFiles: [...] }` | exactly your list | follows `justMyCode` unless `smartStep` is set | lands unless the frame is on your list |
+| `adapterLaunchConfig: { smartStep: false }` (default list) | `<node_internals>/**`, `**/node_modules/**` | no | lands in the next frame V8 does not skip (an internals frame on a request path) |
 
 A caller-supplied `skipFiles` **replaces** the default list (VS Code's launch.json semantics); include
 `<node_internals>/**` yourself if you still want internals skipped. An explicit `smartStep` always wins over the
 derived value. Attach defaults `smartStep` to `false` and leaves `skipFiles` unset (issue #513) — see
-`attach_to_process` in the tool reference.
+`attach_to_process` in the tool reference. With the stepping off, a step lands where V8 lands: a `step_into` on a
+`console.log` line stops in `<node_internals>`, and an `async` callee in TypeScript compiled for a target below
+ES2017 costs four unmapped `__awaiter` stops before its first line (issue #687).
 
-Why launch keeps the stepper on by default while attach turns it off (issue #687, measured on js-debug 1.112):
-js-debug's V8 blackbox patterns for `<node_internals>/**` cover `node:internal/*` but not top-level builtins such
-as `node:url` or `node:events` (the per-builtin patterns are built with a `.js` suffix the live URLs do not
-carry), so with the stepper off a `step_into` from a dependency frame stops in those internals one line at a
-time (`<node_internals>/url`) instead of in your handler, which the stepper reaches in one press; and `step_into`
-an `async` callee in TypeScript compiled for a target below ES2017 costs four unmapped `__awaiter` stops before
-the callee's first line. `step_over` across an `await` is unchanged either way. Those costs have no hint
-mechanism, while the two pending cases in the default row name their remedy — so the default stays, and
-`justMyCode: false` (or `smartStep: false`) is the switch when a pause or a step from a dependency matters more
-than stepping into one.
+**Steps V8 itself loses** (issue #1161). V8 never pauses for a step that leaves a function through a `return`
+written inside `try … finally` (measured on V8 12.4, 13.6 and 14.6 with a bare CDP client): a `step_out` of such a
+function, or a `step_over` off its `finally` block, used to answer `Step completed as session exited.` Node's own
+module loader has that shape, which is how a `step_into` on a `require` line was lost too. So a step never counts on
+V8 alone to come back to a frame. Before a step can leave a frame that way, the server sets temporary breakpoints on
+the frame the step returns to (the nearest frame of your program below, or the awaiting function of an `async`
+one), and whichever pauses first is the landing. That is something the server does in your process: up to 24
+temporary breakpoints for the length of one step, for every `step_out`, for a `step_over` or `step_into` in a
+function whose text contains `finally`, and for a step that walks through skipped code. They are removed when the
+step ends, however it ends. A function that returns to itself (recursion) gets none for `step_over` and
+`step_into`, so that one shape keeps V8's own behaviour.
+
+Not covered: a `step_over` across the first load of a module that has a breakpoint in it still runs on (issue
+#1162; js-debug pauses at the module's entry to bind the breakpoint, and V8 drops the step at any pause). A
+`step_into` on that line does land.
+
+On Linux every engine step costs about 46 ms whoever sends it (the inspector's socket), against 1.5 ms on Windows,
+so a `step_into` on a `console.log` line, which walks 24 engine steps into Node's code before it comes back, takes
+over a second there.
 
 A step whose stop is a breakpoint or an exception rather than the step itself is reported as
 `Stepped over; stopped on 'breakpoint' rather than on the step itself (see stopReason)` — true both when the next
-line carries a breakpoint and when a lost step's next request re-hit the same breakpoint; in the second case the
-program is back at the line you stepped from, and the message says so.
+line carries a breakpoint and when a step that ran on re-hit the same breakpoint on the next request; in the second
+case the program is back at the line you stepped from, and the message says so.
 
 ### Custom Configuration
 
