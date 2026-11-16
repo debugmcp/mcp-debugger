@@ -171,6 +171,22 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
       expectLanding(await step('step_over'), 'after withFinally');
     }, 60000);
 
+    it('step_out into an async caller is the engine\'s own, and the engine loses it (#1174)', async () => {
+      // The function being left is plain; the caller is async. It could
+      // suspend before a temporary breakpoint proves the step came back, so
+      // the server sets none. The program runs on to its end.
+      await pausedAt('return inside try-finally', undefined, ['calls withFinally from an async function']);
+      // The first stop is the call from the plain caller: run to the second.
+      let stop = await server!.call<StopAnswer>('continue_execution', {});
+      stop = await server!.call<StopAnswer>('wait_for_stop', { timeout: 20000 });
+      expect(stop.location?.line, JSON.stringify(stop)).toBe(lineOf('calls withFinally from an async function'));
+      stop = await server!.call<StopAnswer>('step_into', {});
+      expect(stop.location?.line, JSON.stringify(stop)).toBe(lineOf('return inside try-finally'));
+      const answer = await step('step_out');
+      expect(answer, JSON.stringify(answer)).toMatchObject({ success: true });
+      expect(answer.state, JSON.stringify(answer)).not.toBe('paused');
+    }, 60000);
+
     it('step_out of an async function with that shape is the engine\'s own, and the engine loses it (#1174)', async () => {
       await pausedAt('async return inside try-finally');
       // A temporary breakpoint below a function that can suspend cannot tell

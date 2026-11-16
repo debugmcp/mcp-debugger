@@ -35,43 +35,36 @@
  *   Any position there is where V8's own step-out would stop, so a hit at
  *   that depth is a landing.
  *
- *   A NET IS SET ONLY WHERE A HIT PROVES THE STEP CAME BACK. Three versions
- *   of a wider rule each stopped steps in the wrong place, because nothing
- *   V8 exposes tells "the function returned" from "it suspended at an
- *   await", nor one call of a function from another. So, in one place,
- *   before every command that can leave the frame on top (`guard`):
+ *   A NET IS SET ONLY WHERE A HIT PROVES THE STEP CAME BACK. Five versions
+ *   of the rule that decided where read the program's source to tell a
+ *   function that returns from one that suspends at an `await` or `yield`,
+ *   and each was fooled by some way of writing JavaScript. V8 knows, and
+ *   says so on every frame of a pause: `canBeRestarted` is false for an
+ *   async function, a generator and module code that may await, and for
+ *   every frame below one (measured on Node 22, 24 and 26 over every
+ *   function form). So, in one place, before every command that can leave
+ *   the frame on top (`guard`):
  *
- *     (a) The frame being left is a PLAIN function: not async, not a
- *         generator, not module code. That is read from its header (the text
- *         V8's functionLocation points at), for Node's own code as for the
- *         program's; a header that cannot be read counts as one that can
- *         suspend. A plain function comes down only by returning, so
- *         control back in the frame below means it returned: V8 landed
- *         there too, or lost the step. A function that can suspend is V8's
- *         own: V8 keeps a step across an `await`, and what it loses there
- *         (a leave through `finally` within one run) stays lost, and the
- *         answer says so. To spare the breakpoints where they cannot matter,
- *         a plain function whose text names nothing that closes through a
- *         finally (`finally`, `for...of`, `using`) is not netted either:
- *         that test only ever errs toward netting, and a miss costs a
- *         rescue, never a wrong landing.
+ *     (a) The frame guarded, the nearest frame of the program below, can be
+ *         restarted. Then it and every frame above it are plain functions:
+ *         each comes down only by returning, so control back in the guarded
+ *         frame means the step came back, and the guarded frame stays on the
+ *         stack until it reaches a net position. A frame that cannot be
+ *         restarted is not netted: a step that leaves through an async
+ *         function or a generator, or returns to one, is V8's own, and what
+ *         V8 loses there stays lost (issue #1174). To spare breakpoints, a
+ *         function being left whose text names nothing that closes through
+ *         a finally (`finally`, `for...of`, `using`) is not netted either;
+ *         that test only ever errs toward netting.
  *
- *     (b) The frame guarded is on the stack and stays there until it
- *         reaches a net position. A plain function does. One that can
- *         suspend does unless it can suspend between the call returning
- *         and its next break location: V8 puts one at every statement's
- *         start and every call, so only when the calling statement awaits
- *         or yields, or the function suspends with no keyword there (`for
- *         await`, `await using`, an async generator's `return`). Then it can
- *         leave the stack before any position, another call of the same
- *         function can take its depth, and no net is set.
- *
- *     (c) The net covers every break position of the frame it guards, or
+ *     (b) The net covers every break position of the frame it guards, or
  *         there is none: a hit is then the first position control reaches
- *         in that activation. A function with more than `netSize`
- *         positions is not netted. A rescue lands at the caller's next
- *         break location after the call; V8's own step-out, when it does
- *         not lose the step, can stop once more on the call's own line.
+ *         in that activation. A function with more than `netSize` positions,
+ *         or whose positions cannot all be found, is not netted, and when
+ *         V8 refuses one of them none is kept. A rescue lands at the
+ *         caller's next break location after the call; V8's own step-out,
+ *         when it does not lose the step, can stop once more on the call's
+ *         own line.
  *
  *   Nothing is ever guarded that is not on the stack (no net on an awaiting
  *   function), and nothing is decided on a pause's reason, which does not
@@ -113,7 +106,6 @@
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { createLogger } from '../utils/logger.js';
 import { ErrorMessages } from '../utils/error-messages.js';
-import { functionKind, statementCanSuspend, type FunctionKind } from './js-statement-scan.js';
 
 // redirectable: re-pointed into the per-session proxy log at worker init (#519)
 const logger = createLogger('js-stepper', { redirectable: true });
@@ -195,8 +187,11 @@ interface CdpCallFrame {
   functionName?: string;
   functionLocation?: CdpLocation;
   location: CdpLocation;
-  /** Innermost scope first; `module` before any `local` means the frame is a module's own code. */
-  scopeChain?: Array<{ type?: string }>;
+  /**
+   * V8's word on restarting the frame: false for an async function, a
+   * generator, module code that may await, and every frame below one.
+   */
+  canBeRestarted?: boolean;
 }
 
 interface CdpAsyncFrame {
@@ -340,8 +335,6 @@ export class JsStepper {
   private owedNetHit = false;
   /** Scripts js-debug marked "Skipped by skipFiles": a script-level verdict, not asked again. */
   private readonly skippedScripts = new Set<string>();
-  /** Whether a function can suspend, by its header: read once per function. */
-  private readonly kinds = new Map<string, FunctionKind | null>();
   /** Whether a function's text names a construct that closes through a finally. */
   private readonly closing = new Map<string, boolean>();
   /** What each pause's top frame returns to: asked of js-debug once per pause. */
@@ -943,14 +936,27 @@ export class JsStepper {
   /** The break positions of the frame's function. */
   private async locationsOf(frame: CdpCallFrame): Promise<CdpBreakLocation[]> {
     const here = frame.location;
-    let all = frame.functionLocation ? await this.possible(frame.functionLocation) : [];
-    // Top-level code whose first token is a function declaration: the function
-    // at that position is the nested one. Ask from the frame's own line.
-    const spans = all.length > 0 && sameOrAfter(here, all[0]) && sameOrAfter(all[all.length - 1], here);
-    if (!spans) {
-      all = await this.possible({ scriptId: here.scriptId, lineNumber: here.lineNumber, columnNumber: 0 });
+    let start = frame.functionLocation;
+    // Top-level code whose first token is a function declaration: V8 answers
+    // the nested function's positions for the script's own position. The
+    // script's code goes on after that function, so ask again from just after
+    // its last position, until the answer holds the frame's position. Every
+    // position of the frame's function, or none: a part of it is not a net.
+    for (let tries = 0; start && tries < 16; tries++) {
+      const all = await this.possible(start);
+      if (all.length === 0) {
+        return [];
+      }
+      if (sameOrAfter(here, all[0]) && sameOrAfter(all[all.length - 1], here)) {
+        return all;
+      }
+      const last = all[all.length - 1];
+      if (!sameOrAfter(here, last)) {
+        return [];
+      }
+      start = { scriptId: last.scriptId, lineNumber: last.lineNumber, columnNumber: (last.columnNumber ?? 0) + 1 };
     }
-    return all;
+    return [];
   }
 
   /** A net on every one of `all`, the break positions of the function it guards. */
@@ -972,7 +978,9 @@ export class JsStepper {
       )
     );
     const ids = new Set(answers.map((answer) => answer?.breakpointId).filter((id): id is string => typeof id === 'string'));
-    if (ids.size === 0) {
+    if (ids.size < all.length) {
+      // A net with a hole is no net: remove what was set.
+      await Promise.all([...ids].map((breakpointId) => cdp.send('Debugger.removeBreakpoint', { breakpointId }).catch(() => undefined)));
       return false;
     }
     this.nets.push({ ...net, ids });
@@ -998,77 +1006,11 @@ export class JsStepper {
     let lines = this.sources.get(scriptId);
     if (!lines) {
       const answer = await this.cdp?.send<{ scriptSource?: string }>('Debugger.getScriptSource', { scriptId });
-      lines = (answer?.scriptSource ?? '').split('\n');
+      // V8 ends a line at CR LF, LF, CR, U+2028 and U+2029.
+      lines = (answer?.scriptSource ?? '').split(/\r\n|[\n\r\u2028\u2029]/);
       this.sources.set(scriptId, lines);
     }
     return lines;
-  }
-
-  /**
-   * Rule (a): whether the frame's function can hand control down without
-   * returning: an async function, a generator, or a module's own code (which
-   * may await at its top level). Read from the function's header, the text
-   * V8's functionLocation points at, which is the parameter list of a
-   * function or method (`async`, `*` stand right before it) and the first
-   * token of an arrow (`async` itself). V8 gives the source of Node's own
-   * scripts too. Doubt reads as "can suspend": no net. Never throws.
-   */
-  private async canSuspend(frame: CdpCallFrame): Promise<boolean> {
-    const kind = await this.kindOf(frame);
-    return kind === null || kind.async || kind.generator;
-  }
-
-  /**
-   * What the frame's function is, by `functionKind`; null when that is not
-   * known with confidence, and for a module's own code (which may await at
-   * its top level). Read once per function. Never throws.
-   */
-  private async kindOf(frame: CdpCallFrame): Promise<FunctionKind | null> {
-    const key = fnKey(frame);
-    if (this.kinds.has(key)) {
-      return this.kinds.get(key) ?? null;
-    }
-    let kind: FunctionKind | null = null;
-    try {
-      const scopes = frame.scopeChain ?? [];
-      const firstFunctionScope = scopes.find((scope) => scope.type === 'local' || scope.type === 'module');
-      const at = frame.functionLocation;
-      if (firstFunctionScope?.type !== 'module' && at) {
-        kind = functionKind(await this.linesOf(at.scriptId), at.lineNumber, at.columnNumber ?? 0);
-      }
-    } catch (err) {
-      logger.debug(`[JsStepper] could not read a function's header: ${errorText(err)}`);
-    }
-    this.kinds.set(key, kind);
-    return kind;
-  }
-
-  /**
-   * Rule (b), for a guarded frame that can suspend: whether it can suspend
-   * between the call it is making returning and its next break location. V8
-   * puts a break location at every statement's start and at every call, so
-   * it cannot unless the calling statement awaits or yields, or the function
-   * suspends without a keyword there (`for await`, `await using`): read by
-   * `statementCanSuspend`, which errs toward "it can". Never throws.
-   */
-  private async callStatementSuspends(frame: CdpCallFrame): Promise<boolean> {
-    try {
-      const here = frame.location;
-      const all = await this.locationsOf(frame);
-      if (all.length === 0) {
-        return true;
-      }
-      const lines = await this.linesOf(here.scriptId);
-      const from = Math.min(frame.functionLocation?.lineNumber ?? all[0].lineNumber, all[0].lineNumber);
-      const to = all[all.length - 1].lineNumber;
-      const kind = await this.kindOf(frame);
-      return statementCanSuspend(lines, here.lineNumber, here.columnNumber ?? 0, from, to, {
-        asyncGenerator: kind === null || (kind.async && kind.generator)
-      });
-    } catch (err) {
-      logger.debug(`[JsStepper] could not read the calling statement: ${errorText(err)}`);
-      return true;
-    }
   }
 
   /**
@@ -1114,12 +1056,14 @@ export class JsStepper {
     try {
       const frames = pause.callFrames;
       const top = frames[0];
-      if (this.guardedBelow(frames.length) || (skipped && chain.walkHasNothingBelow)) {
+      if (chain.unwinding || this.guardedBelow(frames.length) || (skipped && chain.walkHasNothingBelow)) {
+        // Unwinding: a net fired in a deeper call and was dropped; V8's own
+        // step-outs finish the step.
         return;
       }
-      // (a) Only below a frame that comes down by returning, and no other way;
-      // and only where its text names something V8 can lose the step on.
-      if ((await this.canSuspend(top)) || !(await this.namesAFinally(top))) {
+      // Only where the text of the function being left names something V8 can
+      // lose the step on: this spares breakpoints, and errs toward netting.
+      if (!(await this.namesAFinally(top))) {
         return;
       }
       const target = await this.returnTarget(chain, pause);
@@ -1135,11 +1079,12 @@ export class JsStepper {
         // It returns to itself (recursion): a net would sit in the frame being stepped in.
         return;
       }
-      // (b) The guarded frame must still be on the stack when it reaches a net position.
-      if ((await this.canSuspend(frame)) && (await this.callStatementSuspends(frame))) {
+      // (a) V8's own word: the guarded frame and every frame above it are
+      // plain functions, which come down only by returning.
+      if (frame.canBeRestarted !== true) {
         return;
       }
-      // (c) Every position of it, or none.
+      // (b) Every position of it, or none.
       const all = await this.locationsOf(frame);
       if (all.length === 0 || all.length > this.tunables.netSize) {
         return;

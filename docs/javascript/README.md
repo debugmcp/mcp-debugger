@@ -159,28 +159,26 @@ on each break location of one function, for the length of one step, removed when
 A function with more than 100 break locations is not guarded, and where the breakpoints cannot be set the step
 goes on with V8 alone.
 
-They are set only where a hit there proves the step came back:
+They are set only where a hit there proves the step came back, and V8 decides that, not the server reading
+your code:
 
-- **The function being left is a plain one**: not `async`, not a generator, not a module's own code (read from the
-  function's header, for Node's own code as for yours). A plain function comes down only by returning, so control
-  back in the frame below means it returned. An `async` function or a generator can also hand control down by
-  suspending at an `await` or `yield`, and a breakpoint below would then stop the step in the caller while it is
-  still on its way to the next line, or in another call of the same function. So those steps are V8's own.
-- **The frame it returns to stays on the stack** until it reaches one of them: a plain function does; an `async`
-  one does unless the statement making the call awaits or yields (`const got = await inner(id)` suspends the
-  caller as soon as the call returns, and another call of the same function can take its place), or the function
-  suspends with no keyword there (`for await`, `await using`, a `return` in an async generator).
+- **The frame the step returns to, and every frame above it, are plain functions**: V8 says it could restart that
+  frame, which it says of no `async` function, generator or module code that may await, nor of any frame below one
+  (checked on Node 22, 24 and 26 over every way of writing a function). A plain function comes down only by
+  returning, so control back in that frame means the step came back, in the same call. A function that can suspend
+  at an `await` or `yield` hands control down without returning, and a breakpoint below it would stop the step in
+  the caller while it is still on its way, or in another call of the same function.
 - **Every break location of that frame, or none**: a breakpoint on part of a function can miss the place control
-  comes back to (a loop's top, the code after a long `else`) and stop later, in another iteration or another
-  call.
+  comes back to (a loop's top, the code after a long `else`) and stop later, in another iteration or another call.
+  A function with more than 100 break locations, or whose locations cannot all be found, is not guarded.
 - **Never on the frame being stepped in**: a function that returns to itself (recursion) gets none for `step_over`
   and `step_into`.
 
-What that leaves lost, as in 0.26.0: a step V8 loses in an `async` function or a generator, a step out of a
-plain function whose caller awaits the call, and one out of a plain function whose caller has more than 100 break
-locations. Such a step runs on: while the program keeps running it answers `pending: true`, with a sentence that
-names these cases; when the program ends first it answers `Step completed as session exited.` A breakpoint on the
-line you expected the step to reach stops there (issue #1174).
+What that leaves lost, as in 0.26.0: a step V8 loses while leaving an `async` function or a generator, and one that
+leaves a plain function back into an `async` function or a generator (a helper with a `try … finally`, or a
+`require`, called from an `async` function). Such a step runs on: while the program keeps running it answers
+`pending: true`, with a sentence that names these cases; when the program ends first it answers `Step completed as
+session exited.` A breakpoint on the line you expected the step to reach stops there (issue #1174).
 
 Not covered: a `step_over` across the first load of a module that has a breakpoint in it still runs on (issue
 #1162; js-debug pauses at the module's entry to bind the breakpoint, and V8 drops the step at any pause). A
