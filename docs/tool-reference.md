@@ -490,7 +490,7 @@ Starts debugging a script.
 - `args` (array of strings, optional): Command line arguments for the script.
 - `dapLaunchArgs` (object, optional): Standard DAP launch arguments:
   - `stopOnEntry` (boolean): Stop at first line (default `false` — the opposite of attach, which pauses unless `stopOnEntry` is `false`)
-  - `justMyCode` (boolean): Debug only user code (default `true`). JavaScript launch: `true` puts `node_modules` on js-debug's `skipFiles` beside Node internals, and a step does not stop in skipped code: the server steps through it itself, so `step_into` follows a call through skipped code into your own function, and otherwise lands on the next line and says the line called only skipped code (issue #1130; see [`step_into`](#step_into)). `false` takes `node_modules` off the list and turns that stepping off, so every step lands where V8 lands, inside dependencies and Node internals. A pause lands where the program is either way. A caller `skipFiles` replaces the default list. Source maps are on for every JavaScript launch, `.js` programs included — stops report `src/*.ts` when maps and sources are present; `adapterLaunchConfig: { sourceMaps: false }` opts out (issue #684)
+  - `justMyCode` (boolean): Debug only user code (default `true`). JavaScript launch: `true` puts `node_modules` on js-debug's `skipFiles` beside Node internals, and a step does not stop in skipped code: the server steps through it itself, so `step_into` follows a call through skipped code into your own function, and otherwise lands on the next line and says how far it walked without reaching your code (issue #1130; see [`step_into`](#step_into)). `false` takes `node_modules` off the list and turns that stepping off, so every step lands where V8 lands, inside dependencies and Node internals. A pause lands where the program is either way. A caller `skipFiles` replaces the default list. Source maps are on for every JavaScript launch, `.js` programs included — stops report `src/*.ts` when maps and sources are present; `adapterLaunchConfig: { sourceMaps: false }` opts out (issue #684)
   - `noDebug` (boolean): DAP's "launch without enabling debugging" flag (default `false`). What it does depends on the adapter, and the response says which case you are in. **Honoured** — the debugger is off: no breakpoint binds, no exception filter arms, no entry stop lands, and no breakpoint, exception or entry stop ever arrives, so a short script ends `stopped` and a server stays `running`. That is a legitimate plain run and says nothing by itself; when the session has breakpoints (line or function), an explicit `breakOnExceptions` other than `"none"`, or `stopOnEntry`, the `warning` says the debugger is off for this launch and names what will not fire — not that no stop of any kind can come — in place of the unbound-breakpoint diagnostics that would otherwise send you to check paths that are fine (issue #710). js-debug, debugpy, Delve and CodeLLDB honour it (debugpy and Delve open no configuration phase at all, so the launch is complete on the launch response; CodeLLDB refuses the configuration requests, and the refusal reaches the `warning` and `get_output` — issue #746). The run ends `stopped` with the program's output and, where the adapter reports one, the exit code (Delve states it as a console line, `Process N has exited with status S`, which is read back as `exitCode` — issue #753). Under the flag Delve runs the program through Go's `exec`, so on Windows the binary needs its `.exe` extension. **Ignored** — rdbg, netcoredbg and the Java bridge run the debugger regardless, and the rust launch transform never forwards the flag: the `warning` says the flag had no effect and everything works as usual. The same warning comes back from `restart_debugging` and from a `dryRunSpawn` check. While such a launch runs, the session remembers the decision (`list_debug_sessions` reports `debuggerDisabled: true`) and every later surface says why: `set_breakpoint` and `list_breakpoints` keep the adapter's own answer (still sent — e.g. js-debug's "Unbound breakpoint", or CodeLLDB's refusal echoed onto each pre-launch breakpoint) and add "the debugger is off for this launch (noDebug is true)…", `pause_execution` is still sent and the same sentence explains a pause that never lands or one the adapter refused, and `step_*`/`continue_execution`/`get_stack_trace`/`get_local_variables`/`evaluate_expression` append it to their "not paused" answers. A `stopped` event only a live debugger produces — a breakpoint the adapter itself reports (or names in `hitBreakpointIds`), an exception stop, an entry stop — proves the debugger on for that adapter build and clears the decision, and so does a breakpoint the adapter verified (every honouring adapter refuses or unbinds one under the flag, so a bound one can only come from a build that ignores it); a pause, a step taken from one, or a `debugger;` statement do not (js-debug lands all three under the flag while its breakpoints stay unbound; an uncaught throw does not stop). On a paused session the sentence keeps only the clause still true of it — breakpoints cannot bind — and outside a live launch (`initializing`/`running`/`paused`) the decision is neither reported nor consulted (issue #749).
   - Additional DAP launch keys (`program`, `cwd`, `env`, language-specific options) pass through to the adapter. For Python, `module` (`python -m <module>`) or `code` (`python -c`) replaces `program`: debugpy takes exactly one target, so the launch goes out without `program` and the response's `warning` says so (`dapLaunchArgs.module: launched as a module (python -m); program is not sent …`); `scriptPath` still has to name an existing file, and `cwd` is what `-m` puts on `sys.path`: for these launches it defaults to the directory above the top-most package containing `scriptPath` (the `warning` names it), and a module launch of a project sets it to the project root explicitly (issue #985). `dryRunSpawn` reports such a launch's `data.script` as `module: <name>` or `code: …`. Top-level parameters do **not** belong here: a nested `breakOnExceptions` is honored as an alias (the top-level value wins if both are given) and reported via a `warning` in the response; other misplaced top-level keys (`dryRunSpawn`, `sessionId`, `scriptPath`, `adapterLaunchConfig`) are stripped with a warning instead of silently riding into the launch config.
 - `adapterLaunchConfig` (object, optional): Adapter-specific launch configuration overrides. Use this for language-specific settings that go beyond standard DAP arguments (e.g., `mainClass` and `classpath` for Java, `buildCommand` for Rust). For Rust, `_adapterSettings` passes through to CodeLLDB (issue #441) — e.g. `{"_adapterSettings": {"scriptConfig": {"lang": {"rust": {"sysroot": "/path"}}}}}` points the Rust formatter lookup at an explicit sysroot; the `CODELLDB_RUST_SYSROOT` env var does the same without per-launch config (a user-supplied `_adapterSettings` value wins over the env var).
@@ -706,8 +706,9 @@ The step is not cancelled: the session becomes `"paused"` on its own when it com
 The adapter may append one sentence to that message saying what the step is waiting for. The JavaScript adapter
 does so for a launch that steps through skipped code (issues #678, #1130): a step issued from skipped code names
 the frame and says a step does not stop there, and any other pending step says it left the frame it started in
-and nothing of your program has run since (a function Node called returned to the event loop, or the line is
-waiting on work in flight). So match a pending step by its `pending: true` flag, not by the message text.
+and has not stopped in your program since (a function Node called returned to the event loop, the line is
+waiting on work in flight, or the engine lost the step: an `await` that was the last thing a function did before
+it left through `try … finally`). So match a pending step by its `pending: true` flag, not by the message text.
 
 Once a stop has been observed, the stop path owns the answer — a step that demonstrably landed is never reported as pending afterwards, at the cost of the response then being bounded by the stack-trace round trip rather than by the ~5s window. If the debuggee ends while the step is in flight the result is still a success, with a terminal `state` and a message such as `"Step completed as session terminated."`.
 
@@ -738,11 +739,16 @@ Same ~5s wait and `pending: true` contract as step_over — see [Pending steps](
 
 - A line that calls your own function through skipped code lands in that function: an event listener behind
   `emitter.emit`, an array callback, a route handler from inside express.
-- A line that calls only skipped code (Node internals, `node_modules`, files on `skipFiles`) lands on the next
-  line, and the message says so: `Stepped into. The call on that line ran only skipped code (Node internals,
-  node_modules, or files on skipFiles), so there was nothing of your program to step into and the line ran as a
-  step over. dapLaunchArgs.justMyCode: false steps into that code.`
-- A call that only starts a later task (`setTimeout`, a promise callback) is not followed: the step lands on the
+- A line whose call stays in skipped code (Node internals, `node_modules`, files on `skipFiles`) for the whole
+  walk lands on the next line, and the message says what is known: `Stepped into. step_into walked 25 engine steps
+  into the call on that line and was still in skipped code (Node internals, node_modules, or files on skipFiles),
+  so it stepped back out and the rest of the line ran as a step over runs it. Code of yours that the call reaches
+  further in (a module it loads, a late callback) ran without stopping: a breakpoint there stops in it. To stop
+  inside the skipped code instead, turn stepping through it off: justMyCode: false on a launch, smartStep: false
+  on a launch or an attach.` A `console.log` and a `require` answer this way.
+- A line that calls native code only (`JSON.stringify`) has nothing to walk into: a plain `Stepped into` on the
+  next line.
+- A call that only starts a later task (`setTimeout`, a `.then` callback) is not followed: the step lands on the
   next line. Set a breakpoint in the callback to stop there.
 
 See [Stepping and pausing inside dependencies](javascript/README.md#stepping-and-pausing-inside-dependencies-justmycode-skipfiles).
@@ -767,6 +773,22 @@ Steps out of the current function.
 ```
 
 Same ~5s wait and `pending: true` contract as step_over — see [Pending steps](#pending-steps).
+
+**JavaScript** (a launch that steps through skipped code, the default; issues #1130, #1161):
+
+- Out of an `async` function the event loop resumed, the step lands in the function that awaits it, in the
+  call that awaited.
+- When that `async` function has a `finally` clause, the engine can lose the step, so the server catches it
+  at the awaiting function instead, in whichever call of that function runs next, and the message says so:
+  `Stepped out. The engine loses a step that leaves a function through try...finally, so this step was caught
+  where the awaiting function, handler, next ran. If several calls of handler are in flight, this stop may be
+  in another call's continuation than the one that awaited the function you stepped out of: check its
+  variables.`
+- Out of a function that nothing of your program called or awaits (a timer callback, a `.then` callback, a
+  request handler) there is nowhere to land: the program is resumed, and the answer is the next stop or
+  `pending: true`.
+
+See [Stepping and pausing inside dependencies](javascript/README.md#stepping-and-pausing-inside-dependencies-justmycode-skipfiles).
 
 ---
 
@@ -998,7 +1020,8 @@ A frame is program code when the adapter's policy does not call it internal **an
 
 An adapter may append a sentence to that message, so match a pending pause by its `pending: true` flag, not by the
 message text. (The JavaScript adapter used to add one about js-debug's own stepper stepping away from a pause that
-landed in skipped code; that stepper is off since issue #1130, and a pause lands where the program is.)
+landed in skipped code; that stepper is off since issue #1130, and a pause lands where the program is, also when
+it is asked for while a step is still pending.)
 
 **Notes:**
 - The `"state"` field is the session state at the moment the tool answers: `"paused"` once the stop has been observed, and `"running"` **only on the pending path** — the request was delivered but the program has not stopped yet. On that path, call [`wait_for_stop`](#wait_for_stop) to block until the state flips to `"paused"` when the target next executes code (or poll `list_debug_sessions`).
