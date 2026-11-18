@@ -250,7 +250,7 @@
                 },
                 "justMyCode": {
                   "type": "boolean",
-                  "description": "Only debug user code (default true). JavaScript launch: true skips node_modules and Node internals when stepping (step_into follows a call through them into your own code, or lands on the next line and says how far it walked without reaching it); false lands every step where the engine lands, inside dependencies and Node internals. A pause lands where the program is either way"
+                  "description": "Only debug user code (default true). JavaScript launch: true skips node_modules and Node internals when stepping (step_into follows a call through them into your own code when its walk reaches it within 512 engine steps or 3 s, whichever comes first, or else steps out and says how far it walked); false lands every step where the engine lands, inside dependencies and Node internals. A pause lands where the program is either way"
                 },
                 "noDebug": {
                   "type": "boolean",

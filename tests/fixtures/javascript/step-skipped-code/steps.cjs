@@ -13,6 +13,14 @@ function listener(value) {
 }
 emitter.on('x', listener);
 
+// Node's once-wrapper calls this one: a longer walk through Node's code than on().
+const onceEmitter = new EventEmitter();
+function onceListener(value) {
+  const tripled = value * 3; // MARK: in the once listener
+  return tripled;
+}
+onceEmitter.once('y', onceListener);
+
 function mapper(value) {
   return value + 1; // MARK: in the mapper
 }
@@ -66,9 +74,13 @@ function syncPart() {
 async function main() {
   console.log('first line printed'); // MARK: the first console.log
   const afterLog = 1; // MARK: after the first console.log
+  console.log('a later line printed'); // MARK: a later console.log
+  const afterLaterLog = 1; // MARK: after a later console.log
+  for (const item of [1, 2, 3]) console.log('item', item); // MARK: a one-line loop
   const mapped = [1, 2].map(mapper); // MARK: a builtin calls the program
   emitter.emit('x', 1); // MARK: Node code calls the program
   const afterEmit = 2; // MARK: after emit
+  onceEmitter.emit('y', 1); // MARK: emits to a once listener
   setTimeout(() => {}, 0); // MARK: starts a later task
   const afterTimeout = 3; // MARK: after setTimeout
   const called = callee(); // MARK: calls a function with a breakpoint
@@ -80,7 +92,7 @@ async function main() {
   setTimeout(timerCallback, 0);
   setTimeout(laterCallback, 30);
   await sleep(120);
-  return [afterLog, mapped, afterEmit, afterTimeout, called, fromSync, awaited, afterAwait, again, afterAgain];
+  return [afterLog, afterLaterLog, mapped, afterEmit, afterTimeout, called, fromSync, awaited, afterAwait, again, afterAgain];
 }
 
 main().then(() => {

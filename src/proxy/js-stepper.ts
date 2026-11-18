@@ -35,12 +35,20 @@
  *   cannot be told from a hit in a later call of the caller: CDP names no
  *   single activation.
  *
- *   Skipped code on top: `step_into` repeats up to a budget (that is how a
- *   call through Node's own code reaches a callback of the program's), then
- *   steps out; `step_over` and `step_out` step out at once. With nothing of
- *   the program below (no frame, no awaiter), the stack the step started on
- *   is gone: the program is resumed and nothing is reported (stepping out
- *   of the bottom frame would land in the next task's internals instead).
+ *   Skipped code on top: `step_into` steps in again (that is how a call
+ *   through Node's own code reaches a callback of the program's) while the
+ *   walk is inside both of its bounds, engine steps taken in skipped code and
+ *   time since its first landing there, then steps out; `step_over` and
+ *   `step_out` step out at once. A pause in the program's code is the
+ *   landing, on the line the step started from too: in the measured traces
+ *   V8's step-out lands on the caller's next break position (11:17 after a
+ *   call at 11:1), never back on the call it left, and a first step-in on a
+ *   one-line for...of lands on the header's next position (9:17 to 9:12):
+ *   where the program's code next runs. With nothing
+ *   of the program below (no frame, no awaiter), the stack the step started
+ *   on is gone: the program is resumed, and the only word of it is the
+ *   proxy's own `proxyStepLeftStack` event, for the pending answer (stepping
+ *   out of the bottom frame would land in the next task's internals instead).
  *
  *   A pause that is not the stepper's (another breakpoint, an exception) is
  *   js-debug's to decide. Resumed by js-debug, the chain waits on. Kept, the
@@ -59,6 +67,7 @@
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { createLogger } from '../utils/logger.js';
 import { ErrorMessages } from '../utils/error-messages.js';
+import { PROXY_STEP_LEFT_STACK_EVENT } from './dap-proxy-interfaces.js';
 
 // redirectable: re-pointed into the per-session proxy log at worker init (#519)
 const logger = createLogger('js-stepper', { redirectable: true });
@@ -77,12 +86,16 @@ export interface StepperCdp {
 }
 
 export interface JsStepperTunables {
-  /** Repeats of a step-in while the landing is skipped code, before stepping out. */
-  budget: number;
-  /** CDP step commands in one chain, all told. */
+  /** Engine steps a step-in may take in skipped code before it steps out. */
+  walkBudgetSteps: number;
+  /**
+   * How long a step-in may walk through skipped code, from the chain's first
+   * landing there, before it steps out. A step answers `pending` after about
+   * 5 s; the step-outs after the walk need room inside that.
+   */
+  walkBudgetMs: number;
+  /** CDP step commands in one chain, all told: a backstop above both walk bounds. */
   commandCap: number;
-  /** Re-issued step-ins when a step-in lands back on the statement it started from. */
-  reissueCap: number;
   /** How long a finished chain waits for js-debug's `stopped` events before it reports without them. */
   settleCeilingMs: number;
   /** How long `stackTrace` may answer "not paused" for a pause js-debug keeps. */
@@ -90,9 +103,9 @@ export interface JsStepperTunables {
 }
 
 export const DEFAULT_JS_STEPPER_TUNABLES: JsStepperTunables = {
-  budget: 24,
-  commandCap: 128,
-  reissueCap: 24,
+  walkBudgetSteps: 512,
+  walkBudgetMs: 3000,
+  commandCap: 2048,
   settleCeilingMs: 2000,
   verdictCeilingMs: 2000
 };
@@ -104,6 +117,8 @@ export interface JsStepperOptions {
   tunables?: Partial<JsStepperTunables>;
   /** Test seam. */
   sleep?: (ms: number) => Promise<void>;
+  /** Test seam: the clock the walk's time bound reads. */
+  now?: () => number;
 }
 
 export type StepKind = 'in' | 'over' | 'out';
@@ -175,7 +190,6 @@ interface Chain {
   kind: StepKind;
   threadId: number | undefined;
   originDepth: number;
-  originLine: number;
   originFn: string;
   inbox: Inbox[];
   wake: (() => void) | null;
@@ -186,10 +200,12 @@ interface Chain {
   stoppedSeen: number;
   lastStopped: DebugProtocol.Event | null;
   commands: string[];
+  /** Step-ins sent from a landing in skipped code: the walk's engine steps. */
   spent: number;
-  reissues: number;
-  /** Step-ins a step-in had sent when it gave up on the skipped code and stepped out; 0 if it never did. */
-  walkedBeforeSteppingOut: number;
+  /** When the walk's first landing in skipped code was judged; null before it. */
+  walkStartedAt: number | null;
+  /** How the walk through skipped code ended, when a step-in gave up on it and stepped out. */
+  walkEnded: { steps: number; by: 'steps' | 'time' } | null;
   /** Every command the chain may send is spent and skipped code is still on top. */
   capped: boolean;
   /** The caller asked for a pause during the chain: the next stop is theirs. */
@@ -229,6 +245,7 @@ export class JsStepper {
   private readonly deliver: (event: DebugProtocol.Event) => void;
   private readonly tunables: JsStepperTunables;
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly now: () => number;
 
   private cdp: StepperCdp | null = null;
   private readonly onCdpEvent = (method: string, params: unknown): void => this.handleCdpEvent(method, params);
@@ -241,7 +258,13 @@ export class JsStepper {
   /** `stopped` events of a finished chain still on their way; dropped when they arrive, until the deadline. */
   private owed = 0;
   private owedUntil = 0;
-  /** Scripts js-debug marked "Skipped by skipFiles": a script-level verdict, not asked again. */
+  /**
+   * Scripts of Node's own that js-debug marked "Skipped by skipFiles", not
+   * asked about again. js-debug decides per original source; a Node module
+   * is one script and one source (`<node_internals>/...`), so its verdict
+   * holds at every position. A bundle or a node_modules file is not
+   * remembered: some of its lines can be the program's.
+   */
   private readonly skippedScripts = new Set<string>();
   /** What each pause's top frame returns to: asked of js-debug once per pause. */
   private readonly targets = new WeakMap<CdpPaused, ReturnTarget>();
@@ -251,6 +274,7 @@ export class JsStepper {
     this.deliver = options.deliver;
     this.tunables = { ...DEFAULT_JS_STEPPER_TUNABLES, ...(options.tunables ?? {}) };
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    this.now = options.now ?? Date.now;
   }
 
   /** The session's choice: step through skipped code (on), or land where V8 lands (off). */
@@ -312,7 +336,6 @@ export class JsStepper {
       kind,
       threadId: (args as { threadId?: number } | undefined)?.threadId,
       originDepth: origin.callFrames.length,
-      originLine: top.location.lineNumber,
       originFn: fnKey(top),
       inbox: [],
       wake: null,
@@ -322,8 +345,8 @@ export class JsStepper {
       lastStopped: null,
       commands: [],
       spent: 0,
-      reissues: 0,
-      walkedBeforeSteppingOut: 0,
+      walkStartedAt: null,
+      walkEnded: null,
       capped: false,
       pauseRequested: false,
       pauseTaken: false,
@@ -333,8 +356,8 @@ export class JsStepper {
     this.owed = 0;
 
     try {
-      // js-debug's mark on the frame the step starts from: a script it skips
-      // as a whole is then not asked about again at a landing.
+      // js-debug's mark on the frame the step starts from: a module of Node's
+      // own it skips is then not asked about again at a landing.
       await this.isSkipped(chain, origin);
       await this.sendStep(chain, CDP_COMMAND[kind]);
     } catch (err) {
@@ -525,8 +548,6 @@ export class JsStepper {
     }
     chain.kept++;
 
-    const top = pause.callFrames[0];
-    const depth = pause.callFrames.length;
     const skipped = await this.isSkipped(chain, pause);
     if (chain.cancelled) {
       // Given up while js-debug was being asked: nothing more is sent.
@@ -534,31 +555,36 @@ export class JsStepper {
     }
 
     if (skipped) {
-      // A step-in walks on while it has budget, with or without anything
-      // below: a step issued inside a dependency reaches the program's
-      // handler by calls, not returns (issue #687).
-      if (chain.kind === 'in' && chain.spent < this.tunables.budget) {
-        chain.spent++;
-        return { kind: 'command', command: CDP_COMMAND.in };
+      // A step-in walks on while it is inside both bounds, with or without
+      // anything below: a step issued inside a dependency reaches the
+      // program's handler by calls, not returns (issue #687). The bounds keep
+      // the answer inside the window after which a step answers `pending`
+      // (the time, which is what an engine step costs over a slow inspector
+      // link decides), and keep a walk that never reaches the program's code
+      // from costing all of that time on a fast one (the steps).
+      if (chain.kind === 'in' && chain.walkEnded === null) {
+        const now = this.now();
+        chain.walkStartedAt ??= now;
+        const withinSteps = chain.spent < this.tunables.walkBudgetSteps;
+        const withinTime = now - chain.walkStartedAt < this.tunables.walkBudgetMs;
+        if (withinSteps && withinTime) {
+          chain.spent++;
+          return { kind: 'command', command: CDP_COMMAND.in };
+        }
+        chain.walkEnded = { steps: chain.spent, by: withinSteps ? 'time' : 'steps' };
       }
       // It has to step out now. With nothing of the program below (no frame,
       // no awaiter), the stack the step started on is gone.
       if ((await this.returnTarget(chain, pause)).kind === 'nothing') {
         return { kind: 'left-stack' };
       }
-      if (chain.kind === 'in' && chain.walkedBeforeSteppingOut === 0) {
-        chain.walkedBeforeSteppingOut = chain.commands.filter((sent) => sent === CDP_COMMAND.in).length;
-      }
       return { kind: 'command', command: CDP_COMMAND.out };
     }
 
-    // Program code on top: V8's step landed. A step-in that is back on the
-    // line it left steps in again: that enters the line's next call, or moves on.
-    const backOnOriginStatement = depth === chain.originDepth && fnKey(top) === chain.originFn && top.location.lineNumber === chain.originLine;
-    if (chain.kind === 'in' && backOnOriginStatement && chain.reissues < this.tunables.reissueCap) {
-      chain.reissues++;
-      return { kind: 'command', command: CDP_COMMAND.in };
-    }
+    // Program code on top: V8's step landed. On the line the step started
+    // from too: a new position there (after a step-out, the caller's next
+    // break position on the line; in a one-line loop, the header's next
+    // position, as the traces show), where the program's code next runs.
     return { kind: 'landing', by: 'V8 step' };
   }
 
@@ -602,7 +628,9 @@ export class JsStepper {
       return false;
     }
     const skipped = markOf(marks[0]) === 'deemphasize';
-    if (skipped && /skipFiles/i.test(marks[0].source?.origin ?? '')) {
+    // Remembered only for a module of Node's own, by js-debug's own name for
+    // its source: one script, one source, no source map (C1).
+    if (skipped && /skipFiles/i.test(marks[0].source?.origin ?? '') && (marks[0].source?.path ?? '').startsWith('<node_internals>')) {
       this.skippedScripts.add(scriptId);
     }
     return skipped;
@@ -675,6 +703,12 @@ export class JsStepper {
       this.owed = missing;
       this.owedUntil = Date.now() + this.tunables.settleCeilingMs;
     }
+    if (ender === 'left-stack') {
+      // The program runs on and the step will not land: no stop to report.
+      // The record goes to the parent process, whose pending answer may then
+      // say the step left its frame (I3).
+      this.deliver({ seq: 0, type: 'event', event: PROXY_STEP_LEFT_STACK_EVENT, body: { threadId: chain.threadId ?? 0 } });
+    }
     const count = (name: string): number => chain.commands.filter((c) => c === name).length;
     logger.info(
       `[JsStepper] step ${chain.kind} ended: ${ender}${by ? ` (${by})` : ''}${chain.cancelled ? ` [${chain.cancelled}]` : ''}; ` +
@@ -730,8 +764,10 @@ export class JsStepper {
     if (chain.capped) {
       return { text: ErrorMessages.stepStillInSkippedCode(chain.commands.length) };
     }
-    if (chain.walkedBeforeSteppingOut > 0 && backInOriginFrame) {
-      return { text: ErrorMessages.stepIntoReachedNoProgramCode(chain.walkedBeforeSteppingOut) };
+    const walk = chain.walkEnded;
+    if (walk && backInOriginFrame) {
+      const limit = walk.by === 'time' ? this.tunables.walkBudgetMs : this.tunables.walkBudgetSteps;
+      return { text: ErrorMessages.stepIntoReachedNoProgramCode(walk.steps, walk.by, limit) };
     }
     return {};
   }

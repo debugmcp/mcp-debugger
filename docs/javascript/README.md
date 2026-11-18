@@ -108,21 +108,31 @@ and loses it (a `step_into` on the first `console.log` of a process ended the se
 per statement of the skipped code (131 for one `console.log`, about 6 s on a Linux host). `smartStep` is read as the
 session's choice instead, and a session that chose it has its steps served by the server over js-debug's raw CDP
 socket. What "skipped" means is still js-debug's own verdict on the frame, so `justMyCode`, your own `skipFiles` and
-source maps (an unmapped helper of a source-mapped file) all count.
+source maps (an unmapped helper of a source-mapped file) all count. It is asked at every landing, so in a bundle the
+dependency's lines are skipped and your own lines of the same script are not; only a module of Node's own, one source
+per script, is not asked about twice.
+
+A `step_into` that lands in skipped code walks on, one engine step at a time, until your code is on top again or the
+walk reaches one of its two bounds, whichever comes first: 512 engine steps taken in skipped code, or 3 s from its
+first landing there. Then it steps out. On Windows an engine step costs about 1.6 to 2.5 ms through the server, so
+the step bound comes first; on
+Linux it costs about 44 ms (issue #1163), so the time bound comes first: about 60 engine steps, measured in the
+Docker image.
 
 What a step does when the session steps through skipped code (the launch default):
 
 | Step | From | Lands |
 |---|---|---|
-| `step_into` | a line that calls your function through skipped code (`emitter.emit` to a listener, an array callback, a route handler from inside express) | in that function |
-| `step_into` | a line whose call stays in skipped code for the whole walk (`console.log`, `setTimeout`) | on the next line. The message says how many engine steps the walk took, and that code of yours the call runs further in or only schedules (a timer callback) does not stop the step |
-| `step_into` | a `require` line | nowhere on today's Node versions: the step is lost and the program runs on. Node's loader returns through `try … finally`, so stepping back out of it is one of the steps V8 loses (issue #1161, below). Use `step_over` on a `require` line (it lands on the next line), or set a breakpoint in the module |
+| `step_into` | a line that calls your function through skipped code (`emitter.emit` to an `on` or `once` listener, an array callback, a route handler from inside express) | in that function, when the walk reaches it inside its bounds. Measured through the server on Windows: 11 engine steps to an `on` listener, 35 to a `once` listener, 84 to a custom `util.inspect` function behind a later `console.log`. Beyond the bounds the step steps out, as in the next row |
+| `step_into` | a line whose call stays in skipped code (`console.log`) | where the call returned: the next line, or the line's next statement. A walk that comes back out by itself is a plain `Stepped into`. One that ends on a bound steps out, and the message says how many engine steps the walk took, which bound ended it, and that code of yours the call runs further in or only schedules (a timer callback) did not stop the step. Measured through the server on Windows, the walk comes back out by itself: about 390 engine steps for the first `console.log` of a process, 130 for a later one. On Linux it ends on the 3 s bound (below) |
+| `step_into` | a line that goes on after the call (`console.log(a); console.log(b);`, a one-line `for … of` loop) | at the next position on that line where your code runs: the next statement, or the loop header's next position, in the first iteration. `step_into` again goes on |
+| `step_into` | a `require` line | not where the call returned, on today's Node versions: Node's loader returns through `try … finally`, so stepping back out of it is one of the steps V8 loses (issue #1161, below). The first load of a module of yours is lost and the program runs on. In the measured cases of a built-in module or one already loaded (`require('node:fs')`, a second `require` of a loaded file, on Windows), the walk ended on its step bound inside the loader and the step stopped further down the same function, with the lines between run, as without the server's stepper. Use `step_over` on a `require` line (it lands on the next line), or set a breakpoint in the module |
 | `step_into` | a line that calls native code only (`JSON.stringify`) | on the next line, as a plain `Stepped into`: there is nothing to walk into |
 | `step_into` | a line that only starts a later task (`setTimeout`, a `.then` callback) | on the next line, never in the callback some time later; a breakpoint in the callback stops there |
 | `step_over`, `step_out` | a frame whose caller is skipped code, with your code further down the stack | in that frame of yours |
-| `step_out` | an `async` function the event loop resumed | in the function that awaits it, in the call that awaited (V8's own step) |
+| `step_out` | an `async` function the event loop resumed | in the function that awaits it, in the call that awaited (V8's own step). Not for TypeScript compiled for a target below ES2017 (issue #1165): there the step does not land in the awaiting function, and the program runs on to the next breakpoint or its end |
 | `step_over`, `step_out` | the last line of a function that nothing of yours called or awaits (a request handler, a timer callback, a `.then` callback) | nowhere of its own: nothing of your program is on the stack. If another callback of yours is already queued behind a `.then` callback, V8's step stops in it; otherwise the program is resumed, and the answer is the next stop if one comes while the step waits (a breakpoint, the program's end), or `pending: true` if none does (on a launch, with a sentence saying the step left its frame) |
-| any step | skipped code (a breakpoint inside a dependency) | `step_into` walks on into your handler; `step_over` and `step_out` run on as in the row above. `justMyCode: false` steps inside that code |
+| any step | skipped code (a breakpoint inside a dependency) | `step_into` walks on, into your handler when the walk reaches it inside its bounds. `step_over` and `step_out`: when your code called the dependency, in your caller at once, where the call returned; when nothing of yours is on the stack (a request path inside a framework), the program runs on, as in the row above. `justMyCode: false` steps inside that code |
 
 A breakpoint or an exception reached during a step stops as itself. A `debugger;` statement reached during a step is
 reported as the step's landing: V8 reports the two alike, and it is where the program stopped. (A `debugger;` in
@@ -132,7 +142,7 @@ if that is where it is (the stack response marks the frame). A step never steps 
 
 | Launch | `skipFiles` sent | Steps through skipped code | `step_over` from a breakpoint inside a dependency |
 |---|---|---|---|
-| default (`justMyCode: true`) | `<node_internals>/**`, `**/node_modules/**` | yes | runs on (`pending: true`; the message names the skipped frame and the remedy) |
+| default (`justMyCode: true`) | `<node_internals>/**`, `**/node_modules/**` | yes | lands in your caller when your code called the dependency; runs on when nothing of yours is on the stack (`pending: true`; the message names the skipped frame and the remedy) |
 | `dapLaunchArgs: { justMyCode: false }` | `<node_internals>/**` | no | lands on the next line of the dependency |
 | `dapLaunchArgs: { skipFiles: [...] }` | exactly your list | follows `justMyCode` unless `smartStep` is set | lands unless the frame is on your list |
 | `adapterLaunchConfig: { smartStep: false }` (default list) | `<node_internals>/**`, `**/node_modules/**` | no | lands in the next frame V8 does not skip (an internals frame on a request path) |
@@ -169,9 +179,12 @@ A different loss, in js-debug: a `step_over` across the first load of a module t
 (issue #1162). js-debug pauses at the module's entry to bind the breakpoint and resumes that pause itself while the
 step is in flight, and the step is lost with it.
 
-On Linux every engine step costs about 46 ms whoever sends it (the inspector's socket; issue #1163), against 1.5 ms
-on Windows, so a `step_into` on a `console.log` line, which walks 25 engine steps into Node's code and a few back
-out, takes over a second there.
+On Linux every engine step costs about 44 ms whoever sends it (the inspector's socket; issue #1163), against about
+1.6 to 2.5 ms through the server on Windows. There the walk's time bound comes first, at about 60 engine steps (measured in the Docker image):
+a `step_into` on a `console.log` line walks for 3 s, steps out and lands on the next line, answering in about 3.7 s,
+and a function of yours that Node's code reaches only after more engine steps than that (a custom `util.inspect`
+function behind `console.log`) is not entered. A `once` listener behind `emitter.emit` (35 engine steps) is entered
+there, in about 2 s.
 
 A step whose stop is a breakpoint or an exception rather than the step itself is reported as
 `Stepped over; stopped on 'breakpoint' rather than on the step itself (see stopReason)` — true both when the next

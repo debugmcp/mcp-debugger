@@ -24,6 +24,12 @@ tests/**/*.js.map
 # negation, `git add` silently skips new fixtures (how PR #252 lost one)
 !tests/fixtures/debug-scripts/*.js
 !tests/fixtures/javascript/subprocess-tree/*.js
+# The JavaScript stepper's bundle fixture (issue #1130): an esbuild bundle, its
+# source map, and both of its sources, the dependency under node_modules/ where
+# the bundler found it. Hand-written fixtures, not build output.
+!tests/fixtures/javascript/step-skipped-code/bundle/node_modules/
+!tests/fixtures/javascript/step-skipped-code/bundle/**/*.js
+!tests/fixtures/javascript/step-skipped-code/bundle/**/*.js.map
 
 # Package source compilation artifacts
 packages/*/src/**/*.js

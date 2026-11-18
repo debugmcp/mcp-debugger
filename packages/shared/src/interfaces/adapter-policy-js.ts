@@ -411,13 +411,15 @@ export const JsDebugAdapterPolicy = {
    * #1130). The proxy's own stepper serves the steps of a session whose
    * effective `smartStep` is on: it never stops in skipped code, it steps out
    * toward the nearest frame of the program below, and with none below it
-   * resumes the program (the stack the step started on is gone). So a step
-   * still pending after the grace window has run off the program's stack, or
-   * is waiting on work in flight. A step issued from skipped code (a
-   * breakpoint inside a dependency) gets the sentence that names the frame
-   * and the switch that steps inside that code; the frame is matched with the
-   * helpers the launch transform uses, and a caller's own glob
-   * (`**\/vendor/**`) is not matched, since this package has no glob matcher.
+   * resumes the program (the stack the step started on is gone). A step
+   * issued from skipped code (a breakpoint inside a dependency) gets the
+   * sentence that names the frame and the switch that steps inside that
+   * code; the frame is matched with the helpers the launch transform uses,
+   * and a caller's own glob (`**\/vendor/**`) is not matched, since this
+   * package has no glob matcher. Any other step gets the sentence that it
+   * left its frame only when the stepper recorded that it ended the step by
+   * resuming the program (`stepLeftStack`): a step still executing (a
+   * `step_over` of a long call in its own frame) gets the generic wording.
    * A pause gets nothing: js-debug's stepper, which stepped away from a pause
    * that landed in skipped code, is off (the pending pause has its own
    * wording, issue #1146). Attach sessions default neither key (#513) and get
@@ -449,12 +451,18 @@ export const JsDebugAdapterPolicy = {
         'still in flight. It stops at the next breakpoint in your own code. Relaunch with ' +
         'dapLaunchArgs.justMyCode: false (or adapterLaunchConfig.smartStep: false) to step inside that code.';
     }
-    return 'The step left the frame it started in and has not stopped in your program since: a function that Node ' +
-      'called returned to the event loop, the line is waiting on work still in flight, or the engine lost the step ' +
-      '(when the function left returns from inside try...finally, or out of a for...of loop, or declares using, ' +
-      'V8 loses the step, issue #1161; set a breakpoint where you expect execution to come back and continue). ' +
-      'The program is running; ' +
-      'wait_for_stop answers when the step lands, a breakpoint is hit, or the program ends.';
+    // Only what the stepper recorded: a step it did not end by leaving the
+    // stack may still be executing in the frame it started in (I3).
+    if (info.stepLeftStack !== true) {
+      return undefined;
+    }
+    // What the record means, and no more: the stepper resumed the program, so
+    // this step is over. (A step V8 itself lost, issue #1161, leaves no
+    // record and cannot be told from one still executing.)
+    return 'The step left the frame it started in and reached skipped code with nothing of your program below it ' +
+      '(a function that Node called, such as a timer or event callback, returned to the event loop), so the ' +
+      'program was resumed and this step will not land. The program is running; wait_for_stop answers when a ' +
+      'breakpoint is hit or the program ends.';
   },
 
   /**

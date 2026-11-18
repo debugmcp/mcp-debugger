@@ -13,7 +13,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import { JsStepper, type JsStepperTunables } from '../../src/proxy/js-stepper.js';
+import { JsStepper, DEFAULT_JS_STEPPER_TUNABLES, type JsStepperTunables } from '../../src/proxy/js-stepper.js';
+import { PROXY_STEP_LEFT_STACK_EVENT } from '../../src/proxy/dap-proxy-interfaces.js';
 import { ErrorMessages } from '../../src/utils/error-messages.js';
 
 interface Frame {
@@ -24,8 +25,14 @@ interface Frame {
   col?: number;
   /** js-debug marks it skipped code. */
   skipped?: boolean;
-  /** The mark's wording; "Skipped by skipFiles" is a script-level verdict. */
+  /** The mark's wording, js-debug's `source.origin`: "Skipped by skipFiles" (the default) or "Skipped by smartStep". */
   origin?: string;
+  /**
+   * The source js-debug names for the frame. By default: `<node_internals>/…`
+   * for a `node:` script (with a sourceReference, as js-debug answers for
+   * Node's own modules), `/app/<script>.js` for any other.
+   */
+  path?: string;
 }
 
 interface ScriptedPause {
@@ -184,14 +191,25 @@ class Engine extends EventEmitter {
     if (!pause) {
       throw new Error('Thread is not paused');
     }
-    const mark = (f: { fn: string; line: number; skipped?: boolean; origin?: string; script?: string }, id: number): DebugProtocol.StackFrame => ({
-      id,
-      name: f.fn,
-      line: f.line + 1,
-      column: 1,
-      source: { path: `/app/${f.script ?? 'app'}.js`, ...(f.skipped ? { origin: f.origin ?? 'Skipped by skipFiles' } : {}) },
-      presentationHint: (f.skipped ? 'deemphasize' : 'normal') as DebugProtocol.StackFrame['presentationHint']
-    });
+    // js-debug's answer, in the shape its log shows: Node's own module as
+    // `<node_internals>/internal/console/constructor` with a sourceReference
+    // and `origin: "Skipped by skipFiles"`, a file on disk by its path.
+    const mark = (f: { fn: string; line: number; skipped?: boolean; origin?: string; script?: string; path?: string }, id: number): DebugProtocol.StackFrame => {
+      const script = f.script ?? 'app';
+      const internal = script.startsWith('node:');
+      return {
+        id,
+        name: f.fn,
+        line: f.line + 1,
+        column: 1,
+        source: {
+          path: f.path ?? (internal ? `<node_internals>/${script.slice('node:'.length)}` : `/app/${script}.js`),
+          ...(internal ? { sourceReference: 1000 + id } : {}),
+          ...(f.skipped ? { origin: f.origin ?? 'Skipped by skipFiles' } : {})
+        },
+        presentationHint: (f.skipped ? 'deemphasize' : 'normal') as DebugProtocol.StackFrame['presentationHint']
+      };
+    };
     const frames = pause.frames.map(mark);
     if (pause.asyncParent) {
       for (let i = 0; i < (pause.asyncParent.emptyLinks ?? 0); i++) {
@@ -222,6 +240,8 @@ describe('JsStepper (issue #1130)', () => {
   let seen: Array<{ event: string; withheld: boolean }>;
 
   const commands = (): string[] => engine.calls.map((c) => c.method).filter((m) => /step|resume/.test(m));
+  /** The record a step that ended by leaving the stack delivers instead of a stop (I3). */
+  const LEFT_STACK = expect.objectContaining({ type: 'event', event: PROXY_STEP_LEFT_STACK_EVENT });
   const stopped = (): DebugProtocol.StoppedEvent['body'] => delivered[0].body as DebugProtocol.StoppedEvent['body'];
 
   /** Wait until the chain is over and every event js-debug owes has arrived. */
@@ -328,7 +348,7 @@ describe('JsStepper (issue #1130)', () => {
       expect(delivered).toHaveLength(1);
     });
 
-    it('asks js-debug about a script once: "Skipped by skipFiles" is a verdict on the script', async () => {
+    it('asks js-debug once about a script of Node\'s own: one source at every position, which it names <node_internals>', async () => {
       engine.pauseAt({ frames: frames(app('main', 10)) });
       engine.script = [
         { frames: frames(node('a', 1), app('main', 10)) },
@@ -341,6 +361,53 @@ describe('JsStepper (issue #1130)', () => {
       // One levels-1 question for the frame the step starts from, one for
       // the node script, one for the landing.
       expect(engine.stackTraceCalls.filter((levels) => levels === 1)).toHaveLength(3);
+    });
+
+    it('asks js-debug at every landing in a skipped node_modules file: its verdict is on a source, not on a script (C1)', async () => {
+      const dep = (line: number): Frame => ({ fn: 'mix', line, script: 'blib', path: '/app/node_modules/blib/index.js', skipped: true });
+      engine.pauseAt({ frames: frames(app('main', 10)) });
+      engine.script = [
+        { frames: frames(dep(1), app('main', 10)) },
+        { frames: frames(dep(2), app('main', 10)) },
+        { frames: frames(dep(3), app('main', 10)) },
+        { frames: frames(app('handler', 40), dep(4), app('main', 10)) }
+      ];
+      await stepper.request('stepIn', { threadId: 1 });
+      await settled();
+      // The frame the step starts from, and each of the four landings.
+      expect(engine.stackTraceCalls.filter((levels) => levels === 1)).toHaveLength(5);
+      expect(stopped()).toMatchObject({ reason: 'step' });
+    });
+
+    it('lands in the program\'s code of a bundle after a landing in a dependency of the same script: js-debug is asked again (C1)', async () => {
+      // An esbuild bundle: one script, many sources. js-debug skips the
+      // dependency's lines (a node_modules source) and not the program's.
+      const lib = (line: number): Frame => ({ fn: 'mix', line, script: 'bundle', path: '/app/node_modules/blib/index.js', skipped: true });
+      const own = (fn: string, line: number): Frame => ({ fn, line, script: 'bundle', path: '/app/app.js' });
+      engine.pauseAt({ frames: frames(own('main', 10)) });
+      engine.script = [
+        { frames: frames(lib(3), own('main', 10)) },
+        { frames: frames(own('mine', 4), lib(3), own('main', 10)) },
+        'runs'
+      ];
+      await stepper.request('stepIn', { threadId: 1 });
+      await settled();
+      expect(commands()).toEqual(['Debugger.stepInto', 'Debugger.stepInto']);
+      expect(stopped()).toMatchObject({ reason: 'step' });
+      expect(engine.stackTraceCalls.filter((levels) => levels === 1)).toHaveLength(3);
+    });
+
+    it('lands in the program\'s code of a bundle after a step that started in a dependency of the same script (review C1, s12)', async () => {
+      const lib = (line: number): Frame => ({ fn: 'mix', line, script: 'bundle', path: '/app/node_modules/blib/index.js', skipped: true });
+      const own = (fn: string, line: number): Frame => ({ fn, line, script: 'bundle', path: '/app/app.js' });
+      // A breakpoint inside the bundled dependency; step_over returns to the program's caller, same script.
+      engine.pauseAt({ frames: frames(lib(3), own('main', 8)) });
+      engine.script = [{ frames: frames(own('main', 9)) }, 'runs'];
+      await stepper.request('next', { threadId: 1 });
+      await settled();
+      expect(commands()).toEqual(['Debugger.stepOver']);
+      expect(delivered).toHaveLength(1);
+      expect(stopped()).toMatchObject({ reason: 'step' });
     });
 
     it('asks again each time for a frame skipped for its position, not its script', async () => {
@@ -357,14 +424,8 @@ describe('JsStepper (issue #1130)', () => {
       expect(stopped()).toMatchObject({ reason: 'step' });
     });
 
-    it('steps out once the budget is spent, and says how far it walked without reaching the program', async () => {
-      stepper = new JsStepper({
-        target: { sendRequest: async (_c: string, args?: unknown) => engine.stackTrace((args as { levels: number }).levels) as never },
-        deliver: (event) => delivered.push(event),
-        tunables: { budget: 2, settleCeilingMs: 150, verdictCeilingMs: 150 }
-      });
-      stepper.attachCdp(engine);
-      stepper.setEnabled(true);
+    it('steps out once it has taken its engine steps in skipped code, and says how many it took, counting only those', async () => {
+      withTunables({ walkBudgetSteps: 2 });
       engine.pauseAt({ frames: frames(app('main', 10)) });
       engine.script = [
         { frames: frames(node('require', 1), app('main', 10)) },
@@ -378,38 +439,103 @@ describe('JsStepper (issue #1130)', () => {
 
       expect(commands()).toEqual(['Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepOut']);
       expect(stopped()).toMatchObject({ reason: 'step', description: 'Paused' });
-      // Three step-ins, back in the frame it left: that much is known, and said.
-      expect(stopped().text).toBe(ErrorMessages.stepIntoReachedNoProgramCode(3));
+      // The first step-in went from the program's own line; the two after it
+      // were taken in skipped code, and only those are the walk.
+      expect(stopped().text).toBe(ErrorMessages.stepIntoReachedNoProgramCode(2, 'steps', 2));
     });
 
-    it('steps in again when it comes back to the line it left, at the same depth', async () => {
+    it('lands back on the line it left after stepping out: a pause in the program\'s code is a new position, never stepped from again', async () => {
+      // `console.log(a); console.log(b); const c = 1;` V8's step-out lands on
+      // the line's next statement (11:17 in the trace): that is the landing.
+      withTunables({ walkBudgetSteps: 2 });
       engine.pauseAt({ frames: frames(app('main', 10)) });
       engine.script = [
-        { frames: frames(node('first', 1), app('main', 10)) },
-        // Back on line 10 (the line's second call is next), then into it.
-        { frames: frames(app('main', 10, { col: 14 })) },
-        { frames: frames(app('second', 60), app('main', 10, { col: 14 })) }
+        { frames: frames(node('log', 1), app('main', 10)) },
+        { frames: frames(node('log', 2), app('main', 10)) },
+        { frames: frames(node('log', 3), app('main', 10)) },
+        { frames: frames(app('main', 10, { col: 16 })) },
+        'runs'
       ];
       await stepper.request('stepIn', { threadId: 1 });
       await settled();
-      expect(commands()).toEqual(['Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepInto']);
+      expect(commands()).toEqual(['Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepOut']);
+      expect(stopped()).toMatchObject({ reason: 'step', text: ErrorMessages.stepIntoReachedNoProgramCode(2, 'steps', 2) });
+    });
+
+    it('lands at once on the next position of the line it left: the first step into a one-line for...of header', async () => {
+      // `for (const y of big) console.log('y', y);` from 9:17, V8's first
+      // step-in lands on the header's binding, 9:12 (the trace's pause 1).
+      engine.pauseAt({ frames: frames(app('main', 8, { col: 16 })) });
+      engine.script = [{ frames: frames(app('main', 8, { col: 11 })) }, 'runs'];
+      await stepper.request('stepIn', { threadId: 1 });
+      await settled();
+      expect(commands()).toEqual(['Debugger.stepInto']);
+      expect(delivered).toHaveLength(1);
       expect(stopped()).toMatchObject({ reason: 'step' });
+      expect(stopped().text).toBeUndefined();
     });
 
     it('stops where it is, and says so, when every command it may send is spent in skipped code', async () => {
-      stepper = new JsStepper({
-        target: { sendRequest: async (_c: string, args?: unknown) => engine.stackTrace((args as { levels: number }).levels) as never },
-        deliver: (event) => delivered.push(event),
-        tunables: { budget: 1, commandCap: 3, settleCeilingMs: 150, verdictCeilingMs: 150 }
-      });
-      stepper.attachCdp(engine);
-      stepper.setEnabled(true);
+      withTunables({ walkBudgetSteps: 1, commandCap: 3 });
       engine.pauseAt({ frames: frames(app('main', 10)) });
       engine.script = Array.from({ length: 6 }, (_, i) => ({ frames: frames(node('deep', i), node('deeper', 1), app('main', 10)) }));
       await stepper.request('stepIn', { threadId: 1 });
       await settled();
       expect(commands()).toHaveLength(3);
       expect(stopped()).toMatchObject({ reason: 'step', text: ErrorMessages.stepStillInSkippedCode(3) });
+    });
+  });
+
+  describe('how far a step-in walks through skipped code: two bounds, whichever comes first (I1)', () => {
+    /** A clock the test moves: each pause V8 reports costs `msPerPause`. */
+    function withClock(tunables: Partial<JsStepperTunables>, msPerPause: number): void {
+      let clock = 0;
+      withTunables(tunables, undefined, () => clock);
+      engine.on('cdp-event', (method: string) => {
+        if (method === 'Debugger.paused') {
+          clock += msPerPause;
+        }
+      });
+    }
+
+    const walk = (n: number): ScriptedPause[] => Array.from({ length: n }, (_, i) => ({ frames: frames(node('log', i + 1), app('main', 10)) }));
+
+    it('walks 512 engine steps or 3 s by default, under a backstop above both', () => {
+      expect(DEFAULT_JS_STEPPER_TUNABLES).toMatchObject({ walkBudgetSteps: 512, walkBudgetMs: 3000, commandCap: 2048 });
+      expect(DEFAULT_JS_STEPPER_TUNABLES.commandCap).toBeGreaterThan(DEFAULT_JS_STEPPER_TUNABLES.walkBudgetSteps);
+    });
+
+    it('walks while under the time bound, counted from the first landing in skipped code, then steps out, however few steps it took', async () => {
+      withClock({ walkBudgetMs: 3000, walkBudgetSteps: 512 }, 1000);
+      engine.pauseAt({ frames: frames(app('main', 10)) });
+      // The walk's clock starts at the first landing (t=2000): it walks at
+      // 2000, 3000 and 4000, and is out of time at 5000.
+      engine.script = [...walk(4), { frames: frames(app('main', 11)) }];
+      await stepper.request('stepIn', { threadId: 1 });
+      await settled();
+      expect(commands()).toEqual(['Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepOut']);
+      expect(stopped()).toMatchObject({ reason: 'step', text: ErrorMessages.stepIntoReachedNoProgramCode(3, 'time', 3000) });
+    });
+
+    it('walks while under the step bound, however little time passed, then steps out', async () => {
+      withClock({ walkBudgetMs: 3000, walkBudgetSteps: 3 }, 0);
+      engine.pauseAt({ frames: frames(app('main', 10)) });
+      engine.script = [...walk(4), { frames: frames(app('main', 11)) }];
+      await stepper.request('stepIn', { threadId: 1 });
+      await settled();
+      expect(commands()).toEqual(['Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepOut']);
+      expect(stopped()).toMatchObject({ reason: 'step', text: ErrorMessages.stepIntoReachedNoProgramCode(3, 'steps', 3) });
+    });
+
+    it('reaches the program\'s code after a walk longer than the old 24 steps, inside both bounds (once + emit: 35)', async () => {
+      withClock({}, 1);
+      engine.pauseAt({ frames: frames(app('main', 10)) });
+      engine.script = [...walk(35), { frames: frames(app('fn', 3), node('once', 9), node('emit', 7), app('main', 10)) }];
+      await stepper.request('stepIn', { threadId: 1 });
+      await settled();
+      expect(commands()).toEqual(Array(36).fill('Debugger.stepInto'));
+      expect(stopped()).toMatchObject({ reason: 'step' });
+      expect(stopped().text).toBeUndefined();
     });
   });
 
@@ -431,14 +557,8 @@ describe('JsStepper (issue #1130)', () => {
       expect(engine.stackTraceCalls.filter((levels) => levels > 1)).toHaveLength(0);
     });
 
-    it('step_into resumes the program only once its budget is spent', async () => {
-      stepper = new JsStepper({
-        target: { sendRequest: async (_c: string, args?: unknown) => engine.stackTrace((args as { levels: number }).levels) as never },
-        deliver: (event) => delivered.push(event),
-        tunables: { budget: 2, settleCeilingMs: 150, verdictCeilingMs: 150 }
-      });
-      stepper.attachCdp(engine);
-      stepper.setEnabled(true);
+    it('step_into resumes the program only once its walk is over, and says it left the stack', async () => {
+      withTunables({ walkBudgetSteps: 2 });
       engine.pauseAt({ frames: frames(express(177), node('emit', 7)) });
       engine.script = [
         { frames: frames(node('Url', 77), express(177), node('emit', 7)) },
@@ -449,7 +569,7 @@ describe('JsStepper (issue #1130)', () => {
       await stepper.request('stepIn', { threadId: 1 });
       await settled();
       expect(commands()).toEqual(['Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepInto', 'Debugger.resume']);
-      expect(delivered).toEqual([]);
+      expect(delivered).toEqual([LEFT_STACK]);
     });
 
     it('step_over resumes at once: it would have to step out, and there is nowhere of the program\'s to step out to', async () => {
@@ -458,7 +578,7 @@ describe('JsStepper (issue #1130)', () => {
       await stepper.request('next', { threadId: 1 });
       await settled();
       expect(commands()).toEqual(['Debugger.stepOver', 'Debugger.resume']);
-      expect(delivered).toEqual([]);
+      expect(delivered).toEqual([LEFT_STACK]);
     });
   });
 
@@ -483,7 +603,9 @@ describe('JsStepper (issue #1130)', () => {
       await settled();
       // No step-out from the bottom frames: that lands in the next task's internals.
       expect(commands()).toEqual(['Debugger.stepOut', 'Debugger.resume']);
-      expect(delivered).toEqual([]);
+      // No stop: only the record that the step ended by leaving the stack, for the pending answer (I3).
+      expect(delivered).toEqual([LEFT_STACK]);
+      expect(delivered[0].body).toEqual({ threadId: 1 });
       expect(stepper.describe()).toMatchObject({ chain: false });
     });
   });
@@ -636,14 +758,15 @@ describe('JsStepper (issue #1130)', () => {
   // ----- what the review of the branch found (cases written red first) -----
 
   /** A stepper with its own tunables, on the same engine. */
-  function withTunables(tunables: Partial<JsStepperTunables>, onDeliver?: (event: DebugProtocol.Event) => void): void {
+  function withTunables(tunables: Partial<JsStepperTunables>, onDeliver?: (event: DebugProtocol.Event) => void, now?: () => number): void {
     stepper = new JsStepper({
       target: { sendRequest: async (_c: string, args?: unknown) => engine.stackTrace((args as { levels: number }).levels) as never },
       deliver: (event) => {
         onDeliver?.(event);
         delivered.push(event);
       },
-      tunables: { settleCeilingMs: 150, verdictCeilingMs: 150, ...tunables }
+      tunables: { settleCeilingMs: 150, verdictCeilingMs: 150, ...tunables },
+      ...(now ? { now } : {})
     });
     engine.onDap = (event) => {
       seen.push({ event: event.event, withheld: stepper.withholds(event) });
@@ -726,11 +849,17 @@ describe('JsStepper (issue #1130)', () => {
 
     it('does not take what only scheduled the code for what it returns to: a step out of a `.then` callback resumes', async () => {
       engine.pauseAt({ frames: frames(app('onDone', 3)), asyncParent: { fn: 'work', line: 7, description: 'Promise.then' } });
-      engine.script = [{ frames: frames(node('processTimers', 527)) }, 'runs'];
+      // The landing in skipped code is where the rule reads the async stack:
+      // its first link is the `.then` that scheduled the callback, a program
+      // frame js-debug marks normal, and it is not an awaiter.
+      engine.script = [
+        { frames: frames(node('runMicrotasks', 12)), asyncParent: { fn: 'work', line: 7, description: 'Promise.then' } },
+        'runs'
+      ];
       await stepper.request('stepOut', { threadId: 1 });
       await settled();
       expect(commands()).toEqual(['Debugger.stepOut', 'Debugger.resume']);
-      expect(delivered).toEqual([]);
+      expect(delivered).toEqual([LEFT_STACK]);
     });
 
     it('follows V8 through a skipped awaiter to the program\'s, looking again at each landing', async () => {
@@ -756,44 +885,39 @@ describe('JsStepper (issue #1130)', () => {
       await stepper.request('stepOut', { threadId: 1 });
       await settled();
       expect(commands()).toEqual(['Debugger.stepOut', 'Debugger.stepOut', 'Debugger.resume']);
-      expect(delivered).toEqual([]);
+      expect(delivered).toEqual([LEFT_STACK]);
     });
   });
 
   describe('the sentence on a step-in that reached nothing of the program', () => {
-    it('says nothing when the step went on into the program\'s code after all: the line\'s next call', async () => {
-      withTunables({ budget: 2 });
+    it('says nothing when the walk reached the program\'s code: no step-out, no sentence', async () => {
+      withTunables({ walkBudgetSteps: 2 });
       engine.pauseAt({ frames: frames(app('main', 10)) });
       engine.script = [
         { frames: frames(node('log', 1), app('main', 10)) },
-        { frames: frames(node('log', 2), app('main', 10)) },
-        { frames: frames(node('log', 3), app('main', 10)) },
-        // Stepped out, back on the line: the line's second call is the program's own.
-        { frames: frames(app('main', 10, { col: 14 })) },
-        { frames: frames(app('helper', 60), app('main', 10, { col: 14 })) }
+        { frames: frames(app('helper', 60), node('log', 2), app('main', 10)) }
       ];
       await stepper.request('stepIn', { threadId: 1 });
       await settled();
-      expect(commands()).toEqual(['Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepOut', 'Debugger.stepInto']);
+      expect(commands()).toEqual(['Debugger.stepInto', 'Debugger.stepInto']);
       expect(stopped()).toMatchObject({ reason: 'step' });
       expect(stopped().text).toBeUndefined();
     });
 
-    it('steps in again when the step-out brings it back to its own line, and says how far the walk went when it ends in the frame it left', async () => {
-      withTunables({ budget: 2 });
-      engine.pauseAt({ frames: frames(app('main', 10)) });
+    it('says nothing when the step-out lands in a frame below the one it left: the walk was not into a call of that line', async () => {
+      // From the listener's last line, V8's step-in lands in emit, below it.
+      withTunables({ walkBudgetSteps: 1 });
+      engine.pauseAt({ frames: frames(app('listener', 40), node('emit', 7), app('main', 10)) });
       engine.script = [
-        { frames: frames(node('log', 1), app('main', 10)) },
-        { frames: frames(node('log', 2), app('main', 10)) },
-        { frames: frames(node('log', 3), app('main', 10)) },
-        // V8's step-out stops once more on the call's own line, mid-line.
-        { frames: frames(app('main', 10, { col: 14 })) },
+        { frames: frames(node('emit', 8), app('main', 10)) },
+        { frames: frames(node('emit', 9), app('main', 10)) },
         { frames: frames(app('main', 11)) }
       ];
       await stepper.request('stepIn', { threadId: 1 });
       await settled();
-      expect(commands()).toEqual(['Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepOut', 'Debugger.stepInto']);
-      expect(stopped()).toMatchObject({ reason: 'step', text: ErrorMessages.stepIntoReachedNoProgramCode(3) });
+      expect(commands()).toEqual(['Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepOut']);
+      expect(stopped()).toMatchObject({ reason: 'step' });
+      expect(stopped().text).toBeUndefined();
     });
   });
 
@@ -921,6 +1045,42 @@ describe('JsStepper (issue #1130)', () => {
       expect(delivered).toEqual([]);
     });
 
+    it('sends no step-out once the step is given up while js-debug is asked what the stack returns to', async () => {
+      let gated = false;
+      let asked = false;
+      let release: () => void = () => undefined;
+      stepper = new JsStepper({
+        target: {
+          sendRequest: async (_c: string, args?: unknown) => {
+            const levels = (args as { levels: number }).levels;
+            if (gated && levels > 1) {
+              asked = true;
+              await new Promise<void>((resolve) => {
+                release = resolve;
+              });
+            }
+            return engine.stackTrace(levels) as never;
+          }
+        },
+        deliver: (event) => delivered.push(event),
+        tunables: { settleCeilingMs: 150, verdictCeilingMs: 150 }
+      });
+      stepper.attachCdp(engine);
+      stepper.setEnabled(true);
+      engine.pauseAt({ frames: frames(app('listener', 40), node('emit', 7), app('main', 10)) });
+      engine.script = [{ frames: frames(node('emit', 8), app('main', 10)) }, { frames: frames(app('main', 11)) }];
+      gated = true;
+      await stepper.request('next', { threadId: 1 });
+      await vi.waitFor(() => expect(asked).toBe(true), { timeout: 1000, interval: 2 });
+      // js-debug has not said what is below the landing yet, and the caller continues.
+      await stepper.beforeRequest('continue');
+      release();
+      await tick(20);
+      expect(commands()).toEqual(['Debugger.stepOver']);
+      expect(stepper.describe()).toMatchObject({ chain: false });
+      expect(delivered).toEqual([]);
+    });
+
     it('serves no step while the program runs', async () => {
       engine.pauseAt({ frames: frames(app('main', 10)) });
       engine.script = ['runs'];
@@ -937,7 +1097,7 @@ describe('JsStepper (issue #1130)', () => {
       await stepper.request('stepOut', { threadId: 1 });
       await settled();
       expect(commands()).toEqual(['Debugger.stepOut', 'Debugger.resume']);
-      expect(delivered).toEqual([]);
+      expect(delivered).toEqual([LEFT_STACK]);
     });
 
     it('a step-in that lands on its own line in a deeper call of the same function has landed', async () => {
@@ -949,27 +1109,12 @@ describe('JsStepper (issue #1130)', () => {
       expect(commands()).toEqual(['Debugger.stepInto']);
     });
 
-    it('only a step-in steps in again on its own line: a step over that stops there has landed', async () => {
+    it('a step over that stops on its own line has landed', async () => {
       engine.pauseAt({ frames: frames(app('main', 10)) });
       engine.script = [{ frames: frames(app('main', 10, { col: 14 })) }, 'runs'];
       await stepper.request('next', { threadId: 1 });
       await settled();
       expect(commands()).toEqual(['Debugger.stepOver']);
-    });
-
-    it('stops stepping in again on its own line after the cap', async () => {
-      withTunables({ reissueCap: 2 });
-      engine.pauseAt({ frames: frames(app('main', 10)) });
-      engine.script = [
-        { frames: frames(app('main', 10, { col: 5 })) },
-        { frames: frames(app('main', 10, { col: 9 })) },
-        { frames: frames(app('main', 10, { col: 13 })) },
-        'runs'
-      ];
-      await stepper.request('stepIn', { threadId: 1 });
-      await settled();
-      expect(commands()).toEqual(['Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepInto']);
-      expect(stopped()).toMatchObject({ reason: 'step' });
     });
 
     it('takes a landing js-debug never answers for as program code, once the ceiling is passed', async () => {
@@ -1063,19 +1208,18 @@ describe('JsStepper (issue #1130)', () => {
     });
 
     it('says how far the walk went only for a step back in the very frame it left: not a deeper call of the same function', async () => {
-      withTunables({ budget: 1 });
+      withTunables({ walkBudgetSteps: 1 });
       const start = fnLineOf(app('recur', 0));
       engine.pauseAt({ frames: frames(app('recur', start + 1), app('main', 10)) });
       engine.script = [
         { frames: frames(node('log', 1), app('recur', start + 1), app('main', 10)) },
         { frames: frames(node('log', 2), app('recur', start + 1), app('main', 10)) },
-        // Stepped out, back on the line: its next call is recur again, one frame deeper.
-        { frames: frames(app('recur', start + 1, { col: 14 }), app('main', 10)) },
-        { frames: frames(app('recur', start + 1), app('recur', start + 1, { col: 14 }), app('main', 10)) }
+        // The step-out stops in recur one frame deeper (the skipped code called it again).
+        { frames: frames(app('recur', start + 1, { col: 14 }), app('recur', start + 1), app('main', 10)) }
       ];
       await stepper.request('stepIn', { threadId: 1 });
       await settled();
-      expect(commands()).toEqual(['Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepOut', 'Debugger.stepInto']);
+      expect(commands()).toEqual(['Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepOut']);
       expect(stopped()).toMatchObject({ reason: 'step' });
       expect(stopped().text).toBeUndefined();
     });

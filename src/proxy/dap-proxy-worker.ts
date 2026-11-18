@@ -24,6 +24,7 @@ import {
   BreakpointSyncResult,
   MIRROR_EXPOSE_COMMAND,
   MIRROR_UNEXPOSE_COMMAND,
+  PROXY_STEP_LEFT_STACK_EVENT,
   CHILD_ADOPT_COMMAND,
   CHILD_RELEASE_COMMAND,
   CHILD_CLOSE_COMMAND,
@@ -357,7 +358,8 @@ export class DapProxyWorker {
   // handlers (post threadId-backfill); this generic-channel forwarder covers
   // everything else. initialized is per-client handshake, never replicated.
   private readonly mirrorEventForwarder = (evt: DebugProtocol.Event): void => {
-    if (evt.event === 'stopped' || evt.event === 'continued' || evt.event === 'initialized') {
+    // The proxy stepper's record (issue #1130) is the proxy's own, not the adapter's.
+    if (evt.event === 'stopped' || evt.event === 'continued' || evt.event === 'initialized' || evt.event === PROXY_STEP_LEFT_STACK_EVENT) {
       return;
     }
     this.mirrorServer?.broadcastEvent(evt.event, evt.body);
@@ -1202,6 +1204,12 @@ export class DapProxyWorker {
         this.sendDapEvent(name, body as DebugProtocol.Event['body']);
       });
     }
+    // The proxy stepper's record that it ended a step by resuming the program
+    // (issue #1130): the pending step's answer reads it. A child connection's
+    // stepper sends its own straight to the parent (child-connections.ts).
+    this.dapClient.on(PROXY_STEP_LEFT_STACK_EVENT, (body: unknown) => {
+      this.sendDapEvent(PROXY_STEP_LEFT_STACK_EVENT, body as DebugProtocol.Event['body']);
+    });
 
     this.connectionManager.setupEventHandlers(this.dapClient, {
       onInitialized: async () => {

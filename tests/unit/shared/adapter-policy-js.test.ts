@@ -215,26 +215,36 @@ describe('JsDebugAdapterPolicy', () => {
         expect(text).toMatch(/issued from skipped code \(node:internal\/process\/task_queues:95\)/);
         expect(text).not.toMatch(/left the frame it started in/);
         // Under the same rule as the rewritten form: only while this launch skips Node's own code.
-        expect(hook({ operation: 'step', attachMode: false, launch: launch(undefined, { skipFiles: ['**/node_modules/**'] }), fromFrame: bareInternalFrame }))
+        expect(hook({ operation: 'step', attachMode: false, launch: launch(undefined, { skipFiles: ['**/node_modules/**'] }), fromFrame: bareInternalFrame, stepLeftStack: true }))
           .toMatch(/left the frame it started in/);
       });
 
-      it('says of a pending step from the program\'s own code that it ran off the stack or is waiting on work in flight', () => {
+      it('says of a pending step that the stepper ended by leaving the stack that it left its frame (I3)', () => {
         for (const fromFrame of [userFrame, undefined]) {
-          const text = hook({ operation: 'step', attachMode: false, launch: {}, ...(fromFrame ? { fromFrame } : {}) });
+          const text = hook({ operation: 'step', attachMode: false, launch: {}, stepLeftStack: true, ...(fromFrame ? { fromFrame } : {}) });
           expect(text).toMatch(/left the frame it started in/);
           expect(text).toMatch(/event loop/);
           expect(text).toMatch(/wait_for_stop/);
-          expect(text).not.toMatch(/skipped code/);
+          expect(text).not.toMatch(/issued from skipped code/);
+          // The stepper resumed the program: the answer promises no landing.
+          expect(text).toMatch(/this step will not land/);
+          expect(text).not.toMatch(/when the step lands/);
+        }
+      });
+
+      it('says nothing of a pending step still executing: a step_over of a long call in its own frame never left it (I3)', () => {
+        for (const fromFrame of [userFrame, undefined]) {
+          expect(hook({ operation: 'step', attachMode: false, launch: {}, ...(fromFrame ? { fromFrame } : {}) })).toBeUndefined();
+          expect(hook({ operation: 'step', attachMode: false, launch: {}, stepLeftStack: false, ...(fromFrame ? { fromFrame } : {}) })).toBeUndefined();
         }
       });
 
       it('treats a frame as skipped only when this launch skips it', () => {
         // node_modules is not skipped without justMyCode, or on an internals-only list.
-        expect(hook({ operation: 'step', attachMode: false, launch: launch(undefined, { skipFiles: ['<node_internals>/**'] }), fromFrame: depFrame }))
+        expect(hook({ operation: 'step', attachMode: false, launch: launch(undefined, { skipFiles: ['<node_internals>/**'] }), fromFrame: depFrame, stepLeftStack: true }))
           .toMatch(/left the frame it started in/);
         // Internals are not skipped on a list that does not name them.
-        expect(hook({ operation: 'step', attachMode: false, launch: launch(undefined, { skipFiles: ['**/node_modules/**'] }), fromFrame: internalFrame }))
+        expect(hook({ operation: 'step', attachMode: false, launch: launch(undefined, { skipFiles: ['**/node_modules/**'] }), fromFrame: internalFrame, stepLeftStack: true }))
           .toMatch(/left the frame it started in/);
       });
 
@@ -246,7 +256,7 @@ describe('JsDebugAdapterPolicy', () => {
 
       it('lets adapterLaunchConfig win over dapLaunchArgs, as the launcher merge does', () => {
         expect(hook({ operation: 'step', attachMode: false, launch: launch({ justMyCode: true }, { smartStep: false }), fromFrame: userFrame })).toBeUndefined();
-        expect(hook({ operation: 'step', attachMode: false, launch: launch({ justMyCode: false }, { smartStep: true }), fromFrame: userFrame })).toBeDefined();
+        expect(hook({ operation: 'step', attachMode: false, launch: launch({ justMyCode: false }, { smartStep: true }), fromFrame: userFrame, stepLeftStack: true })).toBeDefined();
       });
     });
   });

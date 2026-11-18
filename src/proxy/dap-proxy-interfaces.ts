@@ -421,6 +421,13 @@ export interface DapProxyDependencies {
 export const MIRROR_EXPOSE_COMMAND = 'mirrorExpose';
 export const MIRROR_UNEXPOSE_COMMAND = 'mirrorUnexpose';
 
+// The proxy's JavaScript stepper (issue #1130) ended a step by resuming the
+// program: the step reached skipped code with nothing of the program below
+// it, so the stack it started on is gone and the step will not land. A DAP
+// event of the proxy's own, sent to the parent process only (the mirror does
+// not forward it); a pending step's answer reads it.
+export const PROXY_STEP_LEFT_STACK_EVENT = 'proxyStepLeftStack';
+
 // The session tree (issue #1081): the parent process's answers to a
 // 'child_reported' status, and the close of an adopted child's connection.
 // They ride the `dap` envelope too; the envelope's sessionId names the

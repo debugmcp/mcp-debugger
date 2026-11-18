@@ -308,22 +308,27 @@ export const ErrorMessages = {
   /**
    * The sentence on a step_into that reached no code of the program (issue #1130)
    * Occurs when: the proxy's JavaScript stepper walked into the call on the
-   * line, stayed in skipped code for its whole budget, stepped back out and
-   * landed in the frame the step started in. It says what is known: how far
-   * the walk went. Not that the call reaches nothing of the program's: a
-   * module the line loads, a late callback, ran during the step out. The
-   * remedy is worded for a launch and an attach alike.
+   * line, was still in skipped code when the walk reached one of its bounds
+   * (engine steps taken in skipped code, or time), stepped out and landed in
+   * the frame the step started in: usually where the call returned to (on
+   * the same line, when the line goes on), further down when V8 lost the
+   * step out (a `require` line, issue #1161). It says what is known: how far the walk
+   * went and which bound ended it. Not that the call reaches nothing of the
+   * program's: code the call runs further in, or only schedules, ran during
+   * the step out. The remedy is worded for a launch and an attach alike.
    * Used in: src/proxy/js-stepper.ts (the `text` of the step's stopped
    * event), appended to the step's message by
    * src/session/execution/execution-controller.ts
-   * @param stepIns - How many engine step-ins the walk took before it stepped out
+   * @param steps - How many engine steps the walk took in skipped code before it stepped out
+   * @param endedBy - Which bound ended the walk
+   * @param limit - That bound: engine steps, or milliseconds
    */
-  stepIntoReachedNoProgramCode: (stepIns: number) =>
-    `step_into walked ${stepIns} engine steps into the call on that line and was still in skipped code ` +
-    '(Node internals, node_modules, or files on skipFiles), so it stepped back out and the rest of the line ran ' +
-    'as a step over runs it. Code of yours that the call runs further in (a module it loads) or only schedules ' +
-    '(a timer or promise callback) does not stop the step: a breakpoint there stops in it. To stop inside the ' +
-    'skipped code instead, turn ' +
+  stepIntoReachedNoProgramCode: (steps: number, endedBy: 'steps' | 'time', limit: number) =>
+    `step_into walked ${steps} engine steps into the call and was still in skipped code ` +
+    '(Node internals, node_modules, or files on skipFiles) when the walk reached its ' +
+    `${endedBy === 'time' ? `${limit / 1000} s` : `${limit}-step`} limit, and stepped out. Code of yours that the ` +
+    'call runs further in, or only schedules (a timer or promise callback), did not stop the step: a breakpoint ' +
+    'there stops in it. To stop inside the skipped code instead, turn ' +
     'stepping through it off: justMyCode: false on a launch, smartStep: false on a launch or an attach.',
 
   /**

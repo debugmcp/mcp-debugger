@@ -9,7 +9,7 @@ import path from 'path';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { DefaultAdapterPolicy, type AdapterPolicy } from '@debugmcp/shared';
 import { DapProxyWorker } from '../../src/proxy/dap-proxy-worker.js';
-import type { DapProxyDependencies, ProxyInitPayload } from '../../src/proxy/dap-proxy-interfaces.js';
+import { PROXY_STEP_LEFT_STACK_EVENT, type DapProxyDependencies, type ProxyInitPayload } from '../../src/proxy/dap-proxy-interfaces.js';
 import { createMockDapClient } from '../test-utils/mocks/dap-client.js';
 import { createMockLogger } from '../test-utils/helpers/test-dependencies.js';
 import { createMockFileSystem, createMockProcessSpawner } from '../test-utils/mocks/dap-proxy-doubles.js';
@@ -109,6 +109,16 @@ describe('DapProxyWorker live update events and resumes (issue #876)', () => {
     await configure({ ...DefaultAdapterPolicy, name: 'plain' } as AdapterPolicy);
     mockDapClient.emit('flutter.appStarted', {});
     expect(forwardedEvents()).toEqual([]);
+  });
+
+  // Not a live-update event, forwarded the same way: the proxy stepper's
+  // record that it ended a step by resuming the program (issue #1130, I3),
+  // which the pending step's answer reads.
+  it("forwards the proxy stepper's left-stack record to the session, with its body", async () => {
+    await configure({ ...DefaultAdapterPolicy, name: 'plain' } as AdapterPolicy);
+    mockDapClient.emit(PROXY_STEP_LEFT_STACK_EVENT, { threadId: 1 });
+    expect(forwardedEvents()).toEqual([PROXY_STEP_LEFT_STACK_EVENT]);
+    expect(sent().find((m) => m.event === PROXY_STEP_LEFT_STACK_EVENT)?.body).toEqual({ threadId: 1 });
   });
 
   it("clears the last stop when one of the feature's resume commands goes out", async () => {

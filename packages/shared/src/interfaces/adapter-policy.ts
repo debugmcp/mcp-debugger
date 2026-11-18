@@ -230,6 +230,13 @@ export interface PendingStopContext {
   };
   /** The raw top frame the step was issued from — step only, and only when it could be read. */
   fromFrame?: StackFrame;
+  /**
+   * Step only: the proxy's own stepper (issue #1130) ended this step by
+   * resuming the program, by the time the grace window elapsed. The step had
+   * reached skipped code with nothing of the program below it, so the stack
+   * it started on is gone. Absent for a step that is still executing.
+   */
+  stepLeftStack?: boolean;
 }
 
 /** Context passed to AdapterPolicy.describeUnresolvedSource (issue #816). */

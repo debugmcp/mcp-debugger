@@ -25,6 +25,7 @@ import { threadStacksHandler } from '../../../test-utils/mocks/thread-stacks.js'
 import { ErrorMessages } from '../../../../src/utils/error-messages.js';
 import { ProxyNotRunningError } from '../../../../src/errors/debug-errors.js';
 import { DapResponseError } from '../../../../src/proxy/dap-response-error.js';
+import { PROXY_STEP_LEFT_STACK_EVENT } from '../../../../src/proxy/dap-proxy-interfaces.js';
 
 /**
  * A `breakpoint` event body as the proxy delivers it for a CHILD session event.
@@ -1743,6 +1744,69 @@ describe('SessionManager - DAP Operations', () => {
       expect(data.location?.line).toBe(160);
       expect(data.message).toBe(ErrorMessages.stepStoppedOn('Stepped over', 'breakpoint', { backAtOrigin: true }));
       expect(data.message).toMatch(/back at the line the step was issued from/);
+    });
+
+    // I3 (issue #1130): the JavaScript policy's "left the frame" sentence is
+    // true only for a step the proxy's stepper ended by resuming the program,
+    // which it records with an event of its own. A step still executing in
+    // its own frame (a step_over of a long call) gets the generic wording.
+    describe('the pending wording of a step the proxy stepper ended by leaving the stack (I3)', () => {
+      const LEFT = 'Left its frame, by the stepper\'s own record.';
+
+      function withLeftStackHook(manager: SessionManager): ReturnType<typeof vi.fn> {
+        const hook = vi.fn((info: { stepLeftStack?: boolean }) => (info.stepLeftStack ? LEFT : undefined));
+        const original = (manager as unknown as { selectPolicy: (language: string) => AdapterPolicy }).selectPolicy.bind(manager);
+        vi.spyOn(manager as unknown as { selectPolicy: (language: string) => AdapterPolicy }, 'selectPolicy')
+          .mockImplementation((language: string) => ({ ...original(language), describePendingStop: hook }));
+        return hook;
+      }
+
+      async function pendingStepOver(sessionId: string, events: Array<[string, unknown]>) {
+        dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+          if (command === 'next') {
+            process.nextTick(() => {
+              for (const [event, body] of events) {
+                dependencies.mockProxyManager.emit('dap-event', event, body);
+              }
+            });
+          }
+          if (command === 'stackTrace') {
+            const frame = { id: 1, name: 'main', source: { path: '/app/main.js' }, line: 12, column: 3 };
+            return { success: true, body: { stackFrames: [frame], totalFrames: 1 } };
+          }
+          return { success: true };
+        });
+        const stepPromise = sessionManager.stepOver(sessionId);
+        await vi.advanceTimersByTimeAsync(6000);
+        return (await stepPromise).data as { message?: string; pending?: boolean };
+      }
+
+      it('carries the sentence when the stepper recorded that the step left the stack', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        const hook = withLeftStackHook(sessionManager);
+        const data = await pendingStepOver(session.id, [[PROXY_STEP_LEFT_STACK_EVENT, { threadId: 1 }]]);
+        expect(data.pending).toBe(true);
+        expect(data.message).toBe(`${ErrorMessages.stepStillRunning(5)} ${LEFT}`);
+        expect(hook).toHaveBeenCalledWith(expect.objectContaining({ operation: 'step', stepLeftStack: true }));
+      });
+
+      it('carries the generic wording for a step with no such record: still executing, in its own frame or a call', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        withLeftStackHook(sessionManager);
+        // Another custom event is not the record.
+        const data = await pendingStepOver(session.id, [['flutter.appStarted', {}]]);
+        expect(data.pending).toBe(true);
+        expect(data.message).toBe(ErrorMessages.stepStillRunning(5));
+      });
+
+      it('reads the record of this step only: the one a finished step left behind does not carry over', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        withLeftStackHook(sessionManager);
+        // The record arrives while no step is waiting (the last step had already answered).
+        dependencies.mockProxyManager.emit('dap-event', PROXY_STEP_LEFT_STACK_EVENT, { threadId: 1 });
+        const data = await pendingStepOver(session.id, []);
+        expect(data.message).toBe(ErrorMessages.stepStillRunning(5));
+      });
     });
 
     // Issue #879: the Dart SDK adapter's `next` stops once per token position

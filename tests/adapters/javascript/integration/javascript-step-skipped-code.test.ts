@@ -6,17 +6,25 @@
  * where a step ends. What that has to hold, as measured:
  *
  *   - a step_into on a line that calls only Node's own code lands on the
- *     next line, at once. js-debug's stepper lost that step on the first
- *     console.log of a process (the session ended), and took about 6 s on a
- *     Linux host for a later one;
+ *     next line, inside the window after which a step answers `pending`.
+ *     js-debug's stepper lost that step on the first console.log of a
+ *     process (the session ended), and took about 6 s on a Linux host for a
+ *     later one;
  *   - a call through Node's code into a callback of the program's is
- *     followed; a call that only starts a later task is not;
+ *     followed (an on() or once() listener); a call that only starts a later
+ *     task is not;
+ *   - a pause in the program's code is the landing, on the line the step
+ *     started from too: a one-line loop stops at its header's next position;
+ *   - in a bundle, js-debug's verdict is asked at each landing: a stop in a
+ *     bundled dependency does not make the program's lines of the same
+ *     script count as skipped;
  *   - a step that leaves a function through `return` inside try...finally
  *     is the engine's own. V8 loses it (issues #1161, #1174; Node 22, 24
  *     and 26), sync and async, and the server does not rescue it. Those
  *     tests accept both a runtime that loses the step and one that lands it
  *     in the caller, and fail on a stop anywhere else (another call of the
- *     same function);
+ *     same function). Every one of them is lost on main too (measured: 3 of
+ *     3 runs each); every step main lands is asserted strictly;
  *   - a breakpoint reached during a step stops as itself;
  *   - a step off the last line of a callback Node called has no frame of the
  *     program to return to: the program is resumed, not walked through the
@@ -51,8 +59,29 @@ type StopAnswer = ToolAnswer & {
   snapshot?: { frames?: Array<{ name: string; line: number }> };
 };
 
-/** A step that answered inside the grace window is not pending; this bound says it was prompt. */
-const PROMPT_MS = 4000;
+/**
+ * Inside the 5 s window after which a step answers `pending` (the step
+ * grace window), with room for the answer's own stack reads: a step that
+ * answers under this bound landed by itself.
+ */
+const PROMPT_MS = 4500;
+
+/**
+ * The sentence a step_into carries when its walk through skipped code ended
+ * on one of its bounds (512 engine steps, or 3 s) and it stepped out. Which
+ * bound comes first depends on what an engine step costs on the host (about
+ * 2 ms through the server on Windows, 44 ms on Linux, issue #1163), so either is accepted, and
+ * the number of steps must fit the bound.
+ */
+function expectWalkEnded(message: string | undefined): void {
+  const walked = /^Stepped into\. step_into walked (\d+) engine steps into the call/.exec(message ?? '');
+  expect(walked, message).not.toBeNull();
+  const steps = Number(walked![1]);
+  expect([
+    `Stepped into. ${ErrorMessages.stepIntoReachedNoProgramCode(512, 'steps', 512)}`,
+    ...(steps < 512 ? [`Stepped into. ${ErrorMessages.stepIntoReachedNoProgramCode(steps, 'time', 3000)}`] : [])
+  ], message).toContain(message);
+}
 
 /**
  * A step V8 loses (issues #1161, #1174) is the engine's own, and the server
@@ -122,13 +151,40 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
   }
 
   describe('step_into (issue #1130)', () => {
-    it('lands on the next line when the walk into the call stays in Node\'s own code, and says how far it went: the first console.log of the process', async () => {
+    it('lands on the next line when the walk into the call stays in Node\'s own code: the first console.log of the process', async () => {
       await pausedAt('the first console.log');
       const answer = await step('step_into');
       // js-debug's own stepper lost this step: "Step completed as session exited."
       expectLanding(answer, 'after the first console.log');
-      // The first command and the whole budget, 25 step-ins, before it stepped out.
-      expect(answer.message).toBe(`Stepped into. ${ErrorMessages.stepIntoReachedNoProgramCode(25)}`);
+      // Measured through the server on Windows: 391 engine steps, back out by
+      // step-ins (a plain landing). On a slow inspector link the walk ends on
+      // its time bound first, steps out, and says so.
+      if (answer.message !== 'Stepped into') {
+        expectWalkEnded(answer.message);
+      }
+    }, 60000);
+
+    it('lands on the next line of a later console.log, inside the window: issue #1130\'s own case', async () => {
+      await pausedAt('a later console.log');
+      const answer = await step('step_into');
+      expectLanding(answer, 'after a later console.log');
+      // 130 engine steps through the server on Windows: walked back out by
+      // step-ins (a plain landing); stepped out after 3 s on a slow link.
+      if (answer.message !== 'Stepped into') {
+        expectWalkEnded(answer.message);
+      }
+    }, 60000);
+
+    it('stays in the first iteration of a one-line loop: the header\'s next position on the same line is the landing', async () => {
+      await pausedAt('a one-line loop');
+      const answer = await step('step_into');
+      expectLanding(answer, 'a one-line loop');
+      expect(answer.message).toBe('Stepped into');
+      // The loop variable is not bound yet, or holds the first item.
+      const item = await server!.call<ToolAnswer & { result?: string }>('evaluate_expression', {
+        expression: "(() => { try { return String(item); } catch (e) { return 'TDZ'; } })()"
+      });
+      expect(['\'TDZ\'', 'TDZ', '\'1\'', '1'], JSON.stringify(item)).toContain(item.result);
     }, 60000);
 
     it('enters a function of the program that a builtin calls', async () => {
@@ -142,6 +198,13 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
       await pausedAt('Node code calls the program');
       const answer = await step('step_into');
       expectLanding(answer, 'in the listener');
+      expect(answer.message).toBe('Stepped into');
+    }, 60000);
+
+    it('follows a call through Node\'s once-wrapper into the program\'s listener: a walk longer than 24 engine steps', async () => {
+      await pausedAt('emits to a once listener');
+      const answer = await step('step_into');
+      expectLanding(answer, 'in the once listener');
       expect(answer.message).toBe('Stepped into');
     }, 60000);
 
@@ -240,6 +303,48 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
       await pausedAt('async return inside try-finally');
       // A runtime with V8's fix (#1173) lands it; the docs then need updating.
       expectInCallerOrLost(await step('step_out'), /steps\.cjs$/, [lineOf('awaits workWithFinally'), lineOf('after the await')]);
+    }, 60000);
+  });
+
+  describe('a bundle: one script, a dependency\'s lines and the program\'s (C1)', () => {
+    const BUNDLE = path.resolve(here, '../../../fixtures/javascript/step-skipped-code/bundle');
+    const SCRIPT = path.join(BUNDLE, 'out', 'bundle.js');
+    const APP = path.join(BUNDLE, 'src', 'app.js');
+    const LIB = path.join(BUNDLE, 'node_modules', 'blib', 'index.js');
+    /** The 1-based line of `file` that carries `// <marker>`. */
+    const markerLine = (file: string, marker: string): number => {
+      const index = fs.readFileSync(file, 'utf8').split('\n').findIndex((line) => new RegExp(`// ${marker}(?![A-Z-])`).test(line));
+      if (index === -1) {
+        throw new Error(`no line marked "${marker}" in ${file}`);
+      }
+      return index + 1;
+    };
+
+    function expectInApp(answer: StopAnswer & { ms: number }, marker: string): void {
+      expect(answer, JSON.stringify(answer)).toMatchObject({ success: true, state: 'paused' });
+      expect(answer.pending, JSON.stringify(answer)).toBeUndefined();
+      expect(answer.stopReason, JSON.stringify(answer)).toBeUndefined();
+      expect(answer.location?.file ?? '', JSON.stringify(answer)).toMatch(/app\.js$/);
+      expect(answer.location?.line, JSON.stringify(answer)).toBe(markerLine(APP, marker));
+      expect(answer.ms, `took ${answer.ms} ms: ${JSON.stringify(answer)}`).toBeLessThan(PROMPT_MS);
+    }
+
+    it('steps on through the program\'s lines after a stop inside the bundled dependency', async () => {
+      server = await startStdioClient({ name: 'js-stepper-bundle' });
+      await server.createSession('javascript', 'js-stepper-bundle');
+      const set = await server.call('set_breakpoint', { file: LIB, line: markerLine(LIB, 'BLIB-WORK') });
+      expect(set.success, JSON.stringify(set)).toBe(true);
+      let stop = await server.call<StopAnswer>('start_debugging', { scriptPath: SCRIPT });
+      if (stop.state !== 'paused') {
+        stop = await server.call<StopAnswer>('wait_for_stop', { timeout: 20000 });
+      }
+      expect(stop, JSON.stringify(stop)).toMatchObject({ success: true, state: 'paused' });
+      expect(stop.location?.file ?? '', JSON.stringify(stop)).toMatch(/blib[\\/]index\.js$/);
+      // The dependency's code is skipped: step_over comes back to the caller's next line.
+      expectInApp(await step('step_over'), 'B-AFTER-LIBWORK');
+      // The program's lines of the same script are program code to the steps after it.
+      expectInApp(await step('step_over'), 'B-CALLS-MINE');
+      expectInApp(await step('step_into'), 'B-IN-MINE');
     }, 60000);
   });
 
