@@ -21,6 +21,20 @@ function onceListener(value) {
 }
 onceEmitter.once('y', onceListener);
 
+// Node's own code first calls a function of Node's that runs 3.5 s (a bound
+// builtin blocking in Atomics.wait), then the program's listener. A walk is
+// counted in engine steps, so how long the code before the listener runs does
+// not decide whether the step enters it (review 8, C1). Emitted only when the
+// program is started with the argument `slow-listener`.
+const slowRun = process.argv.includes('slow-listener');
+const slowEmitter = new EventEmitter();
+slowEmitter.on('z', Atomics.wait.bind(Atomics, new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3500));
+function afterSlowListener(value) {
+  const quadrupled = value * 4; // MARK: in the listener after a slow one
+  return quadrupled;
+}
+slowEmitter.on('z', afterSlowListener);
+
 function mapper(value) {
   return value + 1; // MARK: in the mapper
 }
@@ -81,6 +95,9 @@ async function main() {
   emitter.emit('x', 1); // MARK: Node code calls the program
   const afterEmit = 2; // MARK: after emit
   onceEmitter.emit('y', 1); // MARK: emits to a once listener
+  if (slowRun) {
+    slowEmitter.emit('z', 1); // MARK: emits after a slow listener
+  }
   setTimeout(() => {}, 0); // MARK: starts a later task
   const afterTimeout = 3; // MARK: after setTimeout
   const called = callee(); // MARK: calls a function with a breakpoint

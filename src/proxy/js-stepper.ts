@@ -231,6 +231,14 @@ interface Chain {
   pauseRequested: boolean;
   /** That pause was taken on no breakpoint of js-debug's: it is reported as the pause it is. */
   pauseTaken: boolean;
+  /**
+   * The chain ended by resuming the program (the stack it started on is
+   * gone) and the resume is out: a `stopped` beyond the chain's kept pauses
+   * is the program's next stop, never the chain's.
+   */
+  leaving: boolean;
+  /** Those next stops, held until the chain's own record is out, then delivered as they are. */
+  stopsAfterLeaving: DebugProtocol.Event[];
   startedAt: number;
 }
 
@@ -377,6 +385,8 @@ export class JsStepper {
       capped: false,
       pauseRequested: false,
       pauseTaken: false,
+      leaving: false,
+      stopsAfterLeaving: [],
       startedAt: Date.now()
     };
     this.chain = chain;
@@ -417,6 +427,16 @@ export class JsStepper {
   withholds(event: DebugProtocol.Event): boolean {
     const chain = this.chain;
     if (event.event === 'stopped') {
+      if (chain?.leaving && chain.stoppedSeen >= chain.kept) {
+        // js-debug reports pauses in order, so once every kept pause of the
+        // chain is reported, a `stopped` after its resume is the program's
+        // next stop (a breakpoint the resumed program reached while V8's
+        // answer to the resume was still on its way: review 9, M1). It goes
+        // out as itself, after the chain's record that it resumed.
+        logger.debug(`[JsStepper] DAP stopped after the step resumed the program (reason=${(event.body as { reason?: string } | undefined)?.reason}): held until the step's record is out`);
+        chain.stopsAfterLeaving.push(event);
+        return true;
+      }
       if (chain) {
         chain.stoppedSeen++;
         chain.lastStopped = event;
@@ -795,7 +815,9 @@ export class JsStepper {
     const backInOriginFrame = landed !== null && landed.callFrames.length === chain.originDepth &&
       fnKey(landed.callFrames[0]) === chain.originFn;
     if (ender === 'left-stack') {
-      // Nothing of the program is below: resume, and report nothing.
+      // Nothing of the program is below: resume, and report nothing. From
+      // here on, what the resumed program stops at is not the chain's.
+      chain.leaving = true;
       try {
         chain.commands.push('Debugger.resume');
         await this.cdp?.send('Debugger.resume', {});
@@ -876,6 +898,10 @@ export class JsStepper {
       });
     } else if (ender === 'real-stop' && chain.lastStopped) {
       this.deliver(chain.lastStopped);
+    }
+    // The program's own next stops, reached after the chain's resume: never lost, and after the chain's record.
+    for (const next of chain.stopsAfterLeaving.splice(0)) {
+      this.deliver(next);
     }
   }
 

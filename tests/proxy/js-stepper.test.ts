@@ -109,9 +109,15 @@ class Engine extends EventEmitter {
 
   async send<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
     this.calls.push({ method, params });
-    // One ordered socket: every event sent before the answer arrives before it.
-    for (const [held, body] of this.lagged?.splice(0) ?? []) {
-      this.emit('cdp-event', held, body);
+    // One ordered socket: every event sent before the answer arrives before it,
+    // and both arrive after the request went out: a caller that does not wait
+    // for the answer reads none of them (review 9, S02).
+    const held = this.lagged?.splice(0) ?? [];
+    if (held.length > 0) {
+      await tick(1);
+      for (const [name, body] of held) {
+        this.emit('cdp-event', name, body);
+      }
     }
     if (this.failOnce === method) {
       this.failOnce = null;
@@ -137,6 +143,12 @@ class Engine extends EventEmitter {
   pauseAt(pause: ScriptedPause): void {
     this.current = pause;
     this.emit('cdp-event', 'Debugger.paused', this.toCdp(pause));
+  }
+
+  /** js-debug resumes the pause V8 is in by itself, now, after it reported it. */
+  resumeByJsDebug(): void {
+    this.current = null;
+    this.advance(true);
   }
 
   /** The running program pauses here by itself (a breakpoint, a pause request, a late landing), js-debug's report included. */
@@ -286,6 +298,13 @@ describe('JsStepper (issue #1130)', () => {
   /** The stepper's own records, in order. */
   const records = (): string[] => delivered.filter((e) => e.event !== 'stopped').map((e) => e.event);
   const stopped = (): DebugProtocol.StoppedEvent['body'] => stops()[0].body as DebugProtocol.StoppedEvent['body'];
+
+  type CdpSend = (method: string, params?: Record<string, unknown>) => Promise<unknown>;
+  /** Puts `wrap` in front of the engine's CDP `send` for one test. */
+  function wrapSend(wrap: (method: string, params: Record<string, unknown> | undefined, send: CdpSend) => Promise<unknown>): void {
+    const send = engine.send.bind(engine) as CdpSend;
+    (engine as unknown as { send: CdpSend }).send = (method, params) => wrap(method, params, send);
+  }
 
   /** Wait until the chain is over and every event js-debug owes has arrived. */
   async function settled(): Promise<void> {
@@ -715,6 +734,33 @@ describe('JsStepper (issue #1130)', () => {
       expect(delivered[0].body).toEqual({ threadId: 1 });
       expect(stepper.describe()).toMatchObject({ chain: false });
     });
+
+    it('delivers, as itself and after the step\'s record, a breakpoint the resumed program reaches while V8 is still answering that resume (review 9, M1)', async () => {
+      // The resume's answer lags behind what the program does next (on Linux
+      // an answer can wait about 40 ms on the inspector socket, issue #1163).
+      wrapSend(async (method, params, send) => {
+        const answer = await send(method, params);
+        if (method === 'Debugger.resume') await tick(20);
+        return answer;
+      });
+      // Two timers due together: the step leaves the end of a() with nothing
+      // of the program below; b(), the next timer's callback, has a breakpoint.
+      engine.pauseAt({ frames: frames(app('a', 7), node('listOnTimeout', 7)) });
+      engine.script = [
+        { frames: frames(node('listOnTimeout', 8)) },
+        { frames: frames(app('b', 11), node('listOnTimeout', 9)), reason: 'other', hits: ['js-debug:b'], dapReason: 'breakpoint' },
+        'runs'
+      ];
+      await stepper.request('next', { threadId: 1 });
+      await settled();
+      expect(commands()).toEqual(['Debugger.stepOver', 'Debugger.resume']);
+      expect(delivered).toEqual([
+        LEFT_STACK,
+        expect.objectContaining({ event: 'stopped', body: expect.objectContaining({ reason: 'breakpoint', description: 'Paused on breakpoint' }) })
+      ]);
+      // js-debug's continued events for the step's own commands stay the step's.
+      expect(seen.filter((e) => e.event === 'continued')).toEqual(Array(2).fill({ event: 'continued', withheld: true }));
+    });
   });
 
   describe('a pause that is not the stepper\'s', () => {
@@ -794,6 +840,50 @@ describe('JsStepper (issue #1130)', () => {
       expect(stops()).toHaveLength(1);
       expect(stopped()).toMatchObject({ reason: 'breakpoint', description: 'Paused on breakpoint' });
       expect(engine.calls.filter((c) => c.method === 'Runtime.getIsolateId')).toHaveLength(1);
+    });
+
+    it('reads the inbox as it stands when the catch-up request fails: a breakpoint js-debug keeps still goes out as itself (review 9, S01)', async () => {
+      engine.pauseAt({ frames: frames(app('main', 10)) });
+      engine.script = [
+        { frames: frames(app('callee', 30), app('main', 10)), reason: 'other', hits: ['js-debug:7'], dapReason: 'breakpoint', lagCdpFromHere: true },
+        'runs'
+      ];
+      engine.failOnce = 'Runtime.getIsolateId';
+      await stepper.request('next', { threadId: 1 });
+      await settled();
+      expect(engine.calls.filter((c) => c.method === 'Runtime.getIsolateId')).toHaveLength(1);
+      expect(stops()).toHaveLength(1);
+      expect(stopped()).toMatchObject({ reason: 'breakpoint', description: 'Paused on breakpoint' });
+    });
+
+    it('catches up again for a stopped that came while it was catching up: that answer does not cover it (review 9, S04/S05)', async () => {
+      engine.pauseAt({ frames: frames(app('main', 10)) });
+      engine.script = [
+        // A pause js-debug reports, then resumes by itself; the CDP socket lags from here.
+        { frames: frames(app('callee', 30), app('main', 10)), reason: 'other', hits: ['js-debug:7'], dapReason: 'breakpoint', lagCdpFromHere: true },
+        // The step's own landing.
+        { frames: frames(app('main', 11)) },
+        'runs'
+      ];
+      let catchUps = 0;
+      wrapSend(async (method, params, send) => {
+        if (method === 'Runtime.getIsolateId' && ++catchUps === 1) {
+          engine.calls.push({ method, params: params ?? {} });
+          // While this request is out, js-debug resumes the pause it reported
+          // and V8 lands the step: their CDP events come after this answer,
+          // js-debug's stopped for the landing before it.
+          engine.resumeByJsDebug();
+          await tick(10);
+          return { id: 'isolate-1' };
+        }
+        return send(method, params);
+      });
+      await stepper.request('next', { threadId: 1 });
+      await settled();
+      expect(engine.calls.filter((c) => c.method === 'Runtime.getIsolateId')).toHaveLength(2);
+      expect(stops()).toHaveLength(1);
+      // The step's landing, not the breakpoint js-debug resumed.
+      expect(stopped()).toMatchObject({ reason: 'step', description: 'Paused' });
     });
   });
 
@@ -930,6 +1020,30 @@ describe('JsStepper (issue #1130)', () => {
       expect(delivered).toHaveLength(1);
       expect(stopped()).toMatchObject({ reason: 'step' });
       expect(stepper.describe()).toMatchObject({ chain: false });
+    });
+
+    it('withdraws the walk\'s record when the chain fails with V8 running: nothing walks any more (review 9, S12)', async () => {
+      engine.pauseAt({ frames: frames(app('main', 10)) });
+      engine.script = [
+        { frames: frames(node('require', 1), app('main', 10)) },
+        { frames: frames(node('require', 2), app('main', 10)) },
+        'runs'
+      ];
+      let stepIns = 0;
+      wrapSend(async (method, params, send) => {
+        if (method === 'Debugger.stepInto' && ++stepIns === 3) {
+          // V8 runs (js-debug resumed it behind the stepper): the step command is refused.
+          engine.emit('cdp-event', 'Debugger.resumed', {});
+          engine.current = null;
+          throw new Error('Debugger.stepInto: Can only perform operation while paused.');
+        }
+        return send(method, params);
+      });
+      await stepper.request('stepIn', { threadId: 1 });
+      await settled();
+      expect(stops()).toEqual([]);
+      expect(records()).toEqual([PROXY_STEP_WALK_STARTED_EVENT, PROXY_STEP_WALK_ENDED_EVENT]);
+      expect(delivered[1].body).toEqual({ threadId: 1, why: 'failed' });
     });
 
     it('asks again for the stack while js-debug says it is not paused yet, rather than taking it for an empty one', async () => {

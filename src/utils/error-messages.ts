@@ -275,9 +275,12 @@ export const ErrorMessages = {
    * record. Such a step is known not to be "stepping over a long-running
    * call", and nothing promises it will pause, so this lead says only what the
    * server knows: the step has not landed, the session is running, and how to
-   * wait for it or interrupt it (measured: pause_execution during a walk is
-   * answered as the caller's pause). The policy's sentence follows it. A step
-   * with no record keeps `stepStillRunning`.
+   * wait for it or interrupt it (measured: pause_execution during a walk that
+   * is taking engine steps is answered as the caller's pause; while the
+   * program is blocked in native code or idle under a pending step_into, it
+   * stops inside the server's own wake evaluation instead, issue #1208). The
+   * policy's sentence follows it. A step with no record keeps
+   * `stepStillRunning`.
    * Used in: src/session/execution/execution-controller.ts
    * @param graceSeconds - The grace window duration in seconds
    */

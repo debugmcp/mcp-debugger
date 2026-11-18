@@ -140,7 +140,10 @@ A breakpoint or an exception reached during a step stops as itself. A `debugger;
 reported as the step's landing: V8 reports the two alike, and it is where the program stopped. (A `debugger;` in
 skipped code does not stop at all, with or without a step in flight.) A pause asked for while a step
 is still pending is the caller's: the next stop is reported as the pause, where the program is, in Node's own code
-if that is where it is (the stack response marks the frame). A step never steps away from it.
+if that is where it is (the stack response marks the frame). A step never steps away from it. One case is not yet
+so (issue #1208): when a `step_into` is pending because the program is blocked in native code or idle, the pause
+stops inside the expression the server evaluates to wake the program before a pause, and is reported as a step at
+`repl:1`. A pending `step_over` of a call of your own that blocks or loops is not affected: the pause stops in it.
 
 | Launch | `skipFiles` sent | Steps through skipped code | `step_over` from a breakpoint inside a dependency |
 |---|---|---|---|

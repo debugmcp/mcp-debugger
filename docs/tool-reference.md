@@ -716,7 +716,9 @@ stops or ends, and pause_execution interrupts it.`, followed by the sentence:
   it stops the step when your program's code is next on top, and if the walk reaches its limit of 512 engine steps
   first, it steps out toward the nearest frame of your program (with none below it, the program is resumed). A
   breakpoint reached on the way stops the program there, and if the engine loses the step on the way the program
-  runs on.` (`pause_execution` during a walk is answered as your pause.) A walk that reached its limit and is
+  runs on.` (`pause_execution` while the walk is taking engine steps is answered as your pause. While the program
+  is blocked in native code or idle under the pending `step_into`, it stops inside the server's own wake evaluation
+  and is reported as a step at `repl:1`: issue #1208.) A walk that reached its limit and is
   stepping out, or one during which js-debug resumed a pause of its own (the step may have been lost with it, issue
   #1162), is no longer recorded as walking and gets no such sentence.
 - **Left its frame.** The stepper ended the step by resuming the program: the step left the frame it started in and

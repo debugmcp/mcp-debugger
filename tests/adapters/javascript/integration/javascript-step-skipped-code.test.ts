@@ -131,14 +131,23 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
     server = undefined;
   });
 
-  async function pausedAt(marker: string, launchArgs?: Record<string, unknown>, extraBreakpoints: string[] = []): Promise<StopAnswer> {
+  async function pausedAt(
+    marker: string,
+    launchArgs?: Record<string, unknown>,
+    extraBreakpoints: string[] = [],
+    programArgs?: string[]
+  ): Promise<StopAnswer> {
     server = await startStdioClient({ name: 'js-stepper' });
     await server.createSession('javascript', 'js-stepper');
     for (const at of [marker, ...extraBreakpoints]) {
       const set = await server.call('set_breakpoint', { file: FIXTURE, line: lineOf(at) });
       expect(set.success, JSON.stringify(set)).toBe(true);
     }
-    let stop = await server.call<StopAnswer>('start_debugging', { scriptPath: FIXTURE, ...(launchArgs ? { dapLaunchArgs: launchArgs } : {}) });
+    let stop = await server.call<StopAnswer>('start_debugging', {
+      scriptPath: FIXTURE,
+      ...(programArgs ? { args: programArgs } : {}),
+      ...(launchArgs ? { dapLaunchArgs: launchArgs } : {})
+    });
     expect(stop.success, JSON.stringify(stop)).toBe(true);
     if (stop.state !== 'paused') {
       stop = await server.call<StopAnswer>('wait_for_stop', { timeout: 20000 });
@@ -264,6 +273,15 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
       expectLanding(answer, 'in the once listener');
       expect(answer.message).toBe('Stepped into');
     }, 60000);
+
+    it('enters the program\'s listener however long Node\'s code before it runs: a walk is counted in engine steps, never the clock (review 8, C1)', async () => {
+      await pausedAt('emits after a slow listener', undefined, [], ['slow-listener']);
+      const answer = await walkingStep('step_into');
+      expectLanding(answer, 'in the listener after a slow one', { walked: true });
+      // The listener before it blocked for 3.5 s: a clock bound of the walk
+      // (3 s, before round 3) gave up there and landed on the next line.
+      expect(answer.ms, JSON.stringify(answer)).toBeGreaterThanOrEqual(3000);
+    }, 150000);
 
     it('does not follow a call into a later task: the next line, not the timer\'s callback', async () => {
       await pausedAt('starts a later task');
