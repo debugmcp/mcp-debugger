@@ -761,6 +761,116 @@ describe('JsStepper (issue #1130)', () => {
       // js-debug's continued events for the step's own commands stay the step's.
       expect(seen.filter((e) => e.event === 'continued')).toEqual(Array(2).fill({ event: 'continued', withheld: true }));
     });
+
+    describe('what happens around that resume (review 10)', () => {
+      /** The step leaves the end of a() with nothing of the program below; the next timer's b() is what comes next. */
+      function leaveThen(next: ScriptedPause[], tail: Array<ScriptedPause | 'runs'> = ['runs']): void {
+        engine.pauseAt({ frames: frames(app('a', 7), node('listOnTimeout', 7)) });
+        engine.script = [{ frames: frames(node('listOnTimeout', 8)) }, ...next, ...tail];
+      }
+      const atBreakpointInB = (): ScriptedPause => ({
+        frames: frames(app('b', 11), node('listOnTimeout', 9)), reason: 'other', hits: ['js-debug:b'], dapReason: 'breakpoint'
+      });
+      /** What the parent process sees: what the stepper delivers and every event it lets through, in order. */
+      const kinds = (): string[] => delivered.map((e) => (e.event === 'stopped' ? `stopped:${(e.body as { reason?: string }).reason}` : e.event));
+      beforeEach(() => {
+        engine.onDap = (event) => {
+          const withheld = stepper.withholds(event);
+          seen.push({ event: event.event, withheld });
+          if (!withheld) delivered.push(event);
+        };
+      });
+
+      it('takes a resume whose answer was lost, with V8 paused somewhere else, for the resume it was: one stop, the program\'s', async () => {
+        wrapSend(async (method, params, send) => {
+          const answer = await send(method, params);
+          if (method === 'Debugger.resume') {
+            await tick(20);
+            throw new Error('Debugger.resume: timed out');
+          }
+          return answer;
+        });
+        leaveThen([atBreakpointInB()]);
+        await stepper.request('next', { threadId: 1 });
+        await settled();
+        expect(kinds()).toEqual([PROXY_STEP_LEFT_STACK_EVENT, 'stopped:breakpoint']);
+      });
+
+      it('lets a resume of a stop it holds out after that stop: the parent ends knowing the program runs', async () => {
+        wrapSend(async (method, params, send) => {
+          const answer = await send(method, params);
+          if (method === 'Debugger.resume') {
+            await tick(10);
+            engine.resumeByJsDebug();
+            await tick(10);
+          }
+          return answer;
+        });
+        leaveThen([atBreakpointInB()]);
+        await stepper.request('next', { threadId: 1 });
+        await settled();
+        expect(stepper.describe().paused).toBe(false);
+        expect(kinds()).toEqual([PROXY_STEP_LEFT_STACK_EVENT, 'stopped:breakpoint', 'continued']);
+      });
+
+      it('drops what it holds, and records nothing, once the step is given up while the resume is answered', async () => {
+        let deliveredAtGiveUp = -1;
+        wrapSend(async (method, params, send) => {
+          const answer = await send(method, params);
+          if (method === 'Debugger.resume') {
+            await tick(10);
+            deliveredAtGiveUp = delivered.length;
+            await stepper.beforeRequest('disconnect');
+            await tick(10);
+          }
+          return answer;
+        });
+        leaveThen([atBreakpointInB()]);
+        await stepper.request('next', { threadId: 1 });
+        await settled();
+        expect(deliveredAtGiveUp).toBe(0);
+        expect(kinds()).toEqual([]);
+      });
+
+      it('drops a held stop that a continue moved V8 on from: the parent ends knowing the program runs', async () => {
+        wrapSend(async (method, params, send) => {
+          const answer = await send(method, params);
+          if (method === 'Debugger.resume') {
+            await tick(10);
+            await stepper.beforeRequest('continue');
+            engine.resumeByJsDebug();
+            await tick(10);
+          }
+          return answer;
+        });
+        leaveThen([atBreakpointInB()]);
+        await stepper.request('next', { threadId: 1 });
+        await settled();
+        expect(stepper.describe().paused).toBe(false);
+        expect(kinds()).toEqual(['continued']);
+      });
+
+      it('drops a held stop that a new step moved V8 on from: the new step\'s landing is the last stop', async () => {
+        let resumes = 0;
+        let second: Promise<unknown> | null = null;
+        wrapSend(async (method, params, send) => {
+          const answer = await send(method, params);
+          if (method === 'Debugger.resume' && ++resumes === 1) {
+            await tick(10);
+            second = stepper.request('next', { threadId: 1 });
+            await tick(10);
+          }
+          return answer;
+        });
+        leaveThen([atBreakpointInB()], [{ frames: frames(app('b', 12), node('listOnTimeout', 9)) }, 'runs']);
+        await stepper.request('next', { threadId: 1 });
+        await vi.waitFor(() => expect(second).not.toBeNull());
+        await second;
+        await settled();
+        await tick(20);
+        expect(kinds().filter((k) => k.startsWith('stopped'))).toEqual(['stopped:step']);
+      });
+    });
   });
 
   describe('a pause that is not the stepper\'s', () => {

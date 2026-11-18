@@ -237,8 +237,14 @@ interface Chain {
    * is the program's next stop, never the chain's.
    */
   leaving: boolean;
-  /** Those next stops, held until the chain's own record is out, then delivered as they are. */
-  stopsAfterLeaving: DebugProtocol.Event[];
+  /**
+   * Those next stops, and any `continued` after the first of them (never the
+   * chain's own: its resume's `continued` comes before the program's next
+   * pause), held in order until the chain's own record is out, then
+   * delivered as they are. Dropped if the chain is given up meanwhile: the
+   * request that gave it up is the caller's, and V8 has moved on (review 10).
+   */
+  afterLeaving: DebugProtocol.Event[];
   startedAt: number;
 }
 
@@ -386,7 +392,7 @@ export class JsStepper {
       pauseRequested: false,
       pauseTaken: false,
       leaving: false,
-      stopsAfterLeaving: [],
+      afterLeaving: [],
       startedAt: Date.now()
     };
     this.chain = chain;
@@ -434,7 +440,7 @@ export class JsStepper {
         // answer to the resume was still on its way: review 9, M1). It goes
         // out as itself, after the chain's record that it resumed.
         logger.debug(`[JsStepper] DAP stopped after the step resumed the program (reason=${(event.body as { reason?: string } | undefined)?.reason}): held until the step's record is out`);
-        chain.stopsAfterLeaving.push(event);
+        chain.afterLeaving.push(event);
         return true;
       }
       if (chain) {
@@ -458,6 +464,11 @@ export class JsStepper {
         }
       }
       return false;
+    }
+    if (event.event === 'continued' && chain?.leaving && chain.afterLeaving.length > 0) {
+      // A resume of a stop held above, not the chain's: it goes out after that stop.
+      chain.afterLeaving.push(event);
+      return true;
     }
     // One `continued` per resume: a chain's are its own business. The caller
     // was told the program resumed when the step was answered.
@@ -823,8 +834,11 @@ export class JsStepper {
         await this.cdp?.send('Debugger.resume', {});
       } catch (err) {
         logger.warn(`[JsStepper] resume after leaving the stack failed: ${errorText(err)}`);
-        if (this.current !== null) {
-          // V8 is still paused: the caller hears of the stop it can see.
+        if (this.current !== null && this.current === landed) {
+          // V8 is still paused where the chain left it: the caller hears of
+          // the stop it can see. (Paused anywhere else, V8 took the resume
+          // and the answer was lost: the stop it is in now is the program's
+          // next, held above or still to come, review 10.)
           ender = 'landing';
           by = 'where it was: V8 refused the resume';
         }
@@ -846,10 +860,12 @@ export class JsStepper {
       this.owed = missing;
       this.owedUntil = Date.now() + this.tunables.settleCeilingMs;
     }
-    if (ender === 'left-stack') {
+    if (ender === 'left-stack' && !chain.cancelled) {
       // The program runs on and the step will not land: no stop to report.
       // The record goes to the parent process, whose pending answer may then
-      // say the step left its frame (I3).
+      // say the step left its frame (I3). A chain given up while its resume
+      // was being answered records nothing: the request that gave it up is
+      // the caller's (as in review 8's case, before the resume).
       this.deliver({ seq: 0, type: 'event', event: PROXY_STEP_LEFT_STACK_EVENT, body: { threadId: chain.threadId ?? 0 } });
     } else if (ender === 'error' && chain.walkRecorded) {
       // The chain failed with V8 running: nothing walks any more.
@@ -899,9 +915,18 @@ export class JsStepper {
     } else if (ender === 'real-stop' && chain.lastStopped) {
       this.deliver(chain.lastStopped);
     }
-    // The program's own next stops, reached after the chain's resume: never lost, and after the chain's record.
-    for (const next of chain.stopsAfterLeaving.splice(0)) {
-      this.deliver(next);
+    // The program's own next stops, reached after the chain's resume: never
+    // lost, and after the chain's record; stale, and dropped, once the chain
+    // was given up (a continue or a new step has moved V8 on).
+    const after = chain.afterLeaving.splice(0);
+    if (chain.cancelled) {
+      if (after.length > 0) {
+        logger.debug(`[JsStepper] ${after.length} event(s) after the step's resume dropped: the step was given up (${chain.cancelled})`);
+      }
+    } else {
+      for (const next of after) {
+        this.deliver(next);
+      }
     }
   }
 
