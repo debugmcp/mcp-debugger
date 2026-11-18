@@ -23,62 +23,17 @@
  *   maps. js-debug's `stopped` for the pause is never waited for: it is sent
  *   a timer tick later, which costs 12 ms a landing on Windows.
  *
- *   NETS. V8 loses a step in two measured ways: when a frame is left through
- *   a `return` that runs a `finally` first, within the run the step began in
- *   (issue #1161: the replayed Return bytecode has no source position, so it
- *   is not a break location, and V8's step-out floods return locations only;
- *   a `return` out of for...of and a `using` declaration close the same
- *   way), and when js-debug resumes a pause of its own, a module-entry
- *   breakpoint, while the step is in flight (issue #1162). A net is a capped
- *   set of temporary CDP breakpoints on the break positions of the frame a
- *   step returns to, kept with the stack depth of the activation it guards.
- *   Any position there is where V8's own step-out would stop, so a hit at
- *   that depth is a landing.
- *
- *   A NET IS SET ONLY WHERE A HIT PROVES THE STEP CAME BACK. Five versions
- *   of the rule that decided where read the program's source to tell a
- *   function that returns from one that suspends at an `await` or `yield`,
- *   and each was fooled by some way of writing JavaScript. V8 knows, and
- *   says so on every frame of a pause: `canBeRestarted` is false for an
- *   async function, a generator and module code that may await, and for
- *   every frame below one (measured on Node 22, 24 and 26 over every
- *   function form). So, in one place, before every command that can leave
- *   the frame on top (`guard`):
- *
- *     (a) The frame guarded, the nearest frame of the program below, can be
- *         restarted. Then it and every frame above it are plain functions:
- *         each comes down only by returning, so control back in the guarded
- *         frame means the step came back, and the guarded frame stays on the
- *         stack until it reaches a net position. A frame that cannot be
- *         restarted is not netted: a step that leaves through an async
- *         function or a generator, or returns to one, is V8's own, and what
- *         V8 loses there stays lost (issue #1174). To spare breakpoints, a
- *         function being left whose text names nothing that closes through
- *         a finally (`finally`, `for...of`, `using`) is not netted either;
- *         that test only ever errs toward netting.
- *
- *     (b) The net covers every break position of the frame it guards, or
- *         there is none: a hit is then the first position control reaches
- *         in that activation. A function with more than `netSize` positions,
- *         or whose positions cannot all be found, is not netted, and when
- *         V8 refuses one of them none is kept. A rescue lands at the
- *         caller's next break location after the call; V8's own step-out,
- *         when it does not lose the step, can stop once more on the call's
- *         own line.
- *
- *   Nothing is ever guarded that is not on the stack (no net on an awaiting
- *   function), and nothing is decided on a pause's reason, which does not
- *   say whether V8 had lost the step.
- *
- *   A net is a safeguard, never a condition: when one cannot be set the step
- *   goes on with V8 alone.
- *
- *   No net is put on the frame being stepped IN. V8 says `ambiguous` for any
- *   breakpoint hit while a step is in flight, and it exposes no statement
- *   boundaries, so a hit on a later position of the same statement (the
- *   second argument of a multi-line call) cannot be told from the next
- *   statement. In-frame stepping stays V8's own. That is why a plain
- *   `step_over` across issue #1162's module load is not recovered here.
+ *   STEPS V8 LOSES STAY LOST. V8 loses a step that leaves a function
+ *   through a `return` that runs a `finally` first: a `return` inside
+ *   try...finally, a `return` out of for...of, a function with a `using`
+ *   declaration, every async generator (issue #1161; V8 issue 569814973).
+ *   js-debug resuming its own module-entry pause while a step is in flight
+ *   loses one too (issue #1162). The stepper does not rescue these: the
+ *   step is V8's own, and the program runs on (or, for a `step_over` off the
+ *   end of a `finally` block, V8 can stop in the next call of the same
+ *   function). There is no rescue because a breakpoint hit in the caller
+ *   cannot be told from a hit in a later call of the caller: CDP names no
+ *   single activation.
  *
  *   Skipped code on top: `step_into` repeats up to a budget (that is how a
  *   call through Node's own code reaches a callback of the program's), then
@@ -98,10 +53,8 @@
  *   js-debug's `stopped` and `continued` events are withheld by count: it
  *   sends one `stopped` per pause it keeps, out of order with the
  *   `continued` of the next resume. The last one is forwarded: as reason
- *   `step` on a landing (it arrives as `pause` or `breakpoint`), unchanged on
- *   a real stop.
- *
- *   Every ender removes every net.
+ *   `step` on a landing (it arrives as `pause`, or `step`), unchanged on a
+ *   real stop.
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { createLogger } from '../utils/logger.js';
@@ -128,15 +81,7 @@ export interface JsStepperTunables {
   budget: number;
   /** CDP step commands in one chain, all told. */
   commandCap: number;
-  /**
-   * The most break positions a net may have. A net covers every position of
-   * the function it guards, or the function is not netted: a net on part of
-   * it can miss the position control comes back to (a loop's back edge, the
-   * code after a long else) and fire later, in another iteration or another
-   * call. A breakpoint is slow to set in a big function (1000 took 2.4 s).
-   */
-  netSize: number;
-  /** Re-issued commands on a net position that is not a landing (recursion; the origin statement). */
+  /** Re-issued step-ins when a step-in lands back on the statement it started from. */
   reissueCap: number;
   /** How long a finished chain waits for js-debug's `stopped` events before it reports without them. */
   settleCeilingMs: number;
@@ -147,7 +92,6 @@ export interface JsStepperTunables {
 export const DEFAULT_JS_STEPPER_TUNABLES: JsStepperTunables = {
   budget: 24,
   commandCap: 128,
-  netSize: 100,
   reissueCap: 24,
   settleCeilingMs: 2000,
   verdictCeilingMs: 2000
@@ -167,10 +111,10 @@ export type StepKind = 'in' | 'over' | 'out';
 const STEP_OF_COMMAND: Record<string, StepKind> = { stepIn: 'in', next: 'over', stepOut: 'out' };
 const CDP_COMMAND: Record<StepKind, string> = { in: 'Debugger.stepInto', over: 'Debugger.stepOver', out: 'Debugger.stepOut' };
 
-/** Requests that resume or end the target: a chain still waiting on a net must give it up first. */
+/** Requests that resume or end the target: a chain still in flight must give it up first. */
 const CHAIN_ENDING_REQUESTS = new Set(['continue', 'disconnect', 'terminate', 'restart', 'goto', 'reverseContinue', 'restartFrame']);
 
-/** What ends a chain as a real stop when the pause carries no breakpoint of ours. */
+/** The reasons of a pause that is the step's own, when it hits no breakpoint; any other reason is a real stop. */
 const STEP_REASONS = new Set(['step', 'ambiguous']);
 
 interface CdpLocation {
@@ -179,19 +123,10 @@ interface CdpLocation {
   columnNumber?: number;
 }
 
-interface CdpBreakLocation extends CdpLocation {
-  type?: string;
-}
-
 interface CdpCallFrame {
   functionName?: string;
   functionLocation?: CdpLocation;
   location: CdpLocation;
-  /**
-   * V8's word on restarting the frame: false for an async function, a
-   * generator, module code that may await, and every frame below one.
-   */
-  canBeRestarted?: boolean;
 }
 
 interface CdpAsyncFrame {
@@ -215,16 +150,6 @@ interface CdpAsyncTrace {
   parent?: CdpAsyncTrace;
 }
 
-interface Net {
-  /** What it guards, for the log. */
-  name: string;
-  /** Function identity, or the async parent's position. */
-  fn: string;
-  /** The stack depth of the guarded activation. */
-  depth: number;
-  ids: Set<string>;
-}
-
 type Inbox =
   | { type: 'paused'; pause: CdpPaused }
   | { type: 'resumed' };
@@ -246,9 +171,6 @@ const MAX_MARKED_FRAMES = 200;
 /** How far past the sync frames js-debug is asked: the labels of the async segments and the awaiter's frame. */
 const ASYNC_MARKS = 12;
 
-/** What closes through a finally, written or implied: the exits V8 loses a step on (issue #1161). */
-const CLOSES_THROUGH_FINALLY = /\b(finally|using|of)\b/;
-
 interface Chain {
   kind: StepKind;
   threadId: number | undefined;
@@ -266,27 +188,20 @@ interface Chain {
   commands: string[];
   spent: number;
   reissues: number;
-  /** A net fired in recursion and was dropped: V8's own step-outs finish, to the origin depth. */
-  unwinding: boolean;
   /** Step-ins a step-in had sent when it gave up on the skipped code and stepped out; 0 if it never did. */
   walkedBeforeSteppingOut: number;
   /** Every command the chain may send is spent and skipped code is still on top. */
   capped: boolean;
-  /** A step-in's walk found nothing of the program below the skipped code: not looked at again while it walks. */
-  walkHasNothingBelow: boolean;
   /** The caller asked for a pause during the chain: the next stop is theirs. */
   pauseRequested: boolean;
   /** That pause was taken on no breakpoint of js-debug's: it is reported as the pause it is. */
   pauseTaken: boolean;
-  /** Whether any pause the chain kept was a net's: what a late report of it looks like. */
-  netHits: boolean;
   startedAt: number;
 }
 
 type Verdict =
   | { kind: 'wait' }
-  /** `skipped`: the frame the command steps from is skipped code. */
-  | { kind: 'command'; command: string; skipped: boolean }
+  | { kind: 'command'; command: string }
   | { kind: 'landing'; by: string }
   | { kind: 'real-stop' }
   | { kind: 'left-stack' };
@@ -294,10 +209,6 @@ type Verdict =
 function fnKey(frame: CdpCallFrame): string {
   const l = frame.functionLocation ?? frame.location;
   return `${l.scriptId}:${l.lineNumber}:${l.columnNumber ?? 0}`;
-}
-
-function sameOrAfter(a: CdpLocation, b: CdpLocation): boolean {
-  return a.lineNumber > b.lineNumber || (a.lineNumber === b.lineNumber && (a.columnNumber ?? 0) >= (b.columnNumber ?? 0));
 }
 
 function errorText(err: unknown): string {
@@ -327,19 +238,13 @@ export class JsStepper {
   /** The pause V8 is in now, as CDP reported it; null while running. */
   private current: CdpPaused | null = null;
   private chain: Chain | null = null;
-  private nets: Net[] = [];
   /** `stopped` events of a finished chain still on their way; dropped when they arrive, until the deadline. */
   private owed = 0;
   private owedUntil = 0;
-  /** Whether an owed report can be a net's (`breakpoint`, naming none of js-debug's). */
-  private owedNetHit = false;
   /** Scripts js-debug marked "Skipped by skipFiles": a script-level verdict, not asked again. */
   private readonly skippedScripts = new Set<string>();
-  /** Whether a function's text names a construct that closes through a finally. */
-  private readonly closing = new Map<string, boolean>();
   /** What each pause's top frame returns to: asked of js-debug once per pause. */
   private readonly targets = new WeakMap<CdpPaused, ReturnTarget>();
-  private readonly sources = new Map<string, string[]>();
 
   constructor(options: JsStepperOptions) {
     this.target = options.target;
@@ -365,12 +270,11 @@ export class JsStepper {
     cdp.on('cdp-event', this.onCdpEvent);
   }
 
-  /** The socket is gone (the target ended): nothing can be removed any more. */
+  /** The socket is gone (the target ended): a chain in flight is given up. */
   detachCdp(): void {
     this.cdp?.off('cdp-event', this.onCdpEvent);
     this.cdp = null;
     this.current = null;
-    this.nets = [];
     this.owed = 0;
     const chain = this.chain;
     if (chain) {
@@ -419,24 +323,21 @@ export class JsStepper {
       commands: [],
       spent: 0,
       reissues: 0,
-      unwinding: false,
       walkedBeforeSteppingOut: 0,
       capped: false,
-      walkHasNothingBelow: false,
       pauseRequested: false,
       pauseTaken: false,
-      netHits: false,
       startedAt: Date.now()
     };
     this.chain = chain;
     this.owed = 0;
 
     try {
-      // The one rule, before the first command as before every other.
-      await this.guard(chain, origin, await this.isSkipped(chain, origin));
+      // js-debug's mark on the frame the step starts from: a script it skips
+      // as a whole is then not asked about again at a landing.
+      await this.isSkipped(chain, origin);
       await this.sendStep(chain, CDP_COMMAND[kind]);
     } catch (err) {
-      await this.disarmAll();
       this.chain = null;
       throw err;
     }
@@ -446,7 +347,7 @@ export class JsStepper {
 
   /**
    * A request for the target that is not a step. One that resumes or ends
-   * the target ends a chain still waiting on a net, and removes the net first.
+   * the target ends a chain still in flight first.
    */
   async beforeRequest(command: string): Promise<void> {
     if (CHAIN_ENDING_REQUESTS.has(command)) {
@@ -489,8 +390,8 @@ export class JsStepper {
   }
 
   /** For the log and the tests. */
-  describe(): { enabled: boolean; chain: boolean; nets: number; owed: number; paused: boolean } {
-    return { enabled: this.enabled, chain: this.chain !== null, nets: this.nets.length, owed: this.owed, paused: this.current !== null };
+  describe(): { enabled: boolean; chain: boolean; owed: number; paused: boolean } {
+    return { enabled: this.enabled, chain: this.chain !== null, owed: this.owed, paused: this.current !== null };
   }
 
   // ----- CDP events -----
@@ -544,16 +445,6 @@ export class JsStepper {
           if (chain.pauseRequested) {
             // The caller asked for a pause while this landing was being
             // judged: V8 is paused, and this stop is theirs.
-            chain.pauseTaken = true;
-            await this.finish(chain, 'real-stop');
-            return;
-          }
-          await this.guard(chain, pause, verdict.skipped);
-          if (chain.cancelled) {
-            await this.finish(chain, 'cancelled');
-            return;
-          }
-          if (chain.pauseRequested) {
             chain.pauseTaken = true;
             await this.finish(chain, 'real-stop');
             return;
@@ -616,16 +507,10 @@ export class JsStepper {
     }
   }
 
-  private netOf(id: string): Net | undefined {
-    return this.nets.find((net) => net.ids.has(id));
-  }
-
   private async judge(chain: Chain, pause: CdpPaused): Promise<Verdict> {
-    const hits = pause.hitBreakpoints ?? [];
-    const hitNets = [...new Set(hits.map((id) => this.netOf(id)).filter((net): net is Net => net !== undefined))];
-    const foreignHit = hits.some((id) => !this.netOf(id));
-    const ours = !chain.pauseRequested && !foreignHit &&
-      (STEP_REASONS.has(pause.reason) || (pause.reason === 'other' && hitNets.length > 0));
+    // Every breakpoint V8 reports is js-debug's: the stepper sets none.
+    const foreignHit = (pause.hitBreakpoints ?? []).length > 0;
+    const ours = !chain.pauseRequested && !foreignHit && STEP_REASONS.has(pause.reason);
 
     if (!ours) {
       // Another breakpoint, an exception, a pause the caller asked for:
@@ -639,15 +524,12 @@ export class JsStepper {
       return { kind: 'real-stop' };
     }
     chain.kept++;
-    if (hitNets.length > 0) {
-      chain.netHits = true;
-    }
 
     const top = pause.callFrames[0];
     const depth = pause.callFrames.length;
     const skipped = await this.isSkipped(chain, pause);
     if (chain.cancelled) {
-      // Given up while js-debug was being asked: nothing more is armed or sent.
+      // Given up while js-debug was being asked: nothing more is sent.
       return { kind: 'wait' };
     }
 
@@ -657,64 +539,27 @@ export class JsStepper {
       // handler by calls, not returns (issue #687).
       if (chain.kind === 'in' && chain.spent < this.tunables.budget) {
         chain.spent++;
-        return { kind: 'command', command: CDP_COMMAND.in, skipped: true };
+        return { kind: 'command', command: CDP_COMMAND.in };
       }
       // It has to step out now. With nothing of the program below (no frame,
       // no awaiter), the stack the step started on is gone.
-      if (!this.guardedBelow(depth) && (await this.returnTarget(chain, pause)).kind === 'nothing') {
+      if ((await this.returnTarget(chain, pause)).kind === 'nothing') {
         return { kind: 'left-stack' };
       }
       if (chain.kind === 'in' && chain.walkedBeforeSteppingOut === 0) {
         chain.walkedBeforeSteppingOut = chain.commands.filter((sent) => sent === CDP_COMMAND.in).length;
       }
-      return { kind: 'command', command: CDP_COMMAND.out, skipped: true };
+      return { kind: 'command', command: CDP_COMMAND.out };
     }
 
-    // Program code on top.
-    if (chain.unwinding) {
-      return depth > chain.originDepth
-        ? { kind: 'command', command: CDP_COMMAND.out, skipped: false }
-        : { kind: 'landing', by: 'V8 step-outs after a net was dropped (recursion)' };
-    }
+    // Program code on top: V8's step landed. A step-in that is back on the
+    // line it left steps in again: that enters the line's next call, or moves on.
     const backOnOriginStatement = depth === chain.originDepth && fnKey(top) === chain.originFn && top.location.lineNumber === chain.originLine;
-    if (hits.length === 0) {
-      // V8's step landed. A step-in that is back on the line it left steps in
-      // again: that enters the line's next call, or moves on.
-      if (chain.kind === 'in' && backOnOriginStatement && chain.reissues < this.tunables.reissueCap) {
-        chain.reissues++;
-        return { kind: 'command', command: CDP_COMMAND.in, skipped: false };
-      }
-      return { kind: 'landing', by: 'V8 step' };
-    }
-    if (chain.kind === 'in' && depth > chain.originDepth) {
-      return { kind: 'landing', by: 'net, in a deeper frame of the program' };
-    }
-    const guarding = hitNets.filter((net) => depth <= net.depth);
-    if (guarding.length === 0) {
-      if (chain.kind === 'out' && depth >= chain.originDepth && chain.reissues < this.tunables.reissueCap) {
-        // The frame being left is the same function as its caller (recursion)
-        // and is still running: step out again.
-        chain.reissues++;
-        return { kind: 'command', command: CDP_COMMAND.out, skipped: false };
-      }
-      // The net fired in a deeper activation than the one it guards. Drop it;
-      // V8's own step-outs from here, until the depth is the origin's.
-      for (const net of hitNets) {
-        await this.disarm(net);
-      }
-      chain.unwinding = true;
-      if (depth <= chain.originDepth) {
-        return { kind: 'landing', by: 'net dropped (recursion)' };
-      }
-      return { kind: 'command', command: CDP_COMMAND.out, skipped: false };
-    }
-    // Control is back in a frame a net guards: where V8's own step-out would stop.
     if (chain.kind === 'in' && backOnOriginStatement && chain.reissues < this.tunables.reissueCap) {
       chain.reissues++;
-      return { kind: 'command', command: CDP_COMMAND.in, skipped: false };
+      return { kind: 'command', command: CDP_COMMAND.in };
     }
-    // The pause's reason does not say whether V8 had lost the step: it is logged, and nothing is decided on it.
-    return { kind: 'landing', by: `net (${pause.reason})` };
+    return { kind: 'landing', by: 'V8 step' };
   }
 
   /**
@@ -800,7 +645,6 @@ export class JsStepper {
     const landed = this.current;
     const backInOriginFrame = landed !== null && landed.callFrames.length === chain.originDepth &&
       fnKey(landed.callFrames[0]) === chain.originFn;
-    await this.disarmAll();
     if (ender === 'left-stack') {
       // Nothing of the program is below: resume, and report nothing.
       try {
@@ -830,7 +674,6 @@ export class JsStepper {
     if (missing > 0) {
       this.owed = missing;
       this.owedUntil = Date.now() + this.tunables.settleCeilingMs;
-      this.owedNetHit = chain.netHits;
     }
     const count = (name: string): number => chain.commands.filter((c) => c === name).length;
     logger.info(
@@ -856,9 +699,8 @@ export class JsStepper {
         }
       });
     } else if (ender === 'real-stop' && chain.pauseTaken) {
-      // The pause the caller asked for. js-debug may call it a breakpoint
-      // that names none (it was taken on a net's position), or may not have
-      // reported it yet: it leaves as the pause it is.
+      // The pause the caller asked for. js-debug may report it under another
+      // reason, or may not have reported it yet: it leaves as the pause it is.
       const body = { ...((chain.lastStopped?.body ?? {}) as Record<string, unknown>) };
       delete body.hitBreakpointIds;
       delete body.text;
@@ -897,16 +739,12 @@ export class JsStepper {
   /**
    * Whether a `stopped` that arrives after a chain ended can be the late
    * report of one of that chain's own pauses: js-debug reports a step it did
-   * not request as `pause` (or `step`), and a net's position as a
-   * `breakpoint` that names none of its own. Anything else is somebody
-   * else's stop and goes on.
+   * not request as `pause` (or `step`). Anything else is somebody else's
+   * stop and goes on.
    */
   private looksOwed(event: DebugProtocol.Event): boolean {
-    const body = (event.body ?? {}) as { reason?: string; hitBreakpointIds?: number[] };
-    if (body.reason === 'pause' || body.reason === 'step') {
-      return true;
-    }
-    return this.owedNetHit && body.reason === 'breakpoint' && (body.hitBreakpointIds ?? []).length === 0;
+    const body = (event.body ?? {}) as { reason?: string };
+    return body.reason === 'pause' || body.reason === 'step';
   }
 
   private async abandonChain(why: string): Promise<void> {
@@ -916,186 +754,9 @@ export class JsStepper {
     }
     chain.cancelled = why;
     chain.wake?.();
-    // The run loop ends the chain; the nets must be gone before the caller goes on.
-    await this.disarmAll();
+    // The run loop ends the chain; the caller goes on without waiting for it.
     if (this.chain === chain) {
       this.chain = null;
-    }
-  }
-
-  // ----- nets -----
-
-  private async possible(start: CdpLocation): Promise<CdpBreakLocation[]> {
-    const answer = await this.cdp?.send<{ locations?: CdpBreakLocation[] }>('Debugger.getPossibleBreakpoints', {
-      start: { scriptId: start.scriptId, lineNumber: start.lineNumber, columnNumber: start.columnNumber ?? 0 },
-      restrictToFunction: true
-    });
-    return answer?.locations ?? [];
-  }
-
-  /** The break positions of the frame's function. */
-  private async locationsOf(frame: CdpCallFrame): Promise<CdpBreakLocation[]> {
-    const here = frame.location;
-    let start = frame.functionLocation;
-    // Top-level code whose first token is a function declaration: V8 answers
-    // the nested function's positions for the script's own position. The
-    // script's code goes on after that function, so ask again from just after
-    // its last position, until the answer holds the frame's position. Every
-    // position of the frame's function, or none: a part of it is not a net.
-    for (let tries = 0; start && tries < 16; tries++) {
-      const all = await this.possible(start);
-      if (all.length === 0) {
-        return [];
-      }
-      if (sameOrAfter(here, all[0]) && sameOrAfter(all[all.length - 1], here)) {
-        return all;
-      }
-      const last = all[all.length - 1];
-      if (!sameOrAfter(here, last)) {
-        return [];
-      }
-      start = { scriptId: last.scriptId, lineNumber: last.lineNumber, columnNumber: (last.columnNumber ?? 0) + 1 };
-    }
-    return [];
-  }
-
-  /** A net on every one of `all`, the break positions of the function it guards. */
-  private async arm(all: CdpBreakLocation[], net: Omit<Net, 'ids'>): Promise<boolean> {
-    if (this.nets.some((existing) => existing.fn === net.fn && existing.depth === net.depth)) {
-      return true;
-    }
-    const cdp = this.cdp;
-    if (!cdp) {
-      return false;
-    }
-    const answers = await Promise.all(
-      all.map((location) =>
-        cdp
-          .send<{ breakpointId?: string }>('Debugger.setBreakpoint', {
-            location: { scriptId: location.scriptId, lineNumber: location.lineNumber, columnNumber: location.columnNumber ?? 0 }
-          })
-          .catch(() => undefined)
-      )
-    );
-    const ids = new Set(answers.map((answer) => answer?.breakpointId).filter((id): id is string => typeof id === 'string'));
-    if (ids.size < all.length) {
-      // A net with a hole is no net: remove what was set.
-      await Promise.all([...ids].map((breakpointId) => cdp.send('Debugger.removeBreakpoint', { breakpointId }).catch(() => undefined)));
-      return false;
-    }
-    this.nets.push({ ...net, ids });
-    return true;
-  }
-
-  private async disarm(net: Net): Promise<void> {
-    this.nets = this.nets.filter((other) => other !== net);
-    const cdp = this.cdp;
-    if (!cdp) {
-      return;
-    }
-    await Promise.all([...net.ids].map((breakpointId) => cdp.send('Debugger.removeBreakpoint', { breakpointId }).catch(() => undefined)));
-  }
-
-  private async disarmAll(): Promise<void> {
-    for (const net of [...this.nets]) {
-      await this.disarm(net);
-    }
-  }
-
-  private async linesOf(scriptId: string): Promise<string[]> {
-    let lines = this.sources.get(scriptId);
-    if (!lines) {
-      const answer = await this.cdp?.send<{ scriptSource?: string }>('Debugger.getScriptSource', { scriptId });
-      // V8 ends a line at CR LF, LF, CR, U+2028 and U+2029.
-      lines = (answer?.scriptSource ?? '').split(/\r\n|[\n\r\u2028\u2029]/);
-      this.sources.set(scriptId, lines);
-    }
-    return lines;
-  }
-
-  /**
-   * Whether the function's text names a construct that closes through a
-   * finally, the only exits V8 loses a step on: `finally`, `for...of`,
-   * `using`. Only spares breakpoints where they cannot matter: a word in a
-   * comment nets a function that did not need it, and a text that cannot be
-   * read (V8 refuses the positions of Node's own start-up scripts) is netted.
-   */
-  private async namesAFinally(frame: CdpCallFrame): Promise<boolean> {
-    const key = fnKey(frame);
-    const known = this.closing.get(key);
-    if (known !== undefined) {
-      return known;
-    }
-    let names = true;
-    try {
-      const all = await this.locationsOf(frame);
-      if (all.length > 0) {
-        const lines = await this.linesOf(frame.location.scriptId);
-        const from = Math.min(frame.functionLocation?.lineNumber ?? all[0].lineNumber, all[0].lineNumber);
-        names = lines.slice(from, all[all.length - 1].lineNumber + 1).some((line) => CLOSES_THROUGH_FINALLY.test(line));
-      }
-    } catch {
-      // Not readable: net it.
-    }
-    this.closing.set(key, names);
-    return names;
-  }
-
-  /** Whether a net guards something below a pause of this depth. */
-  private guardedBelow(depth: number): boolean {
-    return this.nets.some((net) => net.depth < depth);
-  }
-
-  /**
-   * THE RULE (see the head of this file), applied before every command that
-   * can leave the frame on top of `pause`: a net on the frame it returns to,
-   * only where a hit there proves the step came back. Never throws: a net is
-   * a safeguard, and without one V8's own step goes on alone.
-   */
-  private async guard(chain: Chain, pause: CdpPaused, skipped: boolean): Promise<void> {
-    try {
-      const frames = pause.callFrames;
-      const top = frames[0];
-      if (chain.unwinding || this.guardedBelow(frames.length) || (skipped && chain.walkHasNothingBelow)) {
-        // Unwinding: a net fired in a deeper call and was dropped; V8's own
-        // step-outs finish the step.
-        return;
-      }
-      // Only where the text of the function being left names something V8 can
-      // lose the step on: this spares breakpoints, and errs toward netting.
-      if (!(await this.namesAFinally(top))) {
-        return;
-      }
-      const target = await this.returnTarget(chain, pause);
-      if (target.kind !== 'frame') {
-        if (target.kind === 'nothing' && skipped && chain.kind === 'in') {
-          // Nothing of the program comes to be below without the walk landing in it first.
-          chain.walkHasNothingBelow = true;
-        }
-        return;
-      }
-      const frame = frames[target.index];
-      if (chain.kind !== 'out' && fnKey(frame) === fnKey(top)) {
-        // It returns to itself (recursion): a net would sit in the frame being stepped in.
-        return;
-      }
-      // (a) V8's own word: the guarded frame and every frame above it are
-      // plain functions, which come down only by returning.
-      if (frame.canBeRestarted !== true) {
-        return;
-      }
-      // (b) Every position of it, or none.
-      const all = await this.locationsOf(frame);
-      if (all.length === 0 || all.length > this.tunables.netSize) {
-        return;
-      }
-      await this.arm(all, {
-        name: frame.functionName || '(anonymous)',
-        fn: fnKey(frame),
-        depth: frames.length - target.index
-      });
-    } catch (err) {
-      logger.warn(`[JsStepper] no net for this step, V8's own step goes on alone: ${errorText(err)}`);
     }
   }
 
@@ -1120,8 +781,8 @@ export class JsStepper {
    * With none on the stack, the function awaiting an async one the event
    * loop resumed: the first frame of V8's async stack, when every link down
    * to it is an `await` (a `Promise.then` or timer link only scheduled the
-   * code on top) and js-debug marks it program code. An awaiter is never
-   * netted; it only says the stack is not gone, and V8's own step leads to it.
+   * code on top) and js-debug marks it program code. An awaiter only says
+   * the stack is not gone; V8's own step leads to it.
    */
   private async findReturnTarget(chain: Chain, pause: CdpPaused): Promise<ReturnTarget> {
     const frames = pause.callFrames;

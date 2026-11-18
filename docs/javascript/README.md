@@ -115,7 +115,8 @@ What a step does when the session steps through skipped code (the launch default
 | Step | From | Lands |
 |---|---|---|
 | `step_into` | a line that calls your function through skipped code (`emitter.emit` to a listener, an array callback, a route handler from inside express) | in that function |
-| `step_into` | a line whose call stays in skipped code for the whole walk (`console.log`, a `require`, `setTimeout`) | on the next line. The message says how many engine steps the walk took, and that code of yours the call runs further in (the module a `require` loads) or only schedules (a timer callback) does not stop the step |
+| `step_into` | a line whose call stays in skipped code for the whole walk (`console.log`, `setTimeout`) | on the next line. The message says how many engine steps the walk took, and that code of yours the call runs further in or only schedules (a timer callback) does not stop the step |
+| `step_into` | a `require` line | nowhere on today's Node versions: the step is lost and the program runs on. Node's loader returns through `try … finally`, so stepping back out of it is one of the steps V8 loses (issue #1161, below). Use `step_over` on a `require` line (it lands on the next line), or set a breakpoint in the module |
 | `step_into` | a line that calls native code only (`JSON.stringify`) | on the next line, as a plain `Stepped into`: there is nothing to walk into |
 | `step_into` | a line that only starts a later task (`setTimeout`, a `.then` callback) | on the next line, never in the callback some time later; a breakpoint in the callback stops there |
 | `step_over`, `step_out` | a frame whose caller is skipped code, with your code further down the stack | in that frame of yours |
@@ -144,45 +145,29 @@ derived value. Attach defaults `smartStep` to `false` and leaves `skipFiles` uns
 `console.log` line stops in `<node_internals>`, and an `async` callee in TypeScript compiled for a target below
 ES2017 costs four unmapped `__awaiter` stops before its first line (issue #687).
 
-**Steps V8 itself loses** (issue #1161). V8 loses a step that leaves a function through a `return` that runs a
-`finally` first (measured on V8 12.4, 13.6 and 14.6 with a bare CDP client): a `step_out` of such a function, or a
-`step_over` off its last statement, used to answer `Step completed as session exited.` A `return` out of a
-`for … of` loop and out of a function with a `using` declaration close the same way. Node's own module loader has
-that shape, which is how a `step_into` on a `require` line was lost too. (The cause is in V8: the return replayed
-after the `finally` block carries no source position, so it is not a place a step can stop; issue #1173.)
+**Steps V8 itself loses** (issue #1161; in `async` functions and generators, issue #1174). V8 loses a step that
+leaves a function through a `return` that runs a `finally` first: a `return` inside `try … finally`, a `return` out
+of a `for … of` loop, a function with a `using` declaration, and every async generator. The steps lost are a
+`step_out` of such a function, and a `step_over` or `step_into` off its last statement. Measured on Node 22.23.2,
+24.14.1 and 26.9.0; Node 16.3.0 lands these steps, 16.4.0 and later do not. A step that crosses an `await` first
+is not lost.
 
-So where a step can be lost that way, the server sets temporary breakpoints on every break location of the frame
-the step returns to, and whichever pauses first is the landing: the caller's next break location after the call
-(the next statement, or the next call in the same statement; V8's own step-out, where it does not lose the step,
-can stop once more on the call's own line first). That is something the server does in your process: a breakpoint
-on each break location of one function, for the length of one step, removed when the step ends, however it ends.
-A function with more than 100 break locations is not guarded, and where the breakpoints cannot be set the step
-goes on with V8 alone.
+Such a step shows one of two symptoms:
 
-They are set only where a hit there proves the step came back, and V8 decides that, not the server reading
-your code:
+- It never lands, and the program runs on or ends: the step answers `pending: true` while the program keeps
+  running, or `Step completed as session exited.` when it ends first.
+- A `step_over` off the end of a `finally` block can instead stop in the next call of the same function, not in
+  the caller. Check the stack before you take that stop for the caller.
 
-- **The frame the step returns to, and every frame above it, are plain functions**: V8 says it could restart that
-  frame, which it says of no `async` function, generator or module code that may await, nor of any frame below one
-  (checked on Node 22, 24 and 26 over every way of writing a function). A plain function comes down only by
-  returning, so control back in that frame means the step came back, in the same call. A function that can suspend
-  at an `await` or `yield` hands control down without returning, and a breakpoint below it would stop the step in
-  the caller while it is still on its way, or in another call of the same function.
-- **Every break location of that frame, or none**: a breakpoint on part of a function can miss the place control
-  comes back to (a loop's top, the code after a long `else`) and stop later, in another iteration or another call.
-  A function with more than 100 break locations, or whose locations cannot all be found, is not guarded.
-- **Never on the frame being stepped in**: a function that returns to itself (recursion) gets none for `step_over`
-  and `step_into`.
+The server does not rescue these steps and sets no temporary breakpoints for them: a breakpoint hit in the caller
+cannot be told from a hit in a later call of the caller, so the step is V8's own. To get past such a return, set a
+breakpoint on the line where you expect execution to come back, then `continue_execution`. The fix belongs in V8:
+V8 issue 569814973 has a fix in review (tracked here as issue #1173), and it reaches you only through a Node
+release.
 
-What that leaves lost, as in 0.26.0: a step V8 loses while leaving an `async` function or a generator, and one that
-leaves a plain function back into an `async` function or a generator (a helper with a `try … finally`, or a
-`require`, called from an `async` function). Such a step runs on: while the program keeps running it answers
-`pending: true`, with a sentence that names these cases; when the program ends first it answers `Step completed as
-session exited.` A breakpoint on the line you expected the step to reach stops there (issue #1174).
-
-Not covered: a `step_over` across the first load of a module that has a breakpoint in it still runs on (issue
-#1162; js-debug pauses at the module's entry to bind the breakpoint, and V8 drops the step at any pause). A
-`step_into` on that line does land.
+A different loss, in js-debug: a `step_over` across the first load of a module that has a breakpoint in it runs on
+(issue #1162). js-debug pauses at the module's entry to bind the breakpoint and resumes that pause itself while the
+step is in flight, and the step is lost with it.
 
 On Linux every engine step costs about 46 ms whoever sends it (the inspector's socket; issue #1163), against 1.5 ms
 on Windows, so a `step_into` on a `console.log` line, which walks 25 engine steps into Node's code and a few back

@@ -451,9 +451,9 @@ export const JsDebugAdapterPolicy = {
     }
     return 'The step left the frame it started in and has not stopped in your program since: a function that Node ' +
       'called returned to the event loop, the line is waiting on work still in flight, or the engine lost the step ' +
-      '(V8 loses one that leaves a function through try...finally, a for...of loop or a using declaration, and the ' +
-      'server rescues it only when it returns into a plain function, not into an async function or a generator; ' +
-      'a breakpoint on the line you expected it to reach stops there). The program is running; ' +
+      '(when the function left returns from inside try...finally, or out of a for...of loop, or declares using, ' +
+      'V8 loses the step, issue #1161; set a breakpoint where you expect execution to come back and continue). ' +
+      'The program is running; ' +
       'wait_for_stop answers when the step lands, a breakpoint is hit, or the program ends.';
   },
 

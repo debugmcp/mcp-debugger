@@ -12,9 +12,11 @@
  *   - a call through Node's code into a callback of the program's is
  *     followed; a call that only starts a later task is not;
  *   - a step that leaves a function through `return` inside try...finally
- *     lands in the caller. V8 loses that step (12.4 to 14.6, a bare CDP
- *     client), sync and async; the stepper catches the return with temporary
- *     breakpoints on the frame the step returns to;
+ *     is the engine's own. V8 loses it (issues #1161, #1174; Node 22, 24
+ *     and 26), sync and async, and the server does not rescue it. Those
+ *     tests accept both a runtime that loses the step and one that lands it
+ *     in the caller, and fail on a stop anywhere else (another call of the
+ *     same function);
  *   - a breakpoint reached during a step stops as itself;
  *   - a step off the last line of a callback Node called has no frame of the
  *     program to return to: the program is resumed, not walked through the
@@ -46,10 +48,32 @@ type StopAnswer = ToolAnswer & {
   pending?: boolean;
   stopReason?: string;
   location?: { file: string; line: number };
+  snapshot?: { frames?: Array<{ name: string; line: number }> };
 };
 
 /** A step that answered inside the grace window is not pending; this bound says it was prompt. */
 const PROMPT_MS = 4000;
+
+/**
+ * A step V8 loses (issues #1161, #1174) is the engine's own, and the server
+ * does not rescue it. On a runtime that loses it the step does not land: the
+ * program runs on (`pending: true`, state `running`) or ends. On one that
+ * does not, it lands in the caller. Either passes; a stop anywhere else
+ * fails, another call of the function left included. Every caller these
+ * tests name runs once, so a line of it identifies the call.
+ */
+function expectInCallerOrLost(answer: StopAnswer & { ms: number }, file: RegExp, callerLines: number[]): void {
+  expect(answer.success, JSON.stringify(answer)).toBe(true);
+  if (answer.state !== 'paused') {
+    // Lost: the program ran on, or ended.
+    return;
+  }
+  expect(answer.pending, JSON.stringify(answer)).toBeUndefined();
+  expect(answer.stopReason, JSON.stringify(answer)).toBeUndefined();
+  expect(answer.location?.file ?? '', JSON.stringify(answer)).toMatch(file);
+  expect(callerLines, JSON.stringify(answer)).toContain(answer.location?.line);
+  expect(answer.ms, `took ${answer.ms} ms: ${JSON.stringify(answer)}`).toBeLessThan(PROMPT_MS);
+}
 
 describe('The server\'s JavaScript stepper against a real js-debug (issues #1130, #1161) @requires-node', () => {
   let server: StdioClientHandle | undefined;
@@ -91,6 +115,12 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
     expect(answer.ms, `took ${answer.ms} ms: ${JSON.stringify(answer)}`).toBeLessThan(PROMPT_MS);
   }
 
+  /** Removes the breakpoint on a marked line, so a later call through that line does not stop on it. */
+  async function removeBreakpointAt(marker: string): Promise<void> {
+    const removed = await server!.call('remove_breakpoint', { file: FIXTURE, line: lineOf(marker) });
+    expect(removed.success, JSON.stringify(removed)).toBe(true);
+  }
+
   describe('step_into (issue #1130)', () => {
     it('lands on the next line when the walk into the call stays in Node\'s own code, and says how far it went: the first console.log of the process', async () => {
       await pausedAt('the first console.log');
@@ -120,10 +150,10 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
       expectLanding(await step('step_into'), 'after setTimeout');
     }, 60000);
 
-    it('lands on the next line of a require of a module not yet loaded (the loader returns through try...finally, issue #1161)', async () => {
+    it('lands on the next line of a require of a module not yet loaded, or V8 loses the step (the loader returns through try...finally, issue #1161)', async () => {
       await pausedAt('first load of a module');
       const answer = await step('step_into');
-      expectLanding(answer, 'after the require');
+      expectInCallerOrLost(answer, /steps\.cjs$/, [lineOf('after the require')]);
     }, 60000);
   });
 
@@ -157,24 +187,41 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
     }, 60000);
   });
 
-  describe('a step that leaves a function through return inside try...finally (issue #1161)', () => {
-    it('step_out lands in the caller', async () => {
+  describe('a step that leaves a function through return inside try...finally (issues #1161, #1174)', () => {
+    // withFinally is called twice: from syncPart, where these tests pause,
+    // and later from main. Its caller here is syncPart, which runs once.
+    const CALLER = (): number[] => [lineOf('calls withFinally'), lineOf('after withFinally')];
+
+    it('step_out lands in the caller, or V8 loses it: never in another call', async () => {
       await pausedAt('return inside try-finally');
-      // V8 never pauses for this step-out: "Step completed as session exited."
-      expectLanding(await step('step_out'), 'after withFinally');
+      // So main's later call of withFinally does not stop on it.
+      await removeBreakpointAt('return inside try-finally');
+      // The call's own line too: V8's step-out can stop there once more.
+      expectInCallerOrLost(await step('step_out'), /steps\.cjs$/, CALLER());
     }, 60000);
 
-    it('step_over reaches the finally block, then the caller', async () => {
+    it('step_over reaches the finally block; the step off it is V8\'s: the caller, lost, or the known stop in the next call of the function (#1161)', async () => {
       await pausedAt('return inside try-finally');
+      await removeBreakpointAt('return inside try-finally');
       expectLanding(await step('step_over'), 'the finally block');
-      // The step that leaves the function is the one V8 loses.
-      expectLanding(await step('step_over'), 'after withFinally');
+      // The step that leaves the function is V8's own, and the server does not
+      // rescue it. A runtime with V8's fix lands it in the caller; one that
+      // loses it runs on. Today's V8 does a third thing, the known defect that
+      // docs/javascript/README.md states ("can instead stop in the next call
+      // of the same function"): it stops on the first statement of main's
+      // later call of withFinally and reports that as the step. This test
+      // names that stop, the frame under it included, so any other stop fails.
+      const answer = await step('step_over');
+      const inTheNextCall = answer.state === 'paused' && answer.location?.line === lineOf('return inside try-finally');
+      if (inTheNextCall) {
+        expect(answer.stopReason, JSON.stringify(answer)).toBeUndefined();
+        expect(answer.snapshot?.frames?.[1]?.line, JSON.stringify(answer)).toBe(lineOf('calls withFinally from an async function'));
+        return;
+      }
+      expectInCallerOrLost(answer, /steps\.cjs$/, CALLER());
     }, 60000);
 
-    it('step_out into an async caller is the engine\'s own, and the engine loses it (#1174)', async () => {
-      // The function being left is plain; the caller is async. It could
-      // suspend before a temporary breakpoint proves the step came back, so
-      // the server sets none. The program runs on to its end.
+    it('step_out into an async caller lands in that caller, or V8 loses it (#1174)', async () => {
       await pausedAt('return inside try-finally', undefined, ['calls withFinally from an async function']);
       // The first stop is the call from the plain caller: run to the second.
       let stop = await server!.call<StopAnswer>('continue_execution', {});
@@ -182,20 +229,17 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
       expect(stop.location?.line, JSON.stringify(stop)).toBe(lineOf('calls withFinally from an async function'));
       stop = await server!.call<StopAnswer>('step_into', {});
       expect(stop.location?.line, JSON.stringify(stop)).toBe(lineOf('return inside try-finally'));
-      const answer = await step('step_out');
-      expect(answer, JSON.stringify(answer)).toMatchObject({ success: true });
-      expect(answer.state, JSON.stringify(answer)).not.toBe('paused');
+      // main runs once; withFinally is not called again after this.
+      expectInCallerOrLost(await step('step_out'), /steps\.cjs$/, [
+        lineOf('calls withFinally from an async function'),
+        lineOf('after withFinally from an async function')
+      ]);
     }, 60000);
 
-    it('step_out of an async function with that shape is the engine\'s own, and the engine loses it (#1174)', async () => {
+    it('step_out of an async function with that shape lands in the function that awaits it, or V8 loses it (#1174)', async () => {
       await pausedAt('async return inside try-finally');
-      // A temporary breakpoint below a function that can suspend cannot tell
-      // it returning from it pausing at an await: the server sets none, and
-      // the step is lost as it was before the server had a stepper. If this
-      // starts landing, V8 has fixed it (#1173): update the docs.
-      const answer = await step('step_out');
-      expect(answer, JSON.stringify(answer)).toMatchObject({ success: true });
-      expect(answer.state, JSON.stringify(answer)).not.toBe('paused');
+      // A runtime with V8's fix (#1173) lands it; the docs then need updating.
+      expectInCallerOrLost(await step('step_out'), /steps\.cjs$/, [lineOf('awaits workWithFinally'), lineOf('after the await')]);
     }, 60000);
   });
 
@@ -253,8 +297,8 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
       await asyncPausedAt('in inner, after the gate', { condition: 'id === 2' });
       const answer = await step('step_out');
       expectAsyncLanding(answer, 'the continuation of handler');
-      // A temporary breakpoint on `handler` stopped in handler(1), whose
-      // continuation was queued first. V8's own step finds handler(2).
+      // Three calls of handler are in flight, handler(1)'s continuation
+      // queued first: V8's own step finds handler(2), the one that awaited.
       const id = await server!.call<ToolAnswer & { result?: string }>('evaluate_expression', { expression: 'id' });
       expect(id.result, JSON.stringify(id)).toBe('2');
       expect(answer.message).toBe('Stepped out');
@@ -262,23 +306,20 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
 
     it('step_over on an await lands on the next line of the same function, though the function has a finally clause', async () => {
       await asyncPausedAt('an await before the try');
-      // With a temporary breakpoint on the caller, the step stopped there the
-      // moment this function suspended.
+      // None of these steps leaves the function without crossing an await first: V8 does not lose them.
       expectAsyncLanding(await step('step_over'), 'an await inside the try');
       expectAsyncLanding(await step('step_over'), 'the return inside the try');
       expectAsyncLanding(await step('step_over'), 'the finally block of an async function');
       // Off the finally block of an async function V8 loses the step, and the
-      // server does not rescue it (#1174): the program runs on to its end.
-      const out = await step('step_over');
-      expect(out, JSON.stringify(out)).toMatchObject({ success: true });
-      expect(out.state, JSON.stringify(out)).not.toBe('paused');
+      // server does not rescue it (#1174). closing is called once, from main.
+      expectInCallerOrLost(await step('step_over'), /async-steps\.cjs$/, [at('awaits closing'), at('after closing')]);
     }, 60000);
 
     it('step_over on a statement that awaits on a later line stays in the function: its caller runs on, and is not where the step stops', async () => {
       await asyncPausedAt('a statement that awaits on later lines');
       // The function has a finally clause above, and the paused line itself
-      // awaits nothing. A temporary breakpoint on the caller stopped the step
-      // at the caller's next statement, the moment this function suspended.
+      // awaits nothing: the step crosses the await on the next line and stays
+      // in the function while its caller runs on.
       const answer = await step('step_over');
       expectAsyncLanding(answer, 'the second await of the statement');
       expect(answer.message).toBe('Stepped over');
@@ -288,8 +329,8 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
       await asyncPausedAt('in early, before its first await', { condition: 'id === 2' });
       const answer = await step('step_out');
       expectAsyncLanding(answer, 'the continuation of relay');
-      // A temporary breakpoint on `relay`, kept by depth, stopped in relay(3)
-      // as it was entered: relay(2) had left the stack at its own await.
+      // Three calls of relay are in flight: the id says the step landed in
+      // relay(2), the one that awaited this early.
       const id = await server!.call<ToolAnswer & { result?: string }>('evaluate_expression', { expression: 'id' });
       expect(id.result, JSON.stringify(id)).toBe('2');
       expect(answer.message).toBe('Stepped out');
@@ -307,9 +348,8 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
     it('steps with V8 alone where Node\'s own code is program code: a skip list without <node_internals>', async () => {
       await asyncPausedAt('in a timer callback', { launchArgs: { skipFiles: ['**/node_modules/**'] } });
       const answer = await step('step_out');
-      // V8 gives no break positions for Node's own scripts, so there is no
-      // temporary breakpoint to set on the timer code this returns to. The
-      // step used to fail for it, and leave the session in `error`.
+      // Node's own code is program code to this step: V8's step-out lands
+      // in the timer code it returns to.
       expect(answer, JSON.stringify(answer)).toMatchObject({ success: true, state: 'paused' });
       expect(answer.location?.file ?? '', JSON.stringify(answer)).toMatch(/timers/);
     }, 60000);

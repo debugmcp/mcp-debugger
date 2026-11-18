@@ -398,7 +398,7 @@ export class ExecutionController {
         }
         // What the step itself has to say about how it landed (the JavaScript
         // stepper: how far a step-in walked without reaching the program's
-        // code, or that it was caught at an awaiting function; issue #1130).
+        // code, or that every command it may send was spent there; issue #1130).
         const stepNote = ownStop?.reason === 'step' ? ownStop.text : undefined;
         success(stepNote ? `${options.successMessage}. ${stepNote}` : options.successMessage, landing);
       };

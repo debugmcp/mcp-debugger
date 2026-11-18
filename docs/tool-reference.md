@@ -707,9 +707,10 @@ The adapter may append one sentence to that message saying what the step is wait
 does so for a launch that steps through skipped code (issues #678, #1130): a step issued from skipped code names
 the frame and says a step does not stop there, and any other pending step says it left the frame it started in
 and has not stopped in your program since (a function Node called returned to the event loop, the line is
-waiting on work in flight, or the engine lost the step: V8 loses one that leaves a function through `try …
-finally`, a `for … of` loop or a `using` declaration, and the server rescues it only when it returns into a plain
-function). An attach that steps through skipped code (`smartStep: true`) gets no such sentence.
+waiting on work in flight, or the engine lost the step: V8 loses one that leaves a function through a `return`
+inside `try … finally`, out of a `for … of` loop, or from a function with a `using` declaration, issue #1161), and
+says to set a breakpoint where you expect execution to come back. An attach that steps through skipped code
+(`smartStep: true`) gets no such sentence.
 So match a pending step by its `pending: true` flag, not by the message text.
 
 Once a stop has been observed, the stop path owns the answer — a step that demonstrably landed is never reported as pending afterwards, at the cost of the response then being bounded by the stack-trace round trip rather than by the ~5s window. If the debuggee ends while the step is in flight the result is still a success, with a terminal `state` and a message such as `"Step completed as session terminated."`.
@@ -747,8 +748,10 @@ Same ~5s wait and `pending: true` contract as step_over — see [Pending steps](
   so it stepped back out and the rest of the line ran as a step over runs it. Code of yours that the call runs
   further in (a module it loads) or only schedules (a timer or promise callback) does not stop the step: a
   breakpoint there stops in it. To stop inside the skipped code instead, turn stepping through it off:
-  justMyCode: false on a launch, smartStep: false on a launch or an attach.` A `console.log`, a `require` and a
-  `setTimeout` line answer this way.
+  justMyCode: false on a launch, smartStep: false on a launch or an attach.` A `console.log` and a `setTimeout` line
+  answer this way. A `require` line does not: Node's loader returns through `try … finally`, so a `step_into` on
+  it is one of the steps V8 loses (issue #1161) and the program runs on. Use `step_over` on a `require` line, or
+  a breakpoint in the module.
 - A line that calls native code only (`JSON.stringify`) has nothing to walk into: a plain `Stepped into` on the
   next line.
 - A call that only starts a later task (`setTimeout`, a `.then` callback) is not followed: the step lands on the
@@ -781,14 +784,12 @@ Same ~5s wait and `pending: true` contract as step_over — see [Pending steps](
 
 - Out of an `async` function the event loop resumed, the step lands in the function that awaits it, in the
   call that awaited: that is the engine's own step.
-- The engine loses a step that leaves a function through `try … finally` (also a `return` out of `for … of`,
-  and a function with a `using` declaration). When the step returns into a plain function, the server catches it
-  with a temporary breakpoint on every break location of that function, so the step lands at its next one: the
-  next statement, or the next call in the same statement. When it leaves or returns into an `async` function or a
-  generator (or a function with more than 100 break locations), it does not: a breakpoint there cannot tell a
-  function returning from one pausing at an `await`. Such a step stays lost, as in 0.26.0, and answers
-  `pending: true`, or `Step completed as session exited.` when the program ends first; a breakpoint on the line
-  you expected it to reach stops there (issue #1174).
+- The engine loses a step that leaves a function through a `return` that runs a `finally` first: a `return`
+  inside `try … finally`, a `return` out of `for … of`, a function with a `using` declaration, and every async
+  generator (issues #1161, #1174). The server does not rescue it and sets no temporary breakpoint: the step answers
+  `pending: true`, or `Step completed as session exited.` when the program ends first, and a `step_over` off the
+  end of a `finally` block can stop in the next call of the same function instead of the caller. Set a breakpoint
+  on the line where you expect execution to come back, then `continue_execution`.
 - Out of a function that nothing of your program called or awaits (a timer callback, a `.then` callback, a
   request handler) there is nowhere of its own to land: the program is resumed, and the answer is the next stop or
   `pending: true`.

@@ -53,9 +53,8 @@ function laterCallback() {
   globalThis.later = true; // MARK: a later task
 }
 
-// A plain function, so the steps below return into a frame that comes down
-// only by returning: the one shape the server rescues a lost step into
-// (issue #1161). The same calls from an async function are left to V8 (#1174).
+// A plain function, called once: a step that V8 does not lose returns into
+// this one call (issue #1161). The same call from an async function is #1174.
 function syncPart() {
   const guarded = withFinally(); // MARK: calls withFinally
   const afterFinally = 4; // MARK: after withFinally
