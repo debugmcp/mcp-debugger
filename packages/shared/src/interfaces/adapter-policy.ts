@@ -237,6 +237,16 @@ export interface PendingStopContext {
    * it started on is gone. Absent for a step that is still executing.
    */
   stepLeftStack?: boolean;
+  /**
+   * Step only: the latest record of the proxy's own stepper (issue #1130),
+   * by the time the grace window elapsed, is that it is walking this
+   * step_into through skipped code, one engine step at a time, and nothing
+   * since says the walk may have stopped (it reached its limit, or js-debug
+   * resumed a pause of its own during it). `stepLimit` is the engine steps
+   * the walk may take before it steps out, when the stepper said. Absent
+   * otherwise.
+   */
+  stepWalking?: { stepLimit?: number };
 }
 
 /** Context passed to AdapterPolicy.describeUnresolvedSource (issue #816). */
@@ -609,8 +619,10 @@ export interface AdapterPolicy {
    * `skipFiles` blackboxes, so a pause on an idle server or a step issued from
    * inside a dependency is swallowed with nothing to distinguish it from a
    * slow one. The session layer appends the sentence to the generic pending
-   * message; undefined leaves that message exactly as it is. Optional — absent
-   * means the adapter has nothing to add.
+   * message; undefined leaves that message exactly as it is. A step the
+   * proxy's stepper has a record of (`stepWalking`, `stepLeftStack`) gets the
+   * sentence after a lead that says only that the step has not landed (issue
+   * #1130). Optional — absent means the adapter has nothing to add.
    */
   describePendingStop?(info: PendingStopContext): string | undefined;
 

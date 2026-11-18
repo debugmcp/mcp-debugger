@@ -165,9 +165,23 @@ describe('JsDebugAdapterPolicy', () => {
     const launch = (dapLaunchArgs?: Record<string, unknown>, adapterLaunchConfig?: Record<string, unknown>) =>
       ({ ...(dapLaunchArgs ? { dapLaunchArgs } : {}), ...(adapterLaunchConfig ? { adapterLaunchConfig } : {}) });
 
-    it('says nothing for attach sessions (neither key is defaulted there)', () => {
+    it('says nothing for attach sessions without a record of the stepper\'s (neither key is defaulted there)', () => {
       expect(hook({ operation: 'pause', attachMode: true })).toBeUndefined();
       expect(hook({ operation: 'step', attachMode: true, fromFrame: depFrame })).toBeUndefined();
+      expect(hook({ operation: 'step', attachMode: true, fromFrame: userFrame, stepLeftStack: false })).toBeUndefined();
+    });
+
+    // A record exists only for a step the proxy's stepper served, which it
+    // does for an attach whose smartStep is true as for a launch (review 8).
+    it('gives an attach session the sentences the stepper\'s records carry, as a launch gets them', () => {
+      const left = hook({ operation: 'step', attachMode: true, fromFrame: userFrame, stepLeftStack: true });
+      expect(left).toBe(hook({ operation: 'step', attachMode: false, launch: {}, fromFrame: userFrame, stepLeftStack: true }));
+      expect(left).toMatch(/left the frame it started in/);
+      const walking = hook({ operation: 'step', attachMode: true, fromFrame: userFrame, stepWalking: { stepLimit: 512 } });
+      expect(walking).toBe(hook({ operation: 'step', attachMode: false, launch: {}, fromFrame: userFrame, stepWalking: { stepLimit: 512 } }));
+      expect(walking).toMatch(/walking through skipped code/);
+      // A launch remedy is not offered to an attach: its skip configuration is the target's.
+      expect(hook({ operation: 'step', attachMode: true, fromFrame: depFrame, stepLeftStack: true })).not.toMatch(/Relaunch/);
     });
 
     // js-debug's own stepper used to step away from a pause that landed in
@@ -251,12 +265,62 @@ describe('JsDebugAdapterPolicy', () => {
       it('says nothing when the session chose plain steps: the step lands where V8 lands', () => {
         expect(hook({ operation: 'step', attachMode: false, launch: launch({ justMyCode: false }), fromFrame: depFrame })).toBeUndefined();
         expect(hook({ operation: 'step', attachMode: false, launch: launch(undefined, { smartStep: false }), fromFrame: internalFrame })).toBeUndefined();
-        expect(hook({ operation: 'step', attachMode: false, launch: launch(undefined, { smartStep: false }), fromFrame: userFrame })).toBeUndefined();
+        // With a record that would otherwise carry a sentence: the gate is what silences it (review 8).
+        expect(hook({ operation: 'step', attachMode: false, launch: launch(undefined, { smartStep: false }), fromFrame: userFrame, stepLeftStack: true })).toBeUndefined();
+        expect(hook({ operation: 'step', attachMode: false, launch: launch({ justMyCode: false }), fromFrame: userFrame, stepWalking: { stepLimit: 512 } })).toBeUndefined();
       });
 
       it('lets adapterLaunchConfig win over dapLaunchArgs, as the launcher merge does', () => {
-        expect(hook({ operation: 'step', attachMode: false, launch: launch({ justMyCode: true }, { smartStep: false }), fromFrame: userFrame })).toBeUndefined();
+        // The same record either way: only the merge decides (review 8).
+        expect(hook({ operation: 'step', attachMode: false, launch: launch({ justMyCode: true }, { smartStep: false }), fromFrame: userFrame, stepLeftStack: true })).toBeUndefined();
         expect(hook({ operation: 'step', attachMode: false, launch: launch({ justMyCode: false }, { smartStep: true }), fromFrame: userFrame, stepLeftStack: true })).toBeDefined();
+      });
+
+      // Round 3, decision 2: issue #1130 complained of a pending step_into
+      // that blamed "a long-running call". A walk through skipped code that
+      // outlasts the grace window (an engine step costs about 44 ms on Linux)
+      // says what it is doing, and nothing it cannot know.
+      describe('a step_into walking through skipped code', () => {
+        const walking = (extra: Record<string, unknown> = {}) =>
+          hook({ operation: 'step', attachMode: false, launch: {}, fromFrame: userFrame, stepWalking: { stepLimit: 512 }, ...extra });
+
+        it('says the step is walking through skipped code toward the program\'s code, and what ends the walk', () => {
+          const text = walking();
+          expect(text).toMatch(/walking through skipped code/);
+          expect(text).toMatch(/Node internals, node_modules, or files on skipFiles/);
+          // It lands when the program's code is next on top, or steps out at its limit.
+          expect(text).toMatch(/your program's code is next on top/);
+          expect(text).toMatch(/512 engine steps/);
+          expect(text).toMatch(/steps out/);
+          // How to wait for the step is the lead's to say (ErrorMessages.stepNotLanded), once.
+          expect(text).not.toMatch(/wait_for_stop/);
+        });
+
+        it('promises no landing: the walk can end with the program resumed, or the engine can lose the step', () => {
+          const text = walking() ?? '';
+          expect(text).toMatch(/resumed/);
+          expect(text).not.toMatch(/will land|lands there|will stop/);
+          // Worded as the stepper's last record, not as what it cannot see now.
+          expect(text).toMatch(/last record/);
+        });
+
+        it('names the step limit only when the stepper sent one', () => {
+          const text = hook({ operation: 'step', attachMode: false, launch: {}, fromFrame: userFrame, stepWalking: {} });
+          expect(text).toMatch(/walking through skipped code/);
+          expect(text).not.toMatch(/undefined/);
+          expect(text).toMatch(/its step limit/);
+        });
+
+        it('wins over the sentence for a step issued from skipped code: the record says what the step is doing', () => {
+          const text = hook({ operation: 'step', attachMode: false, launch: {}, fromFrame: depFrame, stepWalking: { stepLimit: 512 } });
+          expect(text).toMatch(/walking through skipped code/);
+          expect(text).not.toMatch(/issued from skipped code/);
+        });
+
+        it('says nothing of a walk once the latest record is another one', () => {
+          expect(walking({ stepWalking: undefined })).toBeUndefined();
+          expect(walking({ stepWalking: undefined, stepLeftStack: true })).toMatch(/left the frame it started in/);
+        });
       });
     });
   });

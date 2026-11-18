@@ -57,6 +57,38 @@ const TS_GENERATED_EXTENSION: Readonly<Record<string, string>> = {
   '.cts': '.cjs'
 };
 const DECLARATION_FILE = /\.d\.[mc]?ts$/i;
+
+/**
+ * A pending step the proxy's stepper (issue #1130) ended by resuming the
+ * program: it reached skipped code with nothing of the program below it.
+ */
+const JS_STEP_LEFT_STACK_SENTENCE =
+  'The step left the frame it started in and reached skipped code with nothing of your program below it ' +
+  '(a function that Node called, such as a timer or event callback, returned to the event loop), so the ' +
+  'program was resumed and this step will not land. The program is running; wait_for_stop answers when a ' +
+  'breakpoint is hit or the program ends.';
+
+/**
+ * A pending step_into the proxy's stepper last recorded as walking through
+ * skipped code (round 3, decision 2). Worded as that record and the rule the
+ * walk follows, never as a promise: the walk can still reach the program's
+ * code, step out at its limit, resume the program when nothing of it is
+ * below, or be lost by the engine (issue #1161), and the server cannot see
+ * which until it happens. How to wait for the step or interrupt it is the
+ * lead's to say (`ErrorMessages.stepNotLanded`, which a recorded step gets
+ * in place of the generic "still executing ... a long-running call").
+ */
+function jsStepWalkingSentence(stepLimit: number | undefined): string {
+  const limit = typeof stepLimit === 'number' && Number.isInteger(stepLimit) && stepLimit > 0
+    ? `its limit of ${stepLimit} engine steps`
+    : 'its step limit';
+  return 'The stepper\'s last record of this step is that it is walking through skipped code (Node internals, ' +
+    'node_modules, or files on skipFiles) one engine step at a time: it stops the step when your program\'s code ' +
+    `is next on top, and if the walk reaches ${limit} first, it steps out toward the nearest frame of your ` +
+    'program (with none below it, the program is resumed). A breakpoint reached on the way stops the program ' +
+    'there, and if the engine loses the step on the way the program runs on.';
+}
+
 /**
  * js-debug's `_createPausedDetails` fallback for a CDP pause it has no
  * breakpoint for: a real `debugger;` statement, and (issue #1097) its own
@@ -420,23 +452,37 @@ export const JsDebugAdapterPolicy = {
    * left its frame only when the stepper recorded that it ended the step by
    * resuming the program (`stepLeftStack`): a step still executing (a
    * `step_over` of a long call in its own frame) gets the generic wording.
+   * A step_into whose latest record is that the stepper is walking it
+   * through skipped code (`stepWalking`) gets the sentence that says so,
+   * worded as the stepper's last record (round 3, decision 2): a walk that
+   * outlasts the grace window is no long-running call of the program's.
    * A pause gets nothing: js-debug's stepper, which stepped away from a pause
    * that landed in skipped code, is off (the pending pause has its own
-   * wording, issue #1146). Attach sessions default neither key (#513) and get
-   * nothing here.
+   * wording, issue #1146). Attach sessions default neither key (#513), and
+   * their skip configuration is the target's: they get only what the
+   * stepper recorded, which it records only for a step it served (an attach
+   * with `smartStep: true`).
    */
   describePendingStop: (info: PendingStopContext): string | undefined => {
-    if (info.attachMode) {
+    // A pause is never stepped away from any more: it lands where the
+    // program is, in Node's own code if that is where it is.
+    if (info.operation === 'pause') {
       return undefined;
+    }
+    if (info.attachMode) {
+      if (info.stepWalking) {
+        return jsStepWalkingSentence(info.stepWalking.stepLimit);
+      }
+      return info.stepLeftStack === true ? JS_STEP_LEFT_STACK_SENTENCE : undefined;
     }
     const merged = { ...(info.launch?.dapLaunchArgs ?? {}), ...(info.launch?.adapterLaunchConfig ?? {}) };
     if (!resolveJsLaunchSmartStep(merged)) {
       return undefined;
     }
-    // A pause is never stepped away from any more: it lands where the
-    // program is, in Node's own code if that is where it is.
-    if (info.operation === 'pause') {
-      return undefined;
+    // What the step is doing, by the stepper's own record: it comes before
+    // what the frame the step was issued from suggests.
+    if (info.stepWalking) {
+      return jsStepWalkingSentence(info.stepWalking.stepLimit);
     }
     const frame = info.fromFrame;
     const file = frame?.file || '';
@@ -459,10 +505,7 @@ export const JsDebugAdapterPolicy = {
     // What the record means, and no more: the stepper resumed the program, so
     // this step is over. (A step V8 itself lost, issue #1161, leaves no
     // record and cannot be told from one still executing.)
-    return 'The step left the frame it started in and reached skipped code with nothing of your program below it ' +
-      '(a function that Node called, such as a timer or event callback, returned to the event loop), so the ' +
-      'program was resumed and this step will not land. The program is running; wait_for_stop answers when a ' +
-      'breakpoint is hit or the program ends.';
+    return JS_STEP_LEFT_STACK_SENTENCE;
   },
 
   /**

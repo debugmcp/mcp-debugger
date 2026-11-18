@@ -14,7 +14,11 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { JsStepper, DEFAULT_JS_STEPPER_TUNABLES, type JsStepperTunables } from '../../src/proxy/js-stepper.js';
-import { PROXY_STEP_LEFT_STACK_EVENT } from '../../src/proxy/dap-proxy-interfaces.js';
+import {
+  PROXY_STEP_LEFT_STACK_EVENT,
+  PROXY_STEP_WALK_ENDED_EVENT,
+  PROXY_STEP_WALK_STARTED_EVENT
+} from '../../src/proxy/dap-proxy-interfaces.js';
 import { ErrorMessages } from '../../src/utils/error-messages.js';
 
 interface Frame {
@@ -54,6 +58,15 @@ interface ScriptedPause {
     /** `await` links with no frames before the one that has the awaiter (V8 lists them for later awaits). */
     emptyLinks?: number;
   };
+  /** How long the program runs before this pause (the skipped code's own run time): the test's clock moves by it. */
+  takesMs?: number;
+  /**
+   * From this pause on, the CDP socket lags behind js-debug's DAP events: CDP
+   * events are held, in order, until the next CDP request, whose answer comes
+   * after them (one ordered socket). Measured under Node 22 on Linux: js-debug's
+   * `stopped` for a later pause arrived before the CDP `resumed` of this one.
+   */
+  lagCdpFromHere?: boolean;
 }
 
 /** The 0-based line a function starts on: a hundred lines of its own per function name. */
@@ -76,18 +89,37 @@ class Engine extends EventEmitter {
   stackTraceCalls: number[] = [];
   /** A CDP method that fails the next time it is sent. */
   failOnce: string | null = null;
+  /** The test's clock: moved by each pause's `takesMs`. */
+  onRun: (ms: number) => void = () => undefined;
+  /** CDP events held while the socket lags (null: it does not). */
+  private lagged: Array<[string, unknown]> | null = null;
 
   isConnected(): boolean {
     return this.connected;
   }
 
+  /** A CDP event, now, or after the lagging socket's earlier events. */
+  private cdpEvent(method: string, params: unknown): void {
+    if (this.lagged) {
+      this.lagged.push([method, params]);
+      return;
+    }
+    this.emit('cdp-event', method, params);
+  }
+
   async send<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
     this.calls.push({ method, params });
+    // One ordered socket: every event sent before the answer arrives before it.
+    for (const [held, body] of this.lagged?.splice(0) ?? []) {
+      this.emit('cdp-event', held, body);
+    }
     if (this.failOnce === method) {
       this.failOnce = null;
       throw new Error(`${method}: refused`);
     }
     switch (method) {
+      case 'Runtime.getIsolateId':
+        return { id: 'isolate-1' } as T;
       case 'Debugger.stepInto':
       case 'Debugger.stepOver':
       case 'Debugger.stepOut':
@@ -115,15 +147,19 @@ class Engine extends EventEmitter {
 
   private advance(resumedFirst: boolean): void {
     if (resumedFirst) {
-      this.emit('cdp-event', 'Debugger.resumed', {});
+      this.cdpEvent('Debugger.resumed', {});
       this.onDap({ seq: 0, type: 'event', event: 'continued', body: { threadId: 1, allThreadsContinued: false } });
     }
     const next = this.script.shift();
     if (!next || next === 'runs') {
       return;
     }
+    this.onRun(next.takesMs ?? 0);
     this.current = next;
-    this.emit('cdp-event', 'Debugger.paused', this.toCdp(next));
+    this.cdpEvent('Debugger.paused', this.toCdp(next));
+    if (next.lagCdpFromHere) {
+      this.lagged ??= [];
+    }
     if (next.resumedByJsDebug) {
       // js-debug's own resume: the step in flight is gone with the pause.
       setImmediate(() => {
@@ -242,7 +278,14 @@ describe('JsStepper (issue #1130)', () => {
   const commands = (): string[] => engine.calls.map((c) => c.method).filter((m) => /step|resume/.test(m));
   /** The record a step that ended by leaving the stack delivers instead of a stop (I3). */
   const LEFT_STACK = expect.objectContaining({ type: 'event', event: PROXY_STEP_LEFT_STACK_EVENT });
-  const stopped = (): DebugProtocol.StoppedEvent['body'] => delivered[0].body as DebugProtocol.StoppedEvent['body'];
+  /** The records of a step_into's walk through skipped code (decision 2 of round 3). */
+  const WALK_STARTED = expect.objectContaining({ type: 'event', event: PROXY_STEP_WALK_STARTED_EVENT });
+  const WALK_ENDED = expect.objectContaining({ type: 'event', event: PROXY_STEP_WALK_ENDED_EVENT });
+  /** The stops delivered, without the stepper's own records. */
+  const stops = (): DebugProtocol.Event[] => delivered.filter((e) => e.event === 'stopped');
+  /** The stepper's own records, in order. */
+  const records = (): string[] => delivered.filter((e) => e.event !== 'stopped').map((e) => e.event);
+  const stopped = (): DebugProtocol.StoppedEvent['body'] => stops()[0].body as DebugProtocol.StoppedEvent['body'];
 
   /** Wait until the chain is over and every event js-debug owes has arrived. */
   async function settled(): Promise<void> {
@@ -345,7 +388,9 @@ describe('JsStepper (issue #1130)', () => {
       expect(stopped().text).toBeUndefined();
       // Three kept pauses, three stopped events from js-debug, one reported.
       expect(seen.filter((e) => e.event === 'stopped')).toEqual(Array(3).fill({ event: 'stopped', withheld: true }));
-      expect(delivered).toHaveLength(1);
+      expect(stops()).toHaveLength(1);
+      // The walk was recorded when it started, and the landing ended it: no other record.
+      expect(records()).toEqual([PROXY_STEP_WALK_STARTED_EVENT]);
     });
 
     it('asks js-debug once about a script of Node\'s own: one source at every position, which it names <node_internals>', async () => {
@@ -440,8 +485,64 @@ describe('JsStepper (issue #1130)', () => {
       expect(commands()).toEqual(['Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepOut']);
       expect(stopped()).toMatchObject({ reason: 'step', description: 'Paused' });
       // The first step-in went from the program's own line; the two after it
-      // were taken in skipped code, and only those are the walk.
-      expect(stopped().text).toBe(ErrorMessages.stepIntoReachedNoProgramCode(2, 'steps', 2));
+      // were taken in skipped code, and only those are the walk: its limit.
+      expect(stopped().text).toBe(ErrorMessages.stepIntoReachedNoProgramCode(2));
+    });
+
+    it('records the walk as it starts and as it ends at its limit, each just before the command it leads to', async () => {
+      const commandsAtRecord: Array<[string, number]> = [];
+      withTunables({ walkBudgetSteps: 2 }, (event) => {
+        if (event.event !== 'stopped') commandsAtRecord.push([event.event, commands().length]);
+      });
+      engine.pauseAt({ frames: frames(app('main', 10)) });
+      engine.script = [
+        { frames: frames(node('require', 1), app('main', 10)) },
+        { frames: frames(node('require', 2), app('main', 10)) },
+        { frames: frames(node('require', 3), app('main', 10)) },
+        { frames: frames(app('main', 11)) }
+      ];
+      await stepper.request('stepIn', { threadId: 1 });
+      await settled();
+      expect(commands()).toEqual(['Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepOut']);
+      // Started before the walk's first step-in (the second command); ended before the step-out (the fourth).
+      expect(commandsAtRecord).toEqual([[PROXY_STEP_WALK_STARTED_EVENT, 1], [PROXY_STEP_WALK_ENDED_EVENT, 3]]);
+      expect(delivered.slice(0, 2)).toEqual([WALK_STARTED, WALK_ENDED]);
+      expect(delivered[0].body).toEqual({ threadId: 1, stepLimit: 2 });
+      expect(delivered[1].body).toMatchObject({ threadId: 1 });
+      expect(stops()).toHaveLength(1);
+    });
+
+    it('records no walk for a step_into that lands at once, nor for a step_over or step_out that steps out of skipped code', async () => {
+      engine.pauseAt({ frames: frames(app('main', 10)) });
+      engine.script = [{ frames: frames(app('callee', 30), app('main', 10)) }];
+      await stepper.request('stepIn', { threadId: 1 });
+      await settled();
+      expect(records()).toEqual([]);
+
+      delivered.length = 0;
+      engine.pauseAt({ frames: frames(app('listener', 40), node('emit', 7), app('main', 10)) });
+      engine.script = [{ frames: frames(node('emit', 8), app('main', 10)) }, { frames: frames(app('main', 11)) }];
+      await stepper.request('next', { threadId: 1 });
+      await settled();
+      expect(commands().slice(-2)).toEqual(['Debugger.stepOver', 'Debugger.stepOut']);
+      expect(records()).toEqual([]);
+    });
+
+    it('withdraws the walk\'s record when js-debug resumes a pause of its own during the walk, and records it again when the walk goes on', async () => {
+      engine.pauseAt({ frames: frames(app('main', 10)) });
+      engine.script = [
+        { frames: frames(node('require', 1), app('main', 10)) },
+        // js-debug's own pause, resumed by js-debug: whether V8 still carries the step is not known.
+        { frames: frames(app('(anonymous)', 0, { script: 'wasm' })), reason: 'other', resumedByJsDebug: true },
+        // V8 did: the step lands in skipped code again, and the walk goes on.
+        { frames: frames(node('require', 2), app('main', 10)) },
+        { frames: frames(app('mod', 3, { script: 'mod' }), node('require', 3), app('main', 10)) }
+      ];
+      await stepper.request('stepIn', { threadId: 1 });
+      await settled();
+      expect(commands()).toEqual(['Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepInto']);
+      expect(records()).toEqual([PROXY_STEP_WALK_STARTED_EVENT, PROXY_STEP_WALK_ENDED_EVENT, PROXY_STEP_WALK_STARTED_EVENT]);
+      expect(stopped()).toMatchObject({ reason: 'step' });
     });
 
     it('lands back on the line it left after stepping out: a pause in the program\'s code is a new position, never stepped from again', async () => {
@@ -459,7 +560,7 @@ describe('JsStepper (issue #1130)', () => {
       await stepper.request('stepIn', { threadId: 1 });
       await settled();
       expect(commands()).toEqual(['Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepOut']);
-      expect(stopped()).toMatchObject({ reason: 'step', text: ErrorMessages.stepIntoReachedNoProgramCode(2, 'steps', 2) });
+      expect(stopped()).toMatchObject({ reason: 'step', text: ErrorMessages.stepIntoReachedNoProgramCode(2) });
     });
 
     it('lands at once on the next position of the line it left: the first step into a one-line for...of header', async () => {
@@ -486,49 +587,54 @@ describe('JsStepper (issue #1130)', () => {
     });
   });
 
-  describe('how far a step-in walks through skipped code: two bounds, whichever comes first (I1)', () => {
-    /** A clock the test moves: each pause V8 reports costs `msPerPause`. */
-    function withClock(tunables: Partial<JsStepperTunables>, msPerPause: number): void {
-      let clock = 0;
-      withTunables(tunables, undefined, () => clock);
-      engine.on('cdp-event', (method: string) => {
-        if (method === 'Debugger.paused') {
-          clock += msPerPause;
-        }
-      });
-    }
-
+  describe('how far a step-in walks through skipped code: engine steps only, never the clock (round 3, decision 1)', () => {
     const walk = (n: number): ScriptedPause[] => Array.from({ length: n }, (_, i) => ({ frames: frames(node('log', i + 1), app('main', 10)) }));
 
-    it('walks 512 engine steps or 3 s by default, under a backstop above both', () => {
-      expect(DEFAULT_JS_STEPPER_TUNABLES).toMatchObject({ walkBudgetSteps: 512, walkBudgetMs: 3000, commandCap: 2048 });
+    it('walks 512 engine steps by default, under a backstop above them, and has no time bound', () => {
+      expect(DEFAULT_JS_STEPPER_TUNABLES).toEqual({ walkBudgetSteps: 512, commandCap: 2048, settleCeilingMs: 2000, verdictCeilingMs: 2000 });
       expect(DEFAULT_JS_STEPPER_TUNABLES.commandCap).toBeGreaterThan(DEFAULT_JS_STEPPER_TUNABLES.walkBudgetSteps);
     });
 
-    it('walks while under the time bound, counted from the first landing in skipped code, then steps out, however few steps it took', async () => {
-      withClock({ walkBudgetMs: 3000, walkBudgetSteps: 512 }, 1000);
+    it('walks on however long the skipped code runs between its engine steps: the program decides where it lands (review 8, C1)', async () => {
+      // emit's first listener (a dependency's) blocks for 3.5 s before the
+      // program's own listener runs: few engine steps, a long time.
+      const realNow = Date.now.bind(Date);
+      let ran = 0;
+      const clock = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + ran);
+      try {
+        withTunables({});
+        engine.onRun = (ms) => {
+          ran += ms;
+        };
+        engine.pauseAt({ frames: frames(app('main', 10)) });
+        engine.script = [
+          { frames: frames(node('emit', 5), app('main', 10)) },
+          { frames: frames({ fn: 'block', line: 3, script: 'r8lib', path: '/app/node_modules/r8lib/index.js', skipped: true }, node('emit', 6), app('main', 10)) },
+          { frames: frames(node('emit', 7), app('main', 10)), takesMs: 3500 },
+          { frames: frames(app('handler', 40), node('emit', 8), app('main', 10)) },
+          'runs'
+        ];
+        await stepper.request('stepIn', { threadId: 1 });
+        await settled();
+      } finally {
+        clock.mockRestore();
+      }
+      expect(commands()).toEqual(Array(4).fill('Debugger.stepInto'));
+      expect(stopped()).toMatchObject({ reason: 'step' });
+      expect(stopped().text).toBeUndefined();
+    });
+
+    it('walks while under the step bound, then steps out and says it reached its limit', async () => {
+      withTunables({ walkBudgetSteps: 3 });
       engine.pauseAt({ frames: frames(app('main', 10)) });
-      // The walk's clock starts at the first landing (t=2000): it walks at
-      // 2000, 3000 and 4000, and is out of time at 5000.
       engine.script = [...walk(4), { frames: frames(app('main', 11)) }];
       await stepper.request('stepIn', { threadId: 1 });
       await settled();
       expect(commands()).toEqual(['Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepOut']);
-      expect(stopped()).toMatchObject({ reason: 'step', text: ErrorMessages.stepIntoReachedNoProgramCode(3, 'time', 3000) });
+      expect(stopped()).toMatchObject({ reason: 'step', text: ErrorMessages.stepIntoReachedNoProgramCode(3) });
     });
 
-    it('walks while under the step bound, however little time passed, then steps out', async () => {
-      withClock({ walkBudgetMs: 3000, walkBudgetSteps: 3 }, 0);
-      engine.pauseAt({ frames: frames(app('main', 10)) });
-      engine.script = [...walk(4), { frames: frames(app('main', 11)) }];
-      await stepper.request('stepIn', { threadId: 1 });
-      await settled();
-      expect(commands()).toEqual(['Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepOut']);
-      expect(stopped()).toMatchObject({ reason: 'step', text: ErrorMessages.stepIntoReachedNoProgramCode(3, 'steps', 3) });
-    });
-
-    it('reaches the program\'s code after a walk longer than the old 24 steps, inside both bounds (once + emit: 35)', async () => {
-      withClock({}, 1);
+    it('reaches the program\'s code after a walk longer than the old 24 steps (once + emit: 35)', async () => {
       engine.pauseAt({ frames: frames(app('main', 10)) });
       engine.script = [...walk(35), { frames: frames(app('fn', 3), node('once', 9), node('emit', 7), app('main', 10)) }];
       await stepper.request('stepIn', { threadId: 1 });
@@ -569,7 +675,8 @@ describe('JsStepper (issue #1130)', () => {
       await stepper.request('stepIn', { threadId: 1 });
       await settled();
       expect(commands()).toEqual(['Debugger.stepInto', 'Debugger.stepInto', 'Debugger.stepInto', 'Debugger.resume']);
-      expect(delivered).toEqual([LEFT_STACK]);
+      // The walk's start, then the left stack: the walk ended in a resume, not a step-out, so no walk-ended record.
+      expect(delivered).toEqual([WALK_STARTED, LEFT_STACK]);
     });
 
     it('step_over resumes at once: it would have to step out, and there is nowhere of the program\'s to step out to', async () => {
@@ -645,10 +752,48 @@ describe('JsStepper (issue #1130)', () => {
       await settled();
       // Nothing was sent after js-debug's resume.
       expect(commands()).toEqual(['Debugger.stepInto', 'Debugger.stepInto']);
-      expect(delivered).toHaveLength(1);
+      expect(stops()).toHaveLength(1);
       expect(stopped()).toMatchObject({ reason: 'breakpoint', description: 'Paused on breakpoint' });
       // Two kept pauses, two stopped events withheld; the resumed one had none.
       expect(seen.filter((e) => e.event === 'stopped')).toEqual(Array(2).fill({ event: 'stopped', withheld: true }));
+      // The walk had started; js-debug's resume left it unknown whether V8 still carried the step, so the
+      // record of a walk in progress was withdrawn: a pending answer must not say the step is walking.
+      expect(records()).toEqual([PROXY_STEP_WALK_STARTED_EVENT, PROXY_STEP_WALK_ENDED_EVENT]);
+    });
+
+    it('reads a stopped that overtook the CDP events as the later pause\'s: the CDP stream catches up first (Node 22 on Linux)', async () => {
+      // Measured on the box: during a step_over, V8 pauses twice with reason
+      // `other` (no breakpoint) and js-debug resumes both; the third pause is
+      // the step's landing. js-debug's `stopped` for it reached the stepper
+      // before the CDP `resumed` of the second and the CDP `paused` of the third.
+      engine.pauseAt({ frames: frames(app('load', 48)) });
+      engine.script = [
+        { frames: frames(app('(anonymous)', 0, { script: 's158' })), reason: 'other', resumedByJsDebug: true },
+        { frames: frames(app('(anonymous)', 0, { script: 's161' })), reason: 'other', resumedByJsDebug: true, lagCdpFromHere: true },
+        { frames: frames(app('load', 50)) },
+        'runs'
+      ];
+      await stepper.request('next', { threadId: 1 });
+      await settled();
+      expect(stops()).toHaveLength(1);
+      // The step's own landing, reported as the step it is.
+      expect(stopped()).toMatchObject({ reason: 'step', description: 'Paused' });
+      expect(commands()).toEqual(['Debugger.stepOver']);
+      // One request V8 answers, on the socket the events travel on.
+      expect(engine.calls.filter((c) => c.method === 'Runtime.getIsolateId')).toHaveLength(1);
+    });
+
+    it('still forwards a breakpoint js-debug keeps as itself after the CDP stream caught up: nothing newer was there', async () => {
+      engine.pauseAt({ frames: frames(app('main', 10)) });
+      engine.script = [
+        { frames: frames(app('callee', 30), app('main', 10)), reason: 'other', hits: ['js-debug:7'], dapReason: 'breakpoint', lagCdpFromHere: true },
+        'runs'
+      ];
+      await stepper.request('next', { threadId: 1 });
+      await settled();
+      expect(stops()).toHaveLength(1);
+      expect(stopped()).toMatchObject({ reason: 'breakpoint', description: 'Paused on breakpoint' });
+      expect(engine.calls.filter((c) => c.method === 'Runtime.getIsolateId')).toHaveLength(1);
     });
   });
 
@@ -665,7 +810,7 @@ describe('JsStepper (issue #1130)', () => {
       // Each stopped arrives a timer tick after its pause: after the continued of the next resume.
       expect(seen.map((e) => e.event).join(' ')).toMatch(/continued continued/);
       expect(seen.every((e) => e.withheld)).toBe(true);
-      expect(delivered).toHaveLength(1);
+      expect(stops()).toHaveLength(1);
     });
 
     it('asks again while js-debug says it is not paused yet', async () => {
@@ -758,15 +903,14 @@ describe('JsStepper (issue #1130)', () => {
   // ----- what the review of the branch found (cases written red first) -----
 
   /** A stepper with its own tunables, on the same engine. */
-  function withTunables(tunables: Partial<JsStepperTunables>, onDeliver?: (event: DebugProtocol.Event) => void, now?: () => number): void {
+  function withTunables(tunables: Partial<JsStepperTunables>, onDeliver?: (event: DebugProtocol.Event) => void): void {
     stepper = new JsStepper({
       target: { sendRequest: async (_c: string, args?: unknown) => engine.stackTrace((args as { levels: number }).levels) as never },
       deliver: (event) => {
         onDeliver?.(event);
         delivered.push(event);
       },
-      tunables: { settleCeilingMs: 150, verdictCeilingMs: 150, ...tunables },
-      ...(now ? { now } : {})
+      tunables: { settleCeilingMs: 150, verdictCeilingMs: 150, ...tunables }
     });
     engine.onDap = (event) => {
       seen.push({ event: event.event, withheld: stepper.withholds(event) });
@@ -1078,6 +1222,43 @@ describe('JsStepper (issue #1130)', () => {
       await tick(20);
       expect(commands()).toEqual(['Debugger.stepOver']);
       expect(stepper.describe()).toMatchObject({ chain: false });
+      expect(delivered).toEqual([]);
+    });
+
+    it('neither resumes nor records a left stack once the step is given up while js-debug is asked what the stack returns to (review 8)', async () => {
+      let gated = false;
+      let asked = false;
+      let release: () => void = () => undefined;
+      stepper = new JsStepper({
+        target: {
+          sendRequest: async (_c: string, args?: unknown) => {
+            const levels = (args as { levels: number }).levels;
+            if (gated && levels > 1) {
+              asked = true;
+              await new Promise<void>((resolve) => {
+                release = resolve;
+              });
+            }
+            return engine.stackTrace(levels) as never;
+          }
+        },
+        deliver: (event) => delivered.push(event),
+        tunables: { settleCeilingMs: 150, verdictCeilingMs: 150 }
+      });
+      stepper.attachCdp(engine);
+      stepper.setEnabled(true);
+      // A timer callback: stepping off it leaves nothing of the program on the stack.
+      engine.pauseAt({ frames: frames(app('onTimer', 40), node('listOnTimeout', 7)) });
+      engine.script = [{ frames: frames(node('listOnTimeout', 8)) }, 'runs'];
+      gated = true;
+      await stepper.request('next', { threadId: 1 });
+      await vi.waitFor(() => expect(asked).toBe(true), { timeout: 1000, interval: 2 });
+      // js-debug has not said what is below the landing yet, and the caller continues.
+      await stepper.beforeRequest('continue');
+      release();
+      await tick(20);
+      // The continue is the caller's to send: the given-up chain sends nothing, and reports nothing.
+      expect(commands()).toEqual(['Debugger.stepOver']);
       expect(delivered).toEqual([]);
     });
 

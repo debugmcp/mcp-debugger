@@ -6,7 +6,11 @@
  * where a step ends. What that has to hold, as measured:
  *
  *   - a step_into on a line that calls only Node's own code lands on the
- *     next line, inside the window after which a step answers `pending`.
+ *     next line. Where it lands is the program's to decide, not the host's:
+ *     the walk is bounded by engine steps only, so where an engine step is
+ *     slow (about 44 ms on Linux, issue #1163) the step first answers
+ *     `pending`, saying it is walking through skipped code, and lands in the
+ *     same place; these tests accept either and assert the line strictly.
  *     js-debug's stepper lost that step on the first console.log of a
  *     process (the session ended), and took about 6 s on a Linux host for a
  *     later one;
@@ -57,6 +61,8 @@ type StopAnswer = ToolAnswer & {
   stopReason?: string;
   location?: { file: string; line: number };
   snapshot?: { frames?: Array<{ name: string; line: number }> };
+  /** wait_for_stop's record of the stop. */
+  lastStop?: { reason?: string };
 };
 
 /**
@@ -67,21 +73,26 @@ type StopAnswer = ToolAnswer & {
 const PROMPT_MS = 4500;
 
 /**
- * The sentence a step_into carries when its walk through skipped code ended
- * on one of its bounds (512 engine steps, or 3 s) and it stepped out. Which
- * bound comes first depends on what an engine step costs on the host (about
- * 2 ms through the server on Windows, 44 ms on Linux, issue #1163), so either is accepted, and
- * the number of steps must fit the bound.
+ * The sentence a step_into carries when its walk through skipped code took
+ * all of its 512 engine steps and it stepped out. The walk's only bound:
+ * where it lands does not depend on what an engine step costs on the host.
  */
 function expectWalkEnded(message: string | undefined): void {
-  const walked = /^Stepped into\. step_into walked (\d+) engine steps into the call/.exec(message ?? '');
-  expect(walked, message).not.toBeNull();
-  const steps = Number(walked![1]);
-  expect([
-    `Stepped into. ${ErrorMessages.stepIntoReachedNoProgramCode(512, 'steps', 512)}`,
-    ...(steps < 512 ? [`Stepped into. ${ErrorMessages.stepIntoReachedNoProgramCode(steps, 'time', 3000)}`] : [])
-  ], message).toContain(message);
+  expect(message).toBe(`Stepped into. ${ErrorMessages.stepIntoReachedNoProgramCode(512)}`);
 }
+
+/**
+ * The sentence a pending step_into carries while the stepper is walking it
+ * through skipped code (round 3, decision 2).
+ */
+const WALKING = /The stepper's last record of this step is that it is walking through skipped code/;
+
+/**
+ * How long a step whose walk outlasted the grace window may take to land:
+ * 512 engine steps at about 44 ms each on Linux (issue #1163) is about 23 s,
+ * and the step-outs after it more. A harness bound, not the step's.
+ */
+const WALK_WAIT_MS = 90000;
 
 /**
  * A step V8 loses (issues #1161, #1174) is the engine's own, and the server
@@ -91,7 +102,7 @@ function expectWalkEnded(message: string | undefined): void {
  * fails, another call of the function left included. Every caller these
  * tests name runs once, so a line of it identifies the call.
  */
-function expectInCallerOrLost(answer: StopAnswer & { ms: number }, file: RegExp, callerLines: number[]): void {
+function expectInCallerOrLost(answer: StopAnswer & { ms: number }, file: RegExp, callerLines: number[], options: { walked?: boolean } = {}): void {
   expect(answer.success, JSON.stringify(answer)).toBe(true);
   if (answer.state !== 'paused') {
     // Lost: the program ran on, or ended.
@@ -101,7 +112,15 @@ function expectInCallerOrLost(answer: StopAnswer & { ms: number }, file: RegExp,
   expect(answer.stopReason, JSON.stringify(answer)).toBeUndefined();
   expect(answer.location?.file ?? '', JSON.stringify(answer)).toMatch(file);
   expect(callerLines, JSON.stringify(answer)).toContain(answer.location?.line);
-  expect(answer.ms, `took ${answer.ms} ms: ${JSON.stringify(answer)}`).toBeLessThan(PROMPT_MS);
+  if (answer.lastStop) {
+    // Read by wait_for_stop after a pending answer: the stop is the step's.
+    expect(answer.lastStop.reason, JSON.stringify(answer)).toBe('step');
+  }
+  // A step that walked through skipped code takes as long as its engine
+  // steps take on the host: only a step that did not walk is held to the window.
+  if (!options.walked) {
+    expect(answer.ms, `took ${answer.ms} ms: ${JSON.stringify(answer)}`).toBeLessThan(PROMPT_MS);
+  }
 }
 
 describe('The server\'s JavaScript stepper against a real js-debug (issues #1130, #1161) @requires-node', () => {
@@ -135,13 +154,49 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
     return { ...answer, ms: Date.now() - started };
   }
 
-  function expectLanding(answer: StopAnswer & { ms: number }, marker: string): void {
+  function expectLanding(answer: StopAnswer & { ms: number }, marker: string, options: { walked?: boolean } = {}): void {
     expect(answer, JSON.stringify(answer)).toMatchObject({ success: true, state: 'paused' });
     expect(answer.pending, JSON.stringify(answer)).toBeUndefined();
     expect(answer.stopReason, JSON.stringify(answer)).toBeUndefined();
     expect(answer.location?.file ?? '', JSON.stringify(answer)).toMatch(/steps\.cjs$/);
     expect(answer.location?.line, JSON.stringify(answer)).toBe(lineOf(marker));
-    expect(answer.ms, `took ${answer.ms} ms: ${JSON.stringify(answer)}`).toBeLessThan(PROMPT_MS);
+    if (answer.lastStop) {
+      // Read by wait_for_stop after a pending answer: the stop is the step's.
+      expect(answer.lastStop.reason, JSON.stringify(answer)).toBe('step');
+    }
+    // A step that walked through skipped code takes as long as its engine
+    // steps take on the host: only a step that did not walk is held to the window.
+    if (!options.walked) {
+      expect(answer.ms, `took ${answer.ms} ms: ${JSON.stringify(answer)}`).toBeLessThan(PROMPT_MS);
+    }
+  }
+
+  /**
+   * A step whose walk through skipped code can outlast the grace window on a
+   * slow inspector link (round 3, decision 6): it answers where it landed at
+   * once, or `pending` with the stepper's walking sentence, and then
+   * wait_for_stop answers where it landed. The landing is what is returned
+   * (`first` keeps the first answer); the caller asserts its line strictly
+   * either way.
+   */
+  async function walkingStep(
+    tool: 'step_into' | 'step_over' | 'step_out',
+    options: { walkingWhenPending?: boolean } = {}
+  ): Promise<StopAnswer & { ms: number; first: StopAnswer }> {
+    const started = Date.now();
+    const first = await server!.call<StopAnswer>(tool, {});
+    if (!first.pending) {
+      return { ...first, ms: Date.now() - started, first };
+    }
+    if (options.walkingWhenPending !== false) {
+      expect(first.message ?? '', JSON.stringify(first)).toMatch(WALKING);
+      // Issue #1130's complaint: the pending answer blamed "a long-running
+      // call" and promised a pause. A step recorded as walking does neither.
+      expect(first.message ?? '', JSON.stringify(first)).toMatch(/^Step dispatched; it has not landed after 5s\./);
+      expect(first.message ?? '', JSON.stringify(first)).not.toMatch(/long-running call|will become 'paused'/);
+    }
+    const landed = await server!.call<StopAnswer>('wait_for_stop', { timeout: WALK_WAIT_MS });
+    return { ...landed, ms: Date.now() - started, first };
   }
 
   /** Removes the breakpoint on a marked line, so a later call through that line does not stop on it. */
@@ -153,27 +208,29 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
   describe('step_into (issue #1130)', () => {
     it('lands on the next line when the walk into the call stays in Node\'s own code: the first console.log of the process', async () => {
       await pausedAt('the first console.log');
-      const answer = await step('step_into');
+      const answer = await walkingStep('step_into');
       // js-debug's own stepper lost this step: "Step completed as session exited."
-      expectLanding(answer, 'after the first console.log');
+      expectLanding(answer, 'after the first console.log', { walked: true });
       // Measured through the server on Windows: 391 engine steps, back out by
-      // step-ins (a plain landing). On a slow inspector link the walk ends on
-      // its time bound first, steps out, and says so.
-      if (answer.message !== 'Stepped into') {
+      // step-ins (a plain landing) in about 1 s. At about 44 ms an engine step
+      // (Linux) the same walk outlasts the grace window: the first answer is
+      // pending and says the step is walking, and it lands on the same line.
+      if (!answer.first.pending && answer.message !== 'Stepped into') {
         expectWalkEnded(answer.message);
       }
-    }, 60000);
+    }, 150000);
 
-    it('lands on the next line of a later console.log, inside the window: issue #1130\'s own case', async () => {
+    it('lands on the next line of a later console.log: issue #1130\'s own case', async () => {
       await pausedAt('a later console.log');
-      const answer = await step('step_into');
-      expectLanding(answer, 'after a later console.log');
-      // 130 engine steps through the server on Windows: walked back out by
-      // step-ins (a plain landing); stepped out after 3 s on a slow link.
-      if (answer.message !== 'Stepped into') {
+      const answer = await walkingStep('step_into');
+      expectLanding(answer, 'after a later console.log', { walked: true });
+      // 130 engine steps through the server on Windows, walked back out by
+      // step-ins (a plain landing); pending first, then the same landing, where
+      // an engine step costs about 44 ms.
+      if (!answer.first.pending && answer.message !== 'Stepped into') {
         expectWalkEnded(answer.message);
       }
-    }, 60000);
+    }, 150000);
 
     it('stays in the first iteration of a one-line loop: the header\'s next position on the same line is the landing', async () => {
       await pausedAt('a one-line loop');
@@ -210,14 +267,22 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
 
     it('does not follow a call into a later task: the next line, not the timer\'s callback', async () => {
       await pausedAt('starts a later task');
-      expectLanding(await step('step_into'), 'after setTimeout');
-    }, 60000);
+      // The walk through Node's timer code outlasts the grace window where an
+      // engine step costs about 44 ms (measured on a Linux host): pending
+      // first, then the same landing.
+      expectLanding(await walkingStep('step_into'), 'after setTimeout', { walked: true });
+    }, 150000);
 
     it('lands on the next line of a require of a module not yet loaded, or V8 loses the step (the loader returns through try...finally, issue #1161)', async () => {
       await pausedAt('first load of a module');
-      const answer = await step('step_into');
-      expectInCallerOrLost(answer, /steps\.cjs$/, [lineOf('after the require')]);
-    }, 60000);
+      // The loader is a long walk through Node's code: on a slow inspector
+      // link the first answer is pending, and what follows is judged the same
+      // way. A pending answer need not say the step is walking: js-debug's
+      // own module-entry pause withdraws that record (the step may be lost
+      // with it, issue #1162), and a walk at its limit is stepping out.
+      const answer = await walkingStep('step_into', { walkingWhenPending: false });
+      expectInCallerOrLost(answer, /steps\.cjs$/, [lineOf('after the require')], { walked: true });
+    }, 150000);
   });
 
   describe('step_out and step_over', () => {

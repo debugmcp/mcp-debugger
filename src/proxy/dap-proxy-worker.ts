@@ -24,7 +24,7 @@ import {
   BreakpointSyncResult,
   MIRROR_EXPOSE_COMMAND,
   MIRROR_UNEXPOSE_COMMAND,
-  PROXY_STEP_LEFT_STACK_EVENT,
+  PROXY_STEP_RECORD_EVENTS,
   CHILD_ADOPT_COMMAND,
   CHILD_RELEASE_COMMAND,
   CHILD_CLOSE_COMMAND,
@@ -358,8 +358,8 @@ export class DapProxyWorker {
   // handlers (post threadId-backfill); this generic-channel forwarder covers
   // everything else. initialized is per-client handshake, never replicated.
   private readonly mirrorEventForwarder = (evt: DebugProtocol.Event): void => {
-    // The proxy stepper's record (issue #1130) is the proxy's own, not the adapter's.
-    if (evt.event === 'stopped' || evt.event === 'continued' || evt.event === 'initialized' || evt.event === PROXY_STEP_LEFT_STACK_EVENT) {
+    // The proxy stepper's records (issue #1130) are the proxy's own, not the adapter's.
+    if (evt.event === 'stopped' || evt.event === 'continued' || evt.event === 'initialized' || PROXY_STEP_RECORD_EVENTS.includes(evt.event)) {
       return;
     }
     this.mirrorServer?.broadcastEvent(evt.event, evt.body);
@@ -1204,12 +1204,16 @@ export class DapProxyWorker {
         this.sendDapEvent(name, body as DebugProtocol.Event['body']);
       });
     }
-    // The proxy stepper's record that it ended a step by resuming the program
-    // (issue #1130): the pending step's answer reads it. A child connection's
-    // stepper sends its own straight to the parent (child-connections.ts).
-    this.dapClient.on(PROXY_STEP_LEFT_STACK_EVENT, (body: unknown) => {
-      this.sendDapEvent(PROXY_STEP_LEFT_STACK_EVENT, body as DebugProtocol.Event['body']);
-    });
+    // The proxy stepper's records of a step (issue #1130): its walk through
+    // skipped code started or ended, or it ended the step by resuming the
+    // program. The pending step's answer reads the latest. A child
+    // connection's stepper sends its own straight to the parent
+    // (child-connections.ts).
+    for (const name of PROXY_STEP_RECORD_EVENTS) {
+      this.dapClient.on(name, (body: unknown) => {
+        this.sendDapEvent(name, body as DebugProtocol.Event['body']);
+      });
+    }
 
     this.connectionManager.setupEventHandlers(this.dapClient, {
       onInitialized: async () => {
