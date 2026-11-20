@@ -176,9 +176,10 @@ Such a step shows one of two symptoms:
 
 The server does not rescue these steps and sets no temporary breakpoints for them: a breakpoint hit in the caller
 cannot be told from a hit in a later call of the caller, so the step is V8's own. To get past such a return, set a
-breakpoint on the line where you expect execution to come back, then `continue_execution`. The fix belongs in V8:
-V8 issue 569814973 has a fix in review (tracked here as issue #1173), and it reaches you only through a Node
-release.
+breakpoint on the line where you expect execution to come back, then `continue_execution`. The fix is in V8 16.0
+(V8 issue 569814973, tracked here as issue #1173). No Node release has it yet: it reaches you only through a Node
+release whose V8 has it. With it these steps land in the caller, and a `step_over` off the end of a `finally` block
+first stops once more at the end of the `return`, with the value it returns, as V8 stops at any `return`.
 
 A different loss, in js-debug: a `step_over` across the first load of a module that has a breakpoint in it runs on
 (issue #1162). js-debug pauses at the module's entry to bind the breakpoint and resumes that pause itself while the
