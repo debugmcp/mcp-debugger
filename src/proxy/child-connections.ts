@@ -451,16 +451,21 @@ export class ChildConnections extends EventEmitter {
       deps.stepsThroughSkippedCode?.() ?? (deps.launchConfig as { smartStep?: unknown } | undefined)?.smartStep === true
     );
     connection.stepper = stepper;
+    let cdp: CdpProxyClient | undefined;
     try {
       const response = (await client.sendRequest('requestCDPProxy', {}, 5000)) as { body?: { host?: string; port?: number; path?: string } };
+      if (connection.closed) {
+        return;
+      }
       const info = response?.body;
       if (!info?.host || !info.port || !info.path) {
         throw new Error(`requestCDPProxy returned no address: ${JSON.stringify(info)}`);
       }
-      const cdp = this.options.cdpClientFactory?.() ?? new CdpProxyClient();
+      cdp = this.options.cdpClientFactory?.() ?? new CdpProxyClient();
       stepper.attachCdp(cdp);
       await cdp.connect(info.host, info.port, info.path);
       if (connection.closed) {
+        stepper.detachCdp();
         cdp.dispose();
         return;
       }
@@ -472,6 +477,10 @@ export class ChildConnections extends EventEmitter {
       logger.info(`[ChildConnections] Child session ${sessionId}: the proxy stepper is on its CDP socket`);
     } catch (error) {
       stepper.detachCdp();
+      cdp?.dispose();
+      if (connection.cdp === cdp) {
+        connection.cdp = undefined;
+      }
       logger.warn(
         `[ChildConnections] Child session ${sessionId}: no CDP socket for the proxy stepper, its steps stay the adapter's: ${error instanceof Error ? error.message : String(error)}`
       );

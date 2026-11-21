@@ -569,10 +569,13 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
       // skipped code, and the adapter's own stepper stays off whatever was
       // asked, because it loses steps and re-steps a statement at a time.
       // Before the snapshot below: an attach's child session sends these
-      // arguments again, and they must not turn that stepper back on.
-      if (this.dapBehavior.stepsThroughSkippedCode && this.childSessionManager && args !== null && typeof args === 'object') {
+      // arguments again, and they must not turn that stepper back on. Applied
+      // on non-root child connections too (forked children run a child-safe
+      // policy with no ChildSessionManager, and an attach root's config still
+      // carries `smartStep: true`).
+      if (this.dapBehavior.stepsThroughSkippedCode && args !== null && typeof args === 'object') {
         const start = args as Record<string, unknown>;
-        this.childSessionManager.setStepThroughSkippedCode(start.smartStep === true);
+        this.childSessionManager?.setStepThroughSkippedCode(start.smartStep === true);
         args = { ...start, smartStep: false };
       }
 

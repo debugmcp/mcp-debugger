@@ -12,6 +12,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
+import * as winston from 'winston';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { JsStepper, DEFAULT_JS_STEPPER_TUNABLES, type JsStepperTunables } from '../../src/proxy/js-stepper.js';
 import {
@@ -1674,5 +1675,189 @@ describe('JsStepper (issue #1130)', () => {
     engine.current = null; // V8 resumed behind the stepper's back
     await expect(stepper.request('stepOut', { threadId: 1 })).rejects.toThrow(/while paused/);
     expect(stepper.describe()).toMatchObject({ chain: false });
+  });
+
+  describe('review defect regressions', () => {
+    it('withholds lagging stopped events immediately when a chain is abandoned mid-verdict, without double-counting owed', async () => {
+      let gated = false;
+      let release: () => void = () => undefined;
+      const lateStopped: DebugProtocol.Event[] = [];
+      stepper = new JsStepper({
+        target: {
+          sendRequest: async (_c: string, args?: unknown) => {
+            if (gated) {
+              await new Promise<void>((resolve) => {
+                release = resolve;
+              });
+            }
+            return engine.stackTrace((args as { levels: number }).levels) as never;
+          }
+        },
+        deliver: (event) => delivered.push(event),
+        tunables: { settleCeilingMs: 150, verdictCeilingMs: 150 }
+      });
+      engine.onDap = (event) => {
+        if (event.event === 'stopped') {
+          // Hold js-debug's stopped so stoppedSeen lags kept when continue arrives.
+          lateStopped.push(event);
+          return;
+        }
+        stepper.withholds(event);
+      };
+      stepper.attachCdp(engine);
+      stepper.setEnabled(true);
+
+      engine.pauseAt({ frames: frames(app('main', 10)) });
+      engine.script = [{ frames: frames(node('log', 1), app('main', 10)) }];
+      await stepper.request('stepIn', { threadId: 1 });
+      gated = true;
+      await vi.waitFor(() => expect(lateStopped).toHaveLength(1));
+
+      // Abandon while stackTrace is still pending: kept=1, stoppedSeen=0.
+      await stepper.beforeRequest('continue');
+      expect(stepper.describe()).toMatchObject({ chain: false, owed: 1 });
+      // Lagging stopped from the abandoned chain arrives BEFORE finish() exits: must be withheld.
+      expect(stepper.withholds(lateStopped[0])).toBe(true);
+      expect(stepper.describe().owed).toBe(0);
+
+      // Now let the abandoned chain's finish() exit: it must not re-add the already-accounted owed stop.
+      gated = false;
+      release();
+      await tick(20);
+      expect(stepper.describe().owed).toBe(0);
+      expect(stepper.withholds({ seq: 0, type: 'event', event: 'stopped', body: { reason: 'pause', threadId: 1 } })).toBe(false);
+    });
+
+    it('an abandoned chain finishing late does not overwrite owed for a newer step', async () => {
+      let gated = false;
+      let release: () => void = () => undefined;
+      stepper = new JsStepper({
+        target: {
+          sendRequest: async (_c: string, args?: unknown) => {
+            if (gated) {
+              await new Promise<void>((resolve) => {
+                release = resolve;
+              });
+            }
+            return engine.stackTrace((args as { levels: number }).levels) as never;
+          }
+        },
+        deliver: (event) => delivered.push(event),
+        tunables: { settleCeilingMs: 150, verdictCeilingMs: 150 }
+      });
+      let dropStopped = true;
+      engine.onDap = (event) => {
+        if (dropStopped && event.event === 'stopped') {
+          return;
+        }
+        stepper.withholds(event);
+      };
+      stepper.attachCdp(engine);
+      stepper.setEnabled(true);
+
+      engine.pauseAt({ frames: frames(app('main', 10)) });
+      engine.script = [{ frames: frames(node('log', 1), app('main', 10)) }];
+      await stepper.request('stepIn', { threadId: 1 });
+      gated = true;
+      await tick(10);
+
+      // Start a second step while chain 1 is still stuck in stackTrace (kept=1, stoppedSeen=0).
+      gated = false;
+      dropStopped = false;
+      engine.script = [{ frames: frames(app('main', 11)) }];
+      await stepper.request('next', { threadId: 1 });
+      await settled();
+      expect(stepper.describe()).toMatchObject({ chain: false, owed: 0 });
+
+      // Release chain 1 so its finish() runs now: must not clobber owed back to 1.
+      release();
+      await tick(20);
+      expect(stepper.describe().owed).toBe(0);
+    });
+
+    it('delivers no stopped event if the chain is cancelled during finish()\'s settle wait', async () => {
+      engine.pauseAt({ frames: frames(app('main', 10)) });
+      engine.script = [{ frames: frames(app('main', 11)) }];
+      // Suppress js-debug's stopped so finish() enters its settle wait loop.
+      engine.onDap = (event) => {
+        if (event.event !== 'stopped') {
+          stepper.withholds(event);
+        }
+      };
+      await stepper.request('next', { threadId: 1 });
+      await tick(15);
+      // Cancel while finish() is waiting for js-debug's stopped.
+      await stepper.beforeRequest('continue');
+      await tick(30);
+      expect(stops()).toEqual([]);
+      expect(stepper.describe()).toMatchObject({ chain: false });
+    });
+
+    it('clears cached skippedScripts on detachCdp so a reused stepper does not misclassify a new target\'s scriptIds', async () => {
+      const engine2 = new Engine();
+      let activeEngine = engine;
+      const reused = new JsStepper({
+        target: { sendRequest: async (_c: string, args?: unknown) => activeEngine.stackTrace((args as { levels: number }).levels) as never },
+        deliver: (event) => delivered.push(event),
+        tunables: { settleCeilingMs: 150, verdictCeilingMs: 150 }
+      });
+      reused.setEnabled(true);
+      reused.attachCdp(engine);
+      engine.onDap = (event) => { reused.withholds(event); };
+
+      // Target 1: scriptId "42" is a Node internal module -> cached in skippedScripts.
+      engine.pauseAt({ frames: frames(app('main', 10)) });
+      engine.script = [
+        { frames: frames({ fn: 'internalFn', line: 1, script: '42', path: '<node_internals>/internal/foo', skipped: true }, app('main', 10)) },
+        { frames: frames(app('main', 11)) }
+      ];
+      await reused.request('stepIn', { threadId: 1 });
+      await vi.waitFor(() => expect(reused.describe().chain).toBe(false), { timeout: 2000, interval: 2 });
+
+      // Target 2 reuses scriptId "42" for user code: must ask js-debug and stop there.
+      activeEngine = engine2;
+      delivered.length = 0;
+      reused.attachCdp(engine2);
+      engine2.onDap = (event) => { reused.withholds(event); };
+      engine2.pauseAt({ frames: frames(app('main', 10)) });
+      engine2.script = [{ frames: frames({ fn: 'userFn', line: 5, script: '42', path: '/app/user.js', skipped: false }, app('main', 10)) }];
+      await reused.request('stepIn', { threadId: 1 });
+      await vi.waitFor(() => expect(reused.describe().chain).toBe(false), { timeout: 2000, interval: 2 });
+
+      expect(engine2.calls.map((c) => c.method).filter((m) => /step|resume/.test(m))).toEqual(['Debugger.stepInto']);
+      expect(stops()).toHaveLength(1);
+    });
+
+    it('leaves owed at 0 when detachCdp closes during an active chain with uncollected stops', async () => {
+      engine.pauseAt({ frames: frames(app('main', 10)) });
+      engine.script = [{ frames: frames(app('main', 11)) }];
+      engine.onDap = (event) => {
+        if (event.event !== 'stopped') {
+          stepper.withholds(event);
+        }
+      };
+      await stepper.request('next', { threadId: 1 });
+      await tick(15);
+      stepper.detachCdp();
+      await tick(30);
+      expect(stepper.describe()).toMatchObject({ chain: false, owed: 0, paused: false });
+      expect(stops()).toEqual([]);
+    });
+
+    it('treats a CDP pause with empty callFrames as non-skipped instead of throwing', async () => {
+      const logSpy = vi.spyOn(winston.transports.Console.prototype, 'log');
+      try {
+        engine.pauseAt({ frames: frames(app('main', 10)) });
+        engine.script = [{ frames: [] }];
+        await stepper.request('next', { threadId: 1 });
+        await settled();
+        expect(stops()).toHaveLength(1);
+        expect(stopped()).toMatchObject({ reason: 'step' });
+        const messages = logSpy.mock.calls.map(([info]) => String((info as { message?: unknown })?.message ?? ''));
+        expect(messages.join('\n')).not.toContain('chain failed');
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
   });
 });

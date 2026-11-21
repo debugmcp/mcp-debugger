@@ -231,6 +231,8 @@ interface Chain {
   pauseRequested: boolean;
   /** That pause was taken on no breakpoint of js-debug's: it is reported as the pause it is. */
   pauseTaken: boolean;
+  /** Whether this chain's uncollected `stopped` events have already been moved to `this.owed`. */
+  owedAccounted: boolean;
   /**
    * The chain ended by resuming the program (the stack it started on is
    * gone) and the resume is out: a `stopped` beyond the chain's kept pauses
@@ -341,8 +343,11 @@ export class JsStepper {
     this.cdp = null;
     this.current = null;
     this.owed = 0;
+    this.skippedScripts.clear();
     const chain = this.chain;
     if (chain) {
+      this.chain = null;
+      chain.owedAccounted = true;
       chain.cancelled = 'the CDP connection closed';
       chain.wake?.();
     }
@@ -391,6 +396,7 @@ export class JsStepper {
       capped: false,
       pauseRequested: false,
       pauseTaken: false,
+      owedAccounted: false,
       leaving: false,
       afterLeaving: [],
       startedAt: Date.now()
@@ -769,7 +775,11 @@ export class JsStepper {
 
   /** js-debug's mark on frame 0 of the current pause. */
   private async isSkipped(chain: Chain, pause: CdpPaused): Promise<boolean> {
-    const scriptId = pause.callFrames[0].location.scriptId;
+    const top = pause.callFrames[0];
+    if (!top) {
+      return false;
+    }
+    const scriptId = top.location.scriptId;
     const plainLanding = pause.reason === 'step' && (pause.hitBreakpoints ?? []).length === 0;
     if (plainLanding && this.skippedScripts.has(scriptId)) {
       return true;
@@ -834,7 +844,7 @@ export class JsStepper {
         await this.cdp?.send('Debugger.resume', {});
       } catch (err) {
         logger.warn(`[JsStepper] resume after leaving the stack failed: ${errorText(err)}`);
-        if (this.current !== null && this.current === landed) {
+        if (!chain.cancelled && this.current !== null && this.current === landed) {
           // V8 is still paused where the chain left it: the caller hears of
           // the stop it can see. (Paused anywhere else, V8 took the resume
           // and the answer was lost: the stop it is in now is the program's
@@ -854,11 +864,7 @@ export class JsStepper {
     }
     if (this.chain === chain) {
       this.chain = null;
-    }
-    const missing = Math.max(0, chain.kept - chain.stoppedSeen);
-    if (missing > 0) {
-      this.owed = missing;
-      this.owedUntil = Date.now() + this.tunables.settleCeilingMs;
+      this.accountOwed(chain);
     }
     if (ender === 'left-stack' && !chain.cancelled) {
       // The program runs on and the step will not land: no stop to report.
@@ -877,43 +883,45 @@ export class JsStepper {
       `${count(CDP_COMMAND.in)} in, ${count(CDP_COMMAND.over)} over, ${count(CDP_COMMAND.out)} out; ` +
       `${chain.kept} pauses kept, ${chain.stoppedSeen} stopped seen; ${Date.now() - chain.startedAt} ms`
     );
-    if (ender === 'landing') {
-      const body = { ...((chain.lastStopped?.body ?? {}) as Record<string, unknown>) };
-      delete body.hitBreakpointIds;
-      delete body.text;
-      this.deliver({
-        seq: 0,
-        type: 'event',
-        event: 'stopped',
-        body: {
-          allThreadsStopped: false,
-          ...body,
-          threadId: (body.threadId as number | undefined) ?? chain.threadId ?? 0,
-          reason: 'step',
-          description: 'Paused',
-          ...this.landingNote(chain, backInOriginFrame)
-        }
-      });
-    } else if (ender === 'real-stop' && chain.pauseTaken) {
-      // The pause the caller asked for. js-debug may report it under another
-      // reason, or may not have reported it yet: it leaves as the pause it is.
-      const body = { ...((chain.lastStopped?.body ?? {}) as Record<string, unknown>) };
-      delete body.hitBreakpointIds;
-      delete body.text;
-      this.deliver({
-        seq: 0,
-        type: 'event',
-        event: 'stopped',
-        body: {
-          allThreadsStopped: false,
-          ...body,
-          threadId: (body.threadId as number | undefined) ?? chain.threadId ?? 0,
-          reason: 'pause',
-          description: 'Paused'
-        }
-      });
-    } else if (ender === 'real-stop' && chain.lastStopped) {
-      this.deliver(chain.lastStopped);
+    if (!chain.cancelled) {
+      if (ender === 'landing') {
+        const body = { ...((chain.lastStopped?.body ?? {}) as Record<string, unknown>) };
+        delete body.hitBreakpointIds;
+        delete body.text;
+        this.deliver({
+          seq: 0,
+          type: 'event',
+          event: 'stopped',
+          body: {
+            allThreadsStopped: false,
+            ...body,
+            threadId: (body.threadId as number | undefined) ?? chain.threadId ?? 0,
+            reason: 'step',
+            description: 'Paused',
+            ...this.landingNote(chain, backInOriginFrame)
+          }
+        });
+      } else if (ender === 'real-stop' && chain.pauseTaken) {
+        // The pause the caller asked for. js-debug may report it under another
+        // reason, or may not have reported it yet: it leaves as the pause it is.
+        const body = { ...((chain.lastStopped?.body ?? {}) as Record<string, unknown>) };
+        delete body.hitBreakpointIds;
+        delete body.text;
+        this.deliver({
+          seq: 0,
+          type: 'event',
+          event: 'stopped',
+          body: {
+            allThreadsStopped: false,
+            ...body,
+            threadId: (body.threadId as number | undefined) ?? chain.threadId ?? 0,
+            reason: 'pause',
+            description: 'Paused'
+          }
+        });
+      } else if (ender === 'real-stop' && chain.lastStopped) {
+        this.deliver(chain.lastStopped);
+      }
     }
     // The program's own next stops, reached after the chain's resume: never
     // lost, and after the chain's record; stale, and dropped, once the chain
@@ -956,6 +964,22 @@ export class JsStepper {
     return body.reason === 'pause' || body.reason === 'step';
   }
 
+  /** Move any uncollected `stopped` events of `chain` into `this.owed`, at most once. */
+  private accountOwed(chain: Chain): void {
+    if (chain.owedAccounted) {
+      return;
+    }
+    chain.owedAccounted = true;
+    if (Date.now() > this.owedUntil) {
+      this.owed = 0;
+    }
+    const missing = Math.max(0, chain.kept - chain.stoppedSeen);
+    if (missing > 0) {
+      this.owed += missing;
+      this.owedUntil = Date.now() + this.tunables.settleCeilingMs;
+    }
+  }
+
   private async abandonChain(why: string): Promise<void> {
     const chain = this.chain;
     if (!chain) {
@@ -966,6 +990,7 @@ export class JsStepper {
     // The run loop ends the chain; the caller goes on without waiting for it.
     if (this.chain === chain) {
       this.chain = null;
+      this.accountOwed(chain);
     }
   }
 

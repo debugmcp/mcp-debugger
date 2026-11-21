@@ -3,6 +3,7 @@ import net from 'net';
 import fs from 'fs';
 import { EventEmitter } from 'events';
 import { MinimalDapClient } from '../../../src/proxy/minimal-dap.js';
+import { createChildSafePolicy } from '../../../src/proxy/child-safe-policy.js';
 import {
   ChildSessionManager,
   type ChildSessionOptions
@@ -2919,6 +2920,27 @@ describe('MinimalDapClient', () => {
       expect(client.stepsThroughSkippedCode()).toBe(true);
       // js-debug's own stepper was never turned on.
       expect(adapterSockets[0].requests.map((request) => (request.arguments as { smartStep?: unknown }).smartStep)).toEqual([false, false, false]);
+    });
+
+    it('keeps js-debug\'s stepper off on a child-safe connection (a forked child) with no ChildSessionManager', async () => {
+      // Forked child connections run createChildSafePolicy(JsDebugAdapterPolicy):
+      // stepsThroughSkippedCode is true, supportsReverseStartDebugging is false
+      // (no ChildSessionManager). An attach root's config still carries smartStep: true.
+      client = new MinimalDapClient('localhost', 5678, createChildSafePolicy(JsDebugAdapterPolicy));
+      await client.connect();
+      expect(client.stepsThroughSkippedCode()).toBeUndefined();
+
+      await client.sendRequest('attach', {
+        type: 'pwa-node', request: 'attach', __pendingTargetId: 'fork-1', continueOnAttach: true, smartStep: true
+      });
+      await client.sendRequest('attach', {
+        type: 'pwa-node', request: 'attach', __pendingTargetId: 'fork-2', continueOnAttach: true
+      });
+
+      expect(adapterSockets[0].requests.map((request) => request.arguments)).toEqual([
+        { type: 'pwa-node', request: 'attach', __pendingTargetId: 'fork-1', continueOnAttach: true, smartStep: false },
+        { type: 'pwa-node', request: 'attach', __pendingTargetId: 'fork-2', continueOnAttach: true, smartStep: false }
+      ]);
     });
 
     describe('a request routed to the child session', () => {

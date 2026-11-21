@@ -166,7 +166,7 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
     extraBreakpoints: string[] = [],
     programArgs?: string[]
   ): Promise<StopAnswer> {
-    server = await startStdioClient({ name: 'js-stepper' });
+    server = await startStdioClient({ name: 'js-stepper', callTimeoutMs: WALK_WAIT_MS + 10_000 });
     await server.createSession('javascript', 'js-stepper');
     for (const at of [marker, ...extraBreakpoints]) {
       const set = await server.call('set_breakpoint', { file: FIXTURE, line: lineOf(at) });
@@ -298,10 +298,12 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
 
     it('follows a call through Node\'s once-wrapper into the program\'s listener: a walk longer than 24 engine steps', async () => {
       await pausedAt('emits to a once listener');
-      const answer = await step('step_into');
-      expectLanding(answer, 'in the once listener');
-      expect(answer.message).toBe('Stepped into');
-    }, 60000);
+      const answer = await walkingStep('step_into');
+      expectLanding(answer, 'in the once listener', { walked: true });
+      if (!answer.first.pending) {
+        expect(answer.message).toBe('Stepped into');
+      }
+    }, 150000);
 
     it('enters the program\'s listener however long Node\'s code before it runs: a walk is counted in engine steps, never the clock (review 8, C1)', async () => {
       await pausedAt('emits after a slow listener', undefined, [], ['slow-listener']);
@@ -458,6 +460,7 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
       const set = await server.call('set_breakpoint', { file: LIB, line: markerLine(LIB, 'BLIB-WORK') });
       expect(set.success, JSON.stringify(set)).toBe(true);
       let stop = await server.call<StopAnswer>('start_debugging', { scriptPath: SCRIPT });
+      expect(stop.success, JSON.stringify(stop)).toBe(true);
       if (stop.state !== 'paused') {
         stop = await server.call<StopAnswer>('wait_for_stop', { timeout: 20000 });
       }

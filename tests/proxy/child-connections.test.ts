@@ -1089,4 +1089,45 @@ describe("ChildConnections: an adopted child's proxy stepper (issue #1130)", () 
     expect(cdp.disposed).toBe(true);
     expect(connections.has('child-1')).toBe(false);
   });
+
+  it('disposes the child\'s CDP socket when subscribe or Debugger.enable fails after connect', async () => {
+    build({ rootSteps: () => true });
+    const origFactory = (connections as unknown as { options: { cdpClientFactory?: () => CdpProxyClient } }).options.cdpClientFactory!;
+    (connections as unknown as { options: { cdpClientFactory?: () => CdpProxyClient } }).options.cdpClientFactory = () => {
+      const cdp = origFactory() as unknown as FakeCdpClient;
+      cdp.send = async (method: string): Promise<unknown> => {
+        cdp.sent.push(method);
+        if (method === 'Debugger.enable') {
+          throw new Error('Debugger.enable failed');
+        }
+        return {};
+      };
+      return cdp as unknown as CdpProxyClient;
+    };
+
+    await adoptChild();
+    await vi.waitFor(() => expect(cdpClients[0]?.disposed).toBe(true));
+
+    expect(cdpClients[0].listenerCount('cdp-event')).toBe(0);
+    expect(connections.stepRequest('child-1', 'next', STEP)).toBeNull();
+  });
+
+  it('does not open a CDP socket when the child closes while requestCDPProxy is still in flight', async () => {
+    build({ rootSteps: () => true });
+    let resolveProxy!: (value: unknown) => void;
+    childClient.sendRequest.mockImplementation(async (command: string) => {
+      if (command === 'requestCDPProxy') {
+        return new Promise((resolve) => { resolveProxy = resolve; });
+      }
+      return { body: {} };
+    });
+
+    await adoptChild();
+    await vi.waitFor(() => expect(resolveProxy).toBeDefined());
+    await connections.close('child-1', { terminateDebuggee: true });
+    resolveProxy({ body: cdpAddress });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(cdpClients).toHaveLength(0);
+  });
 });
