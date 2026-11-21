@@ -34,7 +34,7 @@
   "dependencies": {
     "@debugmcp/shared": "workspace:*",
     "@vscode/debugprotocol": "^1.68.0",
-    "dotenv": "^18.0.9"
+    "dotenv": "^18.0.10"
   },
   "peerDependencies": {
     "@debugmcp/shared": "0.26.0"
@@ -45,7 +45,7 @@
     "eslint": "^10.14.0",
     "extract-zip": "^2.0.1",
     "fs-extra": "^11.4.1",
-    "tar": "^7.5.22",
+    "tar": "^7.5.23",
     "typescript": "^5.9.3",
     "vitest": "^4.1.11"
   },
