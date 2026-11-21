@@ -99,8 +99,8 @@ exited.`), or, for a `step_over` off the end of a `finally` block, can stop in t
 of the same function instead of the caller. mcp-debugger does not rescue these steps.
 
 Workaround: set a breakpoint on the line where you expect execution to come back, then
-`continue_execution`. The fix is in V8: V8 issue 569814973 has one in review (tracked here as
-#1173), and it reaches you only through a Node release. See the
+`continue_execution`. The fix is in V8 16.0 (V8 issue 569814973, tracked here as #1173). No
+Node release has it yet: it reaches you only through a Node release whose V8 has it. See the
 [JavaScript guide](./javascript/README.md).
 
 ## Dart/Flutter: what the SDK debug adapter does differently

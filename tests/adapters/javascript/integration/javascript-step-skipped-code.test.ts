@@ -24,11 +24,14 @@
  *     script count as skipped;
  *   - a step that leaves a function through `return` inside try...finally
  *     is the engine's own. V8 loses it (issues #1161, #1174; Node 22, 24
- *     and 26), sync and async, and the server does not rescue it. Those
- *     tests accept both a runtime that loses the step and one that lands it
- *     in the caller, and fail on a stop anywhere else (another call of the
- *     same function). Every one of them is lost on main too (measured: 3 of
- *     3 runs each); every step main lands is asserted strictly;
+ *     and 26), sync and async, and the server does not rescue it. V8 16.0
+ *     has the fix (#1173); no Node release has it yet. Those tests accept
+ *     both a runtime that loses the step and one that lands it in the
+ *     caller (with the fix, a step_over off the finally block first stops
+ *     once more at the end of the return, in the same call), and fail on a
+ *     stop anywhere else (another call of the same function). Every one of
+ *     them is lost on main too (measured: 3 of 3 runs each); every step
+ *     main lands is asserted strictly;
  *   - a breakpoint reached during a step stops as itself;
  *   - a step off the last line of a callback Node called has no frame of the
  *     program to return to: the program is resumed, not walked through the
@@ -60,7 +63,11 @@ type StopAnswer = ToolAnswer & {
   pending?: boolean;
   stopReason?: string;
   location?: { file: string; line: number };
-  snapshot?: { frames?: Array<{ name: string; line: number }> };
+  snapshot?: {
+    frames?: Array<{ name: string; line: number }>;
+    changedVariables?: Record<string, unknown>;
+    locals?: Record<string, unknown>;
+  };
   /** wait_for_stop's record of the stop. */
   lastStop?: { reason?: string };
 };
@@ -121,6 +128,28 @@ function expectInCallerOrLost(answer: StopAnswer & { ms: number }, file: RegExp,
   if (!options.walked) {
     expect(answer.ms, `took ${answer.ms} ms: ${JSON.stringify(answer)}`).toBeLessThan(PROMPT_MS);
   }
+}
+
+/**
+ * Whether a step_over off the end of a finally block stopped where a runtime
+ * with V8's fix (#1173; V8 16.0) stops it first: once more at the end of the
+ * `return`, in the same call, as V8 stops at any `return`. The step after it
+ * lands in the caller. A stop on the return's line is this one only when the
+ * frame under it is the call the test paused in, not a later call.
+ */
+function isAtTheReturn(answer: StopAnswer, returnLine: number, callerLine: number): boolean {
+  return answer.state === 'paused' && answer.location?.line === returnLine && answer.snapshot?.frames?.[1]?.line === callerLine;
+}
+
+/** The stop at the end of the `return` is a plain step landing, with the value it returns. */
+function expectAtTheReturn(answer: StopAnswer & { ms: number }, file: RegExp): void {
+  expect(answer.success, JSON.stringify(answer)).toBe(true);
+  expect(answer.pending, JSON.stringify(answer)).toBeUndefined();
+  expect(answer.stopReason, JSON.stringify(answer)).toBeUndefined();
+  expect(answer.location?.file ?? '', JSON.stringify(answer)).toMatch(file);
+  const vars = answer.snapshot?.changedVariables ?? answer.snapshot?.locals ?? {};
+  expect(Object.keys(vars), JSON.stringify(answer)).toContain('Return value');
+  expect(answer.ms, `took ${answer.ms} ms: ${JSON.stringify(answer)}`).toBeLessThan(PROMPT_MS);
 }
 
 describe('The server\'s JavaScript stepper against a real js-debug (issues #1130, #1161) @requires-node', () => {
@@ -346,20 +375,31 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
       expectInCallerOrLost(await step('step_out'), /steps\.cjs$/, CALLER());
     }, 60000);
 
-    it('step_over reaches the finally block; the step off it is V8\'s: the caller, lost, or the known stop in the next call of the function (#1161)', async () => {
+    it('step_over reaches the finally block; the step off it is V8\'s: the return then the caller, lost, or the known stop in the next call of the function (#1161, #1173)', async () => {
       await pausedAt('return inside try-finally');
       await removeBreakpointAt('return inside try-finally');
       expectLanding(await step('step_over'), 'the finally block');
       // The step that leaves the function is V8's own, and the server does not
-      // rescue it. A runtime with V8's fix lands it in the caller; one that
-      // loses it runs on. Today's V8 does a third thing, the known defect that
-      // docs/javascript/README.md states ("can instead stop in the next call
-      // of the same function"): it stops on the first statement of main's
-      // later call of withFinally and reports that as the step. This test
-      // names that stop, the frame under it included, so any other stop fails.
+      // rescue it. A runtime with V8's fix (#1173) stops once more at the end
+      // of the return, in this call, and the step after that lands in the
+      // caller; one without it loses the step and runs on, or does a third
+      // thing, the known defect that docs/javascript/README.md states ("can
+      // instead stop in the next call of the same function"): it stops on the
+      // first statement of main's later call of withFinally and reports that
+      // as the step. This test names both stops on that line, the frame under
+      // each included, so any other stop fails.
       const answer = await step('step_over');
+      if (isAtTheReturn(answer, lineOf('return inside try-finally'), lineOf('calls withFinally'))) {
+        expectAtTheReturn(answer, /steps\.cjs$/);
+        const next = await step('step_over');
+        expect(next.state, JSON.stringify(next)).toBe('paused');
+        expectInCallerOrLost(next, /steps\.cjs$/, CALLER());
+        return;
+      }
       const inTheNextCall = answer.state === 'paused' && answer.location?.line === lineOf('return inside try-finally');
       if (inTheNextCall) {
+        expect(answer.success, JSON.stringify(answer)).toBe(true);
+        expect(answer.location?.file ?? '', JSON.stringify(answer)).toMatch(/steps\.cjs$/);
         expect(answer.stopReason, JSON.stringify(answer)).toBeUndefined();
         expect(answer.snapshot?.frames?.[1]?.line, JSON.stringify(answer)).toBe(lineOf('calls withFinally from an async function'));
         return;
@@ -384,7 +424,7 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
 
     it('step_out of an async function with that shape lands in the function that awaits it, or V8 loses it (#1174)', async () => {
       await pausedAt('async return inside try-finally');
-      // A runtime with V8's fix (#1173) lands it; the docs then need updating.
+      // A runtime with V8's fix (#1173) lands it.
       expectInCallerOrLost(await step('step_out'), /steps\.cjs$/, [lineOf('awaits workWithFinally'), lineOf('after the await')]);
     }, 60000);
   });
@@ -499,8 +539,18 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
       expectAsyncLanding(await step('step_over'), 'the return inside the try');
       expectAsyncLanding(await step('step_over'), 'the finally block of an async function');
       // Off the finally block of an async function V8 loses the step, and the
-      // server does not rescue it (#1174). closing is called once, from main.
-      expectInCallerOrLost(await step('step_over'), /async-steps\.cjs$/, [at('awaits closing'), at('after closing')]);
+      // server does not rescue it (#1174). A runtime with V8's fix (#1173)
+      // stops once more at the end of the return, then lands in main.
+      // closing is called once, from main.
+      const off = await step('step_over');
+      if (isAtTheReturn(off, at('the return inside the try'), at('awaits closing'))) {
+        expectAtTheReturn(off, /async-steps\.cjs$/);
+        const next = await step('step_over');
+        expect(next.state, JSON.stringify(next)).toBe('paused');
+        expectInCallerOrLost(next, /async-steps\.cjs$/, [at('awaits closing'), at('after closing')]);
+        return;
+      }
+      expectInCallerOrLost(off, /async-steps\.cjs$/, [at('awaits closing'), at('after closing')]);
     }, 60000);
 
     it('step_over on a statement that awaits on a later line stays in the function: its caller runs on, and is not where the step stops', async () => {
