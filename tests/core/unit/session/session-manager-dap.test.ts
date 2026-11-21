@@ -25,6 +25,11 @@ import { threadStacksHandler } from '../../../test-utils/mocks/thread-stacks.js'
 import { ErrorMessages } from '../../../../src/utils/error-messages.js';
 import { ProxyNotRunningError } from '../../../../src/errors/debug-errors.js';
 import { DapResponseError } from '../../../../src/proxy/dap-response-error.js';
+import {
+  PROXY_STEP_LEFT_STACK_EVENT,
+  PROXY_STEP_WALK_ENDED_EVENT,
+  PROXY_STEP_WALK_STARTED_EVENT
+} from '../../../../src/proxy/dap-proxy-interfaces.js';
 
 /**
  * A `breakpoint` event body as the proxy delivers it for a CHILD session event.
@@ -1745,6 +1750,245 @@ describe('SessionManager - DAP Operations', () => {
       expect(data.message).toMatch(/back at the line the step was issued from/);
     });
 
+    // I3 (issue #1130): the JavaScript policy's "left the frame" sentence is
+    // true only for a step the proxy's stepper ended by resuming the program,
+    // which it records with an event of its own. A step still executing in
+    // its own frame (a step_over of a long call) gets the generic wording.
+    describe('the pending wording of a step the proxy stepper ended by leaving the stack (I3)', () => {
+      const LEFT = 'Left its frame, by the stepper\'s own record.';
+
+      function withLeftStackHook(manager: SessionManager): ReturnType<typeof vi.fn> {
+        const hook = vi.fn((info: { stepLeftStack?: boolean }) => (info.stepLeftStack ? LEFT : undefined));
+        const original = (manager as unknown as { selectPolicy: (language: string) => AdapterPolicy }).selectPolicy.bind(manager);
+        vi.spyOn(manager as unknown as { selectPolicy: (language: string) => AdapterPolicy }, 'selectPolicy')
+          .mockImplementation((language: string) => ({ ...original(language), describePendingStop: hook }));
+        return hook;
+      }
+
+      async function pendingStepOver(sessionId: string, events: Array<[string, unknown]>) {
+        dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+          if (command === 'next') {
+            process.nextTick(() => {
+              for (const [event, body] of events) {
+                dependencies.mockProxyManager.emit('dap-event', event, body);
+              }
+            });
+          }
+          if (command === 'stackTrace') {
+            const frame = { id: 1, name: 'main', source: { path: '/app/main.js' }, line: 12, column: 3 };
+            return { success: true, body: { stackFrames: [frame], totalFrames: 1 } };
+          }
+          return { success: true };
+        });
+        const stepPromise = sessionManager.stepOver(sessionId);
+        await vi.advanceTimersByTimeAsync(6000);
+        return (await stepPromise).data as { message?: string; pending?: boolean };
+      }
+
+      it('carries the sentence when the stepper recorded that the step left the stack', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        const hook = withLeftStackHook(sessionManager);
+        const data = await pendingStepOver(session.id, [[PROXY_STEP_LEFT_STACK_EVENT, { threadId: 1 }]]);
+        expect(data.pending).toBe(true);
+        expect(data.message).toBe(`${ErrorMessages.stepNotLanded(5)} ${LEFT}`);
+        expect(hook).toHaveBeenCalledWith(expect.objectContaining({ operation: 'step', stepLeftStack: true }));
+      });
+
+      /** The session is paused again (the pending step landed later), so the next step can go out. */
+      async function pausedAgain(): Promise<void> {
+        dependencies.mockProxyManager.simulateStopped(1, 'step');
+        await vi.advanceTimersByTimeAsync(10);
+      }
+
+      it('carries the generic wording for a step with no such record, and the sentence for the next step, which has one', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        withLeftStackHook(sessionManager);
+        // Another custom event is not the record.
+        const first = await pendingStepOver(session.id, [['flutter.appStarted', {}]]);
+        expect(first.pending).toBe(true);
+        expect(first.message).toBe(ErrorMessages.stepStillRunning(5));
+        await pausedAgain();
+        // The record itself is.
+        const second = await pendingStepOver(session.id, [[PROXY_STEP_LEFT_STACK_EVENT, { threadId: 1 }]]);
+        expect(second.message).toBe(`${ErrorMessages.stepNotLanded(5)} ${LEFT}`);
+      });
+
+      it('reads the record of this step only: the one a finished step left behind does not carry over', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        withLeftStackHook(sessionManager);
+        // This step's record is read.
+        const first = await pendingStepOver(session.id, [[PROXY_STEP_LEFT_STACK_EVENT, { threadId: 1 }]]);
+        expect(first.message).toBe(`${ErrorMessages.stepNotLanded(5)} ${LEFT}`);
+        await pausedAgain();
+        // A record that arrives while no step is waiting (the last step had already answered) is nobody's.
+        dependencies.mockProxyManager.emit('dap-event', PROXY_STEP_LEFT_STACK_EVENT, { threadId: 1 });
+        const second = await pendingStepOver(session.id, []);
+        expect(second.message).toBe(ErrorMessages.stepStillRunning(5));
+      });
+
+      it('stops listening for the records once the step has answered, pending or landed', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        withLeftStackHook(sessionManager);
+        const before = dependencies.mockProxyManager.listenerCount('dap-event');
+        await pendingStepOver(session.id, []);
+        expect(dependencies.mockProxyManager.listenerCount('dap-event')).toBe(before);
+        await pausedAgain();
+        dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+          if (command === 'next') {
+            process.nextTick(() => dependencies.mockProxyManager.simulateStopped(1, 'step'));
+          }
+          return { success: true };
+        });
+        const landed = sessionManager.stepOver(session.id);
+        await vi.advanceTimersByTimeAsync(100);
+        expect((await landed).data).toMatchObject({ message: 'Stepped over' });
+        expect(dependencies.mockProxyManager.listenerCount('dap-event')).toBe(before);
+      });
+    });
+
+    // Round 3, decision 2 (issue #1130): a step_into the proxy's stepper is
+    // walking through skipped code when the grace window ends says so. The
+    // stepper records when the walk starts and when it ends without a landing;
+    // the controller keeps the latest record of the step and hands the policy
+    // what it says at the 5 s mark.
+    describe('the pending wording of a step_into the proxy stepper is walking through skipped code', () => {
+      const WALKING = 'Walking, by the stepper\'s own record.';
+      const LEFT = 'Left its frame, by the stepper\'s own record.';
+
+      function withRecordHook(manager: SessionManager): ReturnType<typeof vi.fn> {
+        const hook = vi.fn((info: { stepLeftStack?: boolean; stepWalking?: { stepLimit?: number } }) =>
+          (info.stepWalking ? `${WALKING} limit=${info.stepWalking.stepLimit}` : info.stepLeftStack ? LEFT : undefined));
+        const original = (manager as unknown as { selectPolicy: (language: string) => AdapterPolicy }).selectPolicy.bind(manager);
+        vi.spyOn(manager as unknown as { selectPolicy: (language: string) => AdapterPolicy }, 'selectPolicy')
+          .mockImplementation((language: string) => ({ ...original(language), describePendingStop: hook }));
+        return hook;
+      }
+
+      async function pendingStepIn(sessionId: string, events: Array<[string, unknown]>) {
+        dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+          if (command === 'stepIn') {
+            process.nextTick(() => {
+              for (const [event, body] of events) {
+                dependencies.mockProxyManager.emit('dap-event', event, body);
+              }
+            });
+          }
+          if (command === 'stackTrace') {
+            const frame = { id: 1, name: 'main', source: { path: '/app/main.js' }, line: 12, column: 3 };
+            return { success: true, body: { stackFrames: [frame], totalFrames: 1 } };
+          }
+          return { success: true };
+        });
+        const stepPromise = sessionManager.stepInto(sessionId);
+        await vi.advanceTimersByTimeAsync(6000);
+        return (await stepPromise).data as { message?: string; pending?: boolean };
+      }
+
+      it('says the step is walking when the latest record is the walk\'s start, with the limit the stepper sent', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        const hook = withRecordHook(sessionManager);
+        const data = await pendingStepIn(session.id, [[PROXY_STEP_WALK_STARTED_EVENT, { threadId: 1, stepLimit: 512 }]]);
+        expect(data.pending).toBe(true);
+        expect(data.message).toBe(`${ErrorMessages.stepNotLanded(5)} ${WALKING} limit=512`);
+        expect(hook).toHaveBeenCalledWith(expect.objectContaining({ operation: 'step', stepWalking: { stepLimit: 512 } }));
+        expect(hook).not.toHaveBeenCalledWith(expect.objectContaining({ stepLeftStack: true }));
+      });
+
+      it('says nothing of a walk that ended at its limit and is stepping out: the latest record wins', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        const hook = withRecordHook(sessionManager);
+        const data = await pendingStepIn(session.id, [
+          [PROXY_STEP_WALK_STARTED_EVENT, { threadId: 1, stepLimit: 512 }],
+          [PROXY_STEP_WALK_ENDED_EVENT, { threadId: 1 }]
+        ]);
+        expect(data.message).toBe(ErrorMessages.stepStillRunning(5));
+        expect(hook).toHaveBeenCalledWith(expect.not.objectContaining({ stepWalking: expect.anything() }));
+      });
+
+      it('says the step left its frame when that is the latest record, after a walk', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        withRecordHook(sessionManager);
+        const data = await pendingStepIn(session.id, [
+          [PROXY_STEP_WALK_STARTED_EVENT, { threadId: 1, stepLimit: 512 }],
+          [PROXY_STEP_LEFT_STACK_EVENT, { threadId: 1 }]
+        ]);
+        expect(data.message).toBe(`${ErrorMessages.stepNotLanded(5)} ${LEFT}`);
+      });
+
+      it('reads only the stepper\'s records: another event after the walk\'s start leaves it walking', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        withRecordHook(sessionManager);
+        const data = await pendingStepIn(session.id, [
+          [PROXY_STEP_WALK_STARTED_EVENT, { threadId: 1, stepLimit: 512 }],
+          ['flutter.appStarted', {}]
+        ]);
+        expect(data.message).toBe(`${ErrorMessages.stepNotLanded(5)} ${WALKING} limit=512`);
+      });
+
+      it('says the step is walking again when the walk was withdrawn and then went on', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        withRecordHook(sessionManager);
+        const data = await pendingStepIn(session.id, [
+          [PROXY_STEP_WALK_STARTED_EVENT, { threadId: 1, stepLimit: 512 }],
+          [PROXY_STEP_WALK_ENDED_EVENT, { threadId: 1 }],
+          [PROXY_STEP_WALK_STARTED_EVENT, { threadId: 1, stepLimit: 512 }]
+        ]);
+        expect(data.message).toBe(`${ErrorMessages.stepNotLanded(5)} ${WALKING} limit=512`);
+      });
+
+      // Issue #1130's complaint was the lead itself: a walk through skipped
+      // code "still executing ... (e.g. stepping over a long-running call)",
+      // promised to "become 'paused' when it completes". A step the stepper
+      // has a record of is known to be neither, so the lead says only that it
+      // has not landed. Without a record nothing is known, and the generic
+      // lead stays (its promise is issue #1178's).
+      describe('the lead of the pending answer', () => {
+        /** A policy that explains every pending step, whatever was recorded. */
+        function withTalkativeHook(manager: SessionManager, text: string | undefined): void {
+          const original = (manager as unknown as { selectPolicy: (language: string) => AdapterPolicy }).selectPolicy.bind(manager);
+          vi.spyOn(manager as unknown as { selectPolicy: (language: string) => AdapterPolicy }, 'selectPolicy')
+            .mockImplementation((language: string) => ({ ...original(language), describePendingStop: () => text }));
+        }
+
+        it('blames no long-running call and promises no pause for a step recorded as walking, or as having left the stack', async () => {
+          const session = await createPausedSession(sessionManager, dependencies);
+          withRecordHook(sessionManager);
+          const walking = await pendingStepIn(session.id, [[PROXY_STEP_WALK_STARTED_EVENT, { threadId: 1, stepLimit: 512 }]]);
+          expect(walking.message).not.toMatch(/long-running call/);
+          expect(walking.message).not.toMatch(/will become 'paused'/);
+          expect(walking.message).toMatch(/^Step dispatched; it has not landed after 5s\./);
+          dependencies.mockProxyManager.simulateStopped(1, 'step');
+          await vi.advanceTimersByTimeAsync(10);
+          const left = await pendingStepIn(session.id, [[PROXY_STEP_LEFT_STACK_EVENT, { threadId: 1 }]]);
+          expect(left.message).not.toMatch(/long-running call/);
+          expect(left.message).not.toMatch(/will become 'paused'/);
+          expect(left.message).toMatch(/^Step dispatched; it has not landed after 5s\./);
+        });
+
+        it('keeps the generic lead for an explanation no record backs', async () => {
+          const session = await createPausedSession(sessionManager, dependencies);
+          withTalkativeHook(sessionManager, 'Explained by the policy.');
+          const none = await pendingStepIn(session.id, []);
+          expect(none.message).toBe(`${ErrorMessages.stepStillRunning(5)} Explained by the policy.`);
+          dependencies.mockProxyManager.simulateStopped(1, 'step');
+          await vi.advanceTimersByTimeAsync(10);
+          // A walk that ended is no longer known to be anything.
+          const ended = await pendingStepIn(session.id, [
+            [PROXY_STEP_WALK_STARTED_EVENT, { threadId: 1, stepLimit: 512 }],
+            [PROXY_STEP_WALK_ENDED_EVENT, { threadId: 1, why: 'limit' }]
+          ]);
+          expect(ended.message).toBe(`${ErrorMessages.stepStillRunning(5)} Explained by the policy.`);
+        });
+
+        it('keeps the generic lead for a recorded step the policy says nothing of', async () => {
+          const session = await createPausedSession(sessionManager, dependencies);
+          withTalkativeHook(sessionManager, undefined);
+          const data = await pendingStepIn(session.id, [[PROXY_STEP_WALK_STARTED_EVENT, { threadId: 1, stepLimit: 512 }]]);
+          expect(data.message).toBe(ErrorMessages.stepStillRunning(5));
+        });
+      });
+    });
+
     // Issue #879: the Dart SDK adapter's `next` stops once per token position
     // (measured: app.dart:29 took three step_overs, columns 16, 26, 32).
     describe('an adapter that steps by token position (issue #879)', () => {
@@ -1925,6 +2169,66 @@ describe('SessionManager - DAP Operations', () => {
       const data = result.data as { message?: string; stopReason?: string };
       expect(data.stopReason).toBeUndefined();
       expect(data.message).toBe('Stepped over');
+    });
+
+    // The JavaScript stepper reports a landing as reason `step` and puts what
+    // it has to say about it (the line called only skipped code) in the
+    // event's `text`. A literal here: the sentence is the stepper's, and any
+    // text a `step` stop carries is appended.
+    const STEP_NOTE = 'The line called only code this session skips; the step is back in the frame it started in.';
+
+    it.each([
+      ['step_over', 'next', 'Stepped over', (id: string) => sessionManager.stepOver(id)],
+      ['step_into', 'stepIn', 'Stepped into', (id: string) => sessionManager.stepInto(id)],
+      ['step_out', 'stepOut', 'Stepped out', (id: string) => sessionManager.stepOut(id)]
+    ] as const)('%s appends what the step itself says about its landing to the completion wording (issue #1130)', async (_tool, command, stepped, step) => {
+      const session = await createPausedSession(sessionManager, dependencies);
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (sent: string) => {
+        if (sent === command) {
+          process.nextTick(() => {
+            dependencies.mockProxyManager.simulateStopped(1, 'step', { reason: 'step', threadId: 1, text: STEP_NOTE });
+          });
+        }
+        return { success: true };
+      });
+
+      const stepPromise = step(session.id);
+      await vi.runAllTimersAsync();
+      const result = await stepPromise;
+
+      expect(result.success).toBe(true);
+      const data = result.data as { message?: string; stopReason?: string; pending?: boolean };
+      expect(data.pending).toBeUndefined();
+      // Still the step's own stop: no stopReason, the note after the wording.
+      expect(data.stopReason).toBeUndefined();
+      expect(data.message).toBe(`${stepped}. ${STEP_NOTE}`);
+    });
+
+    it.each([
+      // A breakpoint or an exception names itself; its text is not the step's to repeat.
+      ['breakpoint', ErrorMessages.stepStoppedOn('Stepped over', 'breakpoint')],
+      ['exception', ErrorMessages.stepStoppedOn('Stepped over', 'exception')],
+      // Any other stop keeps the plain wording.
+      ['pause', 'Stepped over']
+    ])("appends the text of the step's own stop only: a '%s' stop that carries one keeps its wording (issue #1130)", async (reason, wording) => {
+      const session = await createPausedSession(sessionManager, dependencies);
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (sent: string) => {
+        if (sent === 'next') {
+          process.nextTick(() => {
+            dependencies.mockProxyManager.simulateStopped(1, reason, { reason, threadId: 1, text: STEP_NOTE });
+          });
+        }
+        return { success: true };
+      });
+
+      const stepPromise = sessionManager.stepOver(session.id);
+      await vi.runAllTimersAsync();
+      const result = await stepPromise;
+
+      const data = result.data as { message?: string; stopReason?: string };
+      expect(data.stopReason).toBe(reason);
+      expect(data.message).toBe(wording);
+      expect(data.message).not.toContain(STEP_NOTE);
     });
 
     it('should treat termination during step as a successful completion', async () => {

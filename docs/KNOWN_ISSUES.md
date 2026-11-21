@@ -86,6 +86,23 @@ pause on raised exceptions in Ruby — it will also stop on caught ones.
 (Attach sessions never apply a language default; their `breakOnExceptions` default is
 `"none"` for every language.)
 
+## JavaScript: a step that leaves a function through `finally` is lost
+
+V8 loses a step that leaves a function through a `return` that runs a `finally` first: a
+`return` inside `try … finally`, a `return` out of a `for … of` loop, a function with a
+`using` declaration, and every async generator (#1161; in `async` functions and generators,
+#1174). That is a `step_out` of such a function, or a `step_over` / `step_into` off its last
+statement; a step that crosses an `await` first is not lost. Measured on Node 22.23.2, 24.14.1
+and 26.9.0 (Node 16.3.0 lands these steps, 16.4.0 and later do not). The step either never
+lands, and the program runs on or ends (`pending: true`, or `Step completed as session
+exited.`), or, for a `step_over` off the end of a `finally` block, can stop in the next call
+of the same function instead of the caller. mcp-debugger does not rescue these steps.
+
+Workaround: set a breakpoint on the line where you expect execution to come back, then
+`continue_execution`. The fix is in V8 16.0 (V8 issue 569814973, tracked here as #1173). No
+Node release has it yet: it reaches you only through a Node release whose V8 has it. See the
+[JavaScript guide](./javascript/README.md).
+
 ## Dart/Flutter: what the SDK debug adapter does differently
 
 The Dart adapter drives the SDK's own `dart debug_adapter` / `flutter debug-adapter`, so

@@ -122,6 +122,19 @@ export interface DapClientBehavior {
    * child session is available instead of falling back to the parent.
    */
   childRequiredCommands?: Set<string>;
+
+  /**
+   * The proxy steps through skipped code itself, and the adapter's own
+   * stepper that would do it is kept off (issue #1130). js-debug's smart
+   * stepper re-steps with `breakOnAsyncCall`, which loses the step, and takes
+   * one engine step per statement of the skipped code. With this set, the
+   * `smartStep` of the start request is read as the session's choice (step
+   * through skipped code, or land where the engine lands), the adapter is
+   * always sent `smartStep: false`, and `stepIn` / `next` / `stepOut` for a
+   * session that chose it are served by the proxy's stepper over the
+   * adapter's raw CDP socket.
+   */
+  stepsThroughSkippedCode?: boolean;
 }
 
 /**

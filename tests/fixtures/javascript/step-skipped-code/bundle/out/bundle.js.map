@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../node_modules/blib/index.js", "../src/app.js"],
+  "sourcesContent": ["// A dependency bundled into the program's single script.\n'use strict';\nfunction libWork(n) {\n  let t = n; // BLIB-WORK\n  t += 1;\n  return t; // BLIB-LAST\n}\nfunction libCall(fn) {\n  return fn(2); // BLIB-CALL\n}\nmodule.exports = { libWork, libCall };\n", "// The program, bundled with its dependency into out/bundle.js (one V8 script, one source map).\nconst { libWork, libCall } = require('blib');\nfunction mine(v) {\n  const w = v * 3; // B-IN-MINE\n  return w; // B-MINE-RETURN\n}\nfunction run() {\n  const a = libWork(1); // B-CALLS-LIBWORK\n  const b = a + 1; // B-AFTER-LIBWORK\n  const c = mine(b); // B-CALLS-MINE\n  const d = c + 1; // B-AFTER-MINE\n  const e = libCall(mine); // B-CALLS-LIBCALL\n  const f = e + 1; // B-AFTER-LIBCALL\n  return f; // B-RUN-RETURN\n}\nconst out = run(); // B-CALLS-RUN\nconsole.log('bundle done', out); // B-END\n"],
+  "mappings": ";;;;;;;;;;AAAA;AAAA,+BAAAA,UAAAC,SAAA;AAAA;AAEA,aAASC,SAAQ,GAAG;AAClB,UAAI,IAAI;AACR,WAAK;AACL,aAAO;AAAA,IACT;AACA,aAASC,SAAQ,IAAI;AACnB,aAAO,GAAG,CAAC;AAAA,IACb;AACA,IAAAF,QAAO,UAAU,EAAE,SAAAC,UAAS,SAAAC,SAAQ;AAAA;AAAA;;;ACTpC,IAAM,EAAE,SAAS,QAAQ,IAAI;AAC7B,SAAS,KAAK,GAAG;AACf,QAAM,IAAI,IAAI;AACd,SAAO;AACT;AACA,SAAS,MAAM;AACb,QAAM,IAAI,QAAQ,CAAC;AACnB,QAAM,IAAI,IAAI;AACd,QAAM,IAAI,KAAK,CAAC;AAChB,QAAM,IAAI,IAAI;AACd,QAAM,IAAI,QAAQ,IAAI;AACtB,QAAM,IAAI,IAAI;AACd,SAAO;AACT;AACA,IAAM,MAAM,IAAI;AAChB,QAAQ,IAAI,eAAe,GAAG;",
+  "names": ["exports", "module", "libWork", "libCall"]
+}

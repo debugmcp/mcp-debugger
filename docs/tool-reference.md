@@ -490,7 +490,7 @@ Starts debugging a script.
 - `args` (array of strings, optional): Command line arguments for the script.
 - `dapLaunchArgs` (object, optional): Standard DAP launch arguments:
   - `stopOnEntry` (boolean): Stop at first line (default `false` — the opposite of attach, which pauses unless `stopOnEntry` is `false`)
-  - `justMyCode` (boolean): Debug only user code (default `true`). JavaScript launch: `true` blackboxes `node_modules` through js-debug's `skipFiles` and keeps js-debug's smart-stepper on, so a pause or step that lands in skipped code (Node internals, `node_modules`) is stepped through and may never land (`pending: true`, with an explanation); `false` drops `node_modules` from the skip list and turns the stepper off, so steps land inside dependencies and `pause_execution` lands as soon as any JavaScript runs (issue #678). A caller `skipFiles` replaces the default list. Source maps are on for every JavaScript launch, `.js` programs included — stops report `src/*.ts` when maps and sources are present; `adapterLaunchConfig: { sourceMaps: false }` opts out (issue #684)
+  - `justMyCode` (boolean): Debug only user code (default `true`). JavaScript launch: `true` puts `node_modules` on js-debug's `skipFiles` beside Node internals, and a step does not stop in skipped code: the server steps through it itself, so `step_into` follows a call through skipped code into your own function when its walk reaches it within 512 engine steps, and otherwise steps out and says so (issue #1130; see [`step_into`](#step_into)). The walk has no time bound, so a step lands in the same place on every host; where an engine step is slow (about 44 ms on Linux, issue #1163) a long walk answers `pending: true` first, saying it is walking through skipped code, and `wait_for_stop` answers where it lands. `false` takes `node_modules` off the list and turns that stepping off, so every step lands where V8 lands, inside dependencies and Node internals. A pause lands where the program is either way. A caller `skipFiles` replaces the default list. Source maps are on for every JavaScript launch, `.js` programs included — stops report `src/*.ts` when maps and sources are present; `adapterLaunchConfig: { sourceMaps: false }` opts out (issue #684)
   - `noDebug` (boolean): DAP's "launch without enabling debugging" flag (default `false`). What it does depends on the adapter, and the response says which case you are in. **Honoured** — the debugger is off: no breakpoint binds, no exception filter arms, no entry stop lands, and no breakpoint, exception or entry stop ever arrives, so a short script ends `stopped` and a server stays `running`. That is a legitimate plain run and says nothing by itself; when the session has breakpoints (line or function), an explicit `breakOnExceptions` other than `"none"`, or `stopOnEntry`, the `warning` says the debugger is off for this launch and names what will not fire — not that no stop of any kind can come — in place of the unbound-breakpoint diagnostics that would otherwise send you to check paths that are fine (issue #710). js-debug, debugpy, Delve and CodeLLDB honour it (debugpy and Delve open no configuration phase at all, so the launch is complete on the launch response; CodeLLDB refuses the configuration requests, and the refusal reaches the `warning` and `get_output` — issue #746). The run ends `stopped` with the program's output and, where the adapter reports one, the exit code (Delve states it as a console line, `Process N has exited with status S`, which is read back as `exitCode` — issue #753). Under the flag Delve runs the program through Go's `exec`, so on Windows the binary needs its `.exe` extension. **Ignored** — rdbg, netcoredbg and the Java bridge run the debugger regardless, and the rust launch transform never forwards the flag: the `warning` says the flag had no effect and everything works as usual. The same warning comes back from `restart_debugging` and from a `dryRunSpawn` check. While such a launch runs, the session remembers the decision (`list_debug_sessions` reports `debuggerDisabled: true`) and every later surface says why: `set_breakpoint` and `list_breakpoints` keep the adapter's own answer (still sent — e.g. js-debug's "Unbound breakpoint", or CodeLLDB's refusal echoed onto each pre-launch breakpoint) and add "the debugger is off for this launch (noDebug is true)…", `pause_execution` is still sent and the same sentence explains a pause that never lands or one the adapter refused, and `step_*`/`continue_execution`/`get_stack_trace`/`get_local_variables`/`evaluate_expression` append it to their "not paused" answers. A `stopped` event only a live debugger produces — a breakpoint the adapter itself reports (or names in `hitBreakpointIds`), an exception stop, an entry stop — proves the debugger on for that adapter build and clears the decision, and so does a breakpoint the adapter verified (every honouring adapter refuses or unbinds one under the flag, so a bound one can only come from a build that ignores it); a pause, a step taken from one, or a `debugger;` statement do not (js-debug lands all three under the flag while its breakpoints stay unbound; an uncaught throw does not stop). On a paused session the sentence keeps only the clause still true of it — breakpoints cannot bind — and outside a live launch (`initializing`/`running`/`paused`) the decision is neither reported nor consulted (issue #749).
   - Additional DAP launch keys (`program`, `cwd`, `env`, language-specific options) pass through to the adapter. For Python, `module` (`python -m <module>`) or `code` (`python -c`) replaces `program`: debugpy takes exactly one target, so the launch goes out without `program` and the response's `warning` says so (`dapLaunchArgs.module: launched as a module (python -m); program is not sent …`); `scriptPath` still has to name an existing file, and `cwd` is what `-m` puts on `sys.path`: for these launches it defaults to the directory above the top-most package containing `scriptPath` (the `warning` names it), and a module launch of a project sets it to the project root explicitly (issue #985). `dryRunSpawn` reports such a launch's `data.script` as `module: <name>` or `code: …`. Top-level parameters do **not** belong here: a nested `breakOnExceptions` is honored as an alias (the top-level value wins if both are given) and reported via a `warning` in the response; other misplaced top-level keys (`dryRunSpawn`, `sessionId`, `scriptPath`, `adapterLaunchConfig`) are stripped with a warning instead of silently riding into the launch config.
 - `adapterLaunchConfig` (object, optional): Adapter-specific launch configuration overrides. Use this for language-specific settings that go beyond standard DAP arguments (e.g., `mainClass` and `classpath` for Java, `buildCommand` for Rust). For Rust, `_adapterSettings` passes through to CodeLLDB (issue #441) — e.g. `{"_adapterSettings": {"scriptConfig": {"lang": {"rust": {"sysroot": "/path"}}}}}` points the Rust formatter lookup at an explicit sysroot; the `CODELLDB_RUST_SYSROOT` env var does the same without per-launch config (a user-supplied `_adapterSettings` value wins over the env var).
@@ -703,9 +703,40 @@ ended by a `pause` from elsewhere is read as a pause and may.
 
 The step is not cancelled: the session becomes `"paused"` on its own when it completes — call [`wait_for_stop`](#wait_for_stop) to block until it does (or poll `list_debug_sessions`), or call `pause_execution` to interrupt it.
 
-The adapter may append one sentence to that message explaining why the step may never land — the JavaScript adapter
-does so for a step issued from a frame its `skipFiles` blackbox while `smartStep` is on (issue #678) — so match a
-pending step by its `pending: true` flag, not by the message text.
+The adapter may append one sentence to that message saying what the step is waiting for. The JavaScript adapter
+does so for a session whose steps the server's stepper serves (issues #678, #1130), from what the stepper last
+recorded of the step. When that latest record is that the step is walking, or that it left the stack, the step is
+known not to be a long-running call, and nothing promises it will pause, so the message opens differently: `Step
+dispatched; it has not landed after 5s. The session is 'running': wait_for_stop blocks until the program next
+stops or ends, and pause_execution interrupts it.`, followed by the sentence:
+
+- **Walking.** A `step_into` the stepper is walking through skipped code, one engine step at a time (a long walk
+  where an engine step is slow: about 44 ms on Linux, issue #1163): `The stepper's last record of this step is that
+  it is walking through skipped code (Node internals, node_modules, or files on skipFiles) one engine step at a time:
+  it stops the step when your program's code is next on top, and if the walk reaches its limit of 512 engine steps
+  first, it steps out toward the nearest frame of your program (with none below it, the program is resumed). A
+  breakpoint reached on the way stops the program there, and if the engine loses the step on the way the program
+  runs on.` (`pause_execution` while the walk is taking engine steps is answered as your pause. While the program
+  is blocked in native code or idle under the pending `step_into`, it stops inside the server's own wake evaluation
+  and is reported as a step at `repl:1`: issue #1208.) A walk that reached its limit and is
+  stepping out, or one during which js-debug resumed a pause of its own (the step may have been lost with it, issue
+  #1162), is no longer recorded as walking and gets no such sentence.
+- **Left its frame.** The stepper ended the step by resuming the program: the step left the frame it started in and
+  reached skipped code with nothing of your program below it (a function Node called, such as a timer or event
+  callback, returned to the event loop), so it will not land, and `wait_for_stop` answers at the next breakpoint or
+  when the program ends.
+
+On a launch, a step issued from skipped code that is not recorded as walking instead names the frame and says a step
+does not stop there (that sentence follows the `Step dispatched; it has not landed after 5s. …` lead when the stepper
+also recorded that it left the stack, and otherwise follows the generic `Step dispatched; the program is still
+executing after 5s …` lead above).
+
+A step still executing (a `step_over` of a long call in the function's own frame) gets no sentence. Neither does a
+step V8 itself lost (issues #1161, #1174: one that leaves a function through a `return` inside `try … finally`, out of
+a `for … of` loop, from a function with a `using` declaration, or from an async generator): the server cannot tell it
+from a step still executing, so set a breakpoint where you expect execution to come back. An attach whose steps the
+stepper serves (`smartStep: true`) gets the walking and left-its-frame sentences too.
+So match a pending step by its `pending: true` flag, not by the message text.
 
 Once a stop has been observed, the stop path owns the answer — a step that demonstrably landed is never reported as pending afterwards, at the cost of the response then being bounded by the stack-trace round trip rather than by the ~5s window. If the debuggee ends while the step is in flight the result is still a success, with a terminal `state` and a message such as `"Step completed as session terminated."`.
 
@@ -732,6 +763,48 @@ Steps into function calls on the current line.
 
 Same ~5s wait and `pending: true` contract as step_over — see [Pending steps](#pending-steps).
 
+**JavaScript** (a launch that steps through skipped code, the default; issue #1130):
+
+- A `step_into` that lands in skipped code (Node internals, `node_modules`, files on `skipFiles`) walks on, one
+  engine step at a time, until your code is on top again or the walk has taken 512 engine steps in skipped code;
+  then it steps out. The walk has no time bound: the same step lands in the same place on every host. On Linux,
+  at about 44 ms an engine step (issue #1163), a long walk outlasts the ~5 s window: the step answers
+  `pending: true` with the walking sentence (see [Pending steps](#pending-steps)), and `wait_for_stop` answers
+  where it lands. Measured on an Ubuntu 24.04 host with 2 vCPUs under Node 22: the first `console.log` of a process
+  lands on the next line after 16.8 to 17.2 s, a later one after 5.4 to 5.9 s, both `pending` first; a custom
+  `util.inspect` function behind `console.log` is entered at once, in 4.6 to 4.7 s (on Windows each of these
+  answers at once, in under 1 s).
+- A line that calls your own function through skipped code lands in that function when the walk reaches it within
+  512 engine steps: an `on` or `once` event listener behind `emitter.emit`, an array callback, a route handler from
+  inside express, a custom `util.inspect` function behind `console.log`.
+- A line whose call stays in skipped code lands where the call returned: the next line, or the line's next
+  statement. A walk that came back out by itself answers a plain `Stepped into`; one that took all of its engine
+  steps says what is known: `Stepped into. step_into walked 512 engine steps into the call, its limit, and was
+  still in skipped code (Node internals, node_modules, or files on skipFiles), so it stepped out. Code of yours
+  that the call runs further in, or only schedules (a timer or promise callback), did not stop the step: a
+  breakpoint there stops in it. To stop inside the skipped code instead, turn stepping through it off:
+  justMyCode: false on a launch, smartStep: false on a launch or an attach.` Where the walk ends inside the ~5 s
+  window (Windows) that sentence is in the step's own message. On Linux a 512-step walk answers `pending` with the
+  walking sentence first, and the `wait_for_stop` answer that follows (`Paused (step) at …`) carries it in
+  `lastStop.text`. A `console.log` line comes back out by itself (measured through the server on Windows:
+  about 390 engine steps for the first `console.log` of a process, 130 for a later one).
+  A `require` line does not land where the call returned: Node's loader returns through `try … finally`, so
+  stepping back out of it is one of the steps V8 loses (issue #1161). The first load of a module of yours is lost
+  and the program runs on. On a built-in module or one already loaded (`require('node:fs')`, a second `require` of
+  a loaded file) the walk takes its 512 engine steps inside the loader, and the step stops further down the same
+  function, with the lines between run, as without the server's stepper (Windows: under 1 s; Linux: `pending`
+  first, about 25 s).
+  Use `step_over` on a `require` line, or a breakpoint in the module.
+- A pause in your code is the landing, on the line the step started from too: on `console.log(a); console.log(b);`
+  the step stops at the second statement, and on a one-line `for … of` loop at the header's next position, in the
+  first iteration.
+- A line that calls native code only (`JSON.stringify`) has nothing to walk into: a plain `Stepped into` on the
+  next line.
+- A call that only starts a later task (`setTimeout`, a `.then` callback) is not followed: the step lands on the
+  next line. Set a breakpoint in the callback to stop there.
+
+See [Stepping and pausing inside dependencies](javascript/README.md#stepping-and-pausing-inside-dependencies-justmycode-skipfiles).
+
 ---
 
 ### step_out
@@ -752,6 +825,24 @@ Steps out of the current function.
 ```
 
 Same ~5s wait and `pending: true` contract as step_over — see [Pending steps](#pending-steps).
+
+**JavaScript** (a launch that steps through skipped code, the default; issues #1130, #1161):
+
+- Out of an `async` function the event loop resumed, the step lands in the function that awaits it, in the
+  call that awaited: that is the engine's own step. Not for TypeScript compiled for a target below ES2017 (issue
+  #1165): there the step does not land in the awaiting function, and the program runs on to the next breakpoint
+  or its end.
+- The engine loses a step that leaves a function through a `return` that runs a `finally` first: a `return`
+  inside `try … finally`, a `return` out of `for … of`, a function with a `using` declaration, and every async
+  generator (issues #1161, #1174). The server does not rescue it and sets no temporary breakpoint: the step answers
+  `pending: true`, or `Step completed as session exited.` when the program ends first, and a `step_over` off the
+  end of a `finally` block can stop in the next call of the same function instead of the caller. Set a breakpoint
+  on the line where you expect execution to come back, then `continue_execution`.
+- Out of a function that nothing of your program called or awaits (a timer callback, a `.then` callback, a
+  request handler) there is nowhere of its own to land: the program is resumed, and the answer is the next stop or
+  `pending: true`.
+
+See [Stepping and pausing inside dependencies](javascript/README.md#stepping-and-pausing-inside-dependencies-justmycode-skipfiles).
 
 ---
 
@@ -981,9 +1072,11 @@ A frame is program code when the adapter's policy does not call it internal **an
 }
 ```
 
-The adapter may append one sentence explaining why the pause may never land — the JavaScript adapter does so for a
-launch whose `smartStep` is on and whose `skipFiles` blackbox Node internals (issue #678) — so match a pending pause
-by its `pending: true` flag, not by the message text.
+An adapter may append a sentence to that message, so match a pending pause by its `pending: true` flag, not by the
+message text. (The JavaScript adapter used to add one about js-debug's own stepper stepping away from a pause that
+landed in skipped code; that stepper is off since issue #1130, and a pause lands where the program is, also when
+it is asked for while a step is still pending — except when a `step_into` is pending because the program is blocked
+in native code or idle, where it stops inside the server's wake evaluation at `repl:1`, issue #1208.)
 
 **Notes:**
 - The `"state"` field is the session state at the moment the tool answers: `"paused"` once the stop has been observed, and `"running"` **only on the pending path** — the request was delivered but the program has not stopped yet. On that path, call [`wait_for_stop`](#wait_for_stop) to block until the state flips to `"paused"` when the target next executes code (or poll `list_debug_sessions`).
@@ -1640,9 +1733,9 @@ When the requested pause has not landed by the time the tool answers (a Ruby pro
 - The initial stop of an attach is reported as `lastStop.reason: "pause"` (`stopReason: "pause"` in `get_stack_trace`) by every adapter, whether the debugger paused the target on request or, as CodeLLDB does, stopped it itself. On Windows, CodeLLDB reports that stop as the `DebugBreakProcess` break-in — an `0x80000003` exception on a helper thread — so the adapter's own words stay beside the pause as `lastStop.rawReason: "exception"` and `description: "Exception 0x80000003 encountered at address …"` (issue #817). Only the first stop of an attach that did not pass `stopOnEntry: false` is read this way: a break-in met later, or first by an attach that opted out of the initial stop, is a real `__debugbreak()` and keeps `reason: "exception"`.
 - When `processId` was used, the message reads `Attached to process PID <pid>` instead.
 - The response `warning` reports two distinct `adapterConfig` key outcomes (issues #450/#466): keys the adapter's attach transform genuinely drops (e.g. Python's ptvsd-era `localRoot`/`remoteRoot` — use `pathMappings`) are named as **ignored**, while keys mcp-debugger doesn't recognize are **forwarded to the adapter as-is** and named with an edit-distance suggestion for near-misses (`pathMapping (did you mean pathMappings?)`) — "ignored" means dropped, "forwarded as-is" means the adapter still sees them. The same field also carries the launch-style warning for function breakpoints still unverified at attach (issue #308), and the adapter's own attach-transform notes (issue #908): Dart's note that a `host`/`port` attach built a no-auth `ws://…/ws` URI (and that a `deviceId` is ignored on a Dart runner), COBOL's build options given without `sources` and its C-view-only note.
-- js-debug attach honors `adapterConfig` too: `localRoot`/`remoteRoot`/`sourceMaps`/`skipFiles`/`continueOnAttach` and other js-debug attach options reach the debugger (issue #466). Two keys are defaulted when absent (issue #655): `resolveSourceMapLocations: ["**", "!**/node_modules/**"]` (js-debug's own attach default collapses to "resolve everywhere", which applied every dependency's `.js.map` and produced phantom `../src/*.ts` frames) and `cwd` (the server's working directory, or the workspace root in container mode — js-debug needs a base path before it resolves any source map's relative `sources`, even ones next to the generated file). Pass your own value, including `resolveSourceMapLocations: null`, to override. `skipFiles` is deliberately left at js-debug's default: blackboxing `node_modules` would turn a `pause_execution` that lands in framework code on an idle server into the endless step-chase of issue #513 — `get_stack_trace` hides those frames instead.
+- js-debug attach honors `adapterConfig` too: `localRoot`/`remoteRoot`/`sourceMaps`/`skipFiles`/`continueOnAttach` and other js-debug attach options reach the debugger (issue #466). Two keys are defaulted when absent (issue #655): `resolveSourceMapLocations: ["**", "!**/node_modules/**"]` (js-debug's own attach default collapses to "resolve everywhere", which applied every dependency's `.js.map` and produced phantom `../src/*.ts` frames) and `cwd` (the server's working directory, or the workspace root in container mode — js-debug needs a base path before it resolves any source map's relative `sources`, even ones next to the generated file). Pass your own value, including `resolveSourceMapLocations: null`, to override. `skipFiles` is deliberately left at js-debug's default: an attach leaves it unset so the target's own files and dependencies are not silently skipped unless requested — `get_stack_trace` hides internal frames instead.
 - js-debug child auto-attach defaults on only for a target that can read both a temporary probe file created by the server and the installed js-debug bootloader files. Every attach form, including `processId`, is checked: a sidecar can share PIDs without sharing files, and an SSH or `kubectl` port forward can use a loopback address without sharing the server's filesystem. When locality cannot be verified, including a failed probe, `autoAttachChildProcesses` defaults to `false` and the response warns, preventing the injected server-local bootloader path from breaking later forks. An explicit boolean in `adapterConfig.autoAttachChildProcesses` is preserved; use `true` only when the target and its children can load the server's js-debug bootloader and reach its debugger endpoint.
-- `justMyCode` has no effect on a JavaScript attach: js-debug has no such key, and the attach transform derives nothing from it (a launch derives `skipFiles` and `smartStep` from it — see [start_debugging](#start_debugging)). Set `adapterConfig.skipFiles` / `adapterConfig.smartStep` yourself; attach defaults `smartStep` to `false` and leaves `skipFiles` unset (issue #513), so pauses and steps land where the program is (issue #678).
+- `justMyCode` has no effect on a JavaScript attach: js-debug has no such key, and the attach transform derives nothing from it (a launch derives `skipFiles` and `smartStep` from it — see [start_debugging](#start_debugging)). Set `adapterConfig.skipFiles` / `adapterConfig.smartStep` yourself; attach defaults `smartStep` to `false` and leaves `skipFiles` unset (issue #513), so pauses and steps land where the program is (issue #678). `smartStep: true` there turns on the server's stepping through skipped code, as on a launch (issue #1130); js-debug's own stepper stays off either way.
 - Breakpoints set before the attach are re-sent once the debuggee-owning session is provably live, so their verified state in `list_breakpoints` is authoritative.
 - Languages whose adapter has no attach implementation (`rust`, `go`, `mock`) fail fast with a clear error.
 - A failed attach reports `success: false` with the reason in `message` (`Failed to attach: ...`) and tears the proxy down, so no live proxy is left behind; `state` is then `"error"` (or `"stopped"` if the session was already gone). When the adapter answers the handshake's attach request with its own error response, the attach fails at once in its words (issue #896): `Failed to attach: The javascript debug adapter rejected the attach request: …`. When the adapter itself ended the session while the attach was being verified — it exited, or dropped its DAP connection as js-debug does after failing to reach the inspector — the message says which and quotes the adapter's last stderr line (issue #897): `Failed to attach: The debug adapter ended the session during attach verification: it closed its DAP connection; its last stderr line: "Error: Could not connect to debug target at http://localhost:5678: Could not find any debuggable target"`. When the failure happened during proxy initialization, `data` carries `proxyLogPath`, `proxyLogResource`, and `initProgress` diagnostics. Session-lifecycle failures (unknown or terminated session) return the standard application-level `error` payload instead — see [Error Handling](#error-handling).

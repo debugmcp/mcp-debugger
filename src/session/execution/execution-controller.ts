@@ -53,6 +53,11 @@ import {
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { ProxyNotRunningError, SessionTerminatedError } from '../../errors/debug-errors.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
+import {
+  PROXY_STEP_LEFT_STACK_EVENT,
+  PROXY_STEP_RECORD_EVENTS,
+  PROXY_STEP_WALK_STARTED_EVENT
+} from '../../proxy/dap-proxy-interfaces.js';
 import type { ManagedSession } from '../session-store.js';
 import type {
   DebugResult,
@@ -123,11 +128,15 @@ export interface StepOperationOptions {
   exitedMessage?: string;
   /**
    * The adapter policy's explanation for a step that may never land (issue
-   * #678), appended to the grace-window message. Computed by the step preamble
-   * before the request is sent, because it depends on the frame the step was
-   * issued from.
+   * #678), appended to the grace-window message. Built by the step preamble
+   * over the frame the step was issued from, and asked when the window
+   * elapses, with the latest record the proxy's stepper sent of this step
+   * (issue #1130): its walk through skipped code started or ended, or it
+   * ended the step by resuming the program. When that record is the walk's
+   * start or the left stack, the explanation follows
+   * `ErrorMessages.stepNotLanded` instead of the generic lead.
    */
-  pendingHint?: string;
+  describePending?: (record: StepperRecord | undefined) => string | undefined;
   /**
    * Where the step was issued from (issue #678), when the preamble read it —
    * only for policies with `describePendingStop`, which need the frame anyway.
@@ -142,6 +151,12 @@ export interface StepOperationOptions {
    * and composes after the repeat loop, never inside it.
    */
   onLanding?: (landing: StopLanding) => void;
+}
+
+/** One record of the proxy's JavaScript stepper (issue #1130): the event's name and body. */
+export interface StepperRecord {
+  event: string;
+  body: unknown;
 }
 
 /**
@@ -234,7 +249,8 @@ export class ExecutionController {
       kind === 'stepOver' && this.ctx.selectPolicy(session.language).stepsByTokenPosition === true;
     const origin = await this.readStepOrigin(session, sessionId, threadId, repeatsOnSameLine);
     const fromFrame = origin?.frame;
-    const pendingHint = await this.describePendingStop(session, sessionId, 'step', fromFrame);
+    const describePending = (record: StepperRecord | undefined): string | undefined =>
+      this.describePendingStop(session, sessionId, 'step', fromFrame, record);
 
     // Re-check after the awaits — the origin read is a real DAP round trip
     // — in the order and spirit of pause()'s re-check (#574): a
@@ -264,7 +280,7 @@ export class ExecutionController {
         threadId,
         logTag,
         successMessage,
-        ...(pendingHint ? { pendingHint } : {}),
+        describePending,
         ...(fromFrame ? { origin: { file: fromFrame.file, line: fromFrame.line, column: fromFrame.column } } : {}),
         onLanding: (landing) => { finalLanding = landing; },
       };
@@ -327,6 +343,18 @@ export class ExecutionController {
     // it or something else did (issue #678) — the same discipline pause uses.
     const lastStopBefore = session.lastStop;
 
+    // The latest record the proxy's JavaScript stepper sent of this step
+    // (issue #1130): its walk through skipped code started, or ended without
+    // a landing, or it ended the step by resuming the program. The pending
+    // answer says what the latest one means. Only records that arrive while
+    // this step waits.
+    let latestRecord: StepperRecord | undefined;
+    const onDapEvent = (event: string, body: unknown): void => {
+      if (PROXY_STEP_RECORD_EVENTS.includes(event)) {
+        latestRecord = { event, body };
+      }
+    };
+
     return new Promise((resolve) => {
       let settled = false;
       // Rule 1's flag: "a stop has been observed, the stop path owns the
@@ -339,6 +367,7 @@ export class ExecutionController {
         proxyManager.off('terminated', onTerminated);
         proxyManager.off('exited', onExited);
         proxyManager.off('exit', onExit);
+        proxyManager.off('dap-event', onDapEvent);
         clearTimeout(timeout);
       };
 
@@ -396,7 +425,11 @@ export class ExecutionController {
           success(message, landing, stop);
           return;
         }
-        success(options.successMessage, landing);
+        // What the step itself has to say about how it landed (the JavaScript
+        // stepper: how far a step-in walked without reaching the program's
+        // code, or that every command it may send was spent there; issue #1130).
+        const stepNote = ownStop?.reason === 'step' ? ownStop.text : undefined;
+        success(stepNote ? `${options.successMessage}. ${stepNote}` : options.successMessage, landing);
       };
 
       const onTerminated = () => success(terminatedMessage);
@@ -421,12 +454,22 @@ export class ExecutionController {
         this.ctx.logger.info(
           `[SM ${options.logTag} ${sessionId}] Step still running after ${this.ctx.tunables.stepGraceMs}ms grace window; completing asynchronously`
         );
-        const stillRunning = ErrorMessages.stepStillRunning(this.ctx.tunables.stepGraceMs / 1000);
+        const graceSeconds = this.ctx.tunables.stepGraceMs / 1000;
+        const pendingHint = options.describePending?.(latestRecord);
+        // A step the stepper has a record of, worded by the policy, is known
+        // not to be "stepping over a long-running call" (issue #1130's
+        // complaint), and nothing promises it will pause: the lead says only
+        // that it has not landed. Any other step keeps the generic lead: no
+        // record, a walk that ended, or a record the policy says nothing of.
+        const recorded = pendingHint !== undefined && (
+          latestRecord?.event === PROXY_STEP_WALK_STARTED_EVENT || latestRecord?.event === PROXY_STEP_LEFT_STACK_EVENT
+        );
+        const lead = recorded ? ErrorMessages.stepNotLanded(graceSeconds) : ErrorMessages.stepStillRunning(graceSeconds);
         settle({
           success: true,
           state: session.state,
           data: {
-            message: options.pendingHint ? `${stillRunning} ${options.pendingHint}` : stillRunning,
+            message: pendingHint ? `${lead} ${pendingHint}` : lead,
             pending: true,
           },
         });
@@ -436,6 +479,7 @@ export class ExecutionController {
       proxyManager.on('terminated', onTerminated);
       proxyManager.on('exited', onExited);
       proxyManager.on('exit', onExit);
+      proxyManager.on('dap-event', onDapEvent);
 
       this.ctx.updateState(session, SessionState.RUNNING);
 
@@ -692,7 +736,7 @@ export class ExecutionController {
       this.ctx.logger.info(
         `[SessionManager pause] No stopped event within ${this.ctx.tunables.pauseGraceMs}ms grace window in session ${sessionId}; completing asynchronously`
       );
-      const hint = await this.describePendingStop(session, sessionId, 'pause');
+      const hint = this.describePendingStop(session, sessionId, 'pause');
       // With the debugger off for this launch the why is known (issue #749):
       // one message that promises no stop, with the policy's own explanation
       // kept — on js-debug a pause can land under the flag, and #678's
@@ -1086,12 +1130,13 @@ export class ExecutionController {
    * (issue #678), or undefined when it has none. A throwing hook only costs
    * the explanation.
    */
-  private async describePendingStop(
+  private describePendingStop(
     session: ManagedSession,
     sessionId: string,
     operation: 'pause' | 'step',
-    fromFrame?: StackFrame
-  ): Promise<string | undefined> {
+    fromFrame?: StackFrame,
+    record?: StepperRecord
+  ): string | undefined {
     const policy = this.ctx.selectPolicy(session.language);
     if (!policy.describePendingStop) {
       return undefined;
@@ -1106,11 +1151,18 @@ export class ExecutionController {
             adapterLaunchConfig: session.lastLaunch.adapterLaunchConfig
           }
         : undefined;
+      // What the latest record says, and only that one: a walk that ended
+      // is not walking, and a walk followed by a resume left the stack.
+      const stepLimit = (record?.body as { stepLimit?: unknown } | undefined)?.stepLimit;
       return policy.describePendingStop({
         operation,
         attachMode: session.attachMode === true,
         launch,
-        ...(fromFrame ? { fromFrame } : {})
+        ...(fromFrame ? { fromFrame } : {}),
+        ...(record?.event === PROXY_STEP_LEFT_STACK_EVENT ? { stepLeftStack: true } : {}),
+        ...(record?.event === PROXY_STEP_WALK_STARTED_EVENT
+          ? { stepWalking: typeof stepLimit === 'number' ? { stepLimit } : {} }
+          : {})
       }) || undefined;
     } catch (error) {
       this.ctx.logger.debug(`[SM ${operation} ${sessionId}] Pending-stop explanation failed:`, error);

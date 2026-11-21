@@ -268,6 +268,27 @@ export const ErrorMessages = {
     `block until then, or pause_execution to interrupt.`,
 
   /**
+   * The lead of a pending step's answer when the proxy's JavaScript stepper has a record of the step (issue #1130)
+   * Occurs when: the grace window ends and the latest record the stepper sent
+   * of this step says what it is doing (walking through skipped code) or how
+   * it ended (the program was resumed), and the adapter policy words that
+   * record. Such a step is known not to be "stepping over a long-running
+   * call", and nothing promises it will pause, so this lead says only what the
+   * server knows: the step has not landed, the session is running, and how to
+   * wait for it or interrupt it (measured: pause_execution during a walk that
+   * is taking engine steps is answered as the caller's pause; while the
+   * program is blocked in native code or idle under a pending step_into, it
+   * stops inside the server's own wake evaluation instead, issue #1208). The
+   * policy's sentence follows it. A step with no record keeps
+   * `stepStillRunning`.
+   * Used in: src/session/execution/execution-controller.ts
+   * @param graceSeconds - The grace window duration in seconds
+   */
+  stepNotLanded: (graceSeconds: number) =>
+    `Step dispatched; it has not landed after ${graceSeconds}s. The session is 'running': ` +
+    'wait_for_stop blocks until the program next stops or ends, and pause_execution interrupts it.',
+
+  /**
    * A step whose recorded stop is a breakpoint or an exception rather than
    * the step (issue #678). Neutral by design: js-debug and debugpy both report
    * 'breakpoint' when a step lands on a line that carries one (the routine
@@ -304,6 +325,43 @@ export const ErrorMessages = {
       ? `${stepped} ${steps} times and is still on the same line: this adapter stops once per expression on a line. ` +
         'step_over again to go on, or set a breakpoint on the next line.'
       : `${stepped} in ${steps} steps: this adapter stops once per expression on a line, so the step was repeated until the line changed.`,
+
+  /**
+   * The sentence on a step_into that reached no code of the program (issue #1130)
+   * Occurs when: the proxy's JavaScript stepper walked into the call on the
+   * line, was still in skipped code when the walk reached its limit of
+   * engine steps taken in skipped code (the walk's only bound: where a step
+   * lands is the program's to decide, never the clock's), stepped out and
+   * landed in the frame the step started in: usually where the call
+   * returned to (on the same line, when the line goes on), further down when
+   * V8 lost the step out (a `require` line, issue #1161). It says what is
+   * known: the walk took all of its engine steps. Not that the call reaches
+   * nothing of the program's: code the call runs further in, or only
+   * schedules, ran during the step out. The remedy is worded for a launch
+   * and an attach alike.
+   * Used in: src/proxy/js-stepper.ts (the `text` of the step's stopped
+   * event), appended to the step's message by
+   * src/session/execution/execution-controller.ts
+   * @param limit - The engine steps a walk may take in skipped code, all of which this one took
+   */
+  stepIntoReachedNoProgramCode: (limit: number) =>
+    `step_into walked ${limit} engine steps into the call, its limit, and was still in skipped code ` +
+    '(Node internals, node_modules, or files on skipFiles), so it stepped out. Code of yours that the ' +
+    'call runs further in, or only schedules (a timer or promise callback), did not stop the step: a breakpoint ' +
+    'there stops in it. To stop inside the skipped code instead, turn ' +
+    'stepping through it off: justMyCode: false on a launch, smartStep: false on a launch or an attach.',
+
+  /**
+   * The sentence on a step that is still in skipped code after every engine
+   * step its chain may take (issue #1130)
+   * Occurs when: the proxy's JavaScript stepper reached its command cap.
+   * It stops where it is rather than run on.
+   * Used in: src/proxy/js-stepper.ts
+   * @param commands - How many engine steps the chain took
+   */
+  stepStillInSkippedCode: (commands: number) =>
+    `The step is still in skipped code after ${commands} engine steps, so it stopped here rather than run on. ` +
+    'step_out or continue_execution goes on; a breakpoint in your own code is the reliable way back.',
 
   /**
    * Informational message for pause requests not yet honored within the grace window

@@ -24,6 +24,7 @@ import {
   BreakpointSyncResult,
   MIRROR_EXPOSE_COMMAND,
   MIRROR_UNEXPOSE_COMMAND,
+  PROXY_STEP_RECORD_EVENTS,
   CHILD_ADOPT_COMMAND,
   CHILD_RELEASE_COMMAND,
   CHILD_CLOSE_COMMAND,
@@ -357,7 +358,8 @@ export class DapProxyWorker {
   // handlers (post threadId-backfill); this generic-channel forwarder covers
   // everything else. initialized is per-client handshake, never replicated.
   private readonly mirrorEventForwarder = (evt: DebugProtocol.Event): void => {
-    if (evt.event === 'stopped' || evt.event === 'continued' || evt.event === 'initialized') {
+    // The proxy stepper's records (issue #1130) are the proxy's own, not the adapter's.
+    if (evt.event === 'stopped' || evt.event === 'continued' || evt.event === 'initialized' || PROXY_STEP_RECORD_EVENTS.includes(evt.event)) {
       return;
     }
     this.mirrorServer?.broadcastEvent(evt.event, evt.body);
@@ -766,7 +768,9 @@ export class DapProxyWorker {
             port: spawnConfig.port,
             adapterId: this.adapterPolicy.getDapAdapterConfiguration().type,
             breakOnExceptions: payload.breakOnExceptions,
-            launchConfig: payload.launchConfig
+            launchConfig: payload.launchConfig,
+            // The root's own start request decides, a launch's or an attach's (issue #1130).
+            stepsThroughSkippedCode: () => this.dapClient?.stepsThroughSkippedCode?.()
           }
         });
         this.childConnections.attach(this.dapClient, payload.sessionId);
@@ -1197,6 +1201,16 @@ export class DapProxyWorker {
     for (const name of this.adapterPolicy.liveUpdate?.events ?? []) {
       this.dapClient.on(name, (body: unknown) => {
         this.logger?.info(`[Worker] DAP event: ${name} (live update; forwarded)`);
+        this.sendDapEvent(name, body as DebugProtocol.Event['body']);
+      });
+    }
+    // The proxy stepper's records of a step (issue #1130): its walk through
+    // skipped code started or ended, or it ended the step by resuming the
+    // program. The pending step's answer reads the latest. A child
+    // connection's stepper sends its own straight to the parent
+    // (child-connections.ts).
+    for (const name of PROXY_STEP_RECORD_EVENTS) {
+      this.dapClient.on(name, (body: unknown) => {
         this.sendDapEvent(name, body as DebugProtocol.Event['body']);
       });
     }
@@ -2038,7 +2052,15 @@ export class DapProxyWorker {
   /** A child session's DAP request, answered on the child's envelope (issue #1081). */
   private async forwardToChild(childClient: IDapClient, payload: DapCommandPayload): Promise<void> {
     try {
-      const response = await childClient.sendRequest(payload.dapCommand, payload.dapArgs, payload.timeoutMs);
+      // A step of a child that steps through skipped code is its proxy
+      // stepper's (issue #1130); any other request may end a step in flight.
+      const stepped = this.childConnections?.stepRequest(payload.sessionId, payload.dapCommand, payload.dapArgs);
+      if (!stepped) {
+        await this.childConnections?.beforeRequest(payload.sessionId, payload.dapCommand);
+      }
+      const response = stepped
+        ? await stepped
+        : await childClient.sendRequest(payload.dapCommand, payload.dapArgs, payload.timeoutMs);
       this.sendDapResponse(payload.requestId, true, response, undefined, payload.sessionId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

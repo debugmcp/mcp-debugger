@@ -419,12 +419,16 @@ describe('JavaScript Debugging - Simple Smoke Tests', () => {
 
     const step = parseSdkToolResult(await mcpClient!.callTool({ name: 'step_over', arguments: { sessionId } }));
     expect(step.success, JSON.stringify(step)).toBe(true);
-    // js-debug steps out of the blackboxed frame and the request completes
-    // without ever reaching unskipped code: the step is lost, and the
-    // response says why and what to do about it.
+    // A step does not stop in skipped code: the server's stepper steps out
+    // toward the nearest frame of the program below, and here there is none
+    // (express was called by Node), so the program is resumed and the request
+    // completes. The response says what happened and what steps inside that
+    // code (issue #1130; it used to blame js-debug's own stepper).
     expect(step.pending, JSON.stringify(step)).toBe(true);
-    expect(step.message).toMatch(/skipped frame/);
+    expect(step.message).toMatch(/issued from skipped code/);
+    expect(step.message).toMatch(/application\.js:\d+/);
     expect(step.message).toMatch(/justMyCode: false/);
+    expect(step.message).not.toMatch(/smart-stepper/);
     console.log(`[JS Simple Smoke] ✓ Lost dependency step explained (${label})`);
   }, 60000);
 

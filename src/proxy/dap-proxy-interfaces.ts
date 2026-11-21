@@ -282,6 +282,12 @@ export interface IDapClient {
    * has no child sessions — nothing to flush (issue #378).
    */
   flushChildEvents?(): Promise<void> | undefined;
+  /**
+   * Whether the session steps through skipped code, as its start request
+   * said (issue #1130). Optional: only MinimalDapClient implements it, and
+   * it answers undefined for an adapter with no proxy stepper.
+   */
+  stepsThroughSkippedCode?(): boolean | undefined;
 }
 
 /**
@@ -414,6 +420,37 @@ export interface DapProxyDependencies {
 
 export const MIRROR_EXPOSE_COMMAND = 'mirrorExpose';
 export const MIRROR_UNEXPOSE_COMMAND = 'mirrorUnexpose';
+
+// The proxy's JavaScript stepper (issue #1130) ended a step by resuming the
+// program: the step reached skipped code with nothing of the program below
+// it, so the stack it started on is gone and the step will not land. A DAP
+// event of the proxy's own, sent to the parent process only (the mirror does
+// not forward it); a pending step's answer reads it.
+export const PROXY_STEP_LEFT_STACK_EVENT = 'proxyStepLeftStack';
+
+// The proxy's JavaScript stepper (issue #1130) is walking a step_into through
+// skipped code: sent just before the walk's first engine step there, and again
+// when a walk whose record was withdrawn goes on. Body: `{ threadId, stepLimit }`,
+// the engine steps the walk may take before it steps out.
+export const PROXY_STEP_WALK_STARTED_EVENT = 'proxyStepWalkStarted';
+
+// The walk recorded by PROXY_STEP_WALK_STARTED_EVENT is no longer known to be
+// going: it reached its step limit and the step is stepping out (`why: 'limit'`,
+// sent just before the step-out), or js-debug resumed a pause of its own during
+// the walk, after which whether V8 still carries the step is not known
+// (`why: 'resumed'`). Body: `{ threadId, why }`.
+export const PROXY_STEP_WALK_ENDED_EVENT = 'proxyStepWalkEnded';
+
+/**
+ * Every record the proxy's stepper sends of a step: forwarded to the parent
+ * process, never to a mirror client. The latest one a pending step has seen
+ * says what the step was doing when the grace window ended.
+ */
+export const PROXY_STEP_RECORD_EVENTS: readonly string[] = [
+  PROXY_STEP_WALK_STARTED_EVENT,
+  PROXY_STEP_WALK_ENDED_EVENT,
+  PROXY_STEP_LEFT_STACK_EVENT
+];
 
 // The session tree (issue #1081): the parent process's answers to a
 // 'child_reported' status, and the close of an adopted child's connection.

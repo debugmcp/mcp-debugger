@@ -157,7 +157,7 @@ describe('JsDebugAdapterPolicy', () => {
     });
   });
 
-  describe('describePendingStop (issue #678)', () => {
+  describe('describePendingStop (issues #678, #1130)', () => {
     const hook = JsDebugAdapterPolicy.describePendingStop!;
     const depFrame = { id: 1, name: 'handle', file: 'C:\\app\\node_modules\\router\\index.js', line: 160 };
     const internalFrame = { id: 2, name: 'processTicksAndRejections', file: '<node_internals>/internal/process/task_queues', line: 95 };
@@ -165,83 +165,162 @@ describe('JsDebugAdapterPolicy', () => {
     const launch = (dapLaunchArgs?: Record<string, unknown>, adapterLaunchConfig?: Record<string, unknown>) =>
       ({ ...(dapLaunchArgs ? { dapLaunchArgs } : {}), ...(adapterLaunchConfig ? { adapterLaunchConfig } : {}) });
 
-    it('says nothing for attach sessions (skipFiles is not defaulted there)', () => {
+    it('says nothing for attach sessions without a record of the stepper\'s (neither key is defaulted there)', () => {
       expect(hook({ operation: 'pause', attachMode: true })).toBeUndefined();
       expect(hook({ operation: 'step', attachMode: true, fromFrame: depFrame })).toBeUndefined();
+      expect(hook({ operation: 'step', attachMode: true, fromFrame: userFrame, stepLeftStack: false })).toBeUndefined();
     });
 
-    // js-debug's resume-on-skipped-frame lives inside its smart-stepper
-    // (`getSmartStepDirection` returns early unless launchConfig.smartStep);
-    // blackboxing is only the condition it reads. Measured on the #686 build:
-    // default skip list + smartStep:false → the pause landed; internals-only
-    // skip list + smartStep:true → the #678 chase with node_modules NOT
-    // blackboxed.
+    // A record exists only for a step the proxy's stepper served, which it
+    // does for an attach whose smartStep is true as for a launch (review 8).
+    it('gives an attach session the sentences the stepper\'s records carry, as a launch gets them', () => {
+      const left = hook({ operation: 'step', attachMode: true, fromFrame: userFrame, stepLeftStack: true });
+      expect(left).toBe(hook({ operation: 'step', attachMode: false, launch: {}, fromFrame: userFrame, stepLeftStack: true }));
+      expect(left).toMatch(/left the frame it started in/);
+      const walking = hook({ operation: 'step', attachMode: true, fromFrame: userFrame, stepWalking: { stepLimit: 512 } });
+      expect(walking).toBe(hook({ operation: 'step', attachMode: false, launch: {}, fromFrame: userFrame, stepWalking: { stepLimit: 512 } }));
+      expect(walking).toMatch(/walking through skipped code/);
+      // A launch remedy is not offered to an attach: its skip configuration is the target's.
+      expect(hook({ operation: 'step', attachMode: true, fromFrame: depFrame, stepLeftStack: true })).not.toMatch(/Relaunch/);
+    });
+
+    // js-debug's own stepper used to step away from a pause that landed in
+    // skipped code, which is where an idle server always is (#678). It is
+    // off for every session now, so a pause lands where the program is and
+    // there is nothing of that kind to explain.
     describe('pause', () => {
-      it('explains a pending pause on the default launch: the smart-stepper is on and internals are skipped', () => {
-        const text = hook({ operation: 'pause', attachMode: false, launch: {} });
-        expect(text).toMatch(/smart-stepper|smartStep/);
-        expect(text).toMatch(/may never land/);
-        expect(text).not.toMatch(/does not land/);
+      it.each([
+        ['the default launch', {}],
+        ['justMyCode off', launch({ justMyCode: false })],
+        ['the stepper off', launch(undefined, { smartStep: false })],
+        ['the stepper forced on', launch({ justMyCode: false }, { smartStep: true })],
+        ['a caller skip list', launch(undefined, { skipFiles: ['**/node_modules/**'] })]
+      ])('says nothing about a pending pause on %s: no stepper steps away from a pause any more', (_label, start) => {
+        expect(hook({ operation: 'pause', attachMode: false, launch: start })).toBeUndefined();
+      });
+    });
+
+    // The proxy's stepper never stops in skipped code: it steps out toward
+    // the nearest frame of the program below, and with none it resumes the
+    // program. A step still pending has run off the program's stack, or is
+    // waiting on work in flight.
+    describe('step', () => {
+      it('explains a pending step issued from a skipped dependency frame, naming the frame and the remedy', () => {
+        const text = hook({ operation: 'step', attachMode: false, launch: {}, fromFrame: depFrame });
+        expect(text).toMatch(/issued from skipped code/);
+        expect(text).toMatch(/router[\\/]index\.js:160/);
+        expect(text).toMatch(/does not stop in skipped code/);
         expect(text).toMatch(/justMyCode: false/);
+        // The old wording blamed js-debug's stepper, which is off.
+        expect(text).not.toMatch(/smart-stepper/);
+        expect(text).not.toMatch(/may never land/);
+      });
+
+      it('explains a pending step issued from a skipped Node-internals frame the same way', () => {
+        const text = hook({ operation: 'step', attachMode: false, launch: {}, fromFrame: internalFrame });
+        expect(text).toMatch(/issued from skipped code \(<node_internals>\/internal\/process\/task_queues:95\)/);
         expect(text).toMatch(/smartStep: false/);
+        expect(text).not.toMatch(/smart-stepper/);
       });
 
-      it('says nothing once the smart-stepper is off, whichever way it was turned off', () => {
-        expect(hook({ operation: 'pause', attachMode: false, launch: launch({ justMyCode: false }) })).toBeUndefined();
-        expect(hook({ operation: 'pause', attachMode: false, launch: launch(undefined, { smartStep: false }) })).toBeUndefined();
+      it('reads a bare node: frame as Node\'s own code too: the form js-debug has not rewritten to <node_internals>', () => {
+        const bareInternalFrame = { id: 4, name: 'processTicksAndRejections', file: 'node:internal/process/task_queues', line: 95 };
+        const text = hook({ operation: 'step', attachMode: false, launch: {}, fromFrame: bareInternalFrame });
+        expect(text).toMatch(/issued from skipped code \(node:internal\/process\/task_queues:95\)/);
+        expect(text).not.toMatch(/left the frame it started in/);
+        // Under the same rule as the rewritten form: only while this launch skips Node's own code.
+        expect(hook({ operation: 'step', attachMode: false, launch: launch(undefined, { skipFiles: ['**/node_modules/**'] }), fromFrame: bareInternalFrame, stepLeftStack: true }))
+          .toMatch(/left the frame it started in/);
       });
 
-      it('still explains the pause when justMyCode is off but the stepper was forced back on (run B)', () => {
-        const text = hook({ operation: 'pause', attachMode: false, launch: launch({ justMyCode: false }, { smartStep: true }) });
-        expect(text).toMatch(/smartStep/);
-        expect(text).toMatch(/may never land/);
+      it('says of a pending step that the stepper ended by leaving the stack that it left its frame (I3)', () => {
+        for (const fromFrame of [userFrame, undefined]) {
+          const text = hook({ operation: 'step', attachMode: false, launch: {}, stepLeftStack: true, ...(fromFrame ? { fromFrame } : {}) });
+          expect(text).toMatch(/left the frame it started in/);
+          expect(text).toMatch(/event loop/);
+          expect(text).toMatch(/wait_for_stop/);
+          expect(text).not.toMatch(/issued from skipped code/);
+          // The stepper resumed the program: the answer promises no landing.
+          expect(text).toMatch(/this step will not land/);
+          expect(text).not.toMatch(/when the step lands/);
+        }
       });
 
-      it('says nothing when the caller list does not skip node internals (the stepper has nothing to step out of)', () => {
-        expect(hook({ operation: 'pause', attachMode: false, launch: launch(undefined, { skipFiles: ['**/node_modules/**'] }) })).toBeUndefined();
-        expect(hook({ operation: 'pause', attachMode: false, launch: launch(undefined, { skipFiles: [] }) })).toBeUndefined();
+      it('says nothing of a pending step still executing: a step_over of a long call in its own frame never left it (I3)', () => {
+        for (const fromFrame of [userFrame, undefined]) {
+          expect(hook({ operation: 'step', attachMode: false, launch: {}, ...(fromFrame ? { fromFrame } : {}) })).toBeUndefined();
+          expect(hook({ operation: 'step', attachMode: false, launch: {}, stepLeftStack: false, ...(fromFrame ? { fromFrame } : {}) })).toBeUndefined();
+        }
+      });
+
+      it('treats a frame as skipped only when this launch skips it', () => {
+        // node_modules is not skipped without justMyCode, or on an internals-only list.
+        expect(hook({ operation: 'step', attachMode: false, launch: launch(undefined, { skipFiles: ['<node_internals>/**'] }), fromFrame: depFrame, stepLeftStack: true }))
+          .toMatch(/left the frame it started in/);
+        // Internals are not skipped on a list that does not name them.
+        expect(hook({ operation: 'step', attachMode: false, launch: launch(undefined, { skipFiles: ['**/node_modules/**'] }), fromFrame: internalFrame, stepLeftStack: true }))
+          .toMatch(/left the frame it started in/);
+      });
+
+      it('says nothing when the session chose plain steps: the step lands where V8 lands', () => {
+        expect(hook({ operation: 'step', attachMode: false, launch: launch({ justMyCode: false }), fromFrame: depFrame })).toBeUndefined();
+        expect(hook({ operation: 'step', attachMode: false, launch: launch(undefined, { smartStep: false }), fromFrame: internalFrame })).toBeUndefined();
+        // With a record that would otherwise carry a sentence: the gate is what silences it (review 8).
+        expect(hook({ operation: 'step', attachMode: false, launch: launch(undefined, { smartStep: false }), fromFrame: userFrame, stepLeftStack: true })).toBeUndefined();
+        expect(hook({ operation: 'step', attachMode: false, launch: launch({ justMyCode: false }), fromFrame: userFrame, stepWalking: { stepLimit: 512 } })).toBeUndefined();
       });
 
       it('lets adapterLaunchConfig win over dapLaunchArgs, as the launcher merge does', () => {
-        expect(hook({ operation: 'pause', attachMode: false, launch: launch({ justMyCode: true }, { smartStep: false }) })).toBeUndefined();
-        expect(hook({ operation: 'pause', attachMode: false, launch: launch({ justMyCode: false }, { smartStep: true }) })).toBeDefined();
-      });
-    });
-
-    describe('step', () => {
-      it('explains a pending step issued from a blackboxed dependency frame, naming the frame and the justMyCode remedy', () => {
-        const text = hook({ operation: 'step', attachMode: false, launch: {}, fromFrame: depFrame });
-        expect(text).toMatch(/skipped frame/);
-        expect(text).toMatch(/router[\\/]index\.js:160/);
-        expect(text).toMatch(/justMyCode: false/);
-        expect(text).toMatch(/may never land/);
-        expect(text).not.toMatch(/step_out/);
-        expect(text).not.toMatch(/only steps out/);
+        // The same record either way: only the merge decides (review 8).
+        expect(hook({ operation: 'step', attachMode: false, launch: launch({ justMyCode: true }, { smartStep: false }), fromFrame: userFrame, stepLeftStack: true })).toBeUndefined();
+        expect(hook({ operation: 'step', attachMode: false, launch: launch({ justMyCode: false }, { smartStep: true }), fromFrame: userFrame, stepLeftStack: true })).toBeDefined();
       });
 
-      it('says nothing about a step from a dependency frame once node_modules is not blackboxed or the stepper is off', () => {
-        expect(hook({ operation: 'step', attachMode: false, launch: launch({ justMyCode: false }), fromFrame: depFrame })).toBeUndefined();
-        expect(hook({ operation: 'step', attachMode: false, launch: launch(undefined, { smartStep: false }), fromFrame: depFrame })).toBeUndefined();
-        expect(hook({ operation: 'step', attachMode: false, launch: launch(undefined, { skipFiles: ['<node_internals>/**'] }), fromFrame: depFrame })).toBeUndefined();
-      });
+      // Round 3, decision 2: issue #1130 complained of a pending step_into
+      // that blamed "a long-running call". A walk through skipped code that
+      // outlasts the grace window (an engine step costs about 44 ms on Linux)
+      // says what it is doing, and nothing it cannot know.
+      describe('a step_into walking through skipped code', () => {
+        const walking = (extra: Record<string, unknown> = {}) =>
+          hook({ operation: 'step', attachMode: false, launch: {}, fromFrame: userFrame, stepWalking: { stepLimit: 512 }, ...extra });
 
-      it('explains a step issued from a skipped node-internals frame with the smartStep remedy, never step_out', () => {
-        const text = hook({ operation: 'step', attachMode: false, launch: {}, fromFrame: internalFrame });
-        expect(text).toMatch(/node internals/i);
-        expect(text).toMatch(/smartStep: false/);
-        expect(text).not.toMatch(/step_out/);
-        expect(text).not.toMatch(/only steps out/);
-      });
+        it('says the step is walking through skipped code toward the program\'s code, and what ends the walk', () => {
+          const text = walking();
+          expect(text).toMatch(/walking through skipped code/);
+          expect(text).toMatch(/Node internals, node_modules, or files on skipFiles/);
+          // It lands when the program's code is next on top, or steps out at its limit.
+          expect(text).toMatch(/your program's code is next on top/);
+          expect(text).toMatch(/512 engine steps/);
+          expect(text).toMatch(/steps out/);
+          // How to wait for the step is the lead's to say (ErrorMessages.stepNotLanded), once.
+          expect(text).not.toMatch(/wait_for_stop/);
+        });
 
-      it('says nothing about an internals frame when internals are not skipped or the stepper is off', () => {
-        expect(hook({ operation: 'step', attachMode: false, launch: launch(undefined, { skipFiles: ['**/node_modules/**'] }), fromFrame: internalFrame })).toBeUndefined();
-        expect(hook({ operation: 'step', attachMode: false, launch: launch(undefined, { skipFiles: [] }), fromFrame: internalFrame })).toBeUndefined();
-        expect(hook({ operation: 'step', attachMode: false, launch: launch({ justMyCode: false }), fromFrame: internalFrame })).toBeUndefined();
-      });
+        it('promises no landing: the walk can end with the program resumed, or the engine can lose the step', () => {
+          const text = walking() ?? '';
+          expect(text).toMatch(/resumed/);
+          expect(text).not.toMatch(/will land|lands there|will stop/);
+          // Worded as the stepper's last record, not as what it cannot see now.
+          expect(text).toMatch(/last record/);
+        });
 
-      it('says nothing about a step from user code or a step whose origin frame is unknown', () => {
-        expect(hook({ operation: 'step', attachMode: false, launch: {}, fromFrame: userFrame })).toBeUndefined();
-        expect(hook({ operation: 'step', attachMode: false, launch: {} })).toBeUndefined();
+        it('names the step limit only when the stepper sent one', () => {
+          const text = hook({ operation: 'step', attachMode: false, launch: {}, fromFrame: userFrame, stepWalking: {} });
+          expect(text).toMatch(/walking through skipped code/);
+          expect(text).not.toMatch(/undefined/);
+          expect(text).toMatch(/its step limit/);
+        });
+
+        it('wins over the sentence for a step issued from skipped code: the record says what the step is doing', () => {
+          const text = hook({ operation: 'step', attachMode: false, launch: {}, fromFrame: depFrame, stepWalking: { stepLimit: 512 } });
+          expect(text).toMatch(/walking through skipped code/);
+          expect(text).not.toMatch(/issued from skipped code/);
+        });
+
+        it('says nothing of a walk once the latest record is another one', () => {
+          expect(walking({ stepWalking: undefined })).toBeUndefined();
+          expect(walking({ stepWalking: undefined, stepLeftStack: true })).toMatch(/left the frame it started in/);
+        });
       });
     });
   });

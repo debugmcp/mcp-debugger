@@ -16,6 +16,8 @@ import { createLogger } from '../utils/logger.js';
 import { createChildSafePolicy } from './child-safe-policy.js';
 import type { MinimalDapClient } from './minimal-dap.js';
 import { CdpFunctionBreakpointBridge } from './cdp-function-breakpoint-bridge.js';
+import { CdpProxyClient } from './cdp-proxy-client.js';
+import { JsStepper } from './js-stepper.js';
 import { sendSetBreakpointsStamping, watchConditionSyntaxErrors, matchStoredBreakpoint } from './breakpoint-condition-errors.js';
 import path from 'path';
 
@@ -44,6 +46,8 @@ export interface ChildSessionOptions {
   port: number;
   /** DI seam for tests; only consulted when the policy delivers function breakpoints via CDP (issue #295). */
   cdpBridgeFactory?: () => CdpFunctionBreakpointBridge;
+  /** DI seam for tests: the CDP socket the default bridge opens, which the proxy stepper shares (issue #1130). */
+  cdpClientFactory?: () => CdpProxyClient;
   /**
    * Read once per adoption (#712). Start intent never modifies parentConfig (#730).
    */
@@ -151,6 +155,12 @@ export class ChildSessionManager extends EventEmitter {
   // CDP-delivered function breakpoints (issue #295); present only when the
   // policy declares functionBreakpointsVia 'cdp' (js-debug)
   private cdpBridge: CdpFunctionBreakpointBridge | null = null;
+  /**
+   * The proxy's own stepper for the program's target (issue #1130); present
+   * when the policy keeps the adapter's stepper off. It shares the CDP socket
+   * the bridge opens, and every event of the target passes it first.
+   */
+  private stepper: JsStepper | null = null;
   // Serializes child event forwarding so a stopped event held by the bridge
   // (correlation/bind window) cannot be overtaken by later events
   private childEventChain: Promise<void> = Promise.resolve();
@@ -188,8 +198,29 @@ export class ChildSessionManager extends EventEmitter {
     this.port = options.port;
     this.getParentStart = options.getParentStart;
     this.instanceId = createInstanceId();
+    if (this.dapBehavior.stepsThroughSkippedCode) {
+      this.stepper = new JsStepper({
+        target: {
+          sendRequest: (command, args, timeoutMs) => {
+            const child = this.activeChild;
+            if (!child) {
+              return Promise.reject(new Error(`No active child session for '${command}'`));
+            }
+            return child.sendRequest(command, args, timeoutMs) as Promise<never>;
+          }
+        },
+        deliver: (evt) => this.forwardChildEvent(evt)
+      });
+    }
     if (options.policy.functionBreakpointsVia === 'cdp') {
-      this.cdpBridge = options.cdpBridgeFactory?.() ?? new CdpFunctionBreakpointBridge();
+      // One CDP socket per target: the bridge opens it, the stepper listens on it too.
+      this.cdpBridge = options.cdpBridgeFactory?.() ?? new CdpFunctionBreakpointBridge({
+        clientFactory: () => {
+          const client = options.cdpClientFactory?.() ?? new CdpProxyClient();
+          this.stepper?.attachCdp(client);
+          return client;
+        }
+      });
       this.cdpBridge.on('breakpointEvent', (evt: DebugProtocol.Event) => {
         this.emit('childEvent', evt);
       });
@@ -287,6 +318,38 @@ export class ChildSessionManager extends EventEmitter {
     }
     logger.info(`[ChildSessionManager:${this.instanceId}] getChildTargetState() => ${state}`);
     return state;
+  }
+
+  /**
+   * The session's choice, read from its start request's `smartStep`: step
+   * through skipped code (the proxy's stepper serves the steps), or land
+   * where the engine lands (issue #1130).
+   */
+  setStepThroughSkippedCode(enabled: boolean): void {
+    this.stepper?.setEnabled(enabled);
+    logger.info(`[ChildSessionManager:${this.instanceId}] stepping through skipped code: ${enabled ? 'the proxy stepper' : 'off'}`);
+  }
+
+  /**
+   * The session's choice as it stands, for a forked child's stepper to take
+   * over. Undefined when this manager has no stepper (another adapter).
+   */
+  isSteppingThroughSkippedCode(): boolean | undefined {
+    return this.stepper?.isEnabled();
+  }
+
+  /**
+   * A step the proxy's stepper serves now, or null when it goes to the
+   * adapter as it is (the session chose plain steps, no CDP socket, a step
+   * into a named target).
+   */
+  stepRequest(command: string, args?: unknown): Promise<DebugProtocol.Response> | null {
+    return this.stepper?.handles(command, args) ? this.stepper.request(command, args) : null;
+  }
+
+  /** Any other request for the target: one that resumes or ends it ends a step still in flight. */
+  async beforeChildRequest(command: string): Promise<void> {
+    await this.stepper?.beforeRequest(command);
   }
 
   /**
@@ -931,36 +994,12 @@ export class ChildSessionManager extends EventEmitter {
       if (evt.event === 'initialized') {
         this.childInitializedCount++;
       }
-      const bridge = this.cdpBridge;
-      if (!bridge) {
-        // Forward child events through parent
-        this.emit('childEvent', evt);
+      // The stepper's own pauses and resumes are its business (issue #1130):
+      // of a step's many `stopped` events one is forwarded, by the stepper.
+      if (this.stepper?.withholds(evt)) {
         return;
       }
-      // Serialize through the chain so a stopped event the bridge holds
-      // (bind/correlation window) keeps its place in the event order. Every
-      // event first waits for the adoption's bridge attach to settle (issue
-      // #850); not on adoptionInProgress, which flushEvents() below awaits
-      // through this very chain.
-      this.childEventChain = this.childEventChain.then(async () => {
-        await this.bridgeAttachSettled;
-        let out = evt;
-        if (evt.event === 'stopped') {
-          // An entry stop always goes through the bridge: with nothing armed
-          // it can still be a late entry inside a function (issue #858).
-          const reason = (evt.body as { reason?: string } | undefined)?.reason;
-          if (bridge.hasArmedOrPending() || reason === 'entry') {
-            try {
-              out = await bridge.processStoppedEvent(evt);
-            } catch (err) {
-              logger.warn(`[ChildSessionManager:${this.instanceId}] bridge stop processing failed, forwarding original: ${String(err)}`);
-            }
-          } else {
-            logger.info(`[ChildSessionManager:${this.instanceId}] stopped event bypassed the CDP bridge (no armed or pending function breakpoints)`);
-          }
-        }
-        this.emit('childEvent', out);
-      });
+      this.forwardChildEvent(evt);
     });
 
     child.on('error', (err: Error) => {
@@ -970,12 +1009,50 @@ export class ChildSessionManager extends EventEmitter {
 
     child.on('close', () => {
       logger.info(`[ChildSessionManager:${this.instanceId}] [child] DAP client connection closed (current count=${this.childSessions.size})`);
+      this.stepper?.detachCdp();
       this.cdpBridge?.detach();
       this.emit('childClosed');
       this.childSessions.clear();
       this.activeChild = null;
       this.childEnded = true;
       logger.info(`[ChildSessionManager:${this.instanceId}] *** ACTIVE CHILD CLEARED *** (child closed) at timestamp ${Date.now()}`);
+    });
+  }
+
+  /**
+   * Forward one event of the program's target to the parent connection: the
+   * target's own events, and the one `stopped` the stepper reports for a step.
+   */
+  private forwardChildEvent(evt: DebugProtocol.Event): void {
+    const bridge = this.cdpBridge;
+    if (!bridge) {
+      // Forward child events through parent
+      this.emit('childEvent', evt);
+      return;
+    }
+    // Serialize through the chain so a stopped event the bridge holds
+    // (bind/correlation window) keeps its place in the event order. Every
+    // event first waits for the adoption's bridge attach to settle (issue
+    // #850); not on adoptionInProgress, which flushEvents() below awaits
+    // through this very chain.
+    this.childEventChain = this.childEventChain.then(async () => {
+      await this.bridgeAttachSettled;
+      let out = evt;
+      if (evt.event === 'stopped') {
+        // An entry stop always goes through the bridge: with nothing armed
+        // it can still be a late entry inside a function (issue #858).
+        const reason = (evt.body as { reason?: string } | undefined)?.reason;
+        if (bridge.hasArmedOrPending() || reason === 'entry') {
+          try {
+            out = await bridge.processStoppedEvent(evt);
+          } catch (err) {
+            logger.warn(`[ChildSessionManager:${this.instanceId}] bridge stop processing failed, forwarding original: ${String(err)}`);
+          }
+        } else {
+          logger.info(`[ChildSessionManager:${this.instanceId}] stopped event bypassed the CDP bridge (no armed or pending function breakpoints)`);
+        }
+      }
+      this.emit('childEvent', out);
     });
   }
 
@@ -1059,6 +1136,7 @@ export class ChildSessionManager extends EventEmitter {
    */
   async shutdown(): Promise<void> {
     logger.info(`[ChildSessionManager:${this.instanceId}] Shutting down child sessions`);
+    this.stepper?.detachCdp();
     this.cdpBridge?.detach();
 
     for (const [id, child] of this.childSessions) {

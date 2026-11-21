@@ -157,6 +157,20 @@ describe('ErrorMessages', () => {
       expect(message).not.toMatch(/Check the session state/);
     });
 
+    // A step the proxy's JavaScript stepper has a record of (issue #1130): it
+    // is walking through skipped code, or it ended by resuming the program.
+    // Neither is "a long-running call", and neither is promised a pause.
+    it('a recorded step that has not landed says only that, and how to wait for it or interrupt it', () => {
+      const message = ErrorMessages.stepNotLanded(5);
+      expect(message).toMatch(/^Step dispatched; it has not landed after 5s\./);
+      expect(message).toContain("'running'");
+      expect(message).toContain('wait_for_stop');
+      expect(message).toContain('pause_execution');
+      expect(message).not.toMatch(/long-running call/);
+      expect(message).not.toMatch(/will become 'paused'/);
+      expect(message).not.toMatch(/still in effect/);
+    });
+
     it('a pause that has not landed is still in effect', () => {
       const message = ErrorMessages.pausePending(5);
       expect(message).toContain('within 5s');
