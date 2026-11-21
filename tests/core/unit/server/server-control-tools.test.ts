@@ -882,6 +882,49 @@ describe('Server Control Tools Tests', () => {
       expect(content.pending).toBeUndefined();
     });
 
+    it('hoists exitCode onto terminal step responses (issue #1177) and preserves paused state on refused steps (issue #1179)', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        id: 'test-session',
+        sessionLifecycle: 'ACTIVE'
+      });
+      mockSessionManager.stepOver.mockResolvedValueOnce({
+        success: true,
+        state: 'stopped',
+        data: {
+          message: 'The step did not pause. The program ran to completion (exit code 0).',
+          exitCode: 0
+        }
+      });
+
+      const ended = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'step_over', arguments: { sessionId: 'test-session' } }
+      });
+      const endedJson = JSON.parse(ended.content[0].text);
+      expect(endedJson).toMatchObject({
+        success: true,
+        state: 'stopped',
+        exitCode: 0,
+        message: 'The step did not pause. The program ran to completion (exit code 0).'
+      });
+
+      mockSessionManager.stepOut.mockResolvedValueOnce({
+        success: false,
+        state: 'paused',
+        error: "The debug adapter refused the step: Failed command 'stepOut' : 0x80004005. Nothing ran; the program is still paused."
+      });
+      const refused = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'step_out', arguments: { sessionId: 'test-session' } }
+      });
+      const refusedJson = JSON.parse(refused.content[0].text);
+      expect(refusedJson).toMatchObject({
+        success: false,
+        state: 'paused'
+      });
+      expect(refusedJson.error).toContain('Nothing ran; the program is still paused');
+    });
+
     it.each<[string, StepMethod]>([
       ['step_over', 'stepOver'],
       ['step_into', 'stepInto'],

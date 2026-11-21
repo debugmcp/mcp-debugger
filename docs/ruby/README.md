@@ -73,7 +73,12 @@ set_breakpoint { "sessionId": "...", "file": "/abs/path/app.rb", "line": 15, "co
 While paused, the usual inspection tools work: `get_stack_trace`, `get_scopes` (rdbg
 reports a `Local variables` scope), `get_local_variables`, `evaluate_expression`
 (evaluated in rdbg's `repl` context — expressions can read and modify program state),
-`step_over` / `step_into` / `step_out`, and `continue_execution`.
+`step_over` / `step_into` / `step_out`, and `continue_execution`. Note two `debug`-gem
+stepping caveats (see [Known Issues](../KNOWN_ISSUES.md#steps-the-debug-engines-lose-or-stop-in-another-call)):
+stepping across a line that carries a false-condition breakpoint can cancel the step in
+`rdbg` (#1197), and `step_over` / `step_out` across a `Fiber` or external `Enumerator`
+boundary compares stack depths across fibers (#1198; mcp-debugger notes the call-stack
+change in `note`, #1180).
 
 ### Program output
 

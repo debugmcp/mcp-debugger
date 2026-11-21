@@ -82,7 +82,10 @@ Key launch arguments:
 - `program` (required): Path to the compiled assembly or executable (.dll or .exe), not the source file. This is the runtime target that netcoredbg will launch.
 - `cwd`: Working directory for the launched process
 - `stopOnEntry`: Whether to pause at the program entry point (the opening brace of `Main`, reason `entry`). netcoredbg reads this as `stopAtEntry`; the adapter sends both, and a `stopAtEntry` you pass yourself wins.
+- `enableStepFiltering`: Controls whether `step_into` skips property accessors (`get`/`set`) and overloaded operators. `netcoredbg` defaults this to `true` on launch (matching Visual Studio / `vsdbg`); pass `"dapLaunchArgs": { "enableStepFiltering": false }` to step into properties and operators (when a `step_into` skips a call on the line, the step answer's `note` says so; issue #1184). On attach, `netcoredbg` ignores `enableStepFiltering` and keeps filtering enabled.
 - `args`: Command-line arguments to pass to the program
+
+**Stepping caveats (`netcoredbg` 3.1.x)**: `netcoredbg` refuses `step_out` (and `step_over` on the closing brace) inside an `async` iterator (`IAsyncEnumerable<T>`) or `async ValueTask` method that has awaited (`0x80004005`, #1207); mcp-debugger keeps the session `paused` (#1179) so you can set a breakpoint in the consumer and call `continue_execution`. See [Known Issues](../KNOWN_ISSUES.md#steps-the-debug-engines-lose-or-stop-in-another-call) for async-iterator `yield return` (#1205) and `catch … when` (#1206) behaviors.
 
 **Important**: You must compile the project first with `dotnet build` before launching the debugger. The `program` path should point to the compiled output (typically `bin/Debug/net8.0/YourApp.dll`), not to a `.cs` source file.
 

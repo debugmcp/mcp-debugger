@@ -145,16 +145,58 @@ describe('ErrorMessages', () => {
     expect(message).toContain('debug adapter');
   });
 
-  // Every "pending" answer says two things a caller needs: the thing it asked
-  // for is still in effect, and wait_for_stop is how to wait for it (issue #849).
-  describe('pending answers point at wait_for_stop (issue #849)', () => {
-    it('a step that has not landed is still in effect', () => {
+  // Pending answers point at wait_for_stop without making false promises when an
+  // engine may have dropped a step (issues #849, #1178).
+  describe('pending answers point at wait_for_stop (issues #849, #1178)', () => {
+    it('a step that has not landed points at wait_for_stop without promising completion on a dropped step', () => {
       const message = ErrorMessages.stepStillRunning(5);
       expect(message).toContain('after 5s');
-      expect(message).toMatch(/step is still in effect/);
+      expect(message).toContain("becomes 'paused' if the step completes");
+      expect(message).toContain('docs/KNOWN_ISSUES.md');
       expect(message).toContain('wait_for_stop');
       expect(message).toContain('pause_execution');
+      expect(message).not.toMatch(/step is still in effect/);
+      expect(message).not.toMatch(/will become 'paused' when it completes/);
       expect(message).not.toMatch(/Check the session state/);
+    });
+
+    it('stepSessionEnded reports how the program ended without claiming the step completed (issue #1177)', () => {
+      expect(ErrorMessages.stepSessionEnded(0)).toBe(
+        'The step did not pause. The program ran to completion (exit code 0).'
+      );
+      expect(ErrorMessages.stepSessionEnded(2)).toBe(
+        'The step did not pause. The program exited with code 2.'
+      );
+      expect(ErrorMessages.stepSessionEnded(undefined)).toBe(
+        'The step did not pause: the session ended.'
+      );
+    });
+
+    it('stepRefused states that nothing ran and the program is still paused (issue #1179)', () => {
+      expect(
+        ErrorMessages.stepRefused(
+          "Failed command 'stepOut' : 0x80004005",
+          { file: '/proj/AGenStepOut.cs', line: 10 },
+          'Set a breakpoint in the consumer.'
+        )
+      ).toBe(
+        "The debug adapter refused the step: Failed command 'stepOut' : 0x80004005. " +
+          'Nothing ran; the program is still paused at /proj/AGenStepOut.cs:10. Set a breakpoint in the consumer.'
+      );
+    });
+
+    it('waitForStopPending names an in-flight step even when breakpoints are armed (issue #1178)', () => {
+      const armed = ErrorMessages.waitForStopPending(15, 'running', {
+        armedSummary: '1 breakpoint(s)',
+        inFlightStep: { kind: 'step_out', ageSeconds: 20 }
+      });
+      expect(armed).toContain('without reaching 1 breakpoint(s); a step_out sent 20s ago has not paused');
+      expect(armed).toContain('docs/KNOWN_ISSUES.md');
+
+      const unarmed = ErrorMessages.waitForStopPending(10, 'running', {
+        inFlightStep: { kind: 'step_over', ageSeconds: 15 }
+      });
+      expect(unarmed).toContain('a step_over sent 15s ago has not paused');
     });
 
     // A step the proxy's JavaScript stepper has a record of (issue #1130): it

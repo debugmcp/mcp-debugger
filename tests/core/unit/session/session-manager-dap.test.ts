@@ -2120,6 +2120,192 @@ describe('SessionManager - DAP Operations', () => {
         expect(data.location?.line).toBe(29);
         expect(data.message).toBe('Stepped over');
       });
+
+      it('reports the program ending instead of claiming the line changed when a repeated step exits (issue #1190)', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        withTokenStepping(sessionManager);
+        let nexts = 0;
+        dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+          if (command === 'next') {
+            nexts += 1;
+            process.nextTick(() => {
+              if (nexts === 1) {
+                dependencies.mockProxyManager.simulateStopped(1, 'step', { reason: 'step', threadId: 1 });
+              } else {
+                dependencies.mockProxyManager.simulateExited(0);
+              }
+            });
+          }
+          if (command === 'stackTrace') {
+            return {
+              success: true,
+              body: {
+                stackFrames: [
+                  { id: 10, name: 'main', source: { path: '/app/bin/a3_exit.dart' }, line: 22, column: nexts === 0 ? 9 : 11 }
+                ],
+                totalFrames: 1
+              }
+            };
+          }
+          return { success: true };
+        });
+
+        const stepPromise = sessionManager.stepOver(session.id);
+        await vi.runAllTimersAsync();
+        const result = await stepPromise;
+
+        expect(nexts).toBe(2);
+        expect(result.state).toBe(SessionState.STOPPED);
+        expect(result.data?.exitCode).toBe(0);
+        expect(result.data?.message).toBe(
+          'The step did not pause. The program ran to completion (exit code 0). (2 steps were sent because this adapter stops once per expression on a line.)'
+        );
+        expect(result.data?.message).not.toContain('until the line changed');
+      });
+
+      it('names a caller return on the same line after multiple token steps without claiming the line changed (issue #1190)', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        withTokenStepping(sessionManager);
+        const steps = scriptSteps([{ line: 29, depth: 2 }, { line: 29, depth: 2 }, { line: 29, depth: 1 }]);
+
+        const data = await stepOver(session.id);
+
+        expect(steps.nexts()).toBe(2);
+        expect(data.location?.line).toBe(29);
+        expect(data.message).toBe(
+          ErrorMessages.stepRepeatedOnSameLine('Stepped over', 2, { callerOnSameLine: true })
+        );
+      });
+    });
+
+    describe('step lifecycle, refusal recovery, and provenance (issues #1177, #1179, #1180, #1182, #1184)', () => {
+      it('keeps the session PAUSED and usable when the adapter refuses a step with DapResponseError (issue #1179)', async () => {
+        const { DapResponseError } = await import('../../../../src/proxy/dap-response-error.js');
+        const session = await createPausedSession(sessionManager, dependencies);
+        const original = (sessionManager as unknown as { selectPolicy: (language: string) => AdapterPolicy }).selectPolicy.bind(sessionManager);
+        vi.spyOn(sessionManager as unknown as { selectPolicy: (language: string) => AdapterPolicy }, 'selectPolicy')
+          .mockImplementation((language: string) => ({
+            ...original(language),
+            explainRequestFailure: (cmd: string, msg: string) =>
+              cmd === 'stepOut' && msg.includes('0x80004005') ? 'Set a breakpoint in the consumer.' : undefined
+          }));
+
+        dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+          if (command === 'stackTrace') {
+            return {
+              success: true,
+              body: { stackFrames: [{ id: 1, name: 'AGen', source: { path: '/proj/AGenStepOut.cs' }, line: 10, column: 1 }], totalFrames: 1 }
+            };
+          }
+          if (command === 'stepOut') {
+            throw new DapResponseError({
+              seq: 1,
+              type: 'response',
+              request_seq: 1,
+              command: 'stepOut',
+              success: false,
+              message: "Failed command 'stepOut' : 0x80004005"
+            });
+          }
+          return { success: true };
+        });
+
+        const refused = await sessionManager.stepOut(session.id);
+
+        expect(refused.success).toBe(false);
+        expect(refused.state).toBe(SessionState.PAUSED);
+        expect(refused.error).toContain("The debug adapter refused the step: Failed command 'stepOut' : 0x80004005.");
+        expect(refused.error).toContain('Nothing ran; the program is still paused at /proj/AGenStepOut.cs:10.');
+        expect(refused.error).toContain('Set a breakpoint in the consumer.');
+        expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.PAUSED);
+
+        // Subsequent inspection and continue still succeed on the paused session.
+        const frames = await sessionManager.getStackTrace(session.id);
+        expect(frames).toHaveLength(1);
+        const cont = await sessionManager.continue(session.id);
+        expect(cont.success).toBe(true);
+      });
+
+      it('still transitions to ERROR on a transport Error or when continued arrived before the rejection (issue #1179)', async () => {
+        const { DapResponseError } = await import('../../../../src/proxy/dap-response-error.js');
+        const session = await createPausedSession(sessionManager, dependencies);
+        dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+          if (command === 'stepOut') {
+            dependencies.mockProxyManager.emit('continued');
+            throw new DapResponseError({
+              seq: 1,
+              type: 'response',
+              request_seq: 1,
+              command: 'stepOut',
+              success: false,
+              message: 'Target lost after resume'
+            });
+          }
+          return { success: true, body: { stackFrames: [] } };
+        });
+
+        const failed = await sessionManager.stepOut(session.id);
+        expect(failed.success).toBe(false);
+        expect(failed.state).toBe(SessionState.ERROR);
+      });
+
+      it('reports stepSessionEnded with exitCode when the debuggee exits during a step (issue #1177)', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+          if (command === 'next') {
+            process.nextTick(() => dependencies.mockProxyManager.simulateExited(0));
+          }
+          return { success: true, body: { stackFrames: [] } };
+        });
+
+        const stepPromise = sessionManager.stepOver(session.id);
+        await vi.runAllTimersAsync();
+        const result = await stepPromise;
+
+        expect(result.success).toBe(true);
+        expect(result.state).toBe(SessionState.STOPPED);
+        expect(result.data?.exitCode).toBe(0);
+        expect(result.data?.message).toBe('The step did not pause. The program ran to completion (exit code 0).');
+      });
+
+      it('surfaces meaningful adapter step descriptions (COBOL PERFORM) and origin-comparison notes on every adapter (issues #1180, #1182)', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        let stackReads = 0;
+        dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+          if (command === 'stackTrace') {
+            stackReads += 1;
+            // Both origin and landing are in global.key at depth 2 (#1196).
+            return {
+              success: true,
+              body: {
+                stackFrames: [
+                  { id: 1, name: 'global.key', source: { path: '/proj/cb.cjs' }, line: 3, column: 1 },
+                  { id: 2, name: 'global.viaMap', source: { path: '/proj/cb.cjs' }, line: 7, column: 1 }
+                ],
+                totalFrames: 2
+              }
+            };
+          }
+          if (command === 'stepOut') {
+            process.nextTick(() => {
+              dependencies.mockProxyManager.simulateStopped(1, 'step', {
+                reason: 'step',
+                threadId: 1,
+                description: 'returned from BUMP-PARA to VIA-TIMES (3 times through the performed range)'
+              });
+            });
+          }
+          return { success: true };
+        });
+
+        const stepPromise = sessionManager.stepOut(session.id);
+        await vi.runAllTimersAsync();
+        const result = await stepPromise;
+
+        expect(stackReads).toBeGreaterThanOrEqual(2);
+        expect(result.data?.note).toContain('returned from BUMP-PARA to VIA-TIMES (3 times through the performed range)');
+        expect(result.data?.note).toContain("still in 'global.key' at the same call-stack depth");
+      });
     });
 
     it('omits the back-at-origin sentence when the breakpoint stop is on another line (issue #678)', async () => {

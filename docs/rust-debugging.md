@@ -64,7 +64,7 @@ SKIP_ADAPTER_VENDOR=true pnpm install
 ### Supported Capabilities
 
 - ✅ **Breakpoints**: Set breakpoints in Rust source files
-- ✅ **Stepping**: Step over, into, and out of functions
+- ✅ **Stepping**: Step over, into, and out of functions (note: CodeLLDB's Rust language support configures `step-avoid-regexp` to skip `std`, `core`, and `alloc` frames by default — including `Drop::drop` glue entered through `core::ptr::drop_in_place` — so `step_into` steps over them unless you set a breakpoint inside the target function; issue #1184)
 - ✅ **Variable inspection**: View local variables, including complex types
 - ✅ **Stack traces**: Full call stack with Rust symbols
 - ✅ **Cargo integration**: Debug Cargo projects directly

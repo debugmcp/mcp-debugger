@@ -157,6 +157,33 @@ describe('SessionManager - waitForStop (issue #849)', () => {
     expect(wait.result()?.data?.message).toMatch(/stays armed/);
   });
 
+  it('names an in-flight step and its age when wait_for_stop times out with a breakpoint armed, and clears it once a stop lands (issue #1178)', async () => {
+    const sessionId = await runningSession();
+    await sessionManager.setBreakpoint(sessionId, { file: 'test.py', line: 9 });
+    dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+    await afterStop();
+
+    // Dispatch a step_out whose engine never sends `stopped`.
+    dependencies.mockProxyManager.sendDapRequest = vi.fn().mockResolvedValue({ success: true });
+    const stepPromise = sessionManager.stepOut(sessionId);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const pendingStep = await stepPromise;
+    expect(pendingStep.data?.pending).toBe(true);
+
+    // Wait 15s more: total elapsed since step_out is ~20s.
+    const wait = track(sessionManager.waitForStop(sessionId, 15_000));
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    expect(wait.result()?.data?.pending).toBe(true);
+    expect(wait.result()?.data?.message).toContain('without reaching 1 breakpoint(s); a step_out sent 20s ago has not paused');
+    expect(wait.result()?.data?.message).toContain('docs/KNOWN_ISSUES.md');
+
+    // Once a stop arrives, `inFlightStep` is cleared and the provenance of the delayed step is preserved (#1180).
+    dependencies.mockProxyManager.simulateStopped(1, 'step');
+    await afterStop();
+    expect(sessionManager.getSession(sessionId)?.inFlightStep).toBeUndefined();
+  });
+
   it('waits 30 s by default', async () => {
     const sessionId = await runningSession();
     const wait = track(sessionManager.waitForStop(sessionId));

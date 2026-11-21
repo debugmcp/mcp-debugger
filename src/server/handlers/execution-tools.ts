@@ -77,6 +77,11 @@ export const stepTool: ToolHandler = async (ctx, args, toolName) => {
         response.rawStopReason = resultData.rawStopReason;
       }
     }
+    if (typeof resultData?.exitCode === 'number') {
+      // A step whose debuggee exited before pausing carries the recorded exit
+      // code (issue #1177), hoisted to the top level just like wait_for_stop.
+      response.exitCode = resultData.exitCode;
+    }
 
     // Where the step landed (issues #904, #938): the shape every stop answer has.
     await hoistStopLanding(ctx, response, resultData, args.sessionId, 'step result');

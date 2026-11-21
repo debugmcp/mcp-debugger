@@ -36,9 +36,9 @@ export const ErrorMessages = {
   
   stepStillRunning: (graceSeconds: number) =>
     `Step dispatched; the program is still executing after ${graceSeconds}s ` +
-    `(e.g. stepping over a long-running call). The step is still in effect: the session ` +
-    `remains 'running' and will become 'paused' when it completes. Call wait_for_stop to ` +
-    `block until then, or pause_execution to interrupt.`,
+    `(e.g. stepping over a long-running call). The session remains 'running' and becomes 'paused' ` +
+    `if the step completes; some debug engines can drop a step (see docs/KNOWN_ISSUES.md). ` +
+    `Call wait_for_stop to wait, or pause_execution to interrupt.`,
 
   pausePending: (graceSeconds: number) =>
     `Pause requested; no 'stopped' event within ${graceSeconds}s ` +

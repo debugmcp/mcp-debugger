@@ -21,6 +21,11 @@ import type { ChangedVariable, SnapshotException, StopSnapshot } from '../sessio
 import type { StackTraceResult } from './frame-anchor-resolver.js';
 import { frameSummary } from './frame-anchor-resolver.js';
 import { applyVariableCaps, snapshotLocalsLimits } from '../variable-caps.js';
+import {
+  buildSnapshotFrameKey,
+  hasUnresolvedCallerUnwind,
+  stepOutReenteredOriginFrame
+} from '../execution/step-provenance.js';
 
 export type StopSnapshotContext = Pick<
   OperationsContext,
@@ -65,6 +70,41 @@ function looksLikeTypeName(text: string): boolean {
 /** Own enumerable assignment that survives exotic names ('__proto__'). */
 function setOwn<T>(target: Record<string, T>, key: string, value: T): void {
   Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
+}
+
+/**
+ * Strip sentences that `describeStopLocation` already placed in the top-level
+ * landing `note` (`stackResult.note` and `stackResult.pausedFrameNote`, issue
+ * #1181) so `snapshot.note` carries only snapshot-specific locals disclosures.
+ */
+function stripLandingNotesFromAnchorNote(anchorNote: string, stackResult: StackTraceResult): string {
+  let rest = anchorNote;
+  const stripPrefix = (prefix: string | undefined): void => {
+    if (!prefix) {
+      return;
+    }
+    if (rest === prefix) {
+      rest = '';
+    } else if (rest.startsWith(`${prefix}; `)) {
+      rest = rest.slice(prefix.length + 2);
+    } else if (rest.startsWith(`${prefix} `)) {
+      rest = rest.slice(prefix.length + 1);
+    }
+  };
+  stripPrefix(stackResult.note);
+  stripPrefix(stackResult.pausedFrameNote);
+  // When `pausedFrame.kept` walked down to a lower frame for locals,
+  // `extractLocalsFromResolved` emits a combined sentence starting with
+  // "Paused inside an internal frame '<name>' (<file>:<line>), which has no local variables; ...".
+  // Since `landing.note` already states `pausedFrameNote`, keep only the locals walk-down half.
+  if (stackResult.pausedFrameNote && stackResult.pausedFrame?.kept) {
+    const pf = stackResult.pausedFrame.frame;
+    const combinedPrefix = `Paused inside an internal frame '${pf.name}' (${pf.file}:${pf.line}), which has no local variables; `;
+    if (rest.startsWith(combinedPrefix)) {
+      rest = `Top frame '${pf.name}' has no local variables; ${rest.slice(combinedPrefix.length)}`;
+    }
+  }
+  return rest.trim();
 }
 
 /**
@@ -259,25 +299,38 @@ export async function composeStopSnapshot(
                 setOwn(flat, variable.name, variable.value);
               }
             }
-            // The diff cache (issue #983): a later stop in the same frame
+            // The diff cache (issues #983, #1183): a later stop in the same call
             // reports only what changed since the locals were last SHOWN.
             // Identity rules, each load-bearing: the same stop re-answered
             // never diffs against itself (base untouched); a frame-key
-            // mismatch — anchor name/file or visible depth — re-emits full
-            // locals and rebases, never a wrong diff. Only a successful,
-            // non-empty read touches the cache.
+            // mismatch — anchor name/file, visible depth, or caller-chain call
+            // sites — a step_out that landed back in the origin function, or a
+            // failed caller unwind re-emits full locals and rebases, never a
+            // wrong diff across two calls. Only a successful, non-empty read
+            // touches the cache.
             const anchor = raced.frame ?? frames[0];
-            const frameKey = `${anchor.name}|${anchor.file}|${stackResult.frames.length}`;
+            const frameKey = buildSnapshotFrameKey(anchor, stackResult.frames);
+            const callerResolved = !hasUnresolvedCallerUnwind(stackResult.frames);
+            const provenance =
+              session.lastStepProvenance && session.lastStepProvenance.stopRef === stop
+                ? session.lastStepProvenance
+                : undefined;
+            const stepOutSameFn = stepOutReenteredOriginFrame(
+              provenance?.flavor,
+              provenance?.origin,
+              stackResult.frames
+            );
             const base = session.snapshotDiffBase;
+            const brokenCallerUnwind = base?.callerResolved === true && !callerResolved;
             if (stop && base && base.stopRef === stop) {
               snapshot.locals = flat;
-            } else if (stop && base && base.frameKey === frameKey) {
+            } else if (stop && base && base.frameKey === frameKey && !stepOutSameFn && !brokenCallerUnwind) {
               snapshot.changedVariables = diffLocals(base, flat, complete);
-              session.snapshotDiffBase = { stopRef: stop, frameKey, rendered: flat, complete };
+              session.snapshotDiffBase = { stopRef: stop, frameKey, rendered: flat, complete, callerResolved };
             } else {
               snapshot.locals = flat;
               if (stop) {
-                session.snapshotDiffBase = { stopRef: stop, frameKey, rendered: flat, complete };
+                session.snapshotDiffBase = { stopRef: stop, frameKey, rendered: flat, complete, callerResolved };
               }
             }
           }
@@ -289,17 +342,10 @@ export async function composeStopSnapshot(
             snapshot.truncation = `${parts.join(', ')} — get_local_variables returns the full list`;
           }
           if (raced.anchorNote) {
-            // The resolver's own note already rides on the answer as the
-            // landing's note; the same sentence never ships twice. The data
-            // layer always seeds anchorNote with that note first, so a
-            // prefix strip is exact (the note itself may contain '; ').
-            const resolverNote = stackResult.note;
-            const fresh =
-              resolverNote === undefined ? raced.anchorNote
-              : raced.anchorNote === resolverNote ? ''
-              : raced.anchorNote.startsWith(`${resolverNote}; `)
-                ? raced.anchorNote.slice(resolverNote.length + 2)
-                : raced.anchorNote;
+            // The resolver's own notes (`note` and `pausedFrameNote`, issue
+            // #1181) already ride on the answer as the landing's note; the
+            // same sentence never ships twice.
+            const fresh = stripLandingNotesFromAnchorNote(raced.anchorNote, stackResult);
             if (fresh) {
               notes.push(fresh);
             }

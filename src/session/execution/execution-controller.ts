@@ -28,9 +28,10 @@
  *    One deliberate asymmetry, and the reason rule 2 exists: pause's ended
  *    handler stands down for the stop path, because its wording ('Session
  *    ended before pause took effect') contradicts a stop that was observed.
- *    executeStep's do not — 'Step completed as session terminated./exited.'
- *    is already what rule 2 would have the stop path say, so letting them
- *    answer first is the same answer, sooner. Both ends obey rule 2; they
+ *    executeStep's do not — when no stop was seen, `stepSessionEnded` says the
+ *    step did not pause and reports how the program ended (`exitCode` included,
+ *    issue #1177); when a stop was seen and the session ended during the stack
+ *    read, `endedDuringReadMessage` says so. Both ends obey rule 2; they
  *    differ only in which path is allowed to deliver it.
  * 2. Ended-at-settle. Whoever does settle reads `session.state` at settle
  *    time. A session that reached a terminal state (STOPPED or ERROR) while
@@ -52,13 +53,21 @@ import {
 } from '@debugmcp/shared';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { ProxyNotRunningError, SessionTerminatedError } from '../../errors/debug-errors.js';
+import { DapResponseError } from '../../proxy/dap-response-error.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import {
   PROXY_STEP_LEFT_STACK_EVENT,
   PROXY_STEP_RECORD_EVENTS,
   PROXY_STEP_WALK_STARTED_EVENT
 } from '../../proxy/dap-proxy-interfaces.js';
-import type { ManagedSession } from '../session-store.js';
+import type { InFlightStep, ManagedSession } from '../session-store.js';
+import {
+  captureStepOrigin,
+  compareStepOriginAndLanding,
+  meaningfulStepStopDescription,
+  type StepFlavor,
+  type StepOrigin
+} from './step-provenance.js';
 import type {
   DebugResult,
   PauseResultData,
@@ -82,6 +91,8 @@ import { describeLaunchArming } from '../launch/launch-arming.js';
 interface StepKind {
   /** The DAP request to send. */
   command: 'next' | 'stepIn' | 'stepOut';
+  /** The MCP tool name recorded on an in-flight step (issue #1178). */
+  toolName: 'step_over' | 'step_into' | 'step_out';
   /** How the operation is named in a ProxyNotRunningError. */
   operation: string;
   /** The `[SM <tag> <id>]` log prefix. */
@@ -92,18 +103,21 @@ interface StepKind {
 const STEP_KINDS = {
   stepOver: {
     command: 'next',
+    toolName: 'step_over',
     operation: 'step over',
     logTag: 'stepOver',
     successMessage: 'Stepped over'
   },
   stepInto: {
     command: 'stepIn',
+    toolName: 'step_into',
     operation: 'step into',
     logTag: 'stepInto',
     successMessage: 'Stepped into'
   },
   stepOut: {
     command: 'stepOut',
+    toolName: 'step_out',
     operation: 'step out',
     logTag: 'stepOut',
     successMessage: 'Stepped out'
@@ -138,12 +152,21 @@ export interface StepOperationOptions {
    */
   describePending?: (record: StepperRecord | undefined) => string | undefined;
   /**
-   * Where the step was issued from (issue #678), when the preamble read it —
-   * only for policies with `describePendingStop`, which need the frame anyway.
-   * A breakpoint stop on this very file+line is the lost-step signature the
-   * response then names.
+   * Where the step was issued from (issues #678, #1179, #1180). Used both to
+   * name the paused location when the adapter refuses the step and to detect a
+   * breakpoint stop on the very line the step started from.
    */
   origin?: StopLocation;
+  /** Suppresses `backAtOrigin` on subsequent steps of a same-line repeat loop (issue #879). */
+  suppressBackAtOrigin?: boolean;
+  /** Step flavour for provenance comparison and in-flight tracking (issues #1178, #1180). */
+  flavor?: StepFlavor;
+  /** Public tool name for in-flight step reporting (issue #1178). */
+  toolName?: 'step_over' | 'step_into' | 'step_out';
+  /** Full starting stack captured before sending the step (issues #1180, #1183, #1184). */
+  stepOrigin?: StepOrigin;
+  /** Adapter policy note explaining why `step_into` skipped callees (issue #1184). */
+  stepFilterHint?: string;
   /**
    * Hands each landing read to the caller (issue #983). A same-line-repeating
    * step (Dart, issue #879) reads a landing per attempt; the step snapshot
@@ -217,7 +240,7 @@ export class ExecutionController {
    * checks, the current thread, and the error handling around the wait.
    */
   private async step(sessionId: string, kind: StepKindName): Promise<DebugResult<StepResultData>> {
-    const { command, operation, logTag, successMessage } = STEP_KINDS[kind];
+    const { command, toolName, operation, logTag, successMessage } = STEP_KINDS[kind];
     const session = this.ctx.getSession(sessionId);
 
     // Check if session is terminated
@@ -242,13 +265,15 @@ export class ExecutionController {
       return { success: false, error: 'No current thread ID', state: session.state };
     }
 
-    // An adapter whose `next` stops once per token position (issue #879):
-    // the step is repeated while it stops on the line it left, so the origin
-    // (and its frame depth) is read for it as well.
+    // Read the starting stack for every adapter (issue #1180): one bounded
+    // stackTrace supplies the raw top frame (JS pending hints and Dart
+    // same-line repeats) and the policy-filtered stack (landing provenance and
+    // changedVariables call identity, issues #1183/#1184).
     const repeatsOnSameLine =
       kind === 'stepOver' && this.ctx.selectPolicy(session.language).stepsByTokenPosition === true;
-    const origin = await this.readStepOrigin(session, sessionId, threadId, repeatsOnSameLine);
-    const fromFrame = origin?.frame;
+    const origin = await this.readStepOrigin(session, sessionId, threadId);
+    const fromFrame = origin?.rawTop;
+    const stepFilterHint = kind === 'stepInto' ? this.describeStepInFilter(session, sessionId) : undefined;
     const describePending = (record: StepperRecord | undefined): string | undefined =>
       this.describePendingStop(session, sessionId, 'step', fromFrame, record);
 
@@ -277,15 +302,19 @@ export class ExecutionController {
       let finalLanding: StopLanding | undefined;
       const stepOptions: StepOperationOptions = {
         command,
+        flavor: kind,
+        toolName,
         threadId,
         logTag,
         successMessage,
         describePending,
+        ...(origin ? { stepOrigin: origin } : {}),
+        ...(stepFilterHint ? { stepFilterHint } : {}),
         ...(fromFrame ? { origin: { file: fromFrame.file, line: fromFrame.line, column: fromFrame.column } } : {}),
         onLanding: (landing) => { finalLanding = landing; },
       };
       const first = await this.executeStep(session, sessionId, stepOptions);
-      const result = repeatsOnSameLine && origin
+      const result = repeatsOnSameLine && origin?.rawTop
         ? await this.repeatWhileOnOriginLine(session, sessionId, stepOptions, origin, first)
         : first;
       if (
@@ -305,7 +334,9 @@ export class ExecutionController {
     } catch (error) {
       const errorMessage = getErrorMessage(error);
       this.ctx.logger.error(`[SM ${logTag} ${sessionId}] Error during step:`, error);
-      this.ctx.updateState(session, SessionState.ERROR);
+      if (!(error instanceof DapResponseError) && !isTerminalSessionState(session.state)) {
+        this.ctx.updateState(session, SessionState.ERROR);
+      }
       return { success: false, error: errorMessage, state: session.state };
     }
   }
@@ -329,10 +360,6 @@ export class ExecutionController {
       });
     }
 
-    const terminatedMessage =
-      options.terminatedMessage ?? 'Step completed as session terminated.';
-    const exitedMessage = options.exitedMessage ?? 'Step completed as session exited.';
-
     // Rule 2's wording for this step flavour: the step landed, but the stack
     // read that would say where outlived the session.
     const endedDuringReadMessage =
@@ -342,6 +369,17 @@ export class ExecutionController {
     // onStopped is THIS step's stop, whose reason says whether the step ended
     // it or something else did (issue #678) — the same discipline pause uses.
     const lastStopBefore = session.lastStop;
+
+    const flavor: StepFlavor =
+      options.flavor ?? (options.command === 'stepIn' ? 'stepInto' : options.command === 'stepOut' ? 'stepOut' : 'stepOver');
+    const inFlightRecord: InFlightStep = {
+      kind: options.toolName ?? (options.command === 'stepIn' ? 'step_into' : options.command === 'stepOut' ? 'step_out' : 'step_over'),
+      flavor,
+      command: options.command,
+      threadId: options.threadId,
+      sentAt: Date.now(),
+      ...(options.stepOrigin ? { origin: options.stepOrigin } : {})
+    };
 
     // The latest record the proxy's JavaScript stepper sent of this step
     // (issue #1130): its walk through skipped code started, or ended without
@@ -361,9 +399,17 @@ export class ExecutionController {
       // settle". Set as the first statement of onStopped, so every other path
       // can tell "nothing stopped" from "stopped, still resolving where".
       let stopSeen = false;
+      // Tracks whether the adapter emitted a `continued` event before rejecting
+      // the step request (issue #1179): a refusal before resume leaves the
+      // debuggee paused where it was.
+      let continuedSeen = false;
+      const onContinued = () => {
+        continuedSeen = true;
+      };
 
       const cleanup = () => {
         proxyManager.off('stopped', onStopped);
+        proxyManager.off('continued', onContinued);
         proxyManager.off('terminated', onTerminated);
         proxyManager.off('exited', onExited);
         proxyManager.off('exit', onExit);
@@ -376,18 +422,34 @@ export class ExecutionController {
           return;
         }
         settled = true;
+        if (!result.data?.pending && session.inFlightStep === inFlightRecord) {
+          session.inFlightStep = undefined;
+        }
         cleanup();
         resolve(result);
       };
 
-      const success = (message: string, landing?: StopLanding, stop?: Pick<StepResultData, 'stopReason' | 'rawStopReason'>) => {
+      const success = (
+        message: string,
+        landing?: StopLanding,
+        extra?: Pick<StepResultData, 'stopReason' | 'rawStopReason' | 'exitCode'>
+      ) => {
         this.ctx.logger.info(`[SM ${options.logTag} ${sessionId}] ${message} Current state: ${session.state}`);
-        const data: StepResultData = { message, ...stop, ...(landing ? landingFields(landing) : {}) };
+        const data: StepResultData = { message, ...extra, ...(landing ? landingFields(landing) : {}) };
         settle({
           success: true,
           state: session.state,
           data,
         });
+      };
+
+      const settleEnded = (overrideMessage?: string) => {
+        const message = overrideMessage ?? ErrorMessages.stepSessionEnded(session.exitCode);
+        success(
+          message,
+          undefined,
+          typeof session.exitCode === 'number' ? { exitCode: session.exitCode } : undefined
+        );
       };
 
       /** Rule 2: has the session reached a terminal state by settle time? */
@@ -406,19 +468,34 @@ export class ExecutionController {
         // settled with its own wording; this covers the endings that did not
         // (handlers torn down by the core, an exit mapped straight to ERROR).
         if (sessionEnded()) {
-          success(endedDuringReadMessage);
+          success(
+            endedDuringReadMessage,
+            undefined,
+            typeof session.exitCode === 'number' ? { exitCode: session.exitCode } : undefined
+          );
           return;
         }
         // A stop recorded for THIS step whose reason is not the step: name it,
         // and for a breakpoint or exception say so in the wording too — with
         // the lost-step signature when it is on the line the step left from.
         const ownStop = session.lastStop && session.lastStop !== lastStopBefore ? session.lastStop : undefined;
+        if (ownStop && session.lastStepProvenance?.stopRef !== ownStop) {
+          session.lastStepProvenance = {
+            stopRef: ownStop,
+            flavor,
+            origin: options.stepOrigin
+          };
+        }
         if (ownStop && ownStop.reason !== 'step') {
           const stop = {
             stopReason: ownStop.reason,
             ...(ownStop.rawReason ? { rawStopReason: ownStop.rawReason } : {})
           };
-          const backAtOrigin = options.origin !== undefined && location !== undefined && isSameLine(options.origin, location);
+          const backAtOrigin =
+            !options.suppressBackAtOrigin &&
+            options.origin !== undefined &&
+            location !== undefined &&
+            isSameLine(options.origin, location);
           const message = USER_BREAK_REASONS.has(ownStop.reason)
             ? ErrorMessages.stepStoppedOn(options.successMessage, ownStop.reason, { backAtOrigin })
             : options.successMessage;
@@ -429,12 +506,34 @@ export class ExecutionController {
         // stepper: how far a step-in walked without reaching the program's
         // code, or that every command it may send was spent there; issue #1130).
         const stepNote = ownStop?.reason === 'step' ? ownStop.text : undefined;
-        success(stepNote ? `${options.successMessage}. ${stepNote}` : options.successMessage, landing);
+        let enrichedLanding = landing;
+        if (ownStop?.reason === 'step') {
+          const rawDescription =
+            this.ctx.redactionEnabled() ? redactStopInfo(ownStop).description : ownStop.description;
+          const adapterDescription = meaningfulStepStopDescription(rawDescription);
+          const provenanceNote = compareStepOriginAndLanding(
+            flavor,
+            options.stepOrigin,
+            landing.stackResult?.frames ?? [],
+            {
+              stepFilterHint: options.stepFilterHint,
+              hasStepperWalkNote: stepNote !== undefined,
+              noProgramFrame: landing.noProgramFrame === true
+            }
+          );
+          const mergedNotes = [adapterDescription, landing.note, provenanceNote].filter(
+            (part): part is string => typeof part === 'string' && part.length > 0
+          );
+          if (mergedNotes.length > 0) {
+            enrichedLanding = { ...landing, note: mergedNotes.join(' ') };
+          }
+        }
+        success(stepNote ? `${options.successMessage}. ${stepNote}` : options.successMessage, enrichedLanding);
       };
 
-      const onTerminated = () => success(terminatedMessage);
-      const onExited = () => success(exitedMessage);
-      const onExit = () => success(exitedMessage);
+      const onTerminated = () => settleEnded(options.terminatedMessage);
+      const onExited = () => settleEnded(options.exitedMessage);
+      const onExit = () => settleEnded(options.exitedMessage);
 
       const timeout = setTimeout(() => {
         // Rule 1: the stop already arrived, so onStopped owns the settle and
@@ -476,11 +575,13 @@ export class ExecutionController {
       }, this.ctx.tunables.stepGraceMs);
 
       proxyManager.on('stopped', onStopped);
+      proxyManager.on('continued', onContinued);
       proxyManager.on('terminated', onTerminated);
       proxyManager.on('exited', onExited);
       proxyManager.on('exit', onExit);
       proxyManager.on('dap-event', onDapEvent);
 
+      session.inFlightStep = inFlightRecord;
       this.ctx.updateState(session, SessionState.RUNNING);
 
       proxyManager
@@ -496,11 +597,47 @@ export class ExecutionController {
             );
             return;
           }
+          // Issue #1179: when the debug adapter itself refuses the step
+          // (`DapResponseError`) without having resumed execution, the program
+          // is still paused where it was — revert to PAUSED so inspection,
+          // other steps, and continue_execution stay available.
+          if (
+            error instanceof DapResponseError &&
+            !continuedSeen &&
+            !isTerminalSessionState(session.state)
+          ) {
+            this.ctx.logger.warn(
+              `[SM ${options.logTag} ${sessionId}] Adapter refused '${options.command}'; reverting session to PAUSED: ${errorMessage}`
+            );
+            if (session.lastStop) {
+              this.ctx.updateState(session, SessionState.PAUSED);
+            } else {
+              session.state = SessionState.PAUSED;
+            }
+            let hint: string | undefined;
+            try {
+              hint = this.ctx.selectPolicy(session.language).explainRequestFailure?.(
+                options.command,
+                errorMessage,
+                { program: session.transformedLaunch?.program }
+              );
+            } catch {
+              // Policy explanation is advisory.
+            }
+            settle({
+              success: false,
+              error: ErrorMessages.stepRefused(errorMessage, options.origin, hint),
+              state: session.state
+            });
+            return;
+          }
           this.ctx.logger.error(
             `[SM ${options.logTag} ${sessionId}] Error during step request:`,
             error
           );
-          this.ctx.updateState(session, SessionState.ERROR);
+          if (!isTerminalSessionState(session.state)) {
+            this.ctx.updateState(session, SessionState.ERROR);
+          }
           settle({ success: false, error: errorMessage, state: session.state });
         });
     });
@@ -543,6 +680,7 @@ export class ExecutionController {
       // operations (e.g. getStackTrace polling) see the correct state.
       // If a breakpoint fires during the await, the handleStopped callback
       // will set state back to PAUSED before the await resolves.
+      session.inFlightStep = undefined;
       this.ctx.updateState(session, SessionState.RUNNING);
       await session.proxyManager.sendDapRequest('continue', { threadId });
 
@@ -931,6 +1069,26 @@ export class ExecutionController {
       target.lastStop && target.lastStop !== lastStopBefore.get(target.id) ? { lastStop: emitStop(target.lastStop) } : {};
     if (state === SessionState.PAUSED && stopAtLanding) {
       const where = location ? ` at ${location.file}:${location.line}` : '';
+      let waitLanding = landing;
+      if (stopAtLanding.reason === 'step' && target.lastStepProvenance?.stopRef === stopAtLanding) {
+        const prov = target.lastStepProvenance;
+        const provenanceNote = compareStepOriginAndLanding(
+          prov.flavor,
+          prov.origin,
+          landing.stackResult?.frames ?? [],
+          {
+            stepFilterHint: prov.flavor === 'stepInto' ? this.describeStepInFilter(target, target.id) : undefined,
+            hasStepperWalkNote: stopAtLanding.text !== undefined,
+            noProgramFrame: landing.noProgramFrame === true
+          }
+        );
+        if (provenanceNote) {
+          waitLanding = {
+            ...landing,
+            note: landing.note ? `${landing.note} ${provenanceNote}` : provenanceNote
+          };
+        }
+      }
       return {
         success: true,
         state,
@@ -938,7 +1096,7 @@ export class ExecutionController {
           sessionId: target.id,
           message: explained(`Paused (${stopAtLanding.reason})${where}`),
           lastStop: emitStop(stopAtLanding),
-          ...landingFields(landing),
+          ...landingFields(waitLanding),
           ...(snapshot ? { snapshot } : {}),
           ...tree()
         }
@@ -986,6 +1144,13 @@ export class ExecutionController {
     // armed; with nothing, no pause is promised. An entry stop is not part of
     // it — that belongs to the launch, which is behind a running program.
     const arming = describeLaunchArming(session, false);
+    const inFlightStep =
+      state === SessionState.RUNNING && session.inFlightStep
+        ? {
+            kind: session.inFlightStep.kind,
+            ageSeconds: Math.max(1, Math.round((Date.now() - session.inFlightStep.sentAt) / 1000))
+          }
+        : undefined;
     return {
       success: true,
       state,
@@ -998,6 +1163,7 @@ export class ExecutionController {
             ...(arming.armed ? { armedSummary: arming.summary } : {}),
             ...(arming.loggingSummary ? { loggingSummary: arming.loggingSummary } : {}),
             ...(debuggerOffWhy(session) ? { debuggerOffWhy: debuggerOffWhy(session) } : {}),
+            ...(inFlightStep ? { inFlightStep } : {}),
             noUncaughtStop: arming.noUncaughtStop
           }
         )),
@@ -1008,43 +1174,62 @@ export class ExecutionController {
   }
 
   /**
-   * The raw frame a step is about to be issued from (issue #678) — internals
-   * included, no readiness wait — read only for policies with
-   * `describePendingStop`, whose explanation depends on it, so other adapters
-   * pay nothing. The same frame is the step's `origin`. The read is bounded to
-   * a fraction of the step grace window: a wedged stackTrace (a js child
-   * mid-teardown) must not hold the step for the 30s DAP request timeout. A
-   * failed or late read costs the explanation and the origin, never the step.
+   * Read the starting stack before sending a step (issues #678, #879, #1180):
+   * one unfiltered `stackTrace` call, bounded to a fraction of `stepGraceMs` so
+   * a wedged adapter never stalls the step for 30s. A failed, empty, or late
+   * read returns `undefined` and never blocks the step itself.
    */
   private async readStepOrigin(
     session: ManagedSession,
     sessionId: string,
-    threadId: number,
-    forSameLineRepeat: boolean
-  ): Promise<{ frame: StackFrame; depth: number } | undefined> {
-    if (!forSameLineRepeat && !this.ctx.selectPolicy(session.language).describePendingStop) {
+    threadId: number
+  ): Promise<StepOrigin | undefined> {
+    const boundMs = Math.max(1, Math.floor(this.ctx.tunables.stepGraceMs / 5));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => resolve(undefined), boundMs);
+    });
+    try {
+      const detailed = await Promise.race([
+        this.ctx.getStackTraceDetailed(sessionId, threadId, true, { ensureStackReady: false }),
+        late
+      ]);
+      if (!detailed) {
+        this.ctx.logger.debug(`[SM step ${sessionId}] Origin stack read exceeded ${boundMs}ms; stepping without it`);
+        return undefined;
+      }
+      const policy = this.ctx.selectPolicy(session.language);
+      return captureStepOrigin(detailed.frames, policy, threadId, session.lastStop?.reason);
+    } catch (error) {
+      this.ctx.logger.debug(`[SM step ${sessionId}] Could not read the origin stack before stepping:`, error);
       return undefined;
+    } finally {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
     }
-    return this.readTopFrame(sessionId, threadId);
   }
 
   /**
-   * For an adapter that stops once per token position (issue #879): send the
-   * step again while it stopped, as a plain step, on the origin's file and
-   * line at the origin's frame depth, up to MAX_SAME_LINE_STEPS. Anything
-   * else is a real landing and ends it at once: a breakpoint or exception
-   * (stopReason set), a pending step, an ended session, another line, or the
-   * same line in another frame (a recursive call returning to its caller).
+   * For an adapter that stops once per token position (issues #879, #1190):
+   * send the step again while it stopped, as a plain step, on the origin's
+   * file and line at the origin's frame depth, up to MAX_SAME_LINE_STEPS.
+   * Rewords the final answer according to why the repeat loop exited so an
+   * ended session, a caller-frame return on the same line, or a location-less
+   * stop never claims the line changed.
    */
   private async repeatWhileOnOriginLine(
     session: ManagedSession,
     sessionId: string,
     stepOptions: StepOperationOptions,
-    origin: { frame: StackFrame; depth: number },
+    origin: StepOrigin,
     first: DebugResult<StepResultData>
   ): Promise<DebugResult<StepResultData>> {
+    const originTop = origin.rawTop!;
     let result = first;
     let steps = 1;
+    let stoppedInCallerOnSameLine = false;
+    let rereadFailedOnSameLine = false;
     for (;;) {
       const data = result.data;
       const onOriginLine =
@@ -1054,7 +1239,7 @@ export class ExecutionController {
         !data.pending &&
         data.stopReason === undefined &&
         data.location !== undefined &&
-        isSameLine(origin.frame, data.location);
+        isSameLine(originTop, data.location);
       if (!onOriginLine) {
         break;
       }
@@ -1068,60 +1253,95 @@ export class ExecutionController {
       // another isolate stopping meanwhile must not be stepped in its place.
       const threadId = stepOptions.threadId;
       if (!session.proxyManager?.isRunning()) {
+        rereadFailedOnSameLine = true;
         break;
       }
-      const here = await this.readTopFrame(sessionId, threadId);
+      const here = await this.readStepOrigin(session, sessionId, threadId);
       // Re-check after the read, as the step preamble does: a continue or
       // another step may have resumed the thread meanwhile.
-      if (!here || here.depth !== origin.depth || session.state !== SessionState.PAUSED) {
+      if (session.state !== SessionState.PAUSED) {
+        break;
+      }
+      if (!here) {
+        rereadFailedOnSameLine = true;
+        break;
+      }
+      if (here.rawDepth !== origin.rawDepth) {
+        stoppedInCallerOnSameLine = here.rawDepth < origin.rawDepth;
         break;
       }
       this.ctx.logger.info(
-        `[SM ${stepOptions.logTag} ${sessionId}] Still on ${origin.frame.file}:${origin.frame.line} after step ${steps}; stepping again (the adapter stops per token position)`
+        `[SM ${stepOptions.logTag} ${sessionId}] Still on ${originTop.file}:${originTop.line} after step ${steps}; stepping again (the adapter stops per token position)`
       );
-      // No origin on a repeat: the program has moved within the line, so a
-      // breakpoint that ends it is not the lost-step "back at the line the
-      // step was issued from" signature the origin exists to name.
-      const { origin: _origin, ...repeatOptions } = stepOptions;
+      // Keep the current pause location for refusal diagnostics (#1179), while
+      // suppressing `backAtOrigin` because execution moved within the line (#879).
+      const repeatOptions: StepOperationOptions = {
+        ...stepOptions,
+        origin: data.location,
+        suppressBackAtOrigin: true
+      };
       result = await this.executeStep(session, sessionId, repeatOptions);
       steps += 1;
     }
     const last = result.data;
     if (steps > 1 && result.success && last !== undefined && !last.pending && last.stopReason === undefined) {
-      return { ...result, data: { ...last, message: ErrorMessages.stepRepeatedOnSameLine(stepOptions.successMessage, steps) } };
+      if (isTerminalSessionState(session.state) || session.state !== SessionState.PAUSED) {
+        return {
+          ...result,
+          data: { ...last, message: ErrorMessages.stepRepeatedThenEnded(last.message, steps) }
+        };
+      }
+      if (last.location !== undefined && !isSameLine(originTop, last.location)) {
+        return {
+          ...result,
+          data: { ...last, message: ErrorMessages.stepRepeatedOnSameLine(stepOptions.successMessage, steps) }
+        };
+      }
+      if (stoppedInCallerOnSameLine) {
+        return {
+          ...result,
+          data: {
+            ...last,
+            message: ErrorMessages.stepRepeatedOnSameLine(stepOptions.successMessage, steps, { callerOnSameLine: true })
+          }
+        };
+      }
+      if (last.location === undefined || rereadFailedOnSameLine || isSameLine(originTop, last.location)) {
+        return {
+          ...result,
+          data: {
+            ...last,
+            message: ErrorMessages.stepRepeatedOnSameLine(stepOptions.successMessage, steps, { locationUnknown: true })
+          }
+        };
+      }
     }
     return result;
   }
 
   /**
-   * The stop's top frame and how many frames are under it, bounded to a
-   * fraction of the step grace window like the origin read; undefined when
-   * the read failed or was late.
+   * The adapter policy's explanation for an engine step filter that skips
+   * callees during `step_into` (issue #1184), or `undefined`.
    */
-  private async readTopFrame(sessionId: string, threadId: number): Promise<{ frame: StackFrame; depth: number } | undefined> {
-    const boundMs = Math.max(1, Math.floor(this.ctx.tunables.stepGraceMs / 5));
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const late = new Promise<undefined>((resolve) => {
-      timer = setTimeout(() => resolve(undefined), boundMs);
-    });
-    try {
-      const detailed = await Promise.race([
-        this.ctx.getStackTraceDetailed(sessionId, threadId, true, { ensureStackReady: false }),
-        late
-      ]);
-      if (!detailed) {
-        this.ctx.logger.debug(`[SM step ${sessionId}] Origin frame read exceeded ${boundMs}ms; stepping without it`);
-        return undefined;
-      }
-      const frame = detailed.frames[0];
-      return frame ? { frame, depth: detailed.frames.length } : undefined;
-    } catch (error) {
-      this.ctx.logger.debug(`[SM step ${sessionId}] Could not read the origin frame for the pending-stop explanation:`, error);
+  private describeStepInFilter(session: ManagedSession, sessionId: string): string | undefined {
+    const policy = this.ctx.selectPolicy(session.language);
+    if (!policy.describeStepInFilter) {
       return undefined;
-    } finally {
-      if (timer !== undefined) {
-        clearTimeout(timer);
-      }
+    }
+    try {
+      const launch = session.lastLaunch
+        ? {
+            dapLaunchArgs: { ...this.ctx.defaultDapLaunchArgs, ...(session.lastLaunch.dapLaunchArgs ?? {}) },
+            adapterLaunchConfig: session.lastLaunch.adapterLaunchConfig
+          }
+        : undefined;
+      return policy.describeStepInFilter({
+        attachMode: session.attachMode === true,
+        launch
+      }) || undefined;
+    } catch (error) {
+      this.ctx.logger.debug(`[SM stepInto ${sessionId}] Step-in filter explanation failed:`, error);
+      return undefined;
     }
   }
 

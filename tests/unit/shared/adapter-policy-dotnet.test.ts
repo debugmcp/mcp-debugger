@@ -36,13 +36,30 @@ describe('DotnetAdapterPolicy', () => {
     );
   });
 
-  it('says "the program" when it does not know which, and nothing for other failures', () => {
+  it('says "the program" when it does not know which, explains stepOut/next 0x80004005 refusals (#1179), and says nothing for other failures', () => {
     expect(
       DotnetAdapterPolicy.explainRequestFailure('launch', "Failed command 'launch' : 0x800700c1", {})
     ).toContain('netcoredbg could not start the program as a .NET assembly');
     expect(
       DotnetAdapterPolicy.explainRequestFailure('configurationDone', "Failed command 'configurationDone' : 0x80004005", {})
     ).toBeUndefined();
+    expect(
+      DotnetAdapterPolicy.explainRequestFailure('stepOut', "Failed command 'stepOut' : 0x80004005", {})
+    ).toContain('async iterator or async ValueTask');
+    expect(
+      DotnetAdapterPolicy.explainRequestFailure('next', "Failed command 'next' : 0x80004005", {})
+    ).toContain('async iterator or async ValueTask');
+  });
+
+  it('describes netcoredbg step filtering unless disabled on launch (issue #1184)', () => {
+    expect(DotnetAdapterPolicy.describeStepInFilter({ attachMode: false })).toContain('enableStepFiltering: false');
+    expect(
+      DotnetAdapterPolicy.describeStepInFilter({
+        attachMode: false,
+        launch: { dapLaunchArgs: { enableStepFiltering: false } }
+      })
+    ).toBeUndefined();
+    expect(DotnetAdapterPolicy.describeStepInFilter({ attachMode: true })).toContain('cannot be turned off on attach');
   });
 
   // ===== Child sessions =====
