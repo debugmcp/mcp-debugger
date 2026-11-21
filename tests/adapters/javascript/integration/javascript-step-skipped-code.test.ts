@@ -63,7 +63,11 @@ type StopAnswer = ToolAnswer & {
   pending?: boolean;
   stopReason?: string;
   location?: { file: string; line: number };
-  snapshot?: { frames?: Array<{ name: string; line: number }>; changedVariables?: Record<string, unknown> };
+  snapshot?: {
+    frames?: Array<{ name: string; line: number }>;
+    changedVariables?: Record<string, unknown>;
+    locals?: Record<string, unknown>;
+  };
   /** wait_for_stop's record of the stop. */
   lastStop?: { reason?: string };
 };
@@ -138,10 +142,13 @@ function isAtTheReturn(answer: StopAnswer, returnLine: number, callerLine: numbe
 }
 
 /** The stop at the end of the `return` is a plain step landing, with the value it returns. */
-function expectAtTheReturn(answer: StopAnswer & { ms: number }): void {
+function expectAtTheReturn(answer: StopAnswer & { ms: number }, file: RegExp): void {
+  expect(answer.success, JSON.stringify(answer)).toBe(true);
   expect(answer.pending, JSON.stringify(answer)).toBeUndefined();
   expect(answer.stopReason, JSON.stringify(answer)).toBeUndefined();
-  expect(Object.keys(answer.snapshot?.changedVariables ?? {}), JSON.stringify(answer)).toContain('Return value');
+  expect(answer.location?.file ?? '', JSON.stringify(answer)).toMatch(file);
+  const vars = answer.snapshot?.changedVariables ?? answer.snapshot?.locals ?? {};
+  expect(Object.keys(vars), JSON.stringify(answer)).toContain('Return value');
   expect(answer.ms, `took ${answer.ms} ms: ${JSON.stringify(answer)}`).toBeLessThan(PROMPT_MS);
 }
 
@@ -383,7 +390,7 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
       // each included, so any other stop fails.
       const answer = await step('step_over');
       if (isAtTheReturn(answer, lineOf('return inside try-finally'), lineOf('calls withFinally'))) {
-        expectAtTheReturn(answer);
+        expectAtTheReturn(answer, /steps\.cjs$/);
         const next = await step('step_over');
         expect(next.state, JSON.stringify(next)).toBe('paused');
         expectInCallerOrLost(next, /steps\.cjs$/, CALLER());
@@ -391,6 +398,8 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
       }
       const inTheNextCall = answer.state === 'paused' && answer.location?.line === lineOf('return inside try-finally');
       if (inTheNextCall) {
+        expect(answer.success, JSON.stringify(answer)).toBe(true);
+        expect(answer.location?.file ?? '', JSON.stringify(answer)).toMatch(/steps\.cjs$/);
         expect(answer.stopReason, JSON.stringify(answer)).toBeUndefined();
         expect(answer.snapshot?.frames?.[1]?.line, JSON.stringify(answer)).toBe(lineOf('calls withFinally from an async function'));
         return;
@@ -535,7 +544,7 @@ describe('The server\'s JavaScript stepper against a real js-debug (issues #1130
       // closing is called once, from main.
       const off = await step('step_over');
       if (isAtTheReturn(off, at('the return inside the try'), at('awaits closing'))) {
-        expectAtTheReturn(off);
+        expectAtTheReturn(off, /async-steps\.cjs$/);
         const next = await step('step_over');
         expect(next.state, JSON.stringify(next)).toBe('paused');
         expectInCallerOrLost(next, /async-steps\.cjs$/, [at('awaits closing'), at('after closing')]);
