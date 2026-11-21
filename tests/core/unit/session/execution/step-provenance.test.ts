@@ -32,6 +32,21 @@ describe('step-provenance (issues #1180, #1182, #1183, #1184)', () => {
       expect(captureStepOrigin([], {}, 1)).toBeUndefined();
     });
 
+    it('keeps a runtime-only origin and preserves a pause across an async boundary', () => {
+      const runtime = frame(1, 'runtime.wait', '/runtime/wait.js', 2);
+      const boundary = frame(2, 'await', '<async>', 0);
+      const caller = frame(3, 'caller', '/proj/app.js', 10);
+      const onlyRuntime = captureStepOrigin([runtime], { filterStackFrames: () => [] }, 1, 'pause');
+      expect(onlyRuntime?.visibleFrames).toEqual([runtime]);
+
+      const paused = captureStepOrigin([runtime, boundary, caller], {
+        filterStackFrames: (frames: StackFrame[]) => frames.filter((f) => f.name === 'caller'),
+        isAsyncBoundaryFrame: (f: StackFrame) => f.name === 'await'
+      }, 1, 'pause');
+      expect(paused?.visibleFrames).toEqual([runtime, caller]);
+      expect(paused?.rawDepth).toBe(3);
+    });
+
     it('keeps rawTop/rawDepth and reproduces the #672 keep-top-frame rule on user-directed stops', () => {
       const internalTop = frame(1, 'java.lang.Math.max', 'java/lang/Math.java', 2020);
       const userCaller = frame(2, 'StepInto.viaPastLib', '/proj/StepInto.java', 13);
@@ -51,6 +66,38 @@ describe('step-provenance (issues #1180, #1182, #1183, #1184)', () => {
   });
 
   describe('compareStepOriginAndLanding', () => {
+    it('makes no provenance claim without an origin, live frames, or a program landing', () => {
+      const caller = frame(1, 'caller', '/proj/app.py', 10);
+      const unwound = frame(2, 'raised', '/proj/app.py', 4, { unwound: true });
+      const origin = captureStepOrigin([caller], {}, 1);
+      expect(compareStepOriginAndLanding('stepInto', undefined, [caller])).toBeUndefined();
+      expect(compareStepOriginAndLanding('stepInto', origin, [], {})).toBeUndefined();
+      expect(compareStepOriginAndLanding('stepInto', origin, [unwound])).toBeUndefined();
+      expect(compareStepOriginAndLanding('stepInto', captureStepOrigin([unwound], {}, 1), [caller])).toBeUndefined();
+      expect(compareStepOriginAndLanding('stepInto', origin, [caller], { noProgramFrame: true })).toBeUndefined();
+    });
+
+    it('ignores traceback-only frames when measuring a live step_out return', () => {
+      const unwound = frame(1, 'raised', '/proj/app.py', 4, { unwound: true });
+      const caller = frame(2, 'caller', '/proj/app.py', 10);
+      const main = frame(3, 'main', '/proj/app.py', 20);
+      const origin = captureStepOrigin([unwound, caller, main], {}, 1);
+      expect(compareStepOriginAndLanding('stepOut', origin, [main])).toBeUndefined();
+    });
+
+    it('discloses stacks sharing only the outermost entry without confusing an ordinary caller return', () => {
+      const main = frame(3, '<main>', '/proj/app.rb', 30);
+      const origin = captureStepOrigin([
+        frame(1, 'fiber_leaf', '/proj/app.rb', 5), frame(2, 'fiber_caller', '/proj/app.rb', 10), main
+      ], {}, 1);
+      expect(compareStepOriginAndLanding('stepOver', origin, [
+        frame(4, 'other_leaf', '/proj/app.rb', 15), frame(5, 'other_caller', '/proj/app.rb', 20), main
+      ])).toContain('different call stack');
+      expect(compareStepOriginAndLanding('stepOut', origin, [
+        frame(2, 'fiber_caller', '/proj/app.rb', 11), main
+      ])).toBeUndefined();
+    });
+
     it('says nothing for normal step_over, step_into a callee, and step_out to immediate caller', () => {
       const originInLeaf = captureStepOrigin(
         [frame(1, 'leaf', '/proj/app.py', 10), frame(2, 'caller', '/proj/app.py', 20), frame(3, 'main', '/proj/app.py', 30)],
@@ -223,6 +270,12 @@ describe('step-provenance (issues #1180, #1182, #1183, #1184)', () => {
   });
 
   describe('snapshot call-identity helpers (issue #1183)', () => {
+    it('separates identical call stacks on distinct threads', () => {
+      const stack = [frame(1, 'worker', '/proj/app.py', 4), frame(2, 'run', '/proj/app.py', 10)];
+      expect(buildSnapshotFrameKey(stack[0], stack, 1)).not.toBe(buildSnapshotFrameKey(stack[0], stack, 2));
+      expect(buildSnapshotFrameKey(stack[0], stack, 1)).toBe(buildSnapshotFrameKey(stack[0], stack, 1));
+    });
+
     it('distinguishes calls to the same function from different call-site lines while matching within one call', () => {
       const callA1 = [frame(1, 'key', '/proj/cb.cjs', 3), frame(2, 'viaMap', '/proj/cb.cjs', 7)];
       const callA2 = [frame(1, 'key', '/proj/cb.cjs', 4), frame(2, 'viaMap', '/proj/cb.cjs', 7)];
@@ -237,6 +290,9 @@ describe('step-provenance (issues #1180, #1182, #1183, #1184)', () => {
       const origin = captureStepOrigin(stack, {}, 1);
       expect(stepOutReenteredOriginFrame('stepOut', origin, stack)).toBe(true);
       expect(stepOutReenteredOriginFrame('stepOver', origin, stack)).toBe(false);
+      expect(stepOutReenteredOriginFrame('stepOut', undefined, stack)).toBe(false);
+      expect(stepOutReenteredOriginFrame('stepOut', captureStepOrigin([stack[0]], {}, 1), stack)).toBe(false);
+      expect(stepOutReenteredOriginFrame('stepOut', { rawDepth: 0, visibleFrames: [], threadId: 1 }, [])).toBe(false);
     });
 
     it('detects garbage caller unwind frames (MinGW g++ closing-brace stop, issue #1204)', () => {
@@ -252,6 +308,10 @@ describe('step-provenance (issues #1180, #1182, #1183, #1184)', () => {
       expect(hasUnresolvedCallerUnwind(healthy)).toBe(false);
       expect(hasUnresolvedCallerUnwind(brokenHex)).toBe(true);
       expect(hasUnresolvedCallerUnwind(brokenAt)).toBe(true);
+      expect(hasUnresolvedCallerUnwind([healthy[0]])).toBe(false);
+      expect(hasUnresolvedCallerUnwind([
+        healthy[0], frame(2, 'nativeCaller', '<unknown_source>', 0)
+      ])).toBe(false);
     });
   });
 });

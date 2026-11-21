@@ -273,21 +273,22 @@ export function meaningfulStepStopDescription(description: string | undefined): 
 
 /**
  * Call-stack-aware key for `StopSnapshot.changedVariables` (issue #1183):
- * includes the anchor frame's canonical name and file plus the live caller chain
- * (`name|file|line` per caller), so two calls to the same function from
- * different call sites never diff against each other while stepping within one
- * call keeps an identical caller chain.
+ * includes the thread, anchor frame's canonical name and file, and the live
+ * caller chain (`name|file|line` per caller), so calls from different threads or
+ * call sites never diff against each other while stepping within one call
+ * keeps an identical caller chain.
  */
 export function buildSnapshotFrameKey(
   anchor: Pick<FrameSummary, 'name' | 'file'>,
-  frames: readonly StackFrame[]
+  frames: readonly StackFrame[],
+  threadId?: number
 ): string {
   const live = liveFramesOf(frames);
   const callers = live
     .slice(1)
     .map((f) => `${canonicalFrameName(f.name)}@${f.file}:${f.line}`)
     .join('<');
-  return `${canonicalFrameName(anchor.name)}|${anchor.file}|${live.length}|${callers}`;
+  return `${threadId ?? 'unknown'}|${canonicalFrameName(anchor.name)}|${anchor.file}|${live.length}|${callers}`;
 }
 
 /**

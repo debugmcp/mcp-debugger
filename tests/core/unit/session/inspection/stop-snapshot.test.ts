@@ -858,6 +858,23 @@ describe('review fixes: notes and truncation honesty', () => {
     expect(snapshot?.note).not.toContain('showing thread 2');
   });
 
+  it('preserves locals advice after a space-separated landing note', async () => {
+    const resolverNote = 'The exception left the top frame.';
+    const { ctx } = makeCtx({
+      locals: {
+        kind: 'result',
+        value: {
+          variables: [{ name: 'x', value: '1', variablesReference: 0 }],
+          frame: null,
+          scopeName: 'Locals',
+          anchorNote: `${resolverNote} Locals come from the live caller.`
+        }
+      }
+    });
+    const snapshot = await composeStopSnapshot(ctx, 'sid', stack({ note: resolverNote }), 'test');
+    expect(snapshot?.note).toBe('Locals come from the live caller.');
+  });
+
   it('never duplicates pausedFrameNote in snapshot.note now that landing.note carries it (issue #1181)', async () => {
     const mathFrame = { id: 9, name: 'java.lang.Math.max', file: 'java/lang/Math.java', line: 2020, column: 0 };
     const pausedFrameNote =
@@ -955,6 +972,43 @@ describe('review fixes: notes and truncation honesty', () => {
     const afterBrokenUnwind = await composeStopSnapshot(ctx, 'sid', stack({ frames: brokenFrames as never }), 'stepOver');
     expect(afterBrokenUnwind?.locals).toEqual({ x: '99' });
     expect(afterBrokenUnwind?.changedVariables).toBeUndefined();
+  });
+
+  it('never diffs consecutive broken caller unwinds, even when their raw addresses match', async () => {
+    const { ctx, extractLocalsFromResolved, session } = makeCtx();
+    const brokenFrames = [
+      FRAMES[0],
+      { id: 9, name: '50000061', file: '<unknown_source>', line: 0, column: 0, unresolvedSource: true }
+    ];
+    for (const [index, value] of ['11', '21', '99'].entries()) {
+      (extractLocalsFromResolved as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        variables: [{ name: 'x', value, type: 'number', variablesReference: 0 }],
+        frame: FRAMES[0],
+        scopeName: 'Local'
+      });
+      session.lastStop = { reason: 'step', timestamp: index + 1, threadId: 1 };
+      const snapshot = await composeStopSnapshot(ctx, 'sid', stack({ frames: brokenFrames }), 'stepOver');
+      expect(snapshot?.locals).toEqual({ x: value });
+      expect(snapshot?.changedVariables).toBeUndefined();
+    }
+  });
+
+  it.each([false, true])('rebases identical stacks when the inspection thread changes (resolved=%s)', async (resolvedThread) => {
+    const { ctx, extractLocalsFromResolved, session } = makeCtx();
+    (extractLocalsFromResolved as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ variables: [{ name: 'x', value: '11', variablesReference: 0 }], frame: FRAMES[0] })
+      .mockResolvedValueOnce({ variables: [{ name: 'x', value: '21', variablesReference: 0 }], frame: FRAMES[0] })
+      .mockResolvedValueOnce({ variables: [{ name: 'x', value: '22', variablesReference: 0 }], frame: FRAMES[0] });
+    await composeStopSnapshot(ctx, 'sid', stack(resolvedThread ? { threadId: 1 } : {}), 'test');
+    // A resolved inspection thread wins over the thread named by the stop.
+    session.lastStop = { reason: 'breakpoint', timestamp: 2, threadId: resolvedThread ? 1 : 2 };
+    const second = await composeStopSnapshot(ctx, 'sid', stack(resolvedThread ? { threadId: 2 } : {}), 'test');
+    expect(second?.locals).toEqual({ x: '21' });
+    expect(second?.changedVariables).toBeUndefined();
+
+    session.lastStop = { reason: 'step', timestamp: 3, threadId: resolvedThread ? 1 : 2 };
+    const third = await composeStopSnapshot(ctx, 'sid', stack(resolvedThread ? { threadId: 2 } : {}), 'test');
+    expect(third?.changedVariables).toEqual({ x: { before: '21', after: '22' } });
   });
 
   it('counts a re-cut value once and says when scopes went unread', async () => {

@@ -303,13 +303,13 @@ export async function composeStopSnapshot(
             // reports only what changed since the locals were last SHOWN.
             // Identity rules, each load-bearing: the same stop re-answered
             // never diffs against itself (base untouched); a frame-key
-            // mismatch — anchor name/file, visible depth, or caller-chain call
+            // mismatch - thread, anchor name/file, visible depth, or caller-chain call
             // sites — a step_out that landed back in the origin function, or a
             // failed caller unwind re-emits full locals and rebases, never a
             // wrong diff across two calls. Only a successful, non-empty read
             // touches the cache.
             const anchor = raced.frame ?? frames[0];
-            const frameKey = buildSnapshotFrameKey(anchor, stackResult.frames);
+            const frameKey = buildSnapshotFrameKey(anchor, stackResult.frames, stackResult.threadId ?? stop?.threadId);
             const callerResolved = !hasUnresolvedCallerUnwind(stackResult.frames);
             const provenance =
               session.lastStepProvenance && session.lastStepProvenance.stopRef === stop
@@ -321,7 +321,9 @@ export async function composeStopSnapshot(
               stackResult.frames
             );
             const base = session.snapshotDiffBase;
-            const brokenCallerUnwind = base?.callerResolved === true && !callerResolved;
+            // An unresolved caller cannot establish call identity on either
+            // side of the comparison, even on consecutive broken unwinds.
+            const brokenCallerUnwind = !callerResolved || base?.callerResolved === false;
             if (stop && base && base.stopRef === stop) {
               snapshot.locals = flat;
             } else if (stop && base && base.frameKey === frameKey && !stepOutSameFn && !brokenCallerUnwind) {

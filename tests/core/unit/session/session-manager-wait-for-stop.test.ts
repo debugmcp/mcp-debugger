@@ -184,6 +184,70 @@ describe('SessionManager - waitForStop (issue #849)', () => {
     expect(sessionManager.getSession(sessionId)?.inFlightStep).toBeUndefined();
   });
 
+  it.each(['exited', 'terminated', 'adapter exit'] as const)(
+    'clears a pending step when %s ends the session after the grace window',
+    async (ending) => {
+      const sessionId = await runningSession();
+      dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+      await afterStop();
+      dependencies.mockProxyManager.sendDapRequest = vi.fn().mockResolvedValue({ success: true });
+      const step = sessionManager.stepInto(sessionId);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect((await step).data?.pending).toBe(true);
+      expect(sessionManager.getSession(sessionId)?.inFlightStep?.kind).toBe('step_into');
+
+      // The step's temporary listeners are gone: the core must clear its record.
+      if (ending === 'exited') {
+        dependencies.mockProxyManager.simulateExited(0);
+      } else if (ending === 'terminated') {
+        dependencies.mockProxyManager.emit('terminated');
+      } else {
+        dependencies.mockProxyManager.simulateExit(1);
+      }
+
+      const result = await sessionManager.waitForStop(sessionId);
+      expect(result.state).toBe(ending === 'adapter exit' ? SessionState.ERROR : SessionState.STOPPED);
+      expect(result.data?.pending).toBeUndefined();
+      expect(result.data?.message).not.toContain('has not paused');
+      expect(sessionManager.getSession(sessionId)?.inFlightStep).toBeUndefined();
+    }
+  );
+
+  it('uses the saved origin to explain a delayed step_out landing in the same function', async () => {
+    const sessionId = await runningSession();
+    dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+    await afterStop();
+    const originalRequest = dependencies.mockProxyManager.sendDapRequest.bind(dependencies.mockProxyManager);
+    dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation((command, args) => {
+      if (command === 'stepOut') return Promise.resolve({ success: true });
+      if (command === 'stackTrace') {
+        return Promise.resolve({
+          success: true,
+          body: {
+            stackFrames: [
+              { id: 1, name: 'callback', source: { path: '/app/callback.py' }, line: 3, column: 1 },
+              { id: 2, name: 'main', source: { path: '/app/callback.py' }, line: 9, column: 1 }
+            ],
+            totalFrames: 2
+          }
+        });
+      }
+      return originalRequest(command, args);
+    });
+    const step = sessionManager.stepOut(sessionId);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect((await step).data?.pending).toBe(true);
+
+    const wait = track(sessionManager.waitForStop(sessionId, 10_000));
+    dependencies.mockProxyManager.simulateStopped(1, 'step');
+    await afterStop();
+
+    expect(wait.result()?.state).toBe(SessionState.PAUSED);
+    expect(wait.result()?.data?.note).toContain("still in 'callback' at the same call-stack depth");
+    expect(wait.result()?.data?.location).toMatchObject({ file: '/app/callback.py', line: 3 });
+    expect(sessionManager.getSession(sessionId)?.inFlightStep).toBeUndefined();
+  });
+
   it('waits 30 s by default', async () => {
     const sessionId = await runningSession();
     const wait = track(sessionManager.waitForStop(sessionId));

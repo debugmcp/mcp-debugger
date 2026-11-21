@@ -2050,11 +2050,15 @@ export abstract class SessionManagerCore extends EventEmitter {
           ...(body?.text ? { text: exceptionName(body.text) } : {})
         };
         if (session.inFlightStep) {
-          session.lastStepProvenance = {
-            stopRef: session.lastStop,
-            flavor: session.inFlightStep.flavor,
-            origin: session.inFlightStep.origin
-          };
+          // Another thread may interrupt the step. Its stack cannot prove
+          // anything about motion on the thread that received the command.
+          if (threadId === undefined || threadId === session.inFlightStep.threadId) {
+            session.lastStepProvenance = {
+              stopRef: session.lastStop,
+              flavor: session.inFlightStep.flavor,
+              origin: session.inFlightStep.origin
+            };
+          }
           session.inFlightStep = undefined;
         }
         this.countStopOnAncestors(session);

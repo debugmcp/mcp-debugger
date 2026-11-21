@@ -32,6 +32,13 @@ describe('RustAdapterPolicy', () => {
     spawnMock.mockReset();
   });
 
+  it('explains standard-library step filtering with a breakpoint workaround', () => {
+    const hint = RustAdapterPolicy.describeStepInFilter();
+    expect(hint).toContain('std/core/alloc');
+    expect(hint).toContain('Drop::drop');
+    expect(hint).toContain('set a breakpoint inside the target function');
+  });
+
   describe('extractLocalVariables', () => {
     // extractLocalVariables takes the DOMAIN StackFrame/Variable
     // (models/index.ts), not the DAP wire types — it is called with what the

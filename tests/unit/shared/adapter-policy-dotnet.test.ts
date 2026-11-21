@@ -62,6 +62,33 @@ describe('DotnetAdapterPolicy', () => {
     expect(DotnetAdapterPolicy.describeStepInFilter({ attachMode: true })).toContain('cannot be turned off on attach');
   });
 
+  it('uses the effective launch setting when the two configuration objects disagree', () => {
+    expect(DotnetAdapterPolicy.describeStepInFilter({
+      attachMode: false,
+      launch: {
+        dapLaunchArgs: { enableStepFiltering: true },
+        adapterLaunchConfig: { enableStepFiltering: false }
+      }
+    })).toBeUndefined();
+    expect(DotnetAdapterPolicy.describeStepInFilter({
+      attachMode: false,
+      launch: {
+        dapLaunchArgs: { enableStepFiltering: false },
+        adapterLaunchConfig: { enableStepFiltering: true }
+      }
+    })).toContain('steps over property accessors and operators');
+  });
+
+  it('does not imply a launch-only setting disables filtering on attach', () => {
+    expect(DotnetAdapterPolicy.describeStepInFilter({
+      attachMode: true,
+      launch: {
+        dapLaunchArgs: { enableStepFiltering: false },
+        adapterLaunchConfig: { enableStepFiltering: false }
+      }
+    })).toContain('cannot be turned off on attach');
+  });
+
   // ===== Child sessions =====
 
   it('rejects child session support', () => {

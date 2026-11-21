@@ -407,9 +407,11 @@ export class ExecutionController {
         continuedSeen = true;
       };
 
-      const cleanup = () => {
+      const cleanup = (requestStillPending = false) => {
         proxyManager.off('stopped', onStopped);
-        proxyManager.off('continued', onContinued);
+        // The grace window only finishes this tool answer. A late rejected
+        // request must still know whether its target resumed in the meantime.
+        if (!requestStillPending) proxyManager.off('continued', onContinued);
         proxyManager.off('terminated', onTerminated);
         proxyManager.off('exited', onExited);
         proxyManager.off('exit', onExit);
@@ -418,14 +420,14 @@ export class ExecutionController {
       };
 
       const settle = (result: DebugResult<StepResultData>) => {
+        if (!result.data?.pending && session.inFlightStep === inFlightRecord) {
+          session.inFlightStep = undefined;
+        }
         if (settled) {
           return;
         }
         settled = true;
-        if (!result.data?.pending && session.inFlightStep === inFlightRecord) {
-          session.inFlightStep = undefined;
-        }
-        cleanup();
+        cleanup(result.data?.pending === true);
         resolve(result);
       };
 
@@ -444,7 +446,9 @@ export class ExecutionController {
       };
 
       const settleEnded = (overrideMessage?: string) => {
-        const message = overrideMessage ?? ErrorMessages.stepSessionEnded(session.exitCode);
+        const message = stopSeen
+          ? endedDuringReadMessage
+          : overrideMessage ?? ErrorMessages.stepSessionEnded(session.exitCode);
         success(
           message,
           undefined,
@@ -479,7 +483,10 @@ export class ExecutionController {
         // and for a breakpoint or exception say so in the wording too — with
         // the lost-step signature when it is on the line the step left from.
         const ownStop = session.lastStop && session.lastStop !== lastStopBefore ? session.lastStop : undefined;
-        if (ownStop && session.lastStepProvenance?.stopRef !== ownStop) {
+        const stoppedOnRequestedThread = ownStop?.threadId === undefined || ownStop.threadId === options.threadId;
+        const landedOnRequestedThread =
+          landing.stackResult?.threadId === undefined || landing.stackResult.threadId === options.threadId;
+        if (ownStop && stoppedOnRequestedThread && session.lastStepProvenance?.stopRef !== ownStop) {
           session.lastStepProvenance = {
             stopRef: ownStop,
             flavor,
@@ -513,7 +520,7 @@ export class ExecutionController {
           const adapterDescription = meaningfulStepStopDescription(rawDescription);
           const provenanceNote = compareStepOriginAndLanding(
             flavor,
-            options.stepOrigin,
+            stoppedOnRequestedThread && landedOnRequestedThread ? options.stepOrigin : undefined,
             landing.stackResult?.frames ?? [],
             {
               stepFilterHint: options.stepFilterHint,
@@ -597,6 +604,14 @@ export class ExecutionController {
             );
             return;
           }
+          // A pending answer removes the stop listeners. Core may since have
+          // recorded another stop/resume or replaced the proxy on relaunch;
+          // a rejection of the old request must not roll back that newer run.
+          if (settled && (
+            session.inFlightStep !== inFlightRecord || session.proxyManager !== proxyManager
+          )) {
+            return;
+          }
           // Issue #1179: when the debug adapter itself refuses the step
           // (`DapResponseError`) without having resumed execution, the program
           // is still paused where it was — revert to PAUSED so inspection,
@@ -639,7 +654,8 @@ export class ExecutionController {
             this.ctx.updateState(session, SessionState.ERROR);
           }
           settle({ success: false, error: errorMessage, state: session.state });
-        });
+        })
+        .finally(() => proxyManager.off('continued', onContinued));
     });
   }
 
@@ -1072,9 +1088,11 @@ export class ExecutionController {
       let waitLanding = landing;
       if (stopAtLanding.reason === 'step' && target.lastStepProvenance?.stopRef === stopAtLanding) {
         const prov = target.lastStepProvenance;
+        const landedOnOriginThread =
+          landing.stackResult?.threadId === undefined || landing.stackResult.threadId === prov.origin?.threadId;
         const provenanceNote = compareStepOriginAndLanding(
           prov.flavor,
-          prov.origin,
+          landedOnOriginThread ? prov.origin : undefined,
           landing.stackResult?.frames ?? [],
           {
             stepFilterHint: prov.flavor === 'stepInto' ? this.describeStepInFilter(target, target.id) : undefined,

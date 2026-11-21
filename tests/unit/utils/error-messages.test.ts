@@ -172,6 +172,15 @@ describe('ErrorMessages', () => {
       );
     });
 
+    it('does not claim a repeated step changed lines when its landing location is unavailable', () => {
+      const message = ErrorMessages.stepRepeatedOnSameLine('Stepped over', 3, { locationUnknown: true });
+      expect(message).toContain('3 steps sent');
+      expect(message).toContain('once per expression on a line');
+      expect(message).not.toContain('until the line changed');
+      expect(message).not.toContain('still on the same line');
+      expect(message).not.toContain('caller frame');
+    });
+
     it('stepRefused states that nothing ran and the program is still paused (issue #1179)', () => {
       expect(
         ErrorMessages.stepRefused(
