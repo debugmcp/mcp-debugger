@@ -1733,6 +1733,8 @@ export abstract class SessionManagerCore extends EventEmitter {
     // run (issue #983). The transient entry-stop erase below is NOT a launch
     // boundary: the cache deliberately survives ordinary resumes.
     session.snapshotDiffBase = undefined;
+    session.inFlightStep = undefined;
+    session.lastStepProvenance = undefined;
     session.exitCode = undefined;
     session.adapterCapabilities = undefined;
     session.liveUpdateState = undefined;
@@ -2047,6 +2049,18 @@ export abstract class SessionManagerCore extends EventEmitter {
           ...(body?.description ? { description: exceptionName(body.description) } : {}),
           ...(body?.text ? { text: exceptionName(body.text) } : {})
         };
+        if (session.inFlightStep) {
+          // Another thread may interrupt the step. Its stack cannot prove
+          // anything about motion on the thread that received the command.
+          if (threadId === undefined || threadId === session.inFlightStep.threadId) {
+            session.lastStepProvenance = {
+              stopRef: session.lastStop,
+              flavor: session.inFlightStep.flavor,
+              origin: session.inFlightStep.origin
+            };
+          }
+          session.inFlightStep = undefined;
+        }
         this.countStopOnAncestors(session);
         this._updateSessionState(session, SessionState.PAUSED);
 
@@ -2339,6 +2353,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     // Named function for terminated event
     const handleTerminated = () => {
       clearPauseIntent(session);
+      session.inFlightStep = undefined;
       this.logger.debug(`[SessionManager] handleTerminated: session=${sessionId} currentState=${session.state}`);
       this.logger.info(`[ProxyManager ${sessionId}] Terminated event`);
 
@@ -2373,6 +2388,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     // Named function for exited event
     const handleExited = (exitCode?: number) => {
       clearPauseIntent(session);
+      session.inFlightStep = undefined;
       this.logger.debug(`[SessionManager] handleExited: session=${sessionId} currentState=${session.state} exitCode=${exitCode}`);
       this.logger.info(`[ProxyManager ${sessionId}] Exited event (exitCode=${exitCode})`);
       // Record the debuggee exit code so a crash (non-zero) is
@@ -2626,6 +2642,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     // Named function for error event
     const handleError = (error: Error) => {
       clearPauseIntent(session);
+      session.inFlightStep = undefined;
       this.logger.debug(`[SessionManager] 'error' event handler called for session ${sessionId}`);
       this.logger.error(`[ProxyManager ${sessionId}] Error:`, error);
       // The worker's error report is synchronous and outruns the terminal
@@ -2654,6 +2671,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     // Named function for exit event
     const handleExit = (code: number | null, signal?: string, expected?: boolean) => {
       clearPauseIntent(session);
+      session.inFlightStep = undefined;
       this.logger.debug(`[SessionManager] handleExit: session=${sessionId} currentState=${session.state} code=${code} signal=${signal} expected=${expected}`);
       this.logger.info(`[ProxyManager ${sessionId}] Exit: code=${code}, signal=${signal}, expected=${expected}`);
       // The adapter's own last word, when the worker sent one (issue #897).

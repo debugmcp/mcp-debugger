@@ -70,7 +70,10 @@ Key launch arguments:
   underneath your `dapLaunchArgs` (`src/session/session-manager-core.ts:198`), so the Java adapter's
   own `?? true` fallback never fires on this path. Pass `"stopOnEntry": true` explicitly to pause at
   entry. (The adapter-level default of `true` is real but only observable when calling
-  `transformLaunchConfig` directly, as the unit tests do.)
+  `transformLaunchConfig` directly, as the unit tests do.) Note that `JdiDapServer` does not yet
+  read `justMyCode` when creating JDI `StepRequest`s (issue #1189), so `step_into` on a line that
+  calls a JDK method first (`Math.max(...)`) enters that JDK frame; the step answer's top-level
+  `note` discloses that execution paused inside an internal frame (issue #1181).
 - `javaPath`: Path to the `java` executable (overrides auto-detection)
 - `vmArgs`: Additional JVM arguments as one space-separated string (e.g., `"-Xmx512m"`)
 - Program arguments come from `start_debugging`'s top-level `args` array and are appended after the main class

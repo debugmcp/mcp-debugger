@@ -254,18 +254,43 @@ export const ErrorMessages = {
     (live ? ` Execution is paused in '${live.name}' (${live.where}); a step continues from there.` : ''),
 
   /**
-   * Informational message for step operations still executing after the grace window
+   * Informational message for step operations still executing after the grace window (issues #849, #1178).
    * Occurs when: A step operation (stepOver, stepInto, stepOut) doesn't receive a 'stopped' event
-   * within the grace window — usually because the step runs long-lived user code, which is not an error
-   * Used in: src/session/session-manager-operations.ts
+   * within the grace window — either because the step runs long-lived user code or because the
+   * debug engine dropped the step in an unsupported control-flow shape. Never promises a pause.
+   * Used in: src/session/execution/execution-controller.ts
    * Default grace window: 5 seconds
    * @param graceSeconds - The grace window duration in seconds
    */
   stepStillRunning: (graceSeconds: number) =>
     `Step dispatched; the program is still executing after ${graceSeconds}s ` +
-    `(e.g. stepping over a long-running call). The step is still in effect: the session ` +
-    `remains 'running' and will become 'paused' when it completes. Call wait_for_stop to ` +
-    `block until then, or pause_execution to interrupt.`,
+    `(e.g. stepping over a long-running call). The session remains 'running' and becomes 'paused' ` +
+    `if the step completes; some debug engines can drop a step (see docs/KNOWN_ISSUES.md). ` +
+    `Call wait_for_stop to wait, or pause_execution to interrupt.`,
+
+  /**
+   * Terminal message when the debuggee or session ends before a step pauses (issue #1177).
+   * True both when the step legitimately ran the program to its end and when the engine dropped
+   * the step; never claims the step landed or "completed".
+   * Used in: src/session/execution/execution-controller.ts
+   */
+  stepSessionEnded: (exitCode?: number) =>
+    typeof exitCode === 'number'
+      ? `The step did not pause. ${exitCode === 0 ? 'The program ran to completion (exit code 0)' : `The program exited with code ${exitCode}`}.`
+      : 'The step did not pause: the session ended.',
+
+  /**
+   * Error message when the debug adapter declines a step request without resuming execution (issue #1179).
+   * Used in: src/session/execution/execution-controller.ts
+   */
+  stepRefused: (
+    adapterError: string,
+    where?: { file: string; line: number },
+    hint?: string
+  ) =>
+    `The debug adapter refused the step: ${adapterError}. Nothing ran; the program is still paused` +
+    `${where ? ` at ${where.file}:${where.line}` : ''}.` +
+    (hint ? ` ${hint}` : ''),
 
   /**
    * The lead of a pending step's answer when the proxy's JavaScript stepper has a record of the step (issue #1130)
@@ -312,19 +337,38 @@ export const ErrorMessages = {
 
   /**
    * A step_over the core repeated because the adapter stops once per token
-   * position (issue #879, the Dart SDK adapter): the answer says how many
-   * steps it took, and, when the cap was reached, that the line has not
-   * changed yet.
+   * position (issues #879, #1190, the Dart SDK adapter): chooses the wording
+   * from why the repeat loop stopped so an ended session, a same-line caller
+   * return, or a location-less stop never claims the line changed.
    * Used in: src/session/execution/execution-controller.ts
    * @param stepped - The step flavour's own completion message ("Stepped over")
    * @param steps - How many DAP steps were sent
-   * @param opts.stillOnLine - The cap was reached on the same line
    */
-  stepRepeatedOnSameLine: (stepped: string, steps: number, opts?: { stillOnLine?: boolean }) =>
-    opts?.stillOnLine
-      ? `${stepped} ${steps} times and is still on the same line: this adapter stops once per expression on a line. ` +
+  stepRepeatedOnSameLine: (
+    stepped: string,
+    steps: number,
+    opts?: { stillOnLine?: boolean; callerOnSameLine?: boolean; locationUnknown?: boolean }
+  ) => {
+    if (opts?.stillOnLine) {
+      return (
+        `${stepped} ${steps} times and is still on the same line: this adapter stops once per expression on a line. ` +
         'step_over again to go on, or set a breakpoint on the next line.'
-      : `${stepped} in ${steps} steps: this adapter stops once per expression on a line, so the step was repeated until the line changed.`,
+      );
+    }
+    if (opts?.callerOnSameLine) {
+      return `${stepped} in ${steps} steps: this adapter stops once per expression on a line; stopped on the same line in a caller frame.`;
+    }
+    if (opts?.locationUnknown) {
+      return `${stepped} (${steps} steps sent; this adapter stops once per expression on a line).`;
+    }
+    return `${stepped} in ${steps} steps: this adapter stops once per expression on a line, so the step was repeated until the line changed.`;
+  },
+
+  /**
+   * A token-repeating step_over whose repeated step ended the session (issue #1190).
+   */
+  stepRepeatedThenEnded: (endedMessage: string, steps: number) =>
+    `${endedMessage} (${steps} steps were sent because this adapter stops once per expression on a line.)`,
 
   /**
    * The sentence on a step_into that reached no code of the program (issue #1130)
@@ -486,7 +530,13 @@ export const ErrorMessages = {
   waitForStopPending: (
     seconds: number,
     state: 'running' | 'initializing',
-    why: { armedSummary?: string; debuggerOffWhy?: string; loggingSummary?: string; noUncaughtStop?: NoUncaughtStop } = {}
+    why: {
+      armedSummary?: string;
+      debuggerOffWhy?: string;
+      loggingSummary?: string;
+      noUncaughtStop?: NoUncaughtStop;
+      inFlightStep?: { kind: 'step_over' | 'step_into' | 'step_out'; ageSeconds: number };
+    } = {}
   ) => {
     if (state === 'initializing') {
       return `The session is still starting after ${seconds}s (its launch or attach has not completed). ` +
@@ -500,23 +550,32 @@ export const ErrorMessages = {
     // named apart from what is armed to stop it (issue #865): a caller who
     // set one reads "no breakpoint is armed" as "it was not registered".
     const logging = why.loggingSummary ? `; ${loggingClause(why.loggingSummary)}` : '';
+    const stepClause = why.inFlightStep
+      ? `; a ${why.inFlightStep.kind} sent ${why.inFlightStep.ageSeconds}s ago has not paused`
+      : '';
     if (why.armedSummary) {
-      return `The program is still running after ${seconds}s without reaching ${why.armedSummary}${logging}. ` +
-        `Nothing was cancelled: what is armed stays armed, and the session becomes 'paused' when the program ` +
-        `gets there. Call wait_for_stop again to keep waiting, or pause_execution to interrupt it.`;
+      const pauseCondition = why.inFlightStep
+        ? `if that step or an armed stop lands (some debug engines can drop a step — see docs/KNOWN_ISSUES.md)`
+        : `when the program gets there`;
+      return `The program is still running after ${seconds}s without reaching ${why.armedSummary}${logging}${stepClause}. ` +
+        `Nothing was cancelled: what is armed stays armed, and the session becomes 'paused' ${pauseCondition}. ` +
+        `Call wait_for_stop again to keep waiting, or pause_execution to interrupt it.`;
     }
+    const stepFallback = why.inFlightStep
+      ? `unless that ${why.inFlightStep.kind} (or a pause) lands — some debug engines can drop a step (see docs/KNOWN_ISSUES.md) —`
+      : `unless a step or a pause is still in flight,`;
     // No uncaught exception will stop the program (issues #1009, #1032): the
     // caller opted out, the adapter cannot, or nobody asked — a crash runs to
     // the exit, and promising a stop for it would describe a default this
     // launch does not have.
     if (why.noUncaughtStop) {
-      return `The program is still running after ${seconds}s${logging}, and nothing is armed to stop it ` +
+      return `The program is still running after ${seconds}s${logging}${stepClause}, and nothing is armed to stop it ` +
         `(no ${why.loggingSummary ? 'pausing ' : ''}breakpoint, and no exception filter — ${noUncaughtStopClause(why.noUncaughtStop)}): ` +
-        `unless a step or a pause is still in flight, it will only report its exit. ` +
+        `${stepFallback} it will only report its exit. ` +
         `Call wait_for_stop again to wait for it, or pause_execution to interrupt it.`;
     }
-    return `The program is still running after ${seconds}s${logging}, and no ${why.loggingSummary ? 'pausing ' : ''}breakpoint ` +
-      `or caught-exception filter is armed to stop it: unless a step or a pause is still in flight, it will stop ` +
+    return `The program is still running after ${seconds}s${logging}${stepClause}, and no ${why.loggingSummary ? 'pausing ' : ''}breakpoint ` +
+      `or caught-exception filter is armed to stop it: ${stepFallback} it will stop ` +
       `only for an uncaught exception the debugger catches by default, or report its exit. Call wait_for_stop ` +
       `again to wait for either, or pause_execution to interrupt it.`;
   },

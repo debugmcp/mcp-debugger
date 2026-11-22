@@ -60,7 +60,7 @@ Launch options, all under `adapterLaunchConfig` (or `dapLaunchArgs`):
 | `flutterMode` | Flutter | `debug` (default), `profile` or `release`; the Flutter tool turns the debugger off in the last two, and the launch response says so |
 | `toolArgs` | all | extra arguments for `dart run` / `flutter run` / `flutter test` |
 | `vmAdditionalArgs` | Dart | extra Dart VM flags |
-| `debugExternalPackageLibraries`, `debugSdkLibraries` | all | step into package / SDK code (default off) |
+| `debugExternalPackageLibraries`, `debugSdkLibraries` | all | step into external package / Dart SDK code (the SDK adapter defaults both to `true` when omitted; pass `false` to skip them, issue #1184) |
 | `evaluateToStringInDebugViews` | all | call `toString()` for values (the adapter defaults this to on) |
 | `evaluateGettersInDebugViews`, `showGettersInDebugViews`, `additionalProjectPaths`, `sendLogsToClient`, `customTool`, `customToolReplacesArgs`, `vmServicePort` | all | passed through to the SDK adapter unchanged |
 

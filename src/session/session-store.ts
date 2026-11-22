@@ -44,6 +44,7 @@ import { IProxyManager } from '../proxy/proxy-manager.js';
 import { OutputRingBuffer } from './output-buffer.js';
 import { isDebuggerOff } from './debugger-off.js';
 import type { PauseIntent } from './execution/pause-intent.js';
+import type { StepFlavor, StepOrigin } from './execution/step-provenance.js';
 import type { ProxyFailureDiagnostics } from './launch/proxy-failure-diagnostics.js';
 import { isSessionHidden } from './session-scope.js';
 
@@ -115,6 +116,32 @@ export interface SessionExposure {
  */
 export type ChildReleaseCause = 'adoption-off' | 'cap' | 'unsupported' | 'adoption-failed';
 
+/**
+ * A step dispatched on this session that has not yet paused, ended, or been
+ * superseded by another resume (issue #1178). Lets `wait_for_stop` name the
+ * outstanding step and lets `settleStop` pair a delayed step stop with the
+ * origin stack it started from (issues #1180, #1183).
+ */
+export interface InFlightStep {
+  kind: 'step_over' | 'step_into' | 'step_out';
+  flavor: StepFlavor;
+  command: 'next' | 'stepIn' | 'stepOut';
+  threadId: number;
+  sentAt: number;
+  origin?: StepOrigin;
+}
+
+/**
+ * Provenance paired with the `SessionStopInfo` produced when an `InFlightStep`
+ * stops (issues #1180, #1183): compared by `stopRef` identity so stale steps
+ * never leak onto later stops.
+ */
+export interface StepStopProvenance {
+  stopRef: SessionStopInfo;
+  flavor: StepFlavor;
+  origin?: StepOrigin;
+}
+
 export interface ManagedSession extends DebugSessionInfo {
   executablePath?: string;  // Language-agnostic executable path
   /** The scope the session belongs to (issue #1025, step 2); see CreateSessionParams.ownerKey. */
@@ -171,7 +198,13 @@ export interface ManagedSession extends DebugSessionInfo {
      * base can call a variable new.
      */
     complete: boolean;
+    /** True when frame 1 of the base stack was a resolved caller (issue #1183). */
+    callerResolved?: boolean;
   };
+  /** Step currently in flight (sent, not yet stopped or ended; issue #1178). */
+  inFlightStep?: InFlightStep;
+  /** Origin provenance paired with the stop that completed the last step (issues #1180, #1183). */
+  lastStepProvenance?: StepStopProvenance;
   // Monotonic identity for each proxy installed on this session. A late event
   // from an older worker cannot satisfy intent armed against a newer one.
   proxyGeneration?: number;

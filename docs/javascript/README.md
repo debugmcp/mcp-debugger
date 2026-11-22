@@ -170,7 +170,7 @@ is not lost.
 Such a step shows one of two symptoms:
 
 - It never lands, and the program runs on or ends: the step answers `pending: true` while the program keeps
-  running, or `Step completed as session exited.` when it ends first.
+  running, or `"The step did not pause. The program ran to completion (exit code 0)."` (with `exitCode`) when it ends first.
 - A `step_over` off the end of a `finally` block can instead stop in the next call of the same function, not in
   the caller. Check the stack before you take that stop for the caller.
 

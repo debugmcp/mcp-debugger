@@ -35,7 +35,7 @@
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling, GeneratedFileCandidate, GeneratedFileContext, LocalVariableExtraction, StopReasonContext } from './adapter-policy.js';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling, GeneratedFileCandidate, GeneratedFileContext, LocalVariableExtraction, StepInFilterContext, StopReasonContext } from './adapter-policy.js';
 import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-policy.js';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
@@ -85,17 +85,42 @@ export const DotnetAdapterPolicy = {
   entryStopLaunchKey: 'stopAtEntry',
   /**
    * netcoredbg answers a program it cannot start as a .NET assembly with a
-   * bare HRESULT at configurationDone (issue #959). A source file never gets
-   * this far (the adapter's transform refuses it); a native exe, a .dll that
-   * is not managed, or one built for another architecture still does.
+   * bare HRESULT at configurationDone (issue #959), and refuses `stepOut` /
+   * closing-brace `next` in an async iterator or async ValueTask method that
+   * has awaited with `0x80004005` (issues #1179, #1207).
    */
-  explainRequestFailure: (_command: string, message: string, context: { program?: string }): string | undefined => {
+  explainRequestFailure: (command: string, message: string, context: { program?: string }): string | undefined => {
+    if ((command === 'stepOut' || command === 'next') && /0x80004005/i.test(message)) {
+      return (
+        'netcoredbg cannot step out of (or step over the closing brace of) an async iterator or async ValueTask method ' +
+        'that has awaited (0x80004005); set a breakpoint in the consumer and continue_execution.'
+      );
+    }
     if (!/0x800700c1/i.test(message)) {
       return undefined;
     }
     return (
       `netcoredbg could not start ${context.program ?? 'the program'} as a .NET assembly ` +
       `(0x800700c1, ERROR_BAD_EXE_FORMAT); check that it is a managed assembly built by dotnet build for this runtime.`
+    );
+  },
+
+  /**
+   * netcoredbg enables `enableStepFiltering` by default on launch (matching
+   * vsdbg / Visual Studio), skipping property accessors and operators on
+   * `stepIn`; its attach handler ignores the key (issue #1184).
+   */
+  describeStepInFilter: ({ attachMode, launch }: StepInFilterContext): string | undefined => {
+    if (attachMode) {
+      return 'On a .NET attach, netcoredbg steps over property accessors and operators (enableStepFiltering cannot be turned off on attach).';
+    }
+    const merged = { ...(launch?.dapLaunchArgs ?? {}), ...(launch?.adapterLaunchConfig ?? {}) };
+    if (merged.enableStepFiltering === false) {
+      return undefined;
+    }
+    return (
+      'On a .NET launch, netcoredbg steps over property accessors and operators by default; ' +
+      'pass dapLaunchArgs: { enableStepFiltering: false } to step into them.'
     );
   },
 

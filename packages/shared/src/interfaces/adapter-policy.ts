@@ -268,6 +268,17 @@ export interface UnresolvedSourceContext {
   attachMode: boolean;
 }
 
+/** Context passed to AdapterPolicy.describeStepInFilter (issue #1184). */
+export interface StepInFilterContext {
+  /** True for attach sessions, where launch-only filter keys do not apply. */
+  attachMode: boolean;
+  /** The caller's launch inputs merged over server defaults, as on PendingStopContext. */
+  launch?: {
+    dapLaunchArgs?: Record<string, unknown>;
+    adapterLaunchConfig?: Record<string, unknown>;
+  };
+}
+
 /** Context passed to AdapterPolicy.generatedFileCandidates (issues #938/#950). */
 export interface GeneratedFileContext {
   /** The source path as the breakpoint or stop names it (absolute, server-resolved). */
@@ -642,15 +653,25 @@ export interface AdapterPolicy {
   describeUnresolvedSource?(info: UnresolvedSourceContext): string | undefined;
 
   /**
-   * A sentence that says what an adapter's refusal during the launch's
-   * configuration phase means (issue #959): the worker appends it to the
+   * A sentence that says what an adapter's refusal of a DAP request means
+   * (issues #959, #1179): the worker or execution controller appends it to the
    * adapter's own message, which stays first and unchanged. netcoredbg, for
    * one, answers a program it cannot start with a bare HRESULT
-   * (`Failed command 'configurationDone' : 0x800700c1`). `program` is the
-   * launch's program when the worker knows it. Optional — absent, or
-   * undefined, leaves the adapter's words alone.
+   * (`Failed command 'configurationDone' : 0x800700c1`) and an async-iterator
+   * stepOut it cannot arm with `0x80004005`. `program` is the launch's program
+   * when known. Optional — absent, or undefined, leaves the adapter's words alone.
    */
   explainRequestFailure?(command: string, message: string, context: { program?: string }): string | undefined;
+
+  /**
+   * Explain an engine-side step filter that causes `step_into` to step over
+   * calls by default (issue #1184: netcoredbg's `enableStepFiltering` for
+   * properties and operators; CodeLLDB's Rust step-avoid regexp). Appended to
+   * the step landing's `note` when `step_into` completes in the starting
+   * function without entering a callee. Optional — absent or undefined adds
+   * nothing beyond the factual "No function was entered." disclosure.
+   */
+  describeStepInFilter?(info: StepInFilterContext): string | undefined;
 
   /**
    * The launch-config key this adapter reads for "stop at the program's

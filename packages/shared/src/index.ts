@@ -203,6 +203,7 @@ export type {
   HandshakeContext,
   QueuedDapCommand,
   PendingStopContext,
+  StepInFilterContext,
   StopTopFrameLine,
   GeneratedFileContext,
   GeneratedFileCandidate

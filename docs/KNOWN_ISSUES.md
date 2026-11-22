@@ -94,14 +94,71 @@ V8 loses a step that leaves a function through a `return` that runs a `finally` 
 #1174). That is a `step_out` of such a function, or a `step_over` / `step_into` off its last
 statement; a step that crosses an `await` first is not lost. Measured on Node 22.23.2, 24.14.1
 and 26.9.0 (Node 16.3.0 lands these steps, 16.4.0 and later do not). The step either never
-lands, and the program runs on or ends (`pending: true`, or `Step completed as session
-exited.`), or, for a `step_over` off the end of a `finally` block, can stop in the next call
+lands, and the program runs on or ends (`pending: true`, or `The step did not pause. The program
+ran to completion (exit code 0).`), or, for a `step_over` off the end of a `finally` block, can stop in the next call
 of the same function instead of the caller. mcp-debugger does not rescue these steps.
 
 Workaround: set a breakpoint on the line where you expect execution to come back, then
 `continue_execution`. The fix is in V8 16.0 (V8 issue 569814973, tracked here as #1173). No
 Node release has it yet: it reaches you only through a Node release whose V8 has it. See the
 [JavaScript guide](./javascript/README.md).
+
+## Steps the debug engines lose or stop in another call
+
+Several underlying debug engines drop an in-flight step or complete it in a later invocation of
+the same function in specific control-flow shapes. When the program runs to exit without pausing,
+the step tool answers `"The step did not pause. …"` with `exitCode` (#1177); when it keeps running,
+the pending answer notes that engines can drop steps and `wait_for_stop` names the unpaused step
+(#1178); when a step stops at an unexpected stack depth or in another call stack, the landing
+`note` states what comparing the starting and ending stacks proves (#1180) and `changedVariables`
+rebases to full `locals` across `step_out` re-entries (#1183). Measured shapes and workarounds:
+
+- **Python 3.12 and later (`debugpy` 1.8.20 and 1.8.22).** A `step_out` or `step_over` from a
+  frame that an exception then leaves (at a `raise`, or on a `finally` line while an exception
+  unwinds) never pauses; the program runs on. `step_into` from the same places lands. Workaround
+  (measured on Windows and Linux): launch with `"dapLaunchArgs": {"env": {"PYDEVD_USE_SYS_MONITORING": "0"}}`
+  to use debugpy's frame tracer. Tracked in #1194.
+- **JavaScript (V8, Node 22 to 26).** Beyond the `try … finally` / `for … of` / `using` / async
+  generator return loss above (#1161, #1174), a `step_out` at a `throw` lands one frame past the
+  catching function, or never pauses when the catching function has only a `finally`; a `step_over`
+  off such a `finally` can stop in the function's next call (workaround for the catching shape:
+  `step_over` at the `throw` instead; tracked in #1195). Separately, a `step_out` from a callback
+  that holds a breakpoint which does not stop there (a false condition or a logpoint) stops in the
+  callback's next call (workaround: remove that breakpoint before `step_out`; tracked in #1196).
+- **Ruby (`debug` gem 1.7.0+, measured on 1.11.0 and 1.11.1).** A step that reaches a line holding
+  a breakpoint that does not stop there (a false condition, or a line reached by a return event)
+  is cancelled and the program runs on or stops in a later call (workaround: clear breakpoints in
+  the stepped code first; tracked in #1197). A `step_out` or `step_over` at a fiber boundary (an
+  `Enumerator` block, `Fiber#resume`, `Enumerator#next`) compares depths across fibers and lands in
+  an unrelated frame after more code ran (tracked in #1198). On Ruby 3.4.x (fixed in 4.0.0; 3.3
+  unaffected), while a `rescue` or `ensure` body is on the stack, frames beneath it report their
+  caller's file and line and omit the outermost frame.
+- **Go (`Delve` 1.26.3 and 1.27.2).** A `step_over` or `step_out` on a goroutine ended by
+  `runtime.Goexit` (`t.Fatal`, `t.FailNow`, `t.SkipNow`) never stops in its deferred calls
+  (workaround: set a breakpoint inside the deferred function; tracked in #1199). By Delve design,
+  a `step_out` at a `panic` in a function that recovers in its own deferred closure stops at that
+  closure's entry while the panicking function is still on the stack below it.
+- **.NET (`netcoredbg` 3.1.3, CoreCLR 8.0).** `step_out` from an async iterator (`IAsyncEnumerable<T>`)
+  or an `async ValueTask` method that has awaited (and `step_over` on its closing brace) is refused
+  with `0x80004005`; the session stays `paused` (#1179; workaround: set a breakpoint in the
+  consumer and `continue_execution`; tracked in #1207). A `step_over` at a `yield return` of an
+  async iterator that has already awaited never pauses (workaround: `step_into` from that line
+  lands in the consumer's `await foreach`, or set a breakpoint in the loop body; tracked in #1205).
+  A `step_over` on a `catch … when (…)` clause can stop inside a callee's `finally` (#1206).
+- **Dart (SDK 3.13.4 and 3.13.5 debug adapter).** A `step_over` or `step_out` that meets a logpoint
+  or a false-condition breakpoint is dropped when the SDK adapter resumes the isolate without the
+  in-flight step (#1201; removing that breakpoint lets the step land). `step_into` on a
+  `var x = f();` line stops on the same line at the call token first (workaround: call `step_into`
+  a second time to enter `f()`; tracked in #1200).
+- **C++ and Rust (`CodeLLDB` 1.11.8 / LLDB 20.1.4 and 1.12.3 / LLDB 22.1.8).** A `step_over` or
+  `step_out` whose frame a C++ exception or Rust panic unwinds never pauses, or completes in a
+  later call of the same function (workarounds for C++: a breakpoint in the handler or a destructor
+  run during unwind, or `breakOnExceptions: "all"`; tracked in #1202). In Rust, `step_over` on an
+  `.await` that suspends stops in the awaiting caller before the async function finishes
+  (workaround: set a breakpoint on the `.await` line, which also binds to the resume poll). On
+  Windows C++, `step_into` an inlined call pauses on the right line with stop reason `exception`
+  (`0x80000003`, #1203), and under MinGW `g++` 15.2 a `step_over` off a closing `}` stops a second
+  time at the return instruction with an unresolved caller frame (#1204).
 
 ## Dart/Flutter: what the SDK debug adapter does differently
 

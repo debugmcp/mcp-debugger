@@ -607,7 +607,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       }
     });
 
-    it('keeps the pending-step message untouched, and reads no stack, when the policy has no explanation (issue #678)', async () => {
+    it('keeps the pending-step message free of policy text while still reading the origin stack for provenance (issues #678, #1180)', async () => {
       vi.useFakeTimers();
       try {
         mockSession.state = SessionState.PAUSED;
@@ -622,7 +622,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
         expect(result.data?.pending).toBe(true);
         expect(result.data?.message).toBe(ErrorMessages.stepStillRunning(5));
-        expect(detailed).not.toHaveBeenCalled();
+        expect(detailed).toHaveBeenCalledWith('test-session', 1, true, { ensureStackReady: false });
       } finally {
         vi.useRealTimers();
       }

@@ -78,6 +78,12 @@ export const RustAdapterPolicy = {
   // (issue #816).
   describeUnresolvedSource: describeLldbUnresolvedSource,
 
+  // CodeLLDB's Rust support sets `target.process.thread.step-avoid-regexp` to
+  // `^<?(std|core|alloc)::` (issue #1184): `step_into` skips standard-library
+  // calls and `Drop::drop` glue invoked via `core::ptr::drop_in_place`.
+  describeStepInFilter: (): string =>
+    'CodeLLDB skips Rust std/core/alloc frames by default (including Drop::drop glue entered through core::ptr::drop_in_place); set a breakpoint inside the target function to stop there.',
+
   /**
    * Extract local variables for Rust, filtering out special variables by default
    */

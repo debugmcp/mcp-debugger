@@ -80,6 +80,12 @@ export async function describeStopLocation(
     if (result.note && stillPaused) {
       notes.push(result.note);
     }
+    // Issue #1181: an internal paused frame (kept as frame 0 or hidden above
+    // the visible anchor, issue #672) belongs on the top-level stop `note` so
+    // callers see it even with snapshots off or explicit variable access.
+    if (result.pausedFrameNote && stillPaused) {
+      notes.push(result.pausedFrameNote);
+    }
     if (result.noProgramFrame && top) {
       landing.noProgramFrame = true;
       // The answer shows one frame, as `location`; the rest of the thread's

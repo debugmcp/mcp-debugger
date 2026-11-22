@@ -142,6 +142,28 @@ describe('describeStopLocation (issue #904)', () => {
     expect(landing).toEqual({ note, stackResult: read });
   });
 
+  it('surfaces pausedFrameNote on the landing note while paused so callers see internal stops even without snapshots (issue #1181)', async () => {
+    const mathMax = { id: 1, name: 'java.lang.Math.max', file: 'java/lang/Math.java', line: 2020, column: 0, unresolvedSource: true as const };
+    const pausedFrameNote =
+      "Paused inside an internal frame 'java.lang.Math.max' (java/lang/Math.java:2020); kept as frame 0 so locals and evaluate anchor on the actual stop location.";
+    const read = result({
+      frames: [mathMax, MAIN],
+      totalFrameCount: 2,
+      threadId: 1,
+      pausedFrame: { frame: mathMax, kept: true },
+      pausedFrameNote
+    });
+    const { ctx } = context({ reason: 'step', stopThreadId: 1, read });
+
+    const landing = await describeStopLocation(ctx, 'sid', 'stepInto');
+
+    expect(landing.note).toBe(pausedFrameNote);
+    expect(landingFields(landing)).toEqual({
+      location: { file: 'java/lang/Math.java', line: 2020, column: 0, unresolvedSource: true },
+      note: pausedFrameNote
+    });
+  });
+
   it('drops the resolver note once the session left PAUSED under the read, so a "not paused" note never rides on a Paused answer', async () => {
     const read = result({ frames: [], totalFrameCount: 0, note: 'Cannot get stack trace: session is running.' });
     const { ctx } = context({
