@@ -298,7 +298,7 @@ export class ChildConnections extends EventEmitter {
       // logpoint binding is in the child before its first statement. Not
       // awaited: the child is adopted either way, and the socket's replay
       // covers a pause that comes before it is open.
-      this.startServices(deps, connection);
+      this.startServices(deps, connection, args.breakpoints ?? []);
       await wait(attach);
 
       connection.cancelAdoption = undefined;
@@ -483,9 +483,18 @@ export class ChildConnections extends EventEmitter {
     return stepper?.handles(command, args) ? stepper.request(command, args) : null;
   }
 
-  /** Any other request for the child: one that resumes or ends it ends a step still in flight. */
-  async beforeRequest(sessionId: string, command: string): Promise<void> {
-    await this.clients.get(sessionId)?.services?.stepper?.beforeRequest(command);
+  /**
+   * Any other request for the child: one that resumes or ends it ends a
+   * step still in flight, and breakpoints on their way to it are looked at
+   * for a logpoint (issue #1212: a child that holds one is told when its
+   * logpoints cannot be delivered).
+   */
+  async beforeRequest(sessionId: string, command: string, args?: unknown): Promise<void> {
+    const services = this.clients.get(sessionId)?.services;
+    if (command === 'setBreakpoints') {
+      services?.noteBreakpoints((args as { breakpoints?: unknown[] } | undefined)?.breakpoints);
+    }
+    await services?.stepper?.beforeRequest(command);
   }
 
   /**
@@ -577,7 +586,7 @@ export class ChildConnections extends EventEmitter {
    * process that hit it. Function breakpoints stay unarmed in a child (issue
    * #1219): nothing syncs them onto this socket.
    */
-  private startServices(deps: ChildAdoptionDeps, connection: ChildConnection): void {
+  private startServices(deps: ChildAdoptionDeps, connection: ChildConnection, adopted: readonly unknown[]): void {
     const stepper = deps.policy.getDapClientBehavior().stepsThroughSkippedCode === true;
     const bridge = deps.policy.functionBreakpointsVia === 'cdp';
     if (!stepper && !bridge) {
@@ -604,6 +613,9 @@ export class ChildConnections extends EventEmitter {
       this.sendEvent(sessionId, 'output', event.body);
     });
     connection.services = services;
+    // The breakpoints this child was adopted with went out before the
+    // socket existed: say now whether a logpoint was among them.
+    services.noteBreakpoints(adopted);
     void services
       .attach({ sendRequest: (command, args, timeoutMs) => client.sendRequest(command, args, timeoutMs) })
       .then(() => {

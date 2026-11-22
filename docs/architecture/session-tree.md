@@ -203,7 +203,10 @@ asked for the moment the fork's `configurationDone` is answered (the adapter sta
 about 20 ms later, and a hit that comes before the binding is kept in the process and flushed),
 and the fork's `terminated` and closed status are sent after one round trip on that socket (its
 last lines arrive about 1 ms after the adapter's `terminated`, and the parent takes a child's
-output until its end). The measurements are in
+output until its end). That round trip is answered by js-debug's proxy, not by the target: it
+follows what the proxy had relayed when it took the request, and that the proxy has relayed
+everything by the time the adapter reports a target's end is measured, not promised by a
+protocol. The measurements are in
 [spike-notes-forks.md](../javascript/spike-notes-forks.md).
 
 The attribution is one per-adapter policy pin (below), applied to launch roots. The per-process-only

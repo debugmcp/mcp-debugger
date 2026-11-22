@@ -1571,10 +1571,51 @@ describe("ChildConnections: an adopted child's proxy stepper (issue #1130)", () 
       answerProxy({ body: {} });
 
       await vi.waitFor(() => expect(connections.has('child-1')).toBe(false));
-      // Told that this process's logpoints were not delivered, then its end, in order.
-      expect(childTraffic()).toEqual(['output', 'terminated', 'dap_connection_closed']);
-      expect(outputs()[0]).toMatch(/^\[mcp-debugger\] Warning: logpoints that hit in this process are not delivered/);
+      // Its end, in order; it holds no logpoint, so there is nothing to tell it about its channel.
+      expect(childTraffic()).toEqual(['terminated', 'dap_connection_closed']);
       expect(cdpClients).toHaveLength(0);
+    });
+
+    /** A child whose `requestCDPProxy` the adapter answers with no address: its channel never comes up. */
+    async function adoptWithoutChannel(breakpoints: Array<Record<string, unknown>>): Promise<void> {
+      build({ rootSteps: () => true });
+      childClient.sendRequest.mockImplementation(async () => ({ body: {} }));
+      root.emit('child-report', {
+        request: { seq: 7, type: 'request', command: 'startDebugging', arguments: { request: 'launch', configuration: jsConfiguration } },
+        report: jsReport
+      });
+      const reportId = sent.filter((m) => m.status === 'child_reported').at(-1)!.reportId as string;
+      const adopting = connections.adopt('child-1', { reportId, breakpoints: breakpoints as never });
+      await new Promise((resolve) => setImmediate(resolve));
+      childClient.emit('initialized');
+      await adopting;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    it('a child adopted with a logpoint is told when its channel cannot be opened; one adopted without is not', async () => {
+      await adoptWithoutChannel([{ file: '/abs/child.js', line: 3 }]);
+      expect(outputs()).toEqual([]);
+
+      await adoptWithoutChannel([{ file: '/abs/child.js', line: 3 }, { file: '/abs/child.js', line: 5, logMessage: 'n={n}' }]);
+      expect(outputs()).toHaveLength(1);
+      expect(outputs()[0]).toMatch(/^\[mcp-debugger\] Warning: logpoints that hit in this process are not delivered/);
+    });
+
+    it('a logpoint set on a child later is noticed on its way to the adapter, in the form it travels in', async () => {
+      await adoptWithoutChannel([]);
+      // Other requests, and breakpoints that are not logpoints, say nothing.
+      await connections.beforeRequest('child-1', 'threads', {});
+      await connections.beforeRequest('child-1', 'setBreakpoints', { source: { path: '/abs/child.js' }, breakpoints: [{ line: 3, condition: 'n > 1' }] });
+      expect(outputs()).toEqual([]);
+
+      // The wire form: the logMessage is gone, the condition is the compiled logpoint.
+      await connections.beforeRequest('child-1', 'setBreakpoints', {
+        source: { path: '/abs/child.js' },
+        breakpoints: [{ line: 5, condition: `(() => { ${JS_LOGPOINT_BINDING}('n'); return false; })()` }]
+      });
+
+      expect(outputs()).toHaveLength(1);
+      expect(outputs()[0]).toMatch(/logpoints that hit in this process are not delivered/);
     });
 
     it('close() by this worker does not wait for a held end', async () => {

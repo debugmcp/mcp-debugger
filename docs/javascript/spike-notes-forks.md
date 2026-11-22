@@ -82,7 +82,9 @@ the fork's connection.
 4. **The end of a fork.** The fork's last `Runtime.bindingCalled` arrives about 1 ms AFTER the DAP
    `terminated` for it: two sockets from the same adapter process. js-debug's proxy answers a method of
    its own `JsDebug` domain itself, and one it does not have with an error at once, so one such round
-   trip sent after `terminated` is answered after everything the target sent before.
+   trip sent after `terminated` is answered after everything the proxy had relayed by then. Whether
+   the proxy has relayed all of a target's events when the adapter sends `terminated` is not stated
+   anywhere in js-debug: item 5 is the evidence.
 5. **Through the server** (a parent that forks a child which hits two logpoints and exits at once,
    12 runs in one server): with the fork's `terminated` held behind that round trip, both lines are on
    the fork's session in 12 of 12 runs; with the wait skipped, in 0 of 12. A fork that lives for three
@@ -91,5 +93,10 @@ the fork's connection.
 6. **A `worker_threads` worker** is a target of its own and is adopted as a child session like a
    fork. Its logpoint lines went the same way: before, into the process's stdout (they showed on the
    launch session as `stdout` lines between the program's own); now, on the worker's session.
-7. **Not measured here:** Linux and macOS (the two sockets may race differently; the wait does not
+7. **The program's own target** (an ES module that hits two logpoints and exits at once, 12 runs
+   each). Its end loses nothing with or without this change: both lines arrive in 12 of 12. Its
+   first statement did not have the binding before: `LP one` arrived as a `stdout` line (the
+   `console.log` fall-back) in 12 of 12 runs on main, and as a `console` line (the debugger's
+   channel) in 12 of 12 with the change.
+8. **Not measured here:** Linux and macOS (the two sockets may race differently; the wait does not
    depend on which is first), and a fork under an attach root.

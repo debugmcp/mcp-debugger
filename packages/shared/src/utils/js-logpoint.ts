@@ -15,7 +15,12 @@
  * A hit while the binding is absent is kept, not printed (issue #1212): the
  * message goes on a short queue in the process, and is delivered through
  * the binding, in order, at the next hit or when the proxy flushes the queue
- * right after installing the binding (`JS_LOGPOINT_FLUSH`). It used to fall
+ * right after installing the binding (`JS_LOGPOINT_FLUSH`). What the queue
+ * may leave in a program is bounded and out of its sight: at most
+ * `JS_LOGPOINT_QUEUE_LIMIT` messages and `JS_LOGPOINT_QUEUE_CHARS`
+ * characters (the rest are counted), on globals that are not enumerable (a
+ * test runner's global-leak check does not see them), deleted when the
+ * debugger lets go of the process (`JS_LOGPOINT_CLEAR`). It used to fall
  * back to `console.log`: a logpoint is the debugger's instrument, and the
  * program's stdout is the program's. A forked child whose stdout is a pipe
  * its parent parses had the text written into that pipe (the parent read a
@@ -36,6 +41,15 @@ export const JS_LOGPOINT_QUEUE = '__mcpDebuggerLogpointQueue';
 export const JS_LOGPOINT_DROPPED = '__mcpDebuggerLogpointDropped';
 /** How many undelivered messages a process keeps; the rest are counted, not kept. */
 export const JS_LOGPOINT_QUEUE_LIMIT = 1000;
+/** How many characters of undelivered messages a process keeps, all messages together. */
+export const JS_LOGPOINT_QUEUE_CHARS = 1_000_000;
+
+/** Evaluated by the proxy when it lets go of a process: nothing of the queue stays behind. */
+export const JS_LOGPOINT_CLEAR = `(() => {
+  delete globalThis.${JS_LOGPOINT_QUEUE};
+  delete globalThis.${JS_LOGPOINT_DROPPED};
+  return 0;
+})()`;
 
 /**
  * Evaluated in the debuggee by the proxy right after it installed the
@@ -47,9 +61,10 @@ export const JS_LOGPOINT_QUEUE_LIMIT = 1000;
 export const JS_LOGPOINT_FLUSH = `(() => {
   const g = globalThis;
   const dropped = g.${JS_LOGPOINT_DROPPED} | 0;
-  g.${JS_LOGPOINT_DROPPED} = 0;
+  if (dropped) g.${JS_LOGPOINT_DROPPED} = 0;
   const q = g.${JS_LOGPOINT_QUEUE};
   if (typeof ${JS_LOGPOINT_BINDING} === 'function' && q && q.length) {
+    q.chars = 0;
     for (const held of q.splice(0)) ${JS_LOGPOINT_BINDING}(held);
   }
   return dropped;
@@ -256,11 +271,14 @@ const STRINGIFY = `const __mcpStr = (v) => {
     const g = globalThis;
     if (typeof ${JS_LOGPOINT_BINDING} === 'function') {
       const q = g.${JS_LOGPOINT_QUEUE};
-      if (q && q.length) { for (const held of q.splice(0)) ${JS_LOGPOINT_BINDING}(held); }
+      if (q && q.length) { q.chars = 0; for (const held of q.splice(0)) ${JS_LOGPOINT_BINDING}(held); }
       ${JS_LOGPOINT_BINDING}(m);
     } else {
-      const q = g.${JS_LOGPOINT_QUEUE} || (g.${JS_LOGPOINT_QUEUE} = []);
-      if (q.length < ${JS_LOGPOINT_QUEUE_LIMIT}) q.push(m); else g.${JS_LOGPOINT_DROPPED} = (g.${JS_LOGPOINT_DROPPED} | 0) + 1;
+      const hide = (name, value) => Object.defineProperty(g, name, { value, writable: true, configurable: true, enumerable: false });
+      let q = g.${JS_LOGPOINT_QUEUE};
+      if (!q) { q = []; q.chars = 0; hide('${JS_LOGPOINT_QUEUE}', q); }
+      if (q.length < ${JS_LOGPOINT_QUEUE_LIMIT} && q.chars + m.length <= ${JS_LOGPOINT_QUEUE_CHARS}) { q.push(m); q.chars += m.length; }
+      else hide('${JS_LOGPOINT_DROPPED}', (g.${JS_LOGPOINT_DROPPED} | 0) + 1);
     }
   };`;
 

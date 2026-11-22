@@ -16,6 +16,7 @@
  * breakpoints to relabel; a fork has neither).
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
+import { JS_LOGPOINT_BINDING } from '@debugmcp/shared';
 import { CdpFunctionBreakpointBridge, type ChildDapRequestor } from './cdp-function-breakpoint-bridge.js';
 import { CdpProxyClient } from './cdp-proxy-client.js';
 import { JsStepper } from './js-stepper.js';
@@ -79,6 +80,26 @@ export class JsTargetServices {
     if (!this.bridge.isAttached()) {
       // No socket after all: the stepper lets go of the one it was handed.
       this.stepper?.detachCdp();
+    }
+  }
+
+  /**
+   * Breakpoints the owner is sending this target, in either form they
+   * travel in: with their `logMessage`, or as the wire form whose
+   * `condition` is the compiled logpoint. A target that was sent a
+   * logpoint is one that must be told when its logpoints cannot be
+   * delivered; a target that never was has nothing to be told.
+   */
+  noteBreakpoints(breakpoints: readonly unknown[] | undefined): void {
+    const carriesLogpoint = (breakpoints ?? []).some((breakpoint) => {
+      const { logMessage, condition } = (breakpoint ?? {}) as { logMessage?: unknown; condition?: unknown };
+      return (
+        (typeof logMessage === 'string' && logMessage.length > 0) ||
+        (typeof condition === 'string' && condition.includes(JS_LOGPOINT_BINDING))
+      );
+    });
+    if (carriesLogpoint) {
+      this.bridge?.noteLogpoints();
     }
   }
 

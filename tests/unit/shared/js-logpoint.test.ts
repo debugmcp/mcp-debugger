@@ -1,9 +1,11 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import {
   JS_LOGPOINT_BINDING,
+  JS_LOGPOINT_CLEAR,
   JS_LOGPOINT_DROPPED,
   JS_LOGPOINT_FLUSH,
   JS_LOGPOINT_QUEUE,
+  JS_LOGPOINT_QUEUE_CHARS,
   JS_LOGPOINT_QUEUE_LIMIT,
   parseJsLogMessage,
   validateJsLogpoint,
@@ -158,6 +160,8 @@ describe('compileJsLogpoint', () => {
 
   describe('while the binding is not installed (issue #1212)', () => {
     const globals = globalThis as unknown as Record<string, unknown>;
+    /** The kept messages (the queue is an array with a running character count on it). */
+    const kept = (): string[] => [...((globals[JS_LOGPOINT_QUEUE] as string[] | undefined) ?? [])];
     const compiledFor = (logMessage: string): string => {
       const compiled = compileJsLogpoint({ logMessage });
       if (!compiled.ok) {
@@ -176,7 +180,43 @@ describe('compileJsLogpoint', () => {
       expect(run({ log: (m: unknown) => logged.push(m) }, 1)).toBe(false);
       expect(run({ log: (m: unknown) => logged.push(m) }, 2)).toBe(false);
       expect(logged).toEqual([]);
-      expect(globals[JS_LOGPOINT_QUEUE]).toEqual(['plain 1', 'plain 2']);
+      expect(kept()).toEqual(['plain 1', 'plain 2']);
+    });
+
+    it('keeps them out of the program\'s sight: neither global is enumerable, and the proxy\'s clear deletes both', () => {
+      const unbound = new Function('n', `return (${compiledFor('m{n}')});`);
+      for (let n = 0; n < JS_LOGPOINT_QUEUE_LIMIT + 1; n++) {
+        unbound(n);
+      }
+      expect(JS_LOGPOINT_QUEUE in globals).toBe(true);
+      expect(JS_LOGPOINT_DROPPED in globals).toBe(true);
+      // What a global-leak check reads (mocha --check-leaks, jest).
+      expect(Object.keys(globalThis)).not.toContain(JS_LOGPOINT_QUEUE);
+      expect(Object.keys(globalThis)).not.toContain(JS_LOGPOINT_DROPPED);
+
+      expect(new Function(`return ${JS_LOGPOINT_CLEAR};`)()).toBe(0);
+
+      expect(JS_LOGPOINT_QUEUE in globals).toBe(false);
+      expect(JS_LOGPOINT_DROPPED in globals).toBe(false);
+      // Cleared, a later hit starts over.
+      unbound(7);
+      expect(kept()).toEqual(['m7']);
+    });
+
+    it('keeps a bounded number of characters too, and counts what did not fit', () => {
+      const unbound = new Function('s', `return (${compiledFor('{s}')});`);
+      const big = 'x'.repeat(JS_LOGPOINT_QUEUE_CHARS / 4);
+      for (let i = 0; i < 6; i++) {
+        unbound(big);
+      }
+      expect(kept()).toHaveLength(4);
+      expect(globals[JS_LOGPOINT_DROPPED]).toBe(2);
+      // Delivered, the budget is whole again.
+      const emitted: string[] = [];
+      new Function(JS_LOGPOINT_BINDING, `return ${JS_LOGPOINT_FLUSH};`)((m: string) => emitted.push(m));
+      expect(emitted).toHaveLength(4);
+      unbound(big);
+      expect(kept()).toHaveLength(1);
     });
 
     it('delivers what it kept first, in order, at the next hit that has the binding', () => {
@@ -188,7 +228,7 @@ describe('compileJsLogpoint', () => {
       const bound = new Function(JS_LOGPOINT_BINDING, 'n', `return (${condition});`);
       expect(bound((m: string) => emitted.push(m), 3)).toBe(false);
       expect(emitted).toEqual(['hit 1', 'hit 2', 'hit 3']);
-      expect(globals[JS_LOGPOINT_QUEUE]).toEqual([]);
+      expect(kept()).toEqual([]);
     });
 
     it('keeps a bounded number of messages and counts the rest', () => {
@@ -209,14 +249,14 @@ describe('compileJsLogpoint', () => {
       const flush = new Function(JS_LOGPOINT_BINDING, `return ${JS_LOGPOINT_FLUSH};`);
       expect(flush((m: string) => emitted.push(m))).toBe(4);
       expect(emitted).toEqual(['m1', 'm2']);
-      expect(globals[JS_LOGPOINT_QUEUE]).toEqual([]);
+      expect(kept()).toEqual([]);
       // Asked again, there is nothing left to deliver or to report.
       expect(flush((m: string) => emitted.push(m))).toBe(0);
       expect(emitted).toEqual(['m1', 'm2']);
       // Without the binding it delivers nothing and loses nothing.
       unbound(3);
       expect(new Function(`return ${JS_LOGPOINT_FLUSH};`)()).toBe(0);
-      expect(globals[JS_LOGPOINT_QUEUE]).toEqual(['m3']);
+      expect(kept()).toEqual(['m3']);
     });
   });
 

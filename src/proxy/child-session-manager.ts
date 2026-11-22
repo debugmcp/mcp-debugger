@@ -403,6 +403,8 @@ export class ChildSessionManager extends EventEmitter {
     sourcePath: string,
     breakpoints: DebugProtocol.SourceBreakpoint[]
   ): Promise<DebugProtocol.SetBreakpointsResponse> {
+    // A target that is sent a logpoint is told when its logpoints cannot be delivered (issue #1212).
+    this.services.noteBreakpoints(breakpoints);
     const send = (): Promise<DebugProtocol.SetBreakpointsResponse> =>
       child.sendRequest<DebugProtocol.SetBreakpointsResponse>('setBreakpoints', {
         source: { path: sourcePath },

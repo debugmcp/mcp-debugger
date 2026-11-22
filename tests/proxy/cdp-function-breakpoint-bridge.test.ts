@@ -15,7 +15,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { CdpFunctionBreakpointBridge, MAX_SCRIPT_URLS } from '../../src/proxy/cdp-function-breakpoint-bridge.js';
-import { JS_LOGPOINT_BINDING, JS_LOGPOINT_FLUSH } from '@debugmcp/shared';
+import { JS_LOGPOINT_BINDING, JS_LOGPOINT_CLEAR, JS_LOGPOINT_FLUSH } from '@debugmcp/shared';
 
 type CdpHandler = (params: Record<string, unknown>) => unknown;
 
@@ -71,8 +71,12 @@ class FakeCdpClient extends EventEmitter {
     this.connected = true;
   }
 
-  async send(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
+  /** The timeout each call was sent with, by method. */
+  timeouts = new Map<string, Array<number | undefined>>();
+
+  async send(method: string, params: Record<string, unknown> = {}, timeoutMs?: number): Promise<unknown> {
     this.calls.push({ method, params });
+    this.timeouts.set(method, [...(this.timeouts.get(method) ?? []), timeoutMs]);
     const handler = this.handlers.get(method);
     return handler ? handler(params) : {};
   }
@@ -819,6 +823,7 @@ describe('CdpFunctionBreakpointBridge', () => {
     it('tells the session, once, that logpoints are not delivered when the binding is refused', async () => {
       const outputs: DebugProtocol.OutputEvent[] = [];
       bridge.on('outputEvent', (evt: DebugProtocol.OutputEvent) => outputs.push(evt));
+      bridge.noteLogpoints();
       cdp.handlers.set('Runtime.addBinding', () => {
         throw new Error('Runtime.addBinding: not supported');
       });
@@ -837,9 +842,36 @@ describe('CdpFunctionBreakpointBridge', () => {
       expect(outputs[0].body.output).toContain("kept out of the program's own output");
     });
 
+    it('says nothing about a target that was never sent a logpoint, and says it the moment one is', async () => {
+      // A fork that ends before its socket is open is the common case of a
+      // channel that never came up: a warning about nothing, without this.
+      const outputs: DebugProtocol.OutputEvent[] = [];
+      bridge.on('outputEvent', (evt: DebugProtocol.OutputEvent) => outputs.push(evt));
+      child.failProxyRequest = true;
+      await attach();
+      expect(outputs).toHaveLength(0);
+
+      bridge.noteLogpoints();
+      bridge.noteLogpoints();
+
+      expect(outputs.map((o) => o.body.output)).toEqual([
+        expect.stringMatching(/logpoints that hit in this process are not delivered.*requestCDPProxy timed out/)
+      ]);
+    });
+
+    it('a logpoint sent to a target whose binding is in says nothing', async () => {
+      const outputs: DebugProtocol.OutputEvent[] = [];
+      bridge.on('outputEvent', (evt: DebugProtocol.OutputEvent) => outputs.push(evt));
+      bridge.noteLogpoints();
+      await attach();
+      bridge.noteLogpoints();
+      expect(outputs).toHaveLength(0);
+    });
+
     it('tells the session when the CDP socket cannot be opened at all, and says nothing when the binding went in', async () => {
       const outputs: DebugProtocol.OutputEvent[] = [];
       bridge.on('outputEvent', (evt: DebugProtocol.OutputEvent) => outputs.push(evt));
+      bridge.noteLogpoints();
       child.failProxyRequest = true;
       await attach();
       expect(outputs.map((o) => o.body.output)).toEqual([
@@ -854,6 +886,7 @@ describe('CdpFunctionBreakpointBridge', () => {
       });
       const bound = new CdpFunctionBreakpointBridge({ clientFactory: () => other as never, stopEventHoldMs: 40 });
       bound.on('outputEvent', (evt: DebugProtocol.OutputEvent) => quiet.push(evt));
+      bound.noteLogpoints();
       await bound.attachToChild(new FakeChildClient() as never);
       expect(quiet).toHaveLength(0);
     });
@@ -863,6 +896,28 @@ describe('CdpFunctionBreakpointBridge', () => {
       bridge.detach();
       expect(cdp.callsFor('Runtime.removeBinding')).toEqual([{ method: 'Runtime.removeBinding', params: { name: JS_LOGPOINT_BINDING } }]);
       expect(cdp.disposeCalls).toBe(1);
+    });
+
+    it('leaves nothing of the kept messages in a process it lets go of, binding or not (issue #1212)', async () => {
+      await attach();
+      const before = cdp.calls.length;
+      bridge.detach();
+      const sent = cdp.calls.slice(before);
+      expect(sent[0]).toEqual({ method: 'Runtime.evaluate', params: { expression: JS_LOGPOINT_CLEAR, returnByValue: true } });
+      expect(sent.map((c) => c.method)).toEqual(['Runtime.evaluate', 'Runtime.removeBinding']);
+
+      // A target that refused the binding still kept messages: cleared too, and no binding to remove.
+      const other = new FakeCdpClient();
+      other.handlers.set('Runtime.addBinding', () => {
+        throw new Error('Runtime.addBinding: not supported');
+      });
+      const unbound = new CdpFunctionBreakpointBridge({ clientFactory: () => other as never, stopEventHoldMs: 40 });
+      await unbound.attachToChild(new FakeChildClient() as never);
+      const otherBefore = other.calls.length;
+      unbound.detach();
+      expect(other.calls.slice(otherBefore)).toEqual([
+        { method: 'Runtime.evaluate', params: { expression: JS_LOGPOINT_CLEAR, returnByValue: true } }
+      ]);
     });
   });
 
@@ -950,6 +1005,20 @@ describe('CdpFunctionBreakpointBridge', () => {
       expect(cdp.callsFor('JsDebug.mcpDebuggerBarrier')).toHaveLength(1);
       const order = cdp.calls.map((c) => c.method);
       expect(order.indexOf('Debugger.enable')).toBeLessThan(order.indexOf('JsDebug.mcpDebuggerBarrier'));
+      await attaching;
+    });
+
+    it('settle() has one deadline: the round trip gets what the attach in flight left of it', async () => {
+      child.proxyRequestDelayMs = 60;
+      const attaching = attach();
+
+      await bridge.settle(400);
+
+      const barrier = cdp.timeouts.get('JsDebug.mcpDebuggerBarrier') ?? [];
+      expect(barrier).toHaveLength(1);
+      expect(barrier[0]).toBeGreaterThan(0);
+      // Not 400 again: the attach took at least 60 of them.
+      expect(barrier[0]).toBeLessThanOrEqual(345);
       await attaching;
     });
 

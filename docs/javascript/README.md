@@ -327,13 +327,19 @@ and exited 3 instead of 0, and no session showed the lines).
 No stop, hold or resume is added to deliver a logpoint. The binding is usually in a fork before
 its first statement runs: the socket is asked for the moment the fork's `configurationDone` is
 answered, and js-debug lets the fork run about 20 ms later. A hit that comes before the binding
-is kept in the process (up to 1000 messages; a line says how many did not fit) and delivered, in
-order, as soon as the binding is in. The end of a fork is reported after one round trip on its
-CDP socket (at most 500 ms): its last lines were measured to arrive about 1 ms after the
-adapter's `terminated`. A fork that hits two logpoints and exits at once delivered both lines in
-12 of 12 runs with that wait, and in 0 of 12 without it. What is still lost: the lines of a fork
-whose CDP socket never opens; its session then carries one `[mcp-debugger] Warning` line saying
-that its logpoints are not delivered. Function breakpoints are not armed in a fork (#1219).
+is kept in the process and delivered, in order, as soon as the binding is in. What is kept is
+bounded (1000 messages and 1,000,000 characters; a line says how many did not fit), sits on
+globals that are not enumerable, and is deleted when the debugger lets go of the process. The
+end of a fork is reported after one round trip on its CDP socket (at most 500 ms): its last
+lines were measured to arrive about 1 ms after the adapter's `terminated`. A fork that hits two
+logpoints and exits at once delivered both lines in 12 of 12 runs with that wait, and in 0 of 12
+without it. What is still lost: the lines of a process whose CDP socket never opens; if it was
+sent a logpoint, its session carries one `[mcp-debugger] Warning` line saying that its
+logpoints are not delivered. Function breakpoints are not armed in a fork (#1219).
+
+The program's own process gains from the same change: a logpoint on its first statement used to
+go out through its `console.log` (measured on an ES module: the line arrived as `stdout` in 12
+of 12 runs, the binding not yet in), and is now delivered on the debugger's channel.
 
 Opt out per launch with `dapLaunchArgs: { autoAttachChildProcesses: false }`, per attach with
 `adapterConfig: { autoAttachChildProcesses: false }`, or server-wide with
