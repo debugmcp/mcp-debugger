@@ -158,6 +158,10 @@ over*; JavaScript spike, row "Breakpoints"). So:
   line or adapter-owned source keeps the breakpoint stop. A newer stop or resume invalidates
   the pending lookup so its delayed answer cannot resume a later breakpoint.
 - `list_breakpoints` on the child reports the child's verified set with the child's adapter ids.
+  The child's records are written from its own connection's answers (issue #1211): the ids of the
+  adoption's `setBreakpoints`, the bind events that follow, the line a breakpoint bound on when
+  that is not the line asked for, and every `set_breakpoint` on the child's id afterwards. See
+  *What a child reads, and where* below.
 
 ### Output
 
@@ -404,6 +408,31 @@ The tree-specific responsibilities in the core are:
 - the tree-aware wait: `waitForStop` subscribes to the state of the session and its descendants,
   including newly adopted descendants, and applies the four-rule priority above after each change;
 - connection-scoped terminal cleanup, the cascade on close, and the per-tree cap.
+
+### What a child reads, and where
+
+A child is a session of its own, and three kinds of fact about it are read in three places.
+
+- **Its connection's behaviour.** An adapter policy describes a language's adapter; one part of
+  it, `getDapClientBehavior()`, describes a connection. js-debug's root connection adopts the
+  program in-session, routes commands to it and mirrors breakpoints to it, so its own answers
+  are provisional. Every other connection of the worker runs the child-safe derivative
+  (`createChildSafePolicy`), and there the adapter's answers are the truth for that process.
+  The session layer reads client behaviour through `connectionBehaviorOf(session, policy)`
+  (`src/session/connection-behavior.ts`) and nowhere else: a root gets its policy's, a child
+  the derivative's. Reading the language's policy for a child gave it the root's behaviour,
+  and a child's breakpoints never received the adapter's ids that way (issue #1211).
+  `tests/unit/architecture/connection-behaviour-seam.test.ts` holds the session and server
+  layers to the one reader, and `tests/unit/proxy/child-safe-policy.test.ts` pins that the
+  derivative changes nothing else those layers read. One site reads the root's behaviour for
+  a child on purpose: the first-stop rule (`pauseAfterChildAttach`), commented where it is.
+- **An adapter id names a record only while one record holds it.** js-debug numbers a pending
+  target's breakpoints from one counter before its attach and from another after it, so a
+  breakpoint added to a child later can come back with the id an earlier one still holds
+  (issue #1220, measured). An id two records share addresses neither: an event carrying it
+  goes by its location, and no hit is credited by it (`soleHolderOf`,
+  `src/session/breakpoints/hit-verification.ts`). The `setBreakpoints` answer is positional,
+  so each record still gets its own state and line.
 
 ### The adoption contract on `AdapterPolicy`
 

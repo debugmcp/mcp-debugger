@@ -21,6 +21,7 @@
  * from the target, and the answer says so.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { connectionBehaviorOf } from '../../../../../src/session/connection-behavior.js';
 import { SessionState, type Breakpoint, type FunctionBreakpoint } from '@debugmcp/shared';
 import { BreakpointController } from '../../../../../src/session/breakpoints/breakpoint-controller.js';
 import type { BreakpointContext } from '../../../../../src/session/operations-context.js';
@@ -53,6 +54,7 @@ function harness(policy: unknown = HOLDS) {
     logger: createMockLogger(),
     getSession: vi.fn().mockReturnValue(session),
     selectPolicy: vi.fn().mockReturnValue(policy),
+    clientBehaviorOf: (s) => connectionBehaviorOf(s, ctx.selectPolicy(s.language)),
     selectStorePolicy: vi.fn(),
     onStateChange: vi.fn((_sessionId: string, listener: () => void) => {
       listeners.add(listener);

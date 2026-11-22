@@ -29,6 +29,7 @@ import {
   type HotReloadResult
 } from './live-update/live-update-controller.js';
 import type { HotReloadArgs } from '@debugmcp/shared';
+import { connectionBehaviorOf } from './connection-behavior.js';
 import {
   MirrorController,
   type ExposeSessionResult,
@@ -182,6 +183,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       descendantsOf: (sessionId) => this.descendantsDepthFirst(sessionId),
       selectPolicy: (language) => this.selectPolicy(language),
       selectStorePolicy: (language) => this.sessionStore.selectPolicy(language),
+      clientBehaviorOf: (session) => connectionBehaviorOf(session, this.selectPolicy(session.language)),
       findFreePort: () => this.findFreePort(),
       setupProxyEventHandlers: (session, proxyManager, effectiveLaunchArgs) =>
         this.setupProxyEventHandlers(session, proxyManager, effectiveLaunchArgs),

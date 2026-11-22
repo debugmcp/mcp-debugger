@@ -12,6 +12,7 @@
  * since M2's second PR, which the attach and cascade suites rely on.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startStdioClient, type StdioClientHandle, type ToolAnswer } from '../../../test-utils/helpers/mcp-stdio-client.js';
@@ -23,6 +24,10 @@ const childFixture = path.join(treeDir, 'child.js');
 const childGrandFixture = path.join(treeDir, 'child_grand.js');
 const grandchildFixture = path.join(treeDir, 'grandchild.js');
 const parentExitsFixture = path.join(treeDir, 'parent_exits.js');
+const childShiftedFixture = path.join(treeDir, 'child_shifted.js');
+/** The line of child_shifted.js that carries `marker`. */
+const shiftedLine = (marker: string): number =>
+  fs.readFileSync(childShiftedFixture, 'utf8').split('\n').findIndex((text) => text.includes(marker)) + 1;
 /** The `// BREAKPOINT` lines of the fixtures. */
 const PARENT_BREAKPOINT_LINE = 20;
 const CHILD_BREAKPOINT_LINE = 14;
@@ -45,6 +50,9 @@ interface Stop extends ToolAnswer {
 interface Closed extends ToolAnswer { childrenClosed?: number; processEnded?: boolean; released?: boolean }
 interface Output extends ToolAnswer { entries: Array<{ output: string }>; outputOn?: string; note?: string }
 interface Stack extends ToolAnswer { stackFrames: Array<{ id: number; file?: string; line?: number }> }
+interface Listed extends ToolAnswer {
+  breakpoints: Array<{ id: string; line: number; requestedLine?: number; verified: boolean; verifiedBy?: string; adapterId?: number }>;
+}
 
 let server: StdioClientHandle;
 const call = <T extends ToolAnswer = ToolAnswer>(name: string, args: Record<string, unknown> = {}): Promise<T> => server.call<T>(name, args);
@@ -348,6 +356,65 @@ describe('JavaScript forks as child sessions (the session tree, issue #1082)', (
     const childEnded = await call<Stop>('wait_for_stop', { sessionId: childId, timeout: 5000 });
     expect(childEnded.state).toBe('stopped');
     expect(childEnded.exitCode).toBeUndefined();
+  }, 120_000);
+
+  /**
+   * Issue #1211. A fork's connection is the adapter's own word for that
+   * process, but the fork's session was read with the launch root's client
+   * behaviour (which mirrors breakpoints to an in-session child and trusts
+   * none of its own answers), so no adapter id ever reached the fork's
+   * records. A breakpoint that bound on the line it was asked for was
+   * verified by its location; one that bound on another line stayed
+   * `verified: false` at the asked line after it had paused the fork there.
+   */
+  it("a fork's breakpoint that binds on another line is verified there, with the fork's own adapter id", async () => {
+    const asked = shiftedLine('// ASKED');
+    const bound = shiftedLine('// BOUND');
+    expect(bound).toBe(asked + 1);
+    const rootId = await server.createSession('javascript', 'js-tree-shifted-breakpoint');
+    expect((await call('set_breakpoint', { file: childShiftedFixture, line: asked })).success).toBe(true);
+    await launch(parentFixture, { args: ['child_shifted.js'] });
+
+    const stop = await waitForChildStop(rootId, /child_shifted\.js$/, bound);
+    const listed = await call<Listed>('list_breakpoints', { sessionId: stop.sessionId });
+    expect(listed.breakpoints, JSON.stringify(listed)).toEqual([
+      expect.objectContaining({ line: bound, requestedLine: asked, verified: true, verifiedBy: 'adapter', adapterId: expect.any(Number) })
+    ]);
+
+    expect((await call('close_debug_session', { sessionId: rootId })).success).toBe(true);
+  }, 120_000);
+
+  /**
+   * Issue #1220. js-debug numbers a pending target's breakpoints from one
+   * counter before its attach and from another after it: a breakpoint added
+   * to a fork while it is paused comes back with the id the one set before
+   * the adoption still holds, and the bind event and the stop then name both
+   * by it. An id two records share addresses neither, so each record keeps
+   * what the positional answer said about it. (If a later js-debug numbers
+   * them apart, this case holds all the same.)
+   */
+  it('a breakpoint added to a paused fork and the one it was adopted with keep their own lines, whatever ids the adapter gives them', async () => {
+    const first = shiftedLine('// BOUND');
+    const second = shiftedLine('// SECOND');
+    const rootId = await server.createSession('javascript', 'js-tree-added-breakpoint');
+    expect((await call('set_breakpoint', { file: childShiftedFixture, line: first })).success).toBe(true);
+    await launch(parentFixture, { args: ['child_shifted.js'] });
+    const childId = (await waitForChildStop(rootId, /child_shifted\.js$/, first)).sessionId;
+
+    const added = await call<ToolAnswer & { verified?: boolean }>('set_breakpoint', { sessionId: childId, file: childShiftedFixture, line: second });
+    expect(added.success, JSON.stringify(added)).toBe(true);
+    const lines = async (): Promise<Array<{ line: number; verified: boolean }>> =>
+      (await call<Listed>('list_breakpoints', { sessionId: childId })).breakpoints.map(({ line, verified }) => ({ line, verified }));
+    // The bind event of the new one follows its answer by a few milliseconds.
+    const settled = await pollUntil(lines, (list) => list.every((bp) => bp.verified), 5000);
+    expect(settled).toEqual([{ line: first, verified: true }, { line: second, verified: true }]);
+
+    expect((await call('continue_execution', { sessionId: childId })).success).toBe(true);
+    const next = await call<Stop>('wait_for_stop', { sessionId: childId, timeout: 30000 });
+    expect(lineOf(next), JSON.stringify(next)).toBe(second);
+    expect(await lines()).toEqual([{ line: first, verified: true }, { line: second, verified: true }]);
+
+    expect((await call('close_debug_session', { sessionId: rootId })).success).toBe(true);
   }, 120_000);
 
   it("a logpoint set on the parent reaches the fork and prints into the launch session's output", async () => {

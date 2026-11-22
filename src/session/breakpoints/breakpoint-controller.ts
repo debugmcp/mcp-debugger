@@ -568,12 +568,13 @@ export class BreakpointController {
   }
 
   /**
-   * Whether the session's policy mirrors breakpoints to a child session
-   * (js-debug). Never throws — the sync methods it feeds promise the same —
-   * so a policy without client behaviour, or one that throws, reads as "no".
+   * Whether the session's own connection mirrors breakpoints to an
+   * in-session child (js-debug's root; an adopted child's does not, issue
+   * #1211). Never throws — the sync methods it feeds promise the same — so a
+   * policy without client behaviour, or one that throws, reads as "no".
    */
   private mirrorsToChild(session: ManagedSession): boolean {
-    return mirrorsBreakpointsToChild(() => this.ctx.selectPolicy(session.language));
+    return mirrorsBreakpointsToChild(() => this.ctx.clientBehaviorOf(session));
   }
 
   /**

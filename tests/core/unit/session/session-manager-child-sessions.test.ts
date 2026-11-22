@@ -1590,3 +1590,128 @@ describe('SessionManager child sessions (issue #1081)', () => {
   });
 });
 
+describe('a child session is read under its own connection (issues #1211, #1220)', () => {
+  // js-debug's shape. The root connection adopts the program in-session and
+  // mirrors breakpoints to it, so the root's own answers are provisional
+  // (issues #495, #500). Every other connection of the worker runs the
+  // child-safe derivative of the policy, where the adapter's answers are the
+  // truth. Measured on a real fork (issue #1211): the adoption's
+  // setBreakpoints answers `{ id: 1, verified: false }`, the bind follows as
+  // `breakpoint changed { id: 1, line: 6 }`, and the stop names `[1]`.
+  const FILE = '/w/child.js';
+  let sessionManager: SessionManager;
+  let dependencies: ReturnType<typeof createMockDependencies>;
+  const jsLike: Partial<AdapterPolicy> = {
+    supportsReverseStartDebugging: true,
+    getDapClientBehavior: () => JsDebugAdapterPolicy.getDapClientBehavior(),
+    childAdoption: JsDebugAdapterPolicy.childAdoption
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    dependencies = createMockDependencies();
+    sessionManager = new SessionManager(
+      { logDirBase: '/tmp/test-sessions', defaultDapLaunchArgs: { stopOnEntry: false, justMyCode: true } },
+      dependencies
+    );
+    overridePolicy(sessionManager, jsLike);
+    // The operations layer has a lookup of its own (see overridePolicy).
+    const facade = sessionManager as unknown as { selectPolicy: (language: string) => AdapterPolicy };
+    const original = facade.selectPolicy.bind(sessionManager);
+    vi.spyOn(facade, 'selectPolicy').mockImplementation((language) => ({ ...original(language), ...jsLike }));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+    dependencies.mockProxyManager.reset();
+  });
+
+  /** A root with one breakpoint at FILE:5, and the child adopted with its copy. */
+  async function adoptedChild() {
+    const root = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+    await sessionManager.setBreakpoint(root.id, { file: FILE, line: 5 });
+    await sessionManager.startDebugging(root.id, 'parent.js');
+    await vi.runAllTimersAsync();
+    dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+    await vi.runAllTimersAsync();
+    const row = sessionManager.getAllSessions().find((s) => s.parentSessionId === root.id)!;
+    const child = sessionManager.getSession(row.id)!;
+    const view = dependencies.mockProxyManager.childViews.get(child.id)!;
+    const record = Array.from(child.breakpoints.values())[0];
+    return { rootId: root.id, child, view, record };
+  }
+
+  const answering = (view: MockChildProxyView, breakpoints: Array<Record<string, unknown>>): void => {
+    view.setDapRequestHandler(async (command) =>
+      command === 'setBreakpoints' ? { success: true, body: { breakpoints } } : { success: true, body: {} });
+  };
+
+  it("stamps the adoption's own answer on the child's records, and the bind event that follows moves the record to the line it bound on (#1211)", async () => {
+    const { view, record } = await adoptedChild();
+
+    view.simulateEvent('breakpoints-synced', [
+      { id: record.id, file: FILE, line: 5, verified: false, adapterId: 1, message: 'breakpoint.provisionalBreakpoint' }
+    ]);
+    expect(record.adapterId).toBe(1);
+    expect(record.verified).toBe(false);
+
+    // The shifted-line shape: a same-line event would match by location on any build.
+    view.simulateEvent('breakpoint', { reason: 'changed', breakpoint: { id: 1, verified: true, line: 6, source: { path: FILE } } });
+    expect(record).toMatchObject({ adapterId: 1, verified: true, verifiedBy: 'adapter', line: 6 });
+  });
+
+  it("still reads the root's own answers as the mirroring connection's: provisional, and never its ids (#495)", async () => {
+    const { rootId } = await adoptedChild();
+    const rootRecord = Array.from(sessionManager.getSession(rootId)!.breakpoints.values())[0];
+    expect(rootRecord.adapterId).toBeUndefined();
+
+    dependencies.mockProxyManager.simulateEvent('breakpoints-synced', [
+      { id: rootRecord.id, file: FILE, line: 5, verified: false, adapterId: 9 }
+    ]);
+    dependencies.mockProxyManager.simulateEvent('breakpoint', {
+      reason: 'changed', breakpoint: { id: 9, verified: true, line: 5, source: { path: FILE } }
+    });
+
+    expect(rootRecord.adapterId).toBeUndefined();
+  });
+
+  it("takes a set_breakpoint on a child from the adapter's own answer: ids, verified state and bound lines", async () => {
+    const { child, view, record: first } = await adoptedChild();
+    answering(view, [
+      { id: 1, verified: true, line: 6, source: { path: FILE } },
+      { id: 2, verified: true, line: 8, source: { path: FILE } }
+    ]);
+
+    await sessionManager.setBreakpoint(child.id, { file: FILE, line: 8 });
+
+    const second = Array.from(child.breakpoints.values()).find((bp) => bp !== first)!;
+    expect(first).toMatchObject({ adapterId: 1, verified: true, line: 6 });
+    expect(second).toMatchObject({ adapterId: 2, verified: true, verifiedBy: 'adapter', line: 8 });
+  });
+
+  it('an adapter id that two records share addresses neither of them: an event goes by its location, or changes nothing (#1220)', async () => {
+    const { child, view, record: first } = await adoptedChild();
+    view.simulateEvent('breakpoints-synced', [{ id: first.id, file: FILE, line: 5, verified: false, adapterId: 1 }]);
+    view.simulateEvent('breakpoint', { reason: 'changed', breakpoint: { id: 1, verified: true, line: 6, source: { path: FILE } } });
+    // js-debug numbers a breakpoint added after the attach from another
+    // counter, and gives it the id the earlier one still holds (measured).
+    answering(view, [
+      { id: 1, verified: true, line: 6, source: { path: FILE } },
+      { id: 1, verified: true, line: 8, source: { path: FILE } }
+    ]);
+    await sessionManager.setBreakpoint(child.id, { file: FILE, line: 8 });
+    const second = Array.from(child.breakpoints.values()).find((bp) => bp !== first)!;
+    // The answer is positional: each record has its own state, whatever the ids say.
+    expect(first).toMatchObject({ adapterId: 1, verified: true, line: 6 });
+    expect(second).toMatchObject({ adapterId: 1, verified: true, line: 8 });
+
+    view.simulateEvent('breakpoint', { reason: 'changed', breakpoint: { id: 1, verified: true, line: 8, source: { path: FILE } } });
+    expect(first.line).toBe(6);
+    expect(second.line).toBe(8);
+
+    view.simulateEvent('breakpoint', { reason: 'changed', breakpoint: { id: 1, verified: false } });
+    expect(first.verified).toBe(true);
+    expect(second.verified).toBe(true);
+  });
+});

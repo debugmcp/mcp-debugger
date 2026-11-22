@@ -16,6 +16,7 @@
  * it); an unverified answer WITHOUT `reason: 'pending'` is the adapter's verdict and still applies.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { connectionBehaviorOf } from '../../../../../src/session/connection-behavior.js';
 import { BreakpointController } from '../../../../../src/session/breakpoints/breakpoint-controller.js';
 import type { BreakpointContext } from '../../../../../src/session/operations-context.js';
 import type { ManagedSession } from '../../../../../src/session/session-store.js';
@@ -30,6 +31,7 @@ function makeController(): BreakpointController {
     logger: createMockLogger(),
     getSession: vi.fn(),
     selectPolicy: vi.fn().mockReturnValue({}),
+    clientBehaviorOf: (s) => connectionBehaviorOf(s, ctx.selectPolicy(s.language)),
     selectStorePolicy: vi.fn(),
     onStateChange: vi.fn().mockReturnValue(() => undefined)
   };
