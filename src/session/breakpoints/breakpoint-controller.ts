@@ -33,6 +33,7 @@ import { DapResponseError } from '../../proxy/dap-response-error.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import type { ManagedSession } from '../session-store.js';
 import type { BreakpointContext } from '../operations-context.js';
+import { runFactsOf } from '../run-facts.js';
 import { getCurrentPauseIntent } from '../execution/pause-intent.js';
 import { buildFunctionBreakpointLaunchWarning, fileLabel } from './launch-warnings.js';
 import {
@@ -656,7 +657,8 @@ export class BreakpointController {
    * warning and the resync report alike.
    */
   private liveSyncHint(session: ManagedSession, message: string): string {
-    if (session.attachMode && session.language === 'ruby' && /is not available/.test(message)) {
+    const attached = runFactsOf(session, (sessionId) => this.ctx.getSession(sessionId)).attached;
+    if (attached && session.language === 'ruby' && /is not available/.test(message)) {
       return "Hint: attach sessions send breakpoint paths to the remote debugger verbatim; the path must be valid on the debug target's filesystem. Use target-side paths, or pass localfsMap in the attach config to map local paths to remote ones.";
     }
     return '';

@@ -411,7 +411,7 @@ The tree-specific responsibilities in the core are:
 
 ### What a child reads, and where
 
-A child is a session of its own, and three kinds of fact about it are read in three places.
+A child is a session of its own, and what is read about it is read where it is true.
 
 - **Its connection's behaviour.** An adapter policy describes a language's adapter; one part of
   it, `getDapClientBehavior()`, describes a connection. js-debug's root connection adopts the
@@ -433,6 +433,19 @@ A child is a session of its own, and three kinds of fact about it are read in th
   goes by its location, and no hit is credited by it (`soleHolderOf`,
   `src/session/breakpoints/hit-verification.ts`). The `setBreakpoints` answer is positional,
   so each record still gets its own state and line.
+- **Its tree's run.** A launch or an attach is called on one session and written there: launch
+  or attach, where an attach's target lives, what the adapter's transform handed the engine,
+  what the caller asked for, the run directory the worker logs into. A child is adopted, never
+  launched, and has none of that; those are facts of the run, the same for every session of the
+  tree. A reader that asked the session it was handed got "nothing was launched" for a child:
+  a worker of vitest was warned that `dist/` was stale (the check exempts a runner under
+  `node_modules`, and could not see one), a child of a remote attach was read as local, and a
+  child's proxy-log resource named a file nobody writes (issues #1214, #1222). Outside the
+  modules that write those fields they are read through `runFactsOf(session, lookup)`
+  (`src/session/run-facts.ts`), which reads the tree's root:
+  `tests/unit/architecture/run-facts-seam.test.ts` holds the session and server layers to it.
+  One worker serves a tree and writes one proxy log, named after the root, so a child's
+  `debug://sessions/<child>/proxy-log` is its tree's.
 
 ### The adoption contract on `AdapterPolicy`
 

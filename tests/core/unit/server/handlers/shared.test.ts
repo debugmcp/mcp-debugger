@@ -272,3 +272,46 @@ describe('attachRequestFromArgs (issue #905)', () => {
     expect(() => attachRequestFromArgs({ port: 5009, breakOnExceptions: 'sometimes' })).toThrow(/breakOnExceptions/);
   });
 });
+
+describe('a child session reads the run of its tree (issue #1214)', () => {
+  let ctx: any;
+  const runner = { program: '/app/node_modules/vitest/vitest.mjs', launchConfig: { program: '/app/node_modules/vitest/vitest.mjs' } };
+
+  const sessions = (root: Record<string, unknown>): void => {
+    const rows: Record<string, Record<string, unknown>> = {
+      root: { id: 'root', ...root },
+      child: { id: 'child', parentSessionId: 'root' }
+    };
+    ctx.sessionManager.getSession.mockImplementation((sessionId: string) => rows[sessionId]);
+  };
+
+  beforeEach(() => {
+    ctx = createMockToolContext();
+    ctx.buildStaleness = { check: vi.fn().mockResolvedValue(undefined) };
+    ctx.sessionManager.getSessionPolicy.mockReturnValue(JsDebugAdapterPolicy);
+  });
+
+  it("hands the stale-build check the launch of the child's root: a worker of a runner is not a session that has launched nothing", async () => {
+    sessions({ transformedLaunch: runner });
+
+    await describeStaleBuild(ctx, 'child', '/app/src/a.ts', 'stop');
+
+    expect(ctx.buildStaleness.check).toHaveBeenCalledWith('/app/src/a.ts', JsDebugAdapterPolicy, runner);
+  });
+
+  it('says nothing for a child of an attach whose target is not on this host, as for the attach itself', async () => {
+    ctx.buildStaleness.check.mockResolvedValue({ generated: '/app/dist/a.js' });
+    sessions({ attachMode: true, attachLocality: 'remote' });
+
+    expect(await describeStaleBuild(ctx, 'child', '/app/src/a.ts', 'stop')).toBeUndefined();
+    expect(ctx.buildStaleness.check).not.toHaveBeenCalled();
+  });
+
+  it('reads no launch for a child of a local attach', async () => {
+    sessions({ attachMode: true, attachLocality: 'pid', transformedLaunch: runner });
+
+    await describeStaleBuild(ctx, 'child', '/app/src/a.ts', 'stop');
+
+    expect(ctx.buildStaleness.check).toHaveBeenCalledWith('/app/src/a.ts', JsDebugAdapterPolicy, undefined);
+  });
+});

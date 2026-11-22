@@ -103,16 +103,18 @@ export interface ProxySetupFailureDeps extends ProxyFailureLogDeps {
  */
 export function collectProxyFailureDiagnostics(
   session: Pick<ManagedSession, 'id' | 'logDir'>,
-  error: unknown
+  error: unknown,
+  /** Whose log this is: the tree's root for a child session (one worker, one log; issue #1222). */
+  logOwner: Pick<ManagedSession, 'id' | 'logDir'> = session
 ): ProxyFailureDiagnostics {
   const diagnostics: ProxyFailureDiagnostics = {};
 
   // The log path comes from the session, not from the error, so it is derived
   // FIRST: it is the pointer that survives a hostile error object, and losing
   // it would drop `data` from the tool result entirely.
-  if (session.logDir) {
-    diagnostics.proxyLogPath = proxyLogPathFor(session.logDir, session.id);
-    diagnostics.proxyLogResource = proxyLogResourceUri(session.id);
+  if (logOwner.logDir) {
+    diagnostics.proxyLogPath = proxyLogPathFor(logOwner.logDir, logOwner.id);
+    diagnostics.proxyLogResource = proxyLogResourceUri(logOwner.id);
   }
 
   // The error, by contrast, is a value that has already misbehaved once — a
@@ -242,14 +244,15 @@ export async function logProxyFailure(
   deps: ProxyFailureLogDeps,
   session: Pick<ManagedSession, 'id' | 'logDir'>,
   error: unknown,
-  operation: ProxyFailureOperation
+  operation: ProxyFailureOperation,
+  logOwner: Pick<ManagedSession, 'id' | 'logDir'> = session
 ): Promise<ProxyFailureDiagnostics> {
   const header = `[SessionManager] Detailed error in ${operation} for session ${session.id}:`;
   let diagnostics: ProxyFailureDiagnostics = {};
   let errorDetails: Record<string, unknown>;
 
   try {
-    diagnostics = collectProxyFailureDiagnostics(session, error);
+    diagnostics = collectProxyFailureDiagnostics(session, error, logOwner);
 
     // Attempt to capture proxy log tail for debugging initialization failures
     const proxyLogTail = await readProxyLogTail(deps.fileSystem, diagnostics.proxyLogPath);

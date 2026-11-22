@@ -40,6 +40,7 @@ import { IProxyManager, type ChildReportedEvent } from '../proxy/proxy-manager.j
 import { isChildProxyView } from '../proxy/child-proxy-view.js';
 import { maxChildSessions, MAX_CHILD_SESSIONS_ENV } from './child-session-cap.js';
 import { connectionBehaviorOf } from './connection-behavior.js';
+import { rootOfTree, runFactsOf } from './run-facts.js';
 import { IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
 import type { BreakpointSyncResult, FunctionBreakpointSyncResult } from '../proxy/dap-proxy-interfaces.js';
 import { CHILD_RELEASE_COMMAND } from '../proxy/dap-proxy-interfaces.js';
@@ -1147,11 +1148,11 @@ export abstract class SessionManagerCore extends EventEmitter {
     } catch {
       return undefined;
     }
-    const root = this.rootOf(session);
+    const run = runFactsOf(session, (id) => this.sessionStore.get(id));
     // A launch owns the stdout/stderr pipes; an attach does not. js-debug's
     // default console capture on attach emits on each target's connection,
     // so pointing at the root would hide the child's actual output.
-    return root.id === session.id || root.attachMode ? undefined : root.id;
+    return run.rootSessionId === session.id || run.attached ? undefined : run.rootSessionId;
   }
 
   /**
@@ -1343,17 +1344,7 @@ export abstract class SessionManagerCore extends EventEmitter {
 
   /** The launch or attach root of a session's tree. */
   protected rootOf(session: ManagedSession): ManagedSession {
-    let current = session;
-    const seen = new Set<string>([current.id]);
-    while (current.parentSessionId) {
-      const parent = this.sessionStore.get(current.parentSessionId);
-      if (!parent || seen.has(parent.id)) {
-        break;
-      }
-      seen.add(parent.id);
-      current = parent;
-    }
-    return current;
+    return rootOfTree(session, (sessionId) => this.sessionStore.get(sessionId));
   }
 
   /** Block new adoptions until this teardown and any overlapping teardown finish. */
@@ -1609,13 +1600,16 @@ export abstract class SessionManagerCore extends EventEmitter {
    */
   private recordProxyFailure(session: ManagedSession, error: unknown): void {
     const generation = session.proxyGeneration;
-    session.failureDiagnostics = collectProxyFailureDiagnostics(session, error);
+    // The worker's log is the tree's, named after the root (issue #1222).
+    const logOwner = this.rootOf(session);
+    session.failureDiagnostics = collectProxyFailureDiagnostics(session, error, logOwner);
 
     void logProxyFailure(
       { logger: this.logger, fileSystem: this.fileSystem },
       session,
       error,
-      'proxyExit'
+      'proxyExit',
+      logOwner
     ).then((diagnostics) => {
       if (session.proxyGeneration === generation && session.state === SessionState.ERROR) {
         session.failureDiagnostics = diagnostics;

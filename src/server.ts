@@ -39,6 +39,7 @@ import { SimpleFileChecker, createSimpleFileChecker, FileExistenceResult } from 
 import { LineReader, createLineReader } from './utils/line-reader.js';
 import { BuildStalenessChecker, createBuildStalenessChecker } from './session/breakpoints/build-staleness.js';
 import { isForeignAttach } from './server/handlers/shared.js';
+import { runFactsOf } from './session/run-facts.js';
 import { isLanguageDisabled } from './utils/language-config.js';
 import { ValidationResultCache } from './utils/language-availability.js';
 import { isContainerMode, isContainerRuntime, getWorkspaceRoot } from './utils/container-path-utils.js';
@@ -378,9 +379,12 @@ export class DebugMcpServer implements ToolContext {
     // binary's build tree, say) still passes through, carrying the checker's
     // own reason when it has one (a relative path in host mode) so the refusal
     // never claims a file is absent that was never looked for.
+    // The run's facts (issue #1214): a child of an attach is debugging that
+    // attach's target too.
     const session = this.sessionManager.getSession(sessionId);
-    if (session?.attachMode) {
-      const local = !isForeignAttach(session);
+    const run = session ? runFactsOf(session, (id) => this.sessionManager.getSession(id)) : undefined;
+    if (run?.attached) {
+      const local = !isForeignAttach(run);
       let detail: string | undefined;
       if (local) {
         const fileCheck = await this.fileChecker.checkExists(file);
@@ -478,7 +482,10 @@ export class DebugMcpServer implements ToolContext {
             : 'use line addressing instead.';
         // Which attach (issue #903): a remote target's loaded source is the
         // authority; a local target's file simply is not on this host.
-        const locality = this.sessionManager.getSession(req.sessionId)?.attachLocality;
+        const asked = this.sessionManager.getSession(req.sessionId);
+        const locality = asked
+          ? runFactsOf(asked, (id) => this.sessionManager.getSession(id)).targetLocality
+          : undefined;
         const attachWhy =
           locality === 'remote'
             ? `a remote attach session (the debuggee's loaded source may differ from the file on the mcp-debugger host)`

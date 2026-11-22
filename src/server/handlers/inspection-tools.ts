@@ -14,6 +14,7 @@ import {
   emittableStopInfo,
   endedSessionExtras,
   hasOpenableSourcePath,
+  runFactsFor,
   variablePayloadExtras
 } from './shared.js';
 import {
@@ -166,7 +167,7 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
           .describeUnresolvedSource?.({
             count: unresolvedFrames.length,
             files: unresolvedFrames.map((frame) => frame.file),
-            attachMode: sessionBefore?.attachMode === true
+            attachMode: runFactsFor(ctx, args.sessionId)?.attached === true
           }) || undefined;
       } catch (error) {
         ctx.logger.debug(`[get_stack_trace ${args.sessionId}] unresolvedSource explanation failed:`, error);

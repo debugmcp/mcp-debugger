@@ -23,7 +23,7 @@ import { validateBreakOnExceptions } from '../tool-validation.js';
 import { debuggerOffWhy } from '../../session/debugger-off.js';
 import type { DebugResult, StopAnswerFields, TreeAnswerFields } from '../../session/session-manager-core.js';
 import type { AttachRequest } from '../../session/attach/attach-controller.js';
-import type { ManagedSession } from '../../session/session-store.js';
+import { runFactsOf, type RunFacts } from '../../session/run-facts.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import { SessionTerminatedError } from '../../errors/debug-errors.js';
 import { failureResult, type ToolResult } from '../tool-result.js';
@@ -72,7 +72,7 @@ export function endedSessionExtras(ctx: ToolContext, error: unknown): { message:
   if (session?.parentSessionId) {
     return { message: ErrorMessages.endedSessionNothingToInspect('child', session.parentSessionId) };
   }
-  return { message: ErrorMessages.endedSessionNothingToInspect(session?.attachMode === true ? 'attach' : 'launch') };
+  return { message: ErrorMessages.endedSessionNothingToInspect(runFactsFor(ctx, error.sessionId)?.attached ? 'attach' : 'launch') };
 }
 
 /**
@@ -144,8 +144,18 @@ export async function readLineContext(
  * neither is any launch. The one spelling for the breakpoint echo, the
  * stale-build check and the server's breakpoint path resolution.
  */
-export function isForeignAttach(session: Pick<ManagedSession, 'attachMode' | 'attachLocality'>): boolean {
-  return session.attachMode === true && session.attachLocality !== 'pid' && session.attachLocality !== 'loopback';
+export function isForeignAttach(run: Pick<RunFacts, 'attached' | 'targetLocality'>): boolean {
+  return run.attached && run.targetLocality !== 'pid' && run.targetLocality !== 'loopback';
+}
+
+/**
+ * The run a session belongs to (issue #1214): how its tree's program was
+ * started, read off the tree's root, or nothing for an unknown id. A child
+ * session was adopted, not launched, and has no launch facts of its own.
+ */
+export function runFactsFor(ctx: ToolContext, sessionId: string): RunFacts | undefined {
+  const session = ctx.sessionManager.getSession(sessionId);
+  return session ? runFactsOf(session, (id) => ctx.sessionManager.getSession(id)) : undefined;
 }
 
 /**
@@ -172,13 +182,14 @@ export async function describeStaleBuild(
   logLabel: string
 ): Promise<string | undefined> {
   try {
-    const session = ctx.sessionManager.getSession(sessionId);
-    if (!session || isForeignAttach(session)) {
+    // The run's, not the session's (issue #1214): a child was never
+    // launched, and its own fields say what a session before its launch says.
+    const run = runFactsFor(ctx, sessionId);
+    if (!run || isForeignAttach(run)) {
       return undefined;
     }
     const policy = ctx.sessionManager.getSessionPolicy(sessionId);
-    const launch = session.attachMode === true ? undefined : session.transformedLaunch;
-    const evidence = await ctx.buildStaleness.check(file, policy, launch);
+    const evidence = await ctx.buildStaleness.check(file, policy, run.launch);
     return evidence ? ErrorMessages.staleGeneratedFile(evidence) : undefined;
   } catch (error) {
     ctx.logger.debug(`Could not check build staleness for ${logLabel}`, { file, error });

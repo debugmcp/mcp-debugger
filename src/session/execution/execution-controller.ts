@@ -78,6 +78,7 @@ import type {
 import { debuggerOffWhy, isDebuggerOff, type DebuggerOffView } from '../debugger-off.js';
 import { samePath } from '../breakpoints/hit-verification.js';
 import type { ExecutionContext } from '../operations-context.js';
+import { runFactsOf, type RunFacts } from '../run-facts.js';
 import { describeStopLocation, landingFields, type StopLanding } from '../inspection/stop-location.js';
 import { composeStopSnapshot } from '../inspection/stop-snapshot.js';
 import type { PauseCoordinator } from './pause-coordinator.js';
@@ -634,7 +635,7 @@ export class ExecutionController {
               hint = this.ctx.selectPolicy(session.language).explainRequestFailure?.(
                 options.command,
                 errorMessage,
-                { program: session.transformedLaunch?.program }
+                { program: this.runOf(session).launch?.program }
               );
             } catch {
               // Policy explanation is advisory.
@@ -1338,6 +1339,15 @@ export class ExecutionController {
   }
 
   /**
+   * The run this session belongs to (issue #1214): its tree's launch or
+   * attach. A child was adopted, not launched; what was asked for at the
+   * launch is its root's.
+   */
+  private runOf(session: ManagedSession): RunFacts {
+    return runFactsOf(session, (sessionId) => this.ctx.getSession(sessionId));
+  }
+
+  /**
    * The adapter policy's explanation for an engine step filter that skips
    * callees during `step_into` (issue #1184), or `undefined`.
    */
@@ -1347,14 +1357,15 @@ export class ExecutionController {
       return undefined;
     }
     try {
-      const launch = session.lastLaunch
+      const run = this.runOf(session);
+      const launch = run.request
         ? {
-            dapLaunchArgs: { ...this.ctx.defaultDapLaunchArgs, ...(session.lastLaunch.dapLaunchArgs ?? {}) },
-            adapterLaunchConfig: session.lastLaunch.adapterLaunchConfig
+            dapLaunchArgs: { ...this.ctx.defaultDapLaunchArgs, ...(run.request.dapLaunchArgs ?? {}) },
+            adapterLaunchConfig: run.request.adapterLaunchConfig
           }
         : undefined;
       return policy.describeStepInFilter({
-        attachMode: session.attachMode === true,
+        attachMode: run.attached,
         launch
       }) || undefined;
     } catch (error) {
@@ -1383,10 +1394,11 @@ export class ExecutionController {
       // The launcher's merge order: defaults under the caller's dapLaunchArgs,
       // adapterLaunchConfig on top (proxy-launcher.ts). lastLaunch records the
       // caller's input only, so the defaults layer is re-applied here.
-      const launch = session.lastLaunch
+      const run = this.runOf(session);
+      const launch = run.request
         ? {
-            dapLaunchArgs: { ...this.ctx.defaultDapLaunchArgs, ...(session.lastLaunch.dapLaunchArgs ?? {}) },
-            adapterLaunchConfig: session.lastLaunch.adapterLaunchConfig
+            dapLaunchArgs: { ...this.ctx.defaultDapLaunchArgs, ...(run.request.dapLaunchArgs ?? {}) },
+            adapterLaunchConfig: run.request.adapterLaunchConfig
           }
         : undefined;
       // What the latest record says, and only that one: a walk that ended
@@ -1394,7 +1406,7 @@ export class ExecutionController {
       const stepLimit = (record?.body as { stepLimit?: unknown } | undefined)?.stepLimit;
       return policy.describePendingStop({
         operation,
-        attachMode: session.attachMode === true,
+        attachMode: run.attached,
         launch,
         ...(fromFrame ? { fromFrame } : {}),
         ...(record?.event === PROXY_STEP_LEFT_STACK_EVENT ? { stepLeftStack: true } : {}),
