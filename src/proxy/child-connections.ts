@@ -20,6 +20,7 @@
 import { EventEmitter } from 'events';
 import { randomUUID } from 'node:crypto';
 import { dapSourcePath } from '../utils/dap-source.js';
+import { ErrorMessages } from '../utils/error-messages.js';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { resolveExceptionFilters } from '@debugmcp/shared';
 import type { AdapterPolicy, ChildAdoptionContract, ChildReport, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
@@ -215,6 +216,9 @@ export class ChildConnections extends EventEmitter {
     let connection: ChildConnection | undefined;
     let initializedTimer: NodeJS.Timeout | undefined;
     let onInitialized: (() => void) | undefined;
+    // Once configurationDone is on the wire the adapter may bind the target
+    // to this connection; a failure after that is cleaned up differently.
+    let configurationDoneSent = false;
     try {
       client = deps.dapClientFactory.create(deps.host, deps.port, this.policyForConnections(deps), { traceLabel: label });
       let cancelAdoption!: (reason: string) => void;
@@ -245,6 +249,9 @@ export class ChildConnections extends EventEmitter {
       const attachFailure = new Promise<never>((_, reject) => {
         attach.catch(reject);
       });
+      // Raced wherever the handshake waits below; handled here for the
+      // moments when nothing is racing it.
+      attachFailure.catch(() => undefined);
       const initializedTimeout = new Promise<never>((_, reject) => {
         initializedTimer = setTimeout(
           () => reject(new Error(`Timeout waiting for initialized event after the child attach (${deps.initializedTimeoutMs ?? CHILD_INITIALIZED_TIMEOUT_MS} ms)`)),
@@ -254,10 +261,17 @@ export class ChildConnections extends EventEmitter {
       await wait(Promise.race([initializedSeen, attachFailure, initializedTimeout]));
       clearTimeout(initializedTimer);
 
-      await wait(this.sendExceptionBreakpoints(deps, client, childSessionId));
-      await wait(this.sendBreakpoints(deps, client, childSessionId, args.breakpoints ?? []));
-      await wait(this.sendFunctionBreakpoints(client, childSessionId, args.functionBreakpoints ?? []));
-      await wait(deps.connectionManager.sendConfigurationDone(client));
+      // An attach that has already failed ends the handshake where it is
+      // (issue #1219). Going on to configurationDone would bind the target
+      // to a connection this adoption is about to abandon, and the release
+      // by a throwaway attach cannot reach a target that is no longer
+      // pending.
+      const step = <T>(operation: Promise<T>): Promise<T> => wait(Promise.race([operation, attachFailure]));
+      await step(this.sendExceptionBreakpoints(deps, client, childSessionId));
+      await step(this.sendBreakpoints(deps, client, childSessionId, args.breakpoints ?? []));
+      await step(this.sendFunctionBreakpoints(client, childSessionId, args.functionBreakpoints ?? []));
+      configurationDoneSent = true;
+      await step(deps.connectionManager.sendConfigurationDone(client));
       await wait(attach);
 
       connection.cancelAdoption = undefined;
@@ -271,6 +285,9 @@ export class ChildConnections extends EventEmitter {
       clearTimeout(initializedTimer);
       const message = error instanceof Error ? error.message : String(error);
       logger.warn(`[ChildConnections] Adoption of child ${held.report.targetId} as session ${childSessionId} failed: ${message}`);
+      // close() marks the connection before it cancels the handshake, and
+      // disconnects the socket itself.
+      const cancelledByClose = connection?.closed === true;
       if (connection) {
         connection.closed = true;
         connection.cancelAdoption = undefined;
@@ -278,14 +295,24 @@ export class ChildConnections extends EventEmitter {
           this.clients.delete(childSessionId);
         }
       }
-      // The report is no longer held, so the server's release command that
-      // follows finds nothing: let the child go here, by the policy's lever.
-      this.giveUp(held, `adoption failed: ${message}`);
-      this.emitEmptyIfSo();
-      try {
-        client?.shutdown(`child adoption failed: ${message}`);
-      } catch {
-        // best effort
+      if (client && configurationDoneSent && !cancelledByClose && this.lever() === 'throwaway-attach') {
+        // The adapter binds the target to this connection once it has
+        // configurationDone, and a second attach to a target that is no
+        // longer pending is never answered (issue #1219: the fork ran to
+        // its first breakpoint and stayed there, under a closed socket).
+        // The child is let go the way an adopted one is: a disconnect on
+        // its own connection, which leaves it running.
+        this.letGoOnItsConnection(deps, client, held, message);
+      } else {
+        // The report is no longer held, so the server's release command that
+        // follows finds nothing: let the child go here, by the policy's lever.
+        this.giveUp(held, `adoption failed: ${message}`);
+        this.emitEmptyIfSo();
+        try {
+          client?.shutdown(`child adoption failed: ${message}`);
+        } catch {
+          // best effort
+        }
       }
       throw error;
     } finally {
@@ -426,6 +453,78 @@ export class ChildConnections extends EventEmitter {
   /** Any other request for the child: one that resumes or ends it ends a step still in flight. */
   async beforeRequest(sessionId: string, command: string): Promise<void> {
     await this.clients.get(sessionId)?.stepper?.beforeRequest(command);
+  }
+
+  /**
+   * The answer to a `setFunctionBreakpoints` for a child whose adapter has no
+   * such request, or null when the request goes to the adapter as it is
+   * (issue #1219). An adapter that arms function breakpoints through the CDP
+   * bridge (js-debug, issue #295) arms them in the session's own program
+   * only: a child's connection has no bridge, and the adapter sends nothing
+   * back for a request it does not know, so a caller would wait out its
+   * deadline. Each one is answered as it is: not armed, with the reason.
+   */
+  unarmedFunctionBreakpoints(
+    sessionId: string,
+    command: string,
+    args?: unknown
+  ): DebugProtocol.SetFunctionBreakpointsResponse | null {
+    if (command !== 'setFunctionBreakpoints' || !this.clients.has(sessionId) || !this.functionBreakpointsNeedTheBridge()) {
+      return null;
+    }
+    const asked = (args as { breakpoints?: unknown[] } | undefined)?.breakpoints ?? [];
+    return {
+      seq: 0,
+      type: 'response',
+      request_seq: 0,
+      command,
+      success: true,
+      body: {
+        breakpoints: asked.map(() => ({ verified: false, message: ErrorMessages.functionBreakpointsNotArmedInChildSession() }))
+      }
+    };
+  }
+
+  /** Whether this adapter's function breakpoints exist only where the CDP bridge is: the session's own program. */
+  private functionBreakpointsNeedTheBridge(): boolean {
+    return this.options.adoption?.policy.functionBreakpointsVia === 'cdp';
+  }
+
+  /**
+   * Let go of a child whose adoption failed after configurationDone went
+   * out: a disconnect on the connection the target is bound to, with the
+   * process kept. Counted with the releases, so the worker does not stop
+   * the adapter underneath it.
+   */
+  private letGoOnItsConnection(deps: ChildAdoptionDeps, client: IDapClient, held: HeldReport, reason: string): void {
+    const { logger } = this.options;
+    const child = `${held.report.targetId} (${held.report.name})`;
+    const releasing = deps.connectionManager
+      .disconnect(client, false)
+      .then((outcome) => {
+        if (outcome?.answered === false) {
+          logger.warn(
+            `[ChildConnections] Child ${child}: the adapter did not acknowledge the disconnect after a failed adoption (${outcome.error ?? 'no answer'}); the process may still be held by the adapter`
+          );
+        } else {
+          logger.warn(
+            `[ChildConnections] Child ${child} released to run UNDEBUGGED (adoption failed: ${reason}) — breakpoints will not bind in that process`
+          );
+        }
+      })
+      .catch((error: unknown) => {
+        logger.error(`[ChildConnections] Failed to release child ${child}: ${error instanceof Error ? error.message : String(error)}`);
+      })
+      .finally(() => {
+        try {
+          client.shutdown(`child adoption failed: ${reason}`);
+        } catch {
+          // best effort
+        }
+        this.releases.delete(releasing);
+        this.emitEmptyIfSo();
+      });
+    this.releases.add(releasing);
   }
 
   /**
@@ -664,6 +763,23 @@ export class ChildConnections extends EventEmitter {
     functionBreakpoints: NonNullable<ChildAdoptArgs['functionBreakpoints']>
   ): Promise<void> {
     if (functionBreakpoints.length === 0) {
+      return;
+    }
+    if (this.functionBreakpointsNeedTheBridge()) {
+      // Nothing to send (issue #1219): the adapter has no such request and
+      // would leave it unanswered. The parent's copies are reported as
+      // they are in this child: not armed.
+      const message: StatusMessage = {
+        type: 'status',
+        status: 'function_breakpoints_synced',
+        sessionId,
+        functionBreakpoints: functionBreakpoints.map((bp) => ({
+          name: bp.name,
+          verified: false,
+          message: ErrorMessages.functionBreakpointsNotArmedInChildSession()
+        }))
+      };
+      this.options.messageSender.send(message);
       return;
     }
     try {

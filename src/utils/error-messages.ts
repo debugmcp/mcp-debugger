@@ -945,6 +945,18 @@ export const ErrorMessages = {
     `Use the parent's id, or close_debug_session on the child.`,
 
   /**
+   * A function breakpoint on a child session of an adapter that arms them
+   * through a channel only the session's own program has (js-debug: the CDP
+   * bridge of the launched or attached process, issue #295). The child's
+   * connection has no such channel and the adapter has no request for
+   * them, so nothing is sent and the breakpoint is reported as it is: not
+   * armed (issue #1219).
+   */
+  functionBreakpointsNotArmedInChildSession: () =>
+    `Function breakpoints are not armed in a child session: this adapter arms them only in the process the ` +
+    `session launched or attached to. Set a line breakpoint in the child's code instead.`,
+
+  /**
    * The detach answer when the adapter acknowledged the detach (issue #1148)
    * Occurs when: the adapter answered the detaching disconnect, or sent
    * `terminated` in reply to it, and reported no exit of the program

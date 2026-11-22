@@ -417,6 +417,50 @@ describe('JavaScript forks as child sessions (the session tree, issue #1082)', (
     expect((await call('close_debug_session', { sessionId: rootId })).success).toBe(true);
   }, 120_000);
 
+  /**
+   * Issue #1219. js-debug has no `setFunctionBreakpoints` and sends nothing
+   * back for a request it does not know. Sent raw to the fork's connection,
+   * the parent's function breakpoint held the adoption for 30 s until it
+   * failed, and the fork was then left paused on its line breakpoint with no
+   * session: the program never ended. Function breakpoints live in the
+   * session's own program (the CDP bridge); in a fork they are reported as
+   * not armed, and the fork is adopted in the usual time.
+   */
+  it('a function breakpoint on the parent does not hold up the fork: it is adopted, stops on its line breakpoint, and says the function breakpoint is not armed there', async () => {
+    const rootId = await server.createSession('javascript', 'js-tree-function-breakpoint');
+    expect((await call('set_breakpoint', { file: childFixture, line: CHILD_BREAKPOINT_LINE })).success).toBe(true);
+    const fnBp = await call('set_breakpoint', { function: 'noSuchFunction' });
+    expect(fnBp.success, JSON.stringify(fnBp)).toBe(true);
+    const startedAt = Date.now();
+    await launch(parentFixture);
+
+    const stop = await waitForChildStop(rootId, /child\.js$/, CHILD_BREAKPOINT_LINE);
+    // Far inside the 30 s the unanswered request used to cost.
+    expect(Date.now() - startedAt).toBeLessThan(20_000);
+    const childId = stop.sessionId;
+
+    const listed = await call<ToolAnswer & { functionBreakpoints?: Array<{ functionName: string; verified: boolean; message?: string }> }>(
+      'list_breakpoints', { sessionId: childId }
+    );
+    expect(listed.functionBreakpoints, JSON.stringify(listed)).toEqual([
+      expect.objectContaining({ functionName: 'noSuchFunction', verified: false, message: expect.stringContaining('not armed in a child session') })
+    ]);
+    // Asked for on the child while it is paused, one is answered the same way, at once.
+    const live = await call<ToolAnswer & { verified?: boolean; message?: string }>('set_breakpoint', { sessionId: childId, function: 'alsoNotThere' });
+    expect(live.success, JSON.stringify(live)).toBe(true);
+    expect(live.verified).toBe(false);
+    expect(JSON.stringify(live)).toContain('not armed in a child session');
+
+    // The fork is a live session: resumed past its ticks, the tree ends with its exit code.
+    expect((await call('clear_breakpoints', { sessionId: childId })).success).toBe(true);
+    expect((await call('continue_execution', { sessionId: childId })).success).toBe(true);
+    const ended = await call<Stop>('wait_for_stop', { sessionId: rootId, timeout: 30000 });
+    expect(ended.state, JSON.stringify(ended)).toBe('stopped');
+    expect(ended.exitCode).toBe(0);
+    expect(ended.childrenReleased).toBeUndefined();
+    expect(await outputText(rootId)).toContain('child done 3');
+  }, 120_000);
+
   it("a logpoint set on the parent reaches the fork and prints into the launch session's output", async () => {
     const rootId = await server.createSession('javascript', 'js-tree-logpoint');
     const logpoint = await call('set_breakpoint', { file: childFixture, line: CHILD_BREAKPOINT_LINE, logMessage: 'tick {i} total {total}' });
