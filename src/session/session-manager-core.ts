@@ -26,6 +26,7 @@ import {
   clearPauseIntent,
   getCurrentPauseIntent
 } from './execution/pause-intent.js';
+import { describeTreeAnswer } from './execution/tree-settle.js';
 import { DebugProtocol } from '@vscode/debugprotocol'; 
 import path from 'path';
 import os from 'os';
@@ -1129,12 +1130,15 @@ export abstract class SessionManagerCore extends EventEmitter {
   }
 
   /**
-   * Where a child session's output is read (issue #1082): the id of its
-   * tree's root when the adapter delivers the whole tree's output on the
-   * launch session's connection and none on the child's (js-debug, the
-   * policy's `childOutput: 'launch-session'` pin); undefined when the
-   * session's own buffer is the place to read (a root, a debugpy child,
-   * or a child under an attach root, whose console output is per-target).
+   * Where a child session's program output is read (issue #1082): the id of
+   * its tree's root when the adapter delivers the whole tree's stdout and
+   * stderr on the launch session's connection and none on the child's
+   * (js-debug, the policy's `childOutput: 'launch-session'` pin); undefined
+   * when the session's own buffer is the place to read (a root, a debugpy
+   * child, or a child under an attach root, whose console output is
+   * per-target). The child's own buffer is never empty by rule: what the
+   * debugger itself produces for that process is there, the lines of the
+   * logpoints it hit among them (issue #1212).
    */
   public outputOnFor(sessionId: string): string | undefined {
     const session = this.sessionStore.get(sessionId);
@@ -1396,6 +1400,18 @@ export abstract class SessionManagerCore extends EventEmitter {
       result.push(...this.descendantsDepthFirst(child.id));
     }
     return result;
+  }
+
+  /**
+   * The `children` list a tree answer on this session carries, built the
+   * way the launch, restart and wait answers build theirs; undefined for a
+   * session with no descendants. For an answer that is read off a session
+   * instead of returned by an operation: `get_output` (issue #1212), where
+   * it tells a caller reading one session which others hold lines of their
+   * own (a child's logpoint lines are on the child).
+   */
+  public treeChildrenOf(sessionId: string): TreeAnswerFields['children'] {
+    return describeTreeAnswer({}, this.descendantsDepthFirst(sessionId)).children;
   }
 
   /** Every descendant of a session, deepest first (post-order), adoption order within a level. */

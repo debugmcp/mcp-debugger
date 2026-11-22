@@ -56,3 +56,40 @@ What does **not** carry over:
 3. Re-send breakpoints per child; there is no `exited`, only `terminated`; output is tree-wide on the root and must be attributed by the worker if per-child buffers are wanted (the `name` in the report carries the pid; so do the `Debugger attached.` lines' order, nothing else).
 4. Ending: only the root's `disconnect` ends the tree, and it does not answer; `terminate`/`disconnect` on a program or child session leave processes alive. Keep the worker's timeout-then-tree-kill.
 5. A child never outlives the launch: the program's exit kills unreported children within 300 ms, so an orphaned-child policy is not needed for js-debug (it is for Python, where a paused child outlives its parent).
+
+## Logpoints in a fork (issue #1212)
+
+Measured 2026-11-22 on Windows 11, Node 24.14.1, js-debug v1.140.0, first with a bare DAP driver against
+js-debug's own server and then through mcp-debugger. Times are from the `configurationDone` response on
+the fork's connection.
+
+1. **Before the fix.** mcp-debugger compiles a logpoint into a breakpoint condition that calls a CDP
+   binding, and only the program's own target had the binding. In a fork the condition fell back to
+   `console.log`. With the fork's stdio piped to a parent that parses it, the text went down that pipe:
+   the parent reported a corrupted protocol and exited 3 instead of 0, and `get_output` showed the
+   lines on no session.
+2. **When a fork's CDP socket can be opened.** `requestCDPProxy` on the fork's connection is never
+   answered before `configurationDone` (js-debug logs `Unknown request` and sends nothing), so it must
+   not be pipelined with it. Sent right after the `configurationDone` response, it is answered at about
+   3 ms. The WebSocket is open at 6 to 9 ms, `Runtime.addBinding` is answered at about 22 ms, and the
+   attach is answered at 24 to 26 ms. js-debug lets the fork run right before it answers the attach.
+3. **Why the binding gets there first.** The proxy forwards to js-debug's own CDP session with the
+   target, where commands are processed in order: an `addBinding` that is on the wire before js-debug's
+   `Runtime.runIfWaitingForDebugger` (sent after its own init, about 20 ms) is installed before the
+   fork's first statement. With a warm socket, 24 of 24 runs delivered the first statement through the
+   binding, also with every core busy and for a fork that lives about 10 ms. The misses were the
+   driver's own cold first WebSocket: the hit was then kept in the process and the flush returned it.
+4. **The end of a fork.** The fork's last `Runtime.bindingCalled` arrives about 1 ms AFTER the DAP
+   `terminated` for it: two sockets from the same adapter process. js-debug's proxy answers a method of
+   its own `JsDebug` domain itself, and one it does not have with an error at once, so one such round
+   trip sent after `terminated` is answered after everything the target sent before.
+5. **Through the server** (a parent that forks a child which hits two logpoints and exits at once,
+   12 runs in one server): with the fork's `terminated` held behind that round trip, both lines are on
+   the fork's session in 12 of 12 runs; with the wait skipped, in 0 of 12. A fork that lives for three
+   200 ms ticks delivers its first statement and all three ticks, in order, and its parent reads an
+   intact protocol and exits 0.
+6. **A `worker_threads` worker** is a target of its own and is adopted as a child session like a
+   fork. Its logpoint lines went the same way: before, into the process's stdout (they showed on the
+   launch session as `stdout` lines between the program's own); now, on the worker's session.
+7. **Not measured here:** Linux and macOS (the two sockets may race differently; the wait does not
+   depend on which is first), and a fork under an attach root.

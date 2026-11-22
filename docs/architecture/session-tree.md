@@ -177,14 +177,34 @@ A child's own buffer carries its own lines **where the adapter can attribute the
 - debugpy can: with `redirectOutput: true` in the child's attach, the child's stdout and stderr
   also arrive on the child's connection. The child's `get_output` and
   `debug://sessions/<child>/output` show the child's lines; the parent's show the tree.
-- js-debug launches cannot: all output of the tree arrives on the root connection and child sessions carry
-  no `output` events at all. A js-debug child's `get_output` answers with an empty page and a note
-  that its output is on the launch session (`outputOn: <launch session id>`); its resource reads
-  the same way, preserving any diagnostics captured in the child's own buffer.
+- js-debug launches cannot: what the tree writes to inherited stdio arrives on the root
+  connection, and js-debug sends none of it on a child's. A js-debug child's `get_output` answers
+  with `outputOn: <launch session id>` and a note that says so, and that what the process writes
+  to a pipe (`silent: true`) is read by its parent process only: no session shows that, and the
+  note used to claim the launch session did. Its resource reads the same way. What a child's own
+  buffer does carry is what the debugger
+  produces for that process: the lines of the logpoints it hit (below) and notices.
 - js-debug attach roots do not own the process pipes. With the default console capture, each
   child's console output arrives on its own connection; its `get_output` and resource show those
   lines, without an `outputOn` pointer. This was measured with an attached Node parent and an
   adopted fork during the M2 review (js-debug v1.140.0).
+
+**A logpoint's line is on the session of the process that hit it**, for both adapters (issue
+[#1212](https://github.com/debugmcp/mcp-debugger/issues/1212)). debugpy sends a child's logpoint
+output on the child's connection only (measured). For js-debug the worker gives every fork
+connection the composition the program's own target has (`JsTargetServices`: the target's CDP
+socket, the logpoint binding and the proxy's stepper on it) and forwards what the binding
+delivers under the fork's session id; it used to give a fork a socket for the stepper alone, so
+a fork's compiled logpoint fell back to `console.log` and wrote into the fork's stdout, which is
+the program's and may be a pipe its parent parses. `get_output` on a session with descendants
+lists them in `children`, the list every tree answer carries: a caller that reads one buffer
+learns in that answer which other sessions exist. Two orderings the worker keeps: the socket is
+asked for the moment the fork's `configurationDone` is answered (the adapter starts the fork
+about 20 ms later, and a hit that comes before the binding is kept in the process and flushed),
+and the fork's `terminated` and closed status are sent after one round trip on that socket (its
+last lines arrive about 1 ms after the adapter's `terminated`, and the parent takes a child's
+output until its end). The measurements are in
+[spike-notes-forks.md](../javascript/spike-notes-forks.md).
 
 The attribution is one per-adapter policy pin (below), applied to launch roots. The per-process-only
 alternative (each session carries only its own process's lines) is not implementable for launches: js-debug offers no

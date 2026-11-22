@@ -297,8 +297,10 @@ js-debug bootloader and reach its debugger endpoint.
 
 For an `attach_to_process` root, the default console capture delivers each child's console
 output to that child's own buffer and resource; it does not return an `outputOn` pointer to the
-root. A launch child's output resource still includes any diagnostics recorded for that child
-alongside the pointer to the launch output. One hazard of an attached target started with
+root. A launch child's `get_output` and resource carry what the debugger itself produced for
+that process (the lines of the logpoints it hit, notices) beside the pointer to the launch
+session, where what it writes to inherited stdio is. What a child writes to a pipe (`fork` with
+`silent: true`) is read by its parent process only and shows on no session; the note says so. One hazard of an attached target started with
 `node --inspect`: a child it `fork()`s inherits that flag through `execArgv` by default, fights
 the parent for the inspector port, and js-debug's process-tree scan then attaches it as a
 nameless `Child Process [<pid>]` target whose breakpoints never bind, racing the bootloader's own
@@ -310,9 +312,28 @@ inside that window runs unreported (measured on a slow CI runner). A program tha
 trigger right after being attached to with child auto-attach enabled should wait for
 `process.env.VSCODE_INSPECTOR_OPTIONS` to appear, as the attach fixture does.
 
-Fork logpoints use a `console.log` fallback because each fork does not have its own CDP logpoint
-bridge. A child that replaces `console.log` can suppress those messages; the program target's
-CDP-backed logpoints are unaffected.
+A logpoint in a fork is delivered the way one in the program is: each fork gets its own CDP
+socket with the logpoint binding on it (issue
+[#1212](https://github.com/debugmcp/mcp-debugger/issues/1212)). Its lines are on **the fork's own
+session**, read with `get_output` on the child's id, and `get_output` on a session that has
+children lists them in `children`, so a caller reading only the launch session sees which other
+sessions to read. What a fork writes to inherited stdio stays where js-debug delivers it, on the
+launch session (`outputOn` in the child's answer). The same holds for a `worker_threads` worker, which
+js-debug also reports as a target of its own. Nothing is written to the fork's own stdout: the
+compiled logpoint used to fall back to the fork's `console.log`, and a parent that parses its
+child's stdout read the logpoint text as protocol (measured: it reported the protocol corrupted
+and exited 3 instead of 0, and no session showed the lines).
+
+No stop, hold or resume is added to deliver a logpoint. The binding is usually in a fork before
+its first statement runs: the socket is asked for the moment the fork's `configurationDone` is
+answered, and js-debug lets the fork run about 20 ms later. A hit that comes before the binding
+is kept in the process (up to 1000 messages; a line says how many did not fit) and delivered, in
+order, as soon as the binding is in. The end of a fork is reported after one round trip on its
+CDP socket (at most 500 ms): its last lines were measured to arrive about 1 ms after the
+adapter's `terminated`. A fork that hits two logpoints and exits at once delivered both lines in
+12 of 12 runs with that wait, and in 0 of 12 without it. What is still lost: the lines of a fork
+whose CDP socket never opens; its session then carries one `[mcp-debugger] Warning` line saying
+that its logpoints are not delivered. Function breakpoints are not armed in a fork (#1219).
 
 Opt out per launch with `dapLaunchArgs: { autoAttachChildProcesses: false }`, per attach with
 `adapterConfig: { autoAttachChildProcesses: false }`, or server-wide with
@@ -347,7 +368,7 @@ const child = fork('child.js');
 
 A `logMessage` turns the breakpoint into a logpoint: execution does not pause — the interpolated message (expressions in `{curly braces}`) arrives in the session output, readable via `get_output` as a `console` entry.
 
-mcp-debugger compiles JavaScript logpoints itself rather than handing the `logMessage` to js-debug (issues #850, #861, #853): js-debug would print through the debuggee's `console.log`, which a program that owns its stdout may have replaced, and would turn a logpoint with a `condition` into a pausing breakpoint. The compiled form delivers the rendered message over js-debug's CDP proxy — strings raw, other values through `util.inspect`, a throwing expression as `<ReferenceError: …>` — logs only when the `condition` holds, and never pauses. A `logMessage` whose `{expression}` does not compile is refused by `set_breakpoint` with V8's syntax error; a `condition` js-debug rejects shows js-debug's message on the breakpoint in `list_breakpoints`. A logpoint set before launch makes js-debug stop on entry so the delivery binding is in place before the first hit; that stop is auto-continued and never reported.
+mcp-debugger compiles JavaScript logpoints itself rather than handing the `logMessage` to js-debug (issues #850, #861, #853): js-debug would print through the debuggee's `console.log`, which a program that owns its stdout may have replaced, and would turn a logpoint with a `condition` into a pausing breakpoint. The compiled form delivers the rendered message over js-debug's CDP proxy — strings raw, other values through `util.inspect`, a throwing expression as `<ReferenceError: …>` — logs only when the `condition` holds, and never pauses. While the delivery binding is not in the process (the first milliseconds of a forked process, or a process whose CDP socket could not be opened) the message is kept in the process and delivered when the binding arrives; it is never printed through the program's `console.log` (issue #1212). A `logMessage` whose `{expression}` does not compile is refused by `set_breakpoint` with V8's syntax error; a `condition` js-debug rejects shows js-debug's message on the breakpoint in `list_breakpoints`. A logpoint set before launch makes js-debug stop on entry so the delivery binding is in place before the first hit; that stop is auto-continued and never reported.
 
 ```json
 {
