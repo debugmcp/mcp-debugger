@@ -85,7 +85,7 @@ export interface LastLaunchSpec {
  * What the adapter's transform handed the engine for the current launch
  * (issue #950): the program it runs — for a compiled language the binary or
  * DLL, not the script the caller named — and the transformed config it came
- * from. See ManagedSession.transformedLaunch.
+ * from. See Run.transformedLaunch.
  */
 export interface TransformedLaunch {
   program: string;
@@ -153,9 +153,17 @@ export interface StepStopProvenance {
  * session, written on the root and empty on a child, and each reader had to
  * know to walk to the root (issues #1214, #1222).
  *
- * Written by the launch-shaped code only: the launcher, the proxy launcher
- * and the attach controller, each field reset where it was reset before the
- * move. A dry run and a failed preparation leave the record as it was.
+ * Written by the launch-shaped code (the launcher, the proxy launcher and
+ * the attach controller, which refuse a child session), each field reset
+ * where it was reset before the move, and in one place by the core: a stop
+ * that proves the debugger on clears `launchDebuggerOff`, from whichever
+ * session of the tree stopped. A dry run leaves the record as it was; a real
+ * start that fails has already reset the facts it resets at its top.
+ *
+ * The record is mutated in place, not replaced per run. A child row that
+ * outlives its run (kept as stopped until closed) therefore reads what its
+ * root reads; the readers that are new to children are gated on a live
+ * state, which such a row does not have.
  */
 export interface Run {
   // True for sessions established via attach_to_process. Attach targets may

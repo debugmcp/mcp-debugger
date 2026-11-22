@@ -450,12 +450,20 @@ A child is a session of its own, and what is read about it is read where it is t
   things that are the root's row and not the record: the root's id and the run directory. One
   worker serves a tree and writes one proxy log, named after the root, so a child's
   `debug://sessions/<child>/proxy-log` is its tree's.
-  The record is written by the launch-shaped code only (the launcher, the proxy launcher, the
-  attach controller), each fact reset where it always was: a dry run and a failed preparation
-  leave it as it was. Two things follow from sharing it and are meant: a stop in a child that
-  proves the debugger is on clears the run's debugger-off decision, and a child reads that
-  decision as its root does. One thing does not follow: the notes of the root's launch are
-  seeded into the root's output only.
+  The record is written by the launch-shaped code (the launcher, the proxy launcher, the attach
+  controller), each fact reset where it always was, and in one place by the core: a stop that
+  proves the debugger on clears the debugger-off decision. A dry run leaves the record as it
+  was. The launch-shaped operations refuse a child session at the session layer too
+  (`refuseChildSession`, `src/session/in-flight-guard.ts`), not only in the tool handlers: on a
+  child they would write, replay or judge by its root's run.
+  Three things follow from sharing the record and are meant: a stop in a child that proves the
+  debugger on clears the run's decision; a child reads that decision as its root does (while
+  the proof by a verified breakpoint stays each session's own, so for a moment the two can
+  answer differently); and a child's exception arming is the live one, where it was a copy
+  taken at adoption. One thing does not follow: the notes of the root's launch are seeded into
+  the root's output only. The record is mutated in place and not replaced per run, so a child
+  row that outlives its run reads what its root reads; the readers that are new to children
+  are gated on a live state.
   Two limits of reading the root's facts for a child, both known:
   - **The stale-build check decides by the root's program.** That is right for a worker of a
     runner that transforms sources in memory (vitest, tsx) and wrong under a process manager

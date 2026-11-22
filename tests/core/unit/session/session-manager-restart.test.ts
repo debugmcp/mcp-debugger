@@ -224,6 +224,24 @@ describe('SessionManager - restart and relaunch', () => {
       expect(result.error).toContain('Nothing to restart');
     });
 
+    it('a launch supersedes an earlier attach: the session is a launch again, and restart replays it (#238)', async () => {
+      const session = await createLaunchedSession();
+      const run = sessionManager.getSession(session.id)!.run;
+      // As attach_to_process leaves it.
+      run.attachMode = true;
+      run.attachLocality = 'remote';
+
+      await sessionManager.startDebugging(session.id, 'again.py');
+      await vi.runAllTimersAsync();
+
+      expect(run.attachMode).toBe(false);
+      expect(run.attachLocality).toBeUndefined();
+      const result = await sessionManager.restartDebugging(session.id);
+      await vi.runAllTimersAsync();
+      expect(result.error ?? '').not.toMatch(/attach/i);
+      expect(result.success).toBe(true);
+    });
+
     it('refuses attach sessions with an attach-specific error', async () => {
       const session = await createLaunchedSession();
       sessionManager.getSession(session.id)!.run.attachMode = true;

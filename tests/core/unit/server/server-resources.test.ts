@@ -132,6 +132,7 @@ describe('Server Output Resources Tests', () => {
   function mockSession(overrides: Record<string, unknown> = {}) {
     const buffer = new OutputRingBuffer();
     return {
+      run: {},
       id: 'sess-1',
       name: 'test session',
       language: 'python',

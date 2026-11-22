@@ -67,6 +67,7 @@ describe('set_breakpoint loud snapping (#271)', () => {
     callToolHandler = getToolHandlers(mockServer).callToolHandler;
 
     mockSessionManager.getSession.mockReturnValue({
+      run: {},
       id: 'test-session',
       sessionLifecycle: 'active'
     });

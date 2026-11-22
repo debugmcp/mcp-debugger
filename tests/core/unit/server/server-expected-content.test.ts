@@ -69,6 +69,7 @@ describe('set_breakpoint expectedContent (#271)', () => {
     callToolHandler = getToolHandlers(mockServer).callToolHandler;
 
     mockSessionManager.getSession.mockReturnValue({
+      run: {},
       id: 'test-session',
       sessionLifecycle: 'active'
     });

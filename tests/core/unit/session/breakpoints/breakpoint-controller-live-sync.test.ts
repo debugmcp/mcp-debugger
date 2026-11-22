@@ -62,6 +62,7 @@ function failingSession(
     functions.map((bp) => [bp.id, { verified: false, ...bp } as FunctionBreakpoint])
   );
   const session = {
+    run: {},
     id: 'sess-1',
     language: 'python',
     state: 'paused',
@@ -467,6 +468,7 @@ describe('BreakpointController live re-send uses the policy wire form (issue #85
     }));
     const breakpoints = new Map<string, Breakpoint>(lines.map((bp) => [bp.id, { verified: false, ...bp } as Breakpoint]));
     const session = {
+      run: {},
       id: 'sess-1',
       language,
       state: 'paused',

@@ -186,7 +186,7 @@ function decideNoDebug(
   // adapter merge reads), the core's projection to RUNNING on
   // adapter-configured, the readiness wait — sees it off, so they agree and
   // none of them waits for a stop that cannot arrive. The warning above and
-  // session.lastLaunch keep the caller's values.
+  // session.run.lastLaunch keep the caller's values.
   const launchArgs = debuggerOff ? { ...dapLaunchArgs, stopOnEntry: false } : dapLaunchArgs;
   const launchAdapterConfig =
     debuggerOff && adapterLaunchConfig?.stopOnEntry !== undefined
@@ -992,7 +992,7 @@ export class DebugLauncher {
     // session. Held for the whole restart, so the replayed launch runs under
     // this claim. The refusal text distinguishes "wait for it" from the one
     // pairing that is terminal rather than transient — an in-flight attach,
-    // whose session will never accept a relaunch (the `session.attachMode`
+    // whose session will never accept a relaunch (the `session.run.attachMode`
     // check below, answered up front because attachMode is only written
     // after the attach's first awaits).
     return this.inFlight.run(sessionId, 'restart', 'restart_debugging', this.ctx, () =>

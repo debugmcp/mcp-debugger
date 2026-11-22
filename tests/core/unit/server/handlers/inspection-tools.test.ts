@@ -139,6 +139,7 @@ describe('inspection tool handlers', () => {
   describe('handleEvaluateExpression', () => {
     it('should handle expression evaluation in terminated session', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.TERMINATED
       });
@@ -156,6 +157,7 @@ describe('inspection tool handlers', () => {
   describe('handleGetSourceContext', () => {
     beforeEach(() => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -246,6 +248,7 @@ describe('inspection tool handlers', () => {
 
     it('returns source context when lineReader returns content', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE,
         name: 'my-session'
@@ -283,6 +286,7 @@ describe('inspection tool handlers', () => {
   describe('handleGetLocalVariables', () => {
     beforeEach(() => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -291,6 +295,7 @@ describe('inspection tool handlers', () => {
 
     describe('a paused session whose anchored thread has no frames (issue #1132)', () => {
       const paused = () => ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE,
         state: SessionState.PAUSED
@@ -591,6 +596,7 @@ describe('inspection tool handlers', () => {
 
     it('returns graceful error for terminated session', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE,
         name: 'my-session'
@@ -620,6 +626,7 @@ describe('inspection tool handlers', () => {
       text: 'bad token'
     };
     ctx.sessionManager.getSession.mockReturnValue({
+      run: {},
       id: 'test-session',
       sessionLifecycle: SessionLifecycleState.ACTIVE,
       state: 'paused',
@@ -650,6 +657,7 @@ describe('inspection tool handlers', () => {
         text: `token ${SECRET} rejected`
       };
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE,
         state: 'paused',
@@ -689,6 +697,7 @@ describe('inspection tool handlers', () => {
 
     function endedSession(session: Record<string, unknown>): void {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.TERMINATED,
         state: 'stopped',

@@ -61,6 +61,7 @@ describe('Server Control Tools Tests', () => {
       // verified:false and the next launch carries it. Remove/list/clear already
       // accepted this state; set must too.
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         state: 'stopped',
         sessionLifecycle: SessionLifecycleState.TERMINATED
@@ -107,7 +108,7 @@ describe('Server Control Tools Tests', () => {
 
     it('keeps the adapter message of a verified line breakpoint in message, out of warning (issue #1144)', async () => {
       // CodeLLDB says "Resolved locations: 1" on a bind that worked.
-      mockSessionManager.getSession.mockReturnValue({ id: 'test-session', state: 'running', sessionLifecycle: 'ACTIVE' });
+      mockSessionManager.getSession.mockReturnValue({ run: {}, id: 'test-session', state: 'running', sessionLifecycle: 'ACTIVE' });
       mockSessionManager.setBreakpoint.mockResolvedValue({
         breakpoint: { id: 'bp-1', file: '/path/to/main.cpp', line: 10, verified: true, message: 'Resolved locations: 1' }
       });
@@ -195,6 +196,7 @@ describe('Server Control Tools Tests', () => {
       
       // Mock session validation
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE' // Not terminated
       });
@@ -237,6 +239,7 @@ describe('Server Control Tools Tests', () => {
       
       // Mock session validation
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE' // Not terminated
       });
@@ -275,6 +278,7 @@ describe('Server Control Tools Tests', () => {
       };
 
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE'
       });
@@ -331,6 +335,7 @@ describe('Server Control Tools Tests', () => {
       // A dry run and a run to completion both end lifecycle-TERMINATED with the
       // session still present: the between-launches state, not a closed session.
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         state: 'stopped',
         sessionLifecycle: SessionLifecycleState.TERMINATED
@@ -365,6 +370,7 @@ describe('Server Control Tools Tests', () => {
 
     it('hoists pending to the top level when the launch answers while the program still runs (issue #815)', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE'
       });
@@ -395,6 +401,7 @@ describe('Server Control Tools Tests', () => {
     it('should start debugging successfully', async () => {
       // Mock session validation
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE' // Not terminated
       });
@@ -437,6 +444,7 @@ describe('Server Control Tools Tests', () => {
 
     it('should pass breakOnExceptions through to the session manager', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE'
       });
@@ -471,6 +479,7 @@ describe('Server Control Tools Tests', () => {
 
     it('should reject a non-object adapterLaunchConfig', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE'
       });
@@ -492,6 +501,7 @@ describe('Server Control Tools Tests', () => {
 
     it('should reject an invalid breakOnExceptions value', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE'
       });
@@ -513,6 +523,7 @@ describe('Server Control Tools Tests', () => {
 
     it('does not turn user text containing "closed" into a session failure payload', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE'
       });
@@ -534,6 +545,7 @@ describe('Server Control Tools Tests', () => {
 
     it('honors breakOnExceptions nested inside dapLaunchArgs with a warning (#305)', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE'
       });
@@ -572,6 +584,7 @@ describe('Server Control Tools Tests', () => {
 
     it('prefers the top-level breakOnExceptions when both placements are given', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE'
       });
@@ -611,6 +624,7 @@ describe('Server Control Tools Tests', () => {
 
     it('rejects an invalid nested breakOnExceptions like an invalid top-level one', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE'
       });
@@ -632,6 +646,7 @@ describe('Server Control Tools Tests', () => {
 
     it('strips other misplaced top-level keys from dapLaunchArgs with a warning', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE'
       });
@@ -669,6 +684,7 @@ describe('Server Control Tools Tests', () => {
 
     it('passes legitimate DAP launch keys through untouched with no warning', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE'
       });
@@ -714,6 +730,7 @@ describe('Server Control Tools Tests', () => {
     it('should handle dry run mode', async () => {
       // Mock session validation
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE' // Not terminated
       });
@@ -787,6 +804,7 @@ describe('Server Control Tools Tests', () => {
     ])('should handle %s successfully', async (toolName, methodName, expectedMessage) => {
       // Mock session validation
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE' // Not terminated
       });
@@ -817,6 +835,7 @@ describe('Server Control Tools Tests', () => {
       // the user-facing 'Stepped over', and the handler passes data.message
       // through whenever the controller set one.
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE'
       });
@@ -859,6 +878,7 @@ describe('Server Control Tools Tests', () => {
       // session terminated.' and no `pending` marker. The hard-coded
       // "Stepped over" used to overwrite it, leaving `state` the only clue.
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE'
       });
@@ -884,6 +904,7 @@ describe('Server Control Tools Tests', () => {
 
     it('hoists exitCode onto terminal step responses (issue #1177) and preserves paused state on refused steps (issue #1179)', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE'
       });
@@ -954,6 +975,7 @@ describe('Server Control Tools Tests', () => {
     ])('should surface a pending %s truthfully while the program is still running', async (toolName, methodName) => {
       // Mock session validation
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE' // Not terminated
       });
@@ -990,6 +1012,7 @@ describe('Server Control Tools Tests', () => {
     ])('should handle %s failure responses', async (toolName, methodName) => {
       // Mock session validation
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE' // Not terminated
       });
@@ -1018,6 +1041,7 @@ describe('Server Control Tools Tests', () => {
     it('should continue execution successfully', async () => {
       // Mock session validation
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE' // Not terminated
       });
@@ -1042,6 +1066,7 @@ describe('Server Control Tools Tests', () => {
 
     it('reports the reason and state when continue fails (issue #638)', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE'
       });
@@ -1085,6 +1110,7 @@ describe('Server Control Tools Tests', () => {
   describe('wait_for_stop (issue #849)', () => {
     it('reaches the session manager with the coerced timeout and the request signal', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         state: 'running',
         sessionLifecycle: 'ACTIVE'
@@ -1118,6 +1144,7 @@ describe('Server Control Tools Tests', () => {
   describe('pause_execution', () => {
     it('should pause execution successfully', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         state: 'running',
         sessionLifecycle: 'ACTIVE'
@@ -1142,6 +1169,7 @@ describe('Server Control Tools Tests', () => {
 
     it('should pause a specific thread when threadId is provided', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         state: 'running',
         sessionLifecycle: 'ACTIVE'
@@ -1183,6 +1211,7 @@ describe('Server Control Tools Tests', () => {
 
     it('should handle pause on terminated session', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.TERMINATED
       });
@@ -1204,6 +1233,7 @@ describe('Server Control Tools Tests', () => {
   describe('list_threads', () => {
     it('should list threads successfully', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         state: 'paused',
         sessionLifecycle: 'ACTIVE'
@@ -1248,6 +1278,7 @@ describe('Server Control Tools Tests', () => {
 
     it('should handle list_threads on terminated session', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.TERMINATED
       });
@@ -1278,6 +1309,7 @@ describe('Server Control Tools Tests', () => {
   describe('tools that need a live debuggee still refuse a TERMINATED session (issue #793)', () => {
     it.each(['continue_execution', 'step_over', 'step_into', 'step_out'])('%s answers Session is terminated', async (name) => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.TERMINATED
       });

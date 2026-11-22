@@ -93,7 +93,7 @@ describe('set_breakpoint stale-build warning (#938)', () => {
     callToolHandler = getToolHandlers(mockServer).callToolHandler;
 
     // A pre-launch session: no lastLaunch, so nothing says the program runs from .ts.
-    mockSessionManager.getSession.mockReturnValue({ id: 'test-session', sessionLifecycle: 'active' });
+    mockSessionManager.getSession.mockReturnValue({ run: {}, id: 'test-session', sessionLifecycle: 'active' });
     mockSessionManager.getSessionPolicy.mockReturnValue(JsDebugAdapterPolicy);
   });
 

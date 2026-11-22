@@ -70,6 +70,7 @@ describe('set_breakpoint statement anchors (#271)', () => {
     callToolHandler = getToolHandlers(mockServer).callToolHandler;
 
     mockSessionManager.getSession.mockReturnValue({
+      run: {},
       id: 'test-session',
       sessionLifecycle: 'active'
     });

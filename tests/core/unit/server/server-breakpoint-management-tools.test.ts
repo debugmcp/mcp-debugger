@@ -55,6 +55,7 @@ describe('Server Breakpoint Management Tools', () => {
     listToolsHandler = handlers.listToolsHandler;
 
     mockSessionManager.getSession.mockReturnValue({
+      run: {},
       id: 'test-session',
       sessionLifecycle: 'active'
     });
@@ -218,6 +219,7 @@ describe('Server Breakpoint Management Tools', () => {
 
     it('works for a terminated session', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'terminated'
       });

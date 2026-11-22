@@ -146,7 +146,7 @@ describe('describeStaleBuild (issues #938/#950)', () => {
   });
 
   it('hands no launch before one exists', async () => {
-    ctx.sessionManager.getSession.mockReturnValue({ id: 's1' });
+    ctx.sessionManager.getSession.mockReturnValue({ run: {}, id: 's1' });
 
     await describeStaleBuild(ctx, 's1', '/app/src/a.ts', 'breakpoint');
 

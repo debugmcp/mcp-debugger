@@ -8,7 +8,8 @@ import path from 'node:path';
 import type { ManagedSession } from '../../../../src/session/session-store.js';
 import { rootOfTree, runFactsOf } from '../../../../src/session/run-facts.js';
 
-const session = (fields: Record<string, unknown>): ManagedSession => fields as unknown as ManagedSession;
+/** A session's row: its own empty run record unless the test gives it one (a child is given its root's). */
+const session = (fields: Record<string, unknown>): ManagedSession => ({ run: {}, ...fields }) as unknown as ManagedSession;
 
 function tree(...sessions: ManagedSession[]): (sessionId: string) => ManagedSession | undefined {
   const byId = new Map(sessions.map((entry) => [entry.id, entry]));

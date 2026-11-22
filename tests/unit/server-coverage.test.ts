@@ -119,6 +119,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
     it('should handle terminated session error', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.TERMINATED
       });
@@ -131,6 +132,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
   describe('Error Handling in Tool Operations', () => {
     it('should handle stepOver failure with specific error', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE,
         proxyManager: { getCurrentThreadId: () => 1 }
@@ -147,6 +149,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
     it('should handle stepInto failure', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE,
         proxyManager: { getCurrentThreadId: () => 1 }
@@ -162,6 +165,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
     it('should handle stepOut failure', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE,
         proxyManager: { getCurrentThreadId: () => 1 }
@@ -177,6 +181,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
     it('should handle continue execution failure', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE,
         proxyManager: { getCurrentThreadId: () => 1 }
@@ -192,6 +197,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
     it('should handle getStackTrace without proxy manager', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE,
         proxyManager: null
@@ -208,6 +214,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
         sendDapRequest: vi.fn().mockResolvedValue({ body: { threads: [{ id: 5, name: 'main' }] } })
       };
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         state: SessionState.PAUSED,
         sessionLifecycle: SessionLifecycleState.ACTIVE,
@@ -237,6 +244,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
         sendDapRequest: vi.fn().mockRejectedValue(new Error('not connected'))
       };
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         state: SessionState.PAUSED,
         sessionLifecycle: SessionLifecycleState.ACTIVE,
@@ -261,6 +269,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
         sendDapRequest: vi.fn().mockResolvedValue({ body: { threads: [] } })
       };
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         state: SessionState.PAUSED,
         sessionLifecycle: SessionLifecycleState.ACTIVE,
@@ -353,6 +362,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
   describe('Start Debugging Edge Cases', () => {
     it('should handle file not found error', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -372,6 +382,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
     it('should handle debugging start failure', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -393,6 +404,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
   describe('Set Breakpoint Edge Cases', () => {
     it('should handle file not found for breakpoint', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -411,6 +423,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
     it('should handle breakpoint setting failure', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -430,6 +443,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
     it('should skip file existence check when policy recognizes non-file source identifier', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -469,6 +483,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
     it('should skip file existence check for inner class notation via policy', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -500,6 +515,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
     it('should skip file existence check for simple class name via policy', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -531,6 +547,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
     it('should NOT skip file existence check when policy returns false for .java paths', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -563,6 +580,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
     it('should NOT skip file existence check when policy has no isNonFileSourceIdentifier', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -593,6 +611,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
     it('should run file existence check for FQCN-like input when policy does not implement isNonFileSourceIdentifier', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -699,6 +718,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
   describe('Successful execution paths', () => {
     beforeEach(() => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE,
         proxyManager: { getCurrentThreadId: () => 1 }
@@ -744,6 +764,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
   describe('Variables and Scopes Error Handling', () => {
     it('should handle getVariables error gracefully', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE,
         proxyManager: { getCurrentThreadId: () => 1 }
@@ -756,6 +777,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
 
     it('should handle getScopes error gracefully', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE,
         proxyManager: { getCurrentThreadId: () => 1 }

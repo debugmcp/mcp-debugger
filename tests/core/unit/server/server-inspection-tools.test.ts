@@ -79,6 +79,7 @@ describe('Server Inspection Tools Tests', () => {
       
       // Mock session validation
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE' // Not terminated
       });
@@ -130,6 +131,7 @@ describe('Server Inspection Tools Tests', () => {
     it('should validate scope parameter type', async () => {
       // Mock session validation
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE' // Not terminated
       });
@@ -205,6 +207,7 @@ describe('Server Inspection Tools Tests', () => {
 
     it('omits stopReason and lastStop for a session that is no longer paused (issue #720)', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         state: 'running',
         lastStop: { reason: 'step', threadId: 0, description: 'Paused' },
         proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(0), setCurrentThreadId: vi.fn() }
@@ -369,6 +372,7 @@ describe('Server Inspection Tools Tests', () => {
 
       async function stackTraceOf(session: Record<string, unknown>, frames: unknown[], policy: Partial<AdapterPolicy>) {
         mockSessionManager.getSession.mockReturnValue({
+          run: {},
           proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) },
           ...session
         });
@@ -463,7 +467,7 @@ describe('Server Inspection Tools Tests', () => {
     });
 
     it('forwards noProgramFrame when no frame of the shown stack is program code (issue #904)', async () => {
-      mockSessionManager.getSession.mockReturnValue({ proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) } });
+      mockSessionManager.getSession.mockReturnValue({ run: {}, proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) } });
       mockSessionManager.getStackTraceDetailed.mockResolvedValue({
         frames: [{ id: 0, name: '<anonymous>', file: '<unknown_source>', line: 1, column: 1 }],
         totalFrameCount: 1, hiddenFrameCount: 0, allFramesInternal: false, noProgramFrame: true
@@ -493,7 +497,7 @@ describe('Server Inspection Tools Tests', () => {
     });
 
     it('says no program frame is active when the frames it lists have no source, beside the hidden-frames note (issue #1131)', async () => {
-      mockSessionManager.getSession.mockReturnValue({ proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) } });
+      mockSessionManager.getSession.mockReturnValue({ run: {}, proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) } });
       // The Rust start-up landing: six frames listed, four hidden as runtime,
       // none with a path. The filter did not hide everything, so the
       // "all frames are internal" sentence does not fire; this one must.
@@ -521,7 +525,7 @@ describe('Server Inspection Tools Tests', () => {
     });
 
     it('never tells a caller who passed includeInternals: true to pass it (issue #1141)', async () => {
-      mockSessionManager.getSession.mockReturnValue({ proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) } });
+      mockSessionManager.getSession.mockReturnValue({ run: {}, proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) } });
       const frames = [
         { id: 1, name: '__tmainCRTStartup', file: '@__tmainCRTStartup', line: 51 },
         { id: 2, name: 'mainCRTStartup', file: '@mainCRTStartup', line: 9 }
@@ -648,6 +652,7 @@ describe('Server Inspection Tools Tests', () => {
       
       // Mock session validation
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE' // Not terminated
       });
@@ -725,6 +730,7 @@ describe('Server Inspection Tools Tests', () => {
 
     it('returns buffered entries with cursor metadata', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE',
         outputBuffer: makeBuffer(['one\n', 'two\n'])
@@ -740,6 +746,7 @@ describe('Server Inspection Tools Tests', () => {
 
     it('works on TERMINATED sessions (post-exit output is the primary use case)', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'TERMINATED',
         outputBuffer: makeBuffer(['final result\n'])
@@ -752,6 +759,7 @@ describe('Server Inspection Tools Tests', () => {
 
     it("says where a child's output is read when its adapter delivers it on the launch session only (js-debug, issue #1082)", async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'child-session',
         parentSessionId: 'root-session',
         sessionLifecycle: 'ACTIVE',
@@ -769,6 +777,7 @@ describe('Server Inspection Tools Tests', () => {
 
     it('carries no output pointer for a session that reads its own buffer', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE',
         outputBuffer: makeBuffer(['one\n'])
@@ -789,6 +798,7 @@ describe('Server Inspection Tools Tests', () => {
 
     it('honours the since cursor and clamps limit', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'ACTIVE',
         outputBuffer: makeBuffer(['a\n', 'b\n', 'c\n'])
@@ -807,6 +817,7 @@ describe('Server Inspection Tools Tests', () => {
 
     it('returns an empty success for sessions that never launched (no buffer)', async () => {
       mockSessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: 'CREATED'
       });

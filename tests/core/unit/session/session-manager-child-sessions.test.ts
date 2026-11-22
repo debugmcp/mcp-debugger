@@ -73,6 +73,38 @@ describe('SessionManager child sessions (issue #1081)', () => {
       expect(child.run.launchDebuggerOff).toBe(true);
     });
 
+    it("refuses the launch-shaped operations on a child at the session layer: they would write, replay or judge by its root's run", async () => {
+      const rootId = await startRoot();
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+      await vi.runAllTimersAsync();
+      const root = sessionManager.getSession(rootId)!;
+      const childId = childOf(rootId)!.id;
+      const launchBefore = root.run.lastLaunch;
+      const startsBefore = dependencies.mockProxyManager.startCalls.length;
+
+      const answers = [
+        await sessionManager.startDebugging(childId, 'other.py'),
+        await sessionManager.restartDebugging(childId),
+        await sessionManager.attachToProcess(childId, { port: 5678 }),
+        await sessionManager.detachFromProcess(childId),
+        await sessionManager.detachFromProcess(childId, true)
+      ];
+
+      for (const answer of answers) {
+        expect(answer.success, JSON.stringify(answer)).toBe(false);
+        expect(answer.error).toContain(`it is a child session; it was started by its parent (${rootId})`);
+      }
+      // Each names the tool that was refused, and none reads as the root's ownership refusal.
+      expect(answers.map((a) => /`(\w+)` cannot be used/.exec(a.error ?? '')?.[1])).toEqual([
+        'start_debugging', 'restart_debugging', 'attach_to_process', 'detach_from_process', 'detach_from_process'
+      ]);
+      // The run is untouched: nothing was started, replayed or rewritten.
+      expect(root.run.lastLaunch).toBe(launchBefore);
+      expect(root.run.attachMode).not.toBe(true);
+      expect(dependencies.mockProxyManager.startCalls.length).toBe(startsBefore);
+      expect(sessionManager.getSession(childId)).toBeDefined();
+    });
+
     it("a session nothing was started on has an empty record of its own, and two roots do not share one", async () => {
       const first = await sessionManager.createSession({ language: DebugLanguage.MOCK });
       const second = await sessionManager.createSession({ language: DebugLanguage.MOCK });
