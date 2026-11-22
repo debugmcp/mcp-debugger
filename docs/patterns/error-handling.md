@@ -18,10 +18,13 @@ Reusable timeout-related error message factories are centralized in this module.
 
 ```typescript
 export const ErrorMessages = {
-  dapRequestTimeout: (command: string, timeout: number) => 
+  dapRequestTimeout: (command: string, timeout: number, attached = false) =>
     `Debug adapter did not respond to '${command}' request within ${timeout}s. ` +
     `This typically means the debug adapter has crashed or lost connection. ` +
-    `Try restart_debugging to relaunch the session. If the problem persists, check the debug adapter logs.`,
+    (attached
+      ? `This session attached to its program, so restart_debugging cannot relaunch it: use attach_to_process to attach again. `
+      : `Try restart_debugging to relaunch the session. `) +
+    `If the problem persists, check the debug adapter logs.`,
 
   dapRequestTimeoutHint: () =>
     `If the operation is expected to take this long, retry with a larger 'timeout' (ms) argument. ` +

@@ -119,11 +119,16 @@ export const ErrorMessages = {
    * Default timeout: 35 seconds
    * @param command - The DAP command that timed out (e.g., 'stackTrace', 'variables')
    * @param timeout - The timeout duration in seconds
+   * @param attached - The session attached to a program it did not start: the recovery is another attach
    */
-  dapRequestTimeout: (command: string, timeout: number) =>
+  dapRequestTimeout: (command: string, timeout: number, attached = false) =>
     `Debug adapter did not respond to '${command}' request within ${timeout}s. ` +
     `This typically means the debug adapter has crashed or lost connection. ` +
-    `Try restart_debugging to relaunch the session. If the problem persists, check the debug adapter logs.`,
+    // restart_debugging replays a launch and refuses an attach session (issue #1213).
+    (attached
+      ? `This session attached to its program, so restart_debugging cannot relaunch it: use attach_to_process to attach again. `
+      : `Try restart_debugging to relaunch the session. `) +
+    `If the problem persists, check the debug adapter logs.`,
 
   /**
    * Hint appended to timeout failures on operations that accept a per-request

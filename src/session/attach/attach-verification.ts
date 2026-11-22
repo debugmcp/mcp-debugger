@@ -33,9 +33,15 @@ export type AttachVerifyResult =
   | { ok: true; threads: DebugProtocol.Thread[] }
   | { ok: false; proxyGone: boolean; lastFailure: string };
 
+/** What the window's own timer resolves with: told apart from any response. */
+const WINDOW_CLOSED = Symbol('attach verification window closed');
+/** How long past its bound a probe's own answer is still waited for (the worker's timeout crossing the IPC channel). */
+const PROBE_ANSWER_GRACE_MS = 250;
+
 /**
  * Poll DAP 'threads' until the debugger reports at least one thread or the
  * verification window closes. Never throws: every failure mode is a result.
+ * Returns by the window's end (plus a short grace) whatever the worker does.
  */
 export async function verifyAttachThreads(
   ctx: AttachVerificationContext,
@@ -81,7 +87,33 @@ export async function verifyAttachThreads(
 
     const requestThreads = async (): Promise<void> => {
       const remainingMs = Math.max(deadline - Date.now(), 1);
-      const threadsResponse = await sendThreadsRequestBounded(proxyManager, remainingMs);
+      const probe = sendThreadsRequestBounded(proxyManager, remainingMs);
+      // The window is the caller's (issue #1213). The request's own bound is
+      // kept by the worker; a worker that answers nothing at all is caught
+      // only by the parent's backstop, a margin later, and its error then
+      // named a longer time than the window that had been asked for
+      // ("within 20000ms (last failure: … within 25s)"). So the wait ends
+      // with the window; the worker's own answer, a little after its bound,
+      // still gets the grace to arrive and be the failure that is quoted.
+      let windowClosed: NodeJS.Timeout | undefined;
+      const closed = new Promise<typeof WINDOW_CLOSED>((resolve) => {
+        windowClosed = setTimeout(() => resolve(WINDOW_CLOSED), remainingMs + PROBE_ANSWER_GRACE_MS);
+      });
+      let threadsResponse: DebugProtocol.ThreadsResponse | undefined;
+      try {
+        const settled = await Promise.race([probe, closed]);
+        if (settled === WINDOW_CLOSED) {
+          // Nobody waits for it any more; its late rejection is not an error of this call.
+          probe.catch(() => undefined);
+          if (!proxyGone) {
+            lastFailure = `the debug adapter did not answer 'threads' before the window closed`;
+          }
+          return;
+        }
+        threadsResponse = settled;
+      } finally {
+        clearTimeout(windowClosed);
+      }
       if (proxyGone) {
         return;
       }

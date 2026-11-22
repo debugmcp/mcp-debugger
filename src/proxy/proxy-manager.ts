@@ -313,6 +313,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
    * worker's own timeout (which produces the actionable error) fires first.
    */
   private dapParentMarginMs = 5000;
+  /** This worker was started for an attach: what a timed-out request recommends depends on it (issue #1213). */
+  private startedAsAttach = false;
   private dapState: DAPSessionState | null = null;
   /** Whether this parent has already consumed a stopped event for this run. */
   private initializationStopSeen = false;
@@ -386,6 +388,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     // (issue #729's drain) emit it a second time on a manager the session had
     // already discarded (issue #735).
     this.exitEmitted = false;
+    this.startedAsAttach = config.attachMode === true;
 
     this.sessionId = config.sessionId;
     // A js-debug release can need its full attach deadline before the worker
@@ -773,7 +776,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
           if (this.activeLaunchBarrier && this.activeLaunchBarrierRequestId === requestId) {
             this.clearActiveLaunchBarrier();
           }
-          reject(new Error(ErrorMessages.dapRequestTimeout(command, Math.round(effectiveTimeoutMs / 1000))));
+          reject(new Error(ErrorMessages.dapRequestTimeout(command, Math.round(effectiveTimeoutMs / 1000), this.startedAsAttach)));
         }
       }, effectiveTimeoutMs);
       timer.unref?.();
