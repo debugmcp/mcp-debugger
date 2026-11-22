@@ -16,7 +16,7 @@
  * breakpoints to relabel; a fork has neither).
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import { CdpFunctionBreakpointBridge } from './cdp-function-breakpoint-bridge.js';
+import { CdpFunctionBreakpointBridge, type ChildDapRequestor } from './cdp-function-breakpoint-bridge.js';
 import { CdpProxyClient } from './cdp-proxy-client.js';
 import { JsStepper } from './js-stepper.js';
 
@@ -61,6 +61,30 @@ export class JsTargetServices {
           }
         })
       : null;
+  }
+
+  /**
+   * Open the target's CDP socket and put the proxy's things on it. Asked on
+   * the target's own DAP connection, which answers `requestCDPProxy` only
+   * after its `configurationDone` (measured: before that the request is
+   * never answered). Never rejects: a target without the socket debugs on,
+   * its steps are the adapter's and the session is told its logpoints are
+   * not delivered.
+   */
+  async attach(target: ChildDapRequestor): Promise<void> {
+    if (!this.bridge) {
+      return;
+    }
+    await this.bridge.attachToChild(target);
+    if (!this.bridge.isAttached()) {
+      // No socket after all: the stepper lets go of the one it was handed.
+      this.stepper?.detachCdp();
+    }
+  }
+
+  /** Resolves when what the target sent on its CDP socket so far has been handled; see the bridge's `settle`. */
+  settle(timeoutMs?: number): Promise<void> {
+    return this.bridge?.settle(timeoutMs) ?? Promise.resolve();
   }
 
   /** The target's connection is gone, or the proxy is letting go of it: close the socket and what rides on it. */

@@ -1,6 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import {
   JS_LOGPOINT_BINDING,
+  JS_LOGPOINT_DROPPED,
+  JS_LOGPOINT_FLUSH,
+  JS_LOGPOINT_QUEUE,
+  JS_LOGPOINT_QUEUE_LIMIT,
   parseJsLogMessage,
   validateJsLogpoint,
   compileJsLogpoint
@@ -10,7 +14,7 @@ import {
  * mcp-debugger compiles JavaScript logpoints itself (issues #850, #853, #861):
  * the wire form sent to js-debug is a breakpoint `condition` that evaluates
  * the user's condition, builds the message, hands it to the CDP binding the
- * proxy installs (falling back to console.log) and returns false.
+ * proxy installs (kept in the process while the binding is absent, issue #1212) and returns false.
  */
 describe('parseJsLogMessage', () => {
   it('splits text and {expr} parts', () => {
@@ -99,7 +103,7 @@ describe('validateJsLogpoint', () => {
 });
 
 describe('compileJsLogpoint', () => {
-  it('produces a deterministic condition that delivers through the binding, falls back to console.log and never pauses', () => {
+  it('produces a deterministic condition that delivers through the binding, never prints and never pauses', () => {
     const first = compileJsLogpoint({ logMessage: 'n={n} done' });
     const second = compileJsLogpoint({ logMessage: 'n={n} done' });
     expect(first).toEqual(second);
@@ -107,7 +111,9 @@ describe('compileJsLogpoint', () => {
       throw new Error(first.error);
     }
     expect(first.condition).toContain(`typeof ${JS_LOGPOINT_BINDING} === 'function'`);
-    expect(first.condition).toContain('console.log(');
+    // The program's stdout is the program's (issue #1212).
+    expect(first.condition).not.toContain('console.');
+    expect(first.condition).toContain(JS_LOGPOINT_QUEUE);
     expect(first.condition).toContain('"n="');
     expect(first.condition).toContain('" done"');
     expect(first.condition).toContain('\nn\n');
@@ -150,15 +156,68 @@ describe('compileJsLogpoint', () => {
     expect(errors).toEqual(['Logpoint condition error: ReferenceError: nope is not defined']);
   });
 
-  it('falls back to console.log when the binding is not installed', () => {
-    const compiled = compileJsLogpoint({ logMessage: 'plain {1 + 1}' });
-    if (!compiled.ok) {
-      throw new Error(compiled.error);
-    }
-    const logged: unknown[] = [];
-    const run = new Function('console', `return (${compiled.condition});`);
-    expect(run({ log: (m: unknown) => logged.push(m) })).toBe(false);
-    expect(logged).toEqual(['plain 2']);
+  describe('while the binding is not installed (issue #1212)', () => {
+    const globals = globalThis as unknown as Record<string, unknown>;
+    const compiledFor = (logMessage: string): string => {
+      const compiled = compileJsLogpoint({ logMessage });
+      if (!compiled.ok) {
+        throw new Error(compiled.error);
+      }
+      return compiled.condition;
+    };
+    afterEach(() => {
+      delete globals[JS_LOGPOINT_QUEUE];
+      delete globals[JS_LOGPOINT_DROPPED];
+    });
+
+    it('keeps the message in the process, prints nothing, and still answers false', () => {
+      const logged: unknown[] = [];
+      const run = new Function('console', 'n', `return (${compiledFor('plain {n}')});`);
+      expect(run({ log: (m: unknown) => logged.push(m) }, 1)).toBe(false);
+      expect(run({ log: (m: unknown) => logged.push(m) }, 2)).toBe(false);
+      expect(logged).toEqual([]);
+      expect(globals[JS_LOGPOINT_QUEUE]).toEqual(['plain 1', 'plain 2']);
+    });
+
+    it('delivers what it kept first, in order, at the next hit that has the binding', () => {
+      const condition = compiledFor('hit {n}');
+      const unbound = new Function('n', `return (${condition});`);
+      unbound(1);
+      unbound(2);
+      const emitted: string[] = [];
+      const bound = new Function(JS_LOGPOINT_BINDING, 'n', `return (${condition});`);
+      expect(bound((m: string) => emitted.push(m), 3)).toBe(false);
+      expect(emitted).toEqual(['hit 1', 'hit 2', 'hit 3']);
+      expect(globals[JS_LOGPOINT_QUEUE]).toEqual([]);
+    });
+
+    it('keeps a bounded number of messages and counts the rest', () => {
+      const unbound = new Function('n', `return (${compiledFor('m{n}')});`);
+      for (let n = 0; n < JS_LOGPOINT_QUEUE_LIMIT + 3; n++) {
+        unbound(n);
+      }
+      expect((globals[JS_LOGPOINT_QUEUE] as unknown[]).length).toBe(JS_LOGPOINT_QUEUE_LIMIT);
+      expect(globals[JS_LOGPOINT_DROPPED]).toBe(3);
+    });
+
+    it('the flush the proxy evaluates delivers the kept messages through the binding and answers the count that did not fit', () => {
+      const unbound = new Function('n', `return (${compiledFor('m{n}')});`);
+      unbound(1);
+      unbound(2);
+      globals[JS_LOGPOINT_DROPPED] = 4;
+      const emitted: string[] = [];
+      const flush = new Function(JS_LOGPOINT_BINDING, `return ${JS_LOGPOINT_FLUSH};`);
+      expect(flush((m: string) => emitted.push(m))).toBe(4);
+      expect(emitted).toEqual(['m1', 'm2']);
+      expect(globals[JS_LOGPOINT_QUEUE]).toEqual([]);
+      // Asked again, there is nothing left to deliver or to report.
+      expect(flush((m: string) => emitted.push(m))).toBe(0);
+      expect(emitted).toEqual(['m1', 'm2']);
+      // Without the binding it delivers nothing and loses nothing.
+      unbound(3);
+      expect(new Function(`return ${JS_LOGPOINT_FLUSH};`)()).toBe(0);
+      expect(globals[JS_LOGPOINT_QUEUE]).toEqual(['m3']);
+    });
   });
 
   it('returns the validation error instead of a condition for a malformed message', () => {

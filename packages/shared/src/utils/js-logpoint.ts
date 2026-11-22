@@ -8,10 +8,20 @@
  * (its precedence is condition → logMessage). Instead of forwarding the
  * logMessage, the JavaScript policy sends a breakpoint `condition` built
  * here: it evaluates the user's condition, renders the message, hands it to
- * the CDP binding the proxy worker installs (`Runtime.addBinding`), falling
- * back to `console.log` when the binding is absent, and returns false so V8
- * never pauses. The stored breakpoint keeps the user's logMessage and
- * condition; only the wire form changes.
+ * the CDP binding the proxy worker installs (`Runtime.addBinding`), and
+ * returns false so V8 never pauses. The stored breakpoint keeps the user's
+ * logMessage and condition; only the wire form changes.
+ *
+ * A hit while the binding is absent is kept, not printed (issue #1212): the
+ * message goes on a short queue in the process, and is delivered through
+ * the binding, in order, at the next hit or when the proxy flushes the queue
+ * right after installing the binding (`JS_LOGPOINT_FLUSH`). It used to fall
+ * back to `console.log`: a logpoint is the debugger's instrument, and the
+ * program's stdout is the program's. A forked child whose stdout is a pipe
+ * its parent parses had the text written into that pipe (the parent read a
+ * corrupted protocol and exited with another code), and no session showed
+ * it. The binding can be absent for the first milliseconds of a forked
+ * process, and for good where no CDP socket could be opened.
  *
  * The template is ES2019 (js-debug wraps and acorn-parses it) and a pure
  * function of its inputs, so js-debug's equivalentTo() dedupe on re-sends
@@ -20,6 +30,30 @@
 
 /** Global installed in the debuggee by the proxy worker's CDP bridge. */
 export const JS_LOGPOINT_BINDING = '__mcpDebuggerLogpoint';
+/** Global the compiled logpoint keeps undelivered messages on while the binding is absent (issue #1212). */
+export const JS_LOGPOINT_QUEUE = '__mcpDebuggerLogpointQueue';
+/** Global counting the messages that did not fit on the queue. */
+export const JS_LOGPOINT_DROPPED = '__mcpDebuggerLogpointDropped';
+/** How many undelivered messages a process keeps; the rest are counted, not kept. */
+export const JS_LOGPOINT_QUEUE_LIMIT = 1000;
+
+/**
+ * Evaluated in the debuggee by the proxy right after it installed the
+ * binding: delivers what was kept while the binding was absent, in order,
+ * and answers how many messages did not fit (and forgets that count). A
+ * later hit does the same delivery itself, so nothing depends on this
+ * expression except messages no later hit would have flushed.
+ */
+export const JS_LOGPOINT_FLUSH = `(() => {
+  const g = globalThis;
+  const dropped = g.${JS_LOGPOINT_DROPPED} | 0;
+  g.${JS_LOGPOINT_DROPPED} = 0;
+  const q = g.${JS_LOGPOINT_QUEUE};
+  if (typeof ${JS_LOGPOINT_BINDING} === 'function' && q && q.length) {
+    for (const held of q.splice(0)) ${JS_LOGPOINT_BINDING}(held);
+  }
+  return dropped;
+})()`;
 
 export type LogMessagePart =
   | { kind: 'text'; text: string }
@@ -218,7 +252,17 @@ const STRINGIFY = `const __mcpStr = (v) => {
   };
   const __mcpErr = (e) => (e && e.name ? e.name + ': ' + e.message : String(e));
   const __mcpEval = (f) => { try { return __mcpStr(f()); } catch (e) { return '<' + __mcpErr(e) + '>'; } };
-  const __mcpEmit = (m) => { if (typeof ${JS_LOGPOINT_BINDING} === 'function') ${JS_LOGPOINT_BINDING}(m); else console.log(m); };`;
+  const __mcpEmit = (m) => {
+    const g = globalThis;
+    if (typeof ${JS_LOGPOINT_BINDING} === 'function') {
+      const q = g.${JS_LOGPOINT_QUEUE};
+      if (q && q.length) { for (const held of q.splice(0)) ${JS_LOGPOINT_BINDING}(held); }
+      ${JS_LOGPOINT_BINDING}(m);
+    } else {
+      const q = g.${JS_LOGPOINT_QUEUE} || (g.${JS_LOGPOINT_QUEUE} = []);
+      if (q.length < ${JS_LOGPOINT_QUEUE_LIMIT}) q.push(m); else g.${JS_LOGPOINT_DROPPED} = (g.${JS_LOGPOINT_DROPPED} | 0) + 1;
+    }
+  };`;
 
 /**
  * Compile a logpoint (and its optional condition) into the breakpoint

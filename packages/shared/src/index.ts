@@ -309,6 +309,10 @@ export {
 export { toSourceBreakpoint, toWireSourceBreakpoint, type BreakpointFields, toFunctionBreakpoint, type FunctionBreakpointFields } from './utils/to-source-breakpoint.js';
 export {
   JS_LOGPOINT_BINDING,
+  JS_LOGPOINT_DROPPED,
+  JS_LOGPOINT_FLUSH,
+  JS_LOGPOINT_QUEUE,
+  JS_LOGPOINT_QUEUE_LIMIT,
   parseJsLogMessage,
   validateJsLogpoint,
   compileJsLogpoint,
