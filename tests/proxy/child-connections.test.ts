@@ -912,6 +912,54 @@ describe('ChildConnections under the throwaway-attach lever (js-debug, issue #10
       await vi.waitFor(() => expect(connections.liveCount()).toBe(0));
     });
 
+    it('keeps the worker live while that fallback throwaway is still attached, and announces empty once', async () => {
+      connectionManager.disconnect.mockResolvedValue({ answered: false, error: 'socket closed' });
+      const empty = vi.fn();
+      connections.on('empty', empty);
+      const { adopting } = await adoptionPastConfigurationDone();
+
+      rejectAttach(new Error('attach failed late'));
+      await expect(adopting).rejects.toThrow('attach failed late');
+      await vi.waitFor(() => expect(releaseClient.sendRequest).toHaveBeenCalledWith('attach', expect.anything(), expect.anything()));
+      await new Promise((resolve) => setImmediate(resolve));
+      // The throwaway has attached and not yet detached: the adapter must not be stopped under it.
+      expect(connections.liveCount()).toBe(1);
+      expect(empty).not.toHaveBeenCalled();
+
+      releaseClient.emit('event', { event: 'thread', body: { reason: 'started', threadId: 1 } });
+      await vi.waitFor(() => expect(releaseClient.shutdown).toHaveBeenCalledWith('release complete'));
+      await vi.waitFor(() => expect(connections.liveCount()).toBe(0));
+      expect(empty).toHaveBeenCalledTimes(1);
+    });
+
+    it('an attach that fails inside the last step before configurationDone stops there: the check sits right before the send', async () => {
+      // The function-breakpoint step of a js-debug child settles in the
+      // same turn (it sends a status and nothing else), so a failure that
+      // lands inside it loses the race and only the check can stop it.
+      const push = sent.push.bind(sent);
+      sent.push = (...messages: Array<Record<string, unknown>>) => {
+        if (messages.some((message) => message.status === 'function_breakpoints_synced')) {
+          rejectAttach(new Error('attach refused'));
+        }
+        return push(...messages);
+      };
+      try {
+        root.emit('child-report', { request: jsStartDebugging(7), report: jsReport });
+        const adopting = connections.adopt('child-1', {
+          reportId: reported()[0].reportId as string, breakpoints: [], functionBreakpoints: [{ name: 'handle' }]
+        });
+        const failed = expect(adopting).rejects.toThrow('attach refused');
+        await new Promise((resolve) => setImmediate(resolve));
+        childClient.emit('initialized');
+        await failed;
+
+        expect(connectionManager.sendConfigurationDone).not.toHaveBeenCalled();
+        await throwawayRan(releaseClient);
+      } finally {
+        sent.push = push;
+      }
+    });
+
     it('a configurationDone that fails is a failure after it went out: the child is let go on its own connection', async () => {
       connectionManager.sendConfigurationDone.mockImplementation(async () => { throw new Error('configurationDone refused'); });
       root.emit('child-report', { request: jsStartDebugging(7), report: jsReport });

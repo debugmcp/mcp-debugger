@@ -218,7 +218,7 @@ export class ChildConnections extends EventEmitter {
     let onInitialized: (() => void) | undefined;
     // Once configurationDone is on the wire the adapter may bind the target
     // to this connection; a failure after that is cleaned up differently.
-    // "Sent", not "processed": the adapter may not have read it yet.
+    // "Sent", not "bound": the adapter binds the target a little later.
     let configurationDoneSent = false;
     try {
       client = deps.dapClientFactory.create(deps.host, deps.port, this.policyForConnections(deps), { traceLabel: label });
@@ -508,7 +508,7 @@ export class ChildConnections extends EventEmitter {
    * Let go of a child whose adoption failed after configurationDone went
    * out: a disconnect on the connection the target is bound to by then, with
    * the process kept. When the adapter does not acknowledge it (the socket
-   * is gone, or the adapter never read configurationDone and the target is
+   * is gone, or the target is not bound to this connection yet and is
    * still pending), the throwaway attach runs as it would have before, so
    * this path releases whatever the old one could. Counted with the
    * releases, so the worker does not stop the adapter underneath it.
