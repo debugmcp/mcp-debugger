@@ -20,7 +20,15 @@
  * `JS_LOGPOINT_QUEUE_LIMIT` messages and `JS_LOGPOINT_QUEUE_CHARS`
  * characters (the rest are counted), on globals that are not enumerable (a
  * test runner's global-leak check does not see them), deleted when the
- * debugger lets go of the process (`JS_LOGPOINT_CLEAR`). It used to fall
+ * debugger lets go of a process it has a socket to (`JS_LOGPOINT_CLEAR`;
+ * one whose socket never opened keeps what it queued until it exits). The
+ * queue never throws out of the condition: js-debug reports a throwing
+ * condition through the program's `console.error`, and can be configured to
+ * pause on one, so a program that froze its global object, or shadows
+ * `globalThis` at the hit, loses the kept message and nothing else; with
+ * the binding in, the message is delivered whatever the queue did. Flush
+ * and clear run in the process's default context: a queue in another `vm`
+ * context is delivered by the next hit there. It used to fall
  * back to `console.log`: a logpoint is the debugger's instrument, and the
  * program's stdout is the program's. A forked child whose stdout is a pipe
  * its parent parses had the text written into that pipe (the parent read a
@@ -267,19 +275,24 @@ const STRINGIFY = `const __mcpStr = (v) => {
   };
   const __mcpErr = (e) => (e && e.name ? e.name + ': ' + e.message : String(e));
   const __mcpEval = (f) => { try { return __mcpStr(f()); } catch (e) { return '<' + __mcpErr(e) + '>'; } };
-  const __mcpEmit = (m) => {
-    const g = globalThis;
-    if (typeof ${JS_LOGPOINT_BINDING} === 'function') {
-      const q = g.${JS_LOGPOINT_QUEUE};
-      if (q && q.length) { q.chars = 0; for (const held of q.splice(0)) ${JS_LOGPOINT_BINDING}(held); }
-      ${JS_LOGPOINT_BINDING}(m);
-    } else {
-      const hide = (name, value) => Object.defineProperty(g, name, { value, writable: true, configurable: true, enumerable: false });
-      let q = g.${JS_LOGPOINT_QUEUE};
-      if (!q) { q = []; q.chars = 0; hide('${JS_LOGPOINT_QUEUE}', q); }
-      if (q.length < ${JS_LOGPOINT_QUEUE_LIMIT} && q.chars + m.length <= ${JS_LOGPOINT_QUEUE_CHARS}) { q.push(m); q.chars += m.length; }
-      else hide('${JS_LOGPOINT_DROPPED}', (g.${JS_LOGPOINT_DROPPED} | 0) + 1);
-    }
+  const __mcpEmit = (v) => {
+    let m;
+    try { m = typeof v === 'string' ? v : String(v); } catch (e) { m = '<unprintable>'; }
+    const bound = typeof ${JS_LOGPOINT_BINDING} === 'function';
+    try {
+      const g = globalThis;
+      if (bound) {
+        const q = g.${JS_LOGPOINT_QUEUE};
+        if (q && q.length) { q.chars = 0; for (const held of q.splice(0)) ${JS_LOGPOINT_BINDING}(held); }
+      } else {
+        const hide = (name, value) => Object.defineProperty(g, name, { value, writable: true, configurable: true, enumerable: false });
+        let q = g.${JS_LOGPOINT_QUEUE};
+        if (!q) { q = []; q.chars = 0; hide('${JS_LOGPOINT_QUEUE}', q); }
+        if (q.length < ${JS_LOGPOINT_QUEUE_LIMIT} && q.chars + m.length <= ${JS_LOGPOINT_QUEUE_CHARS}) { q.push(m); q.chars += m.length; }
+        else hide('${JS_LOGPOINT_DROPPED}', (g.${JS_LOGPOINT_DROPPED} | 0) + 1);
+      }
+    } catch (e) { /* the queue is best effort; see the header */ }
+    if (bound) ${JS_LOGPOINT_BINDING}(m);
   };`;
 
 /**

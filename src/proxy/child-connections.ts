@@ -502,9 +502,10 @@ export class ChildConnections extends EventEmitter {
    * such request, or null when the request goes to the adapter as it is
    * (issue #1219). An adapter that arms function breakpoints through the CDP
    * bridge (js-debug, issue #295) arms them in the session's own program
-   * only: a child's connection has no bridge, and the adapter sends nothing
-   * back for a request it does not know, so a caller would wait out its
-   * deadline. Each one is answered as it is: not armed, with the reason.
+   * only: nothing syncs them onto a child's bridge (issue #1226), and the
+   * adapter sends nothing back for a request it does not know, so a caller
+   * would wait out its deadline. Each one is answered as it is: not armed,
+   * with the reason.
    */
   unarmedFunctionBreakpoints(
     sessionId: string,
@@ -678,9 +679,20 @@ export class ChildConnections extends EventEmitter {
   private wireChildEvents(connection: ChildConnection): void {
     const { client, sessionId } = connection;
     // In arrival order, and after a held end once there is one (see `ending`).
+    // A link that throws must not take the links after it along: the last
+    // one removes the connection, and a root's worker waits for that.
+    const held = (send: () => void) => (): void => {
+      try {
+        send();
+      } catch (error) {
+        this.options.logger.warn(
+          `[ChildConnections] Child session ${sessionId}: a message held behind its end failed to send: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    };
     const inOrder = (send: () => void): void => {
       if (connection.ending) {
-        connection.ending = connection.ending.then(send);
+        connection.ending = connection.ending.then(held(send));
       } else {
         send();
       }
@@ -710,7 +722,7 @@ export class ChildConnections extends EventEmitter {
       const settled = services.settle().catch(() => undefined);
       connection.ending = (connection.ending ?? Promise.resolve())
         .then(() => settled)
-        .then(() => this.sendEvent(sessionId, 'terminated', body));
+        .then(held(() => this.sendEvent(sessionId, 'terminated', body)));
     });
     client.on('error', (error: unknown) => {
       const message: ErrorMessage = {

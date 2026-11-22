@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import type { AdapterPolicy, ParentStart, ReverseRequestResult } from '@debugmcp/shared';
-import { JsDebugAdapterPolicy, PythonAdapterPolicy, DefaultAdapterPolicy } from '@debugmcp/shared';
+import { JS_LOGPOINT_BINDING, JsDebugAdapterPolicy, PythonAdapterPolicy, DefaultAdapterPolicy } from '@debugmcp/shared';
 import { ChildSessionManager } from '../../src/proxy/child-session-manager.js';
 import type { CdpFunctionBreakpointBridge } from '../../src/proxy/cdp-function-breakpoint-bridge.js';
 import type { CdpProxyClient } from '../../src/proxy/cdp-proxy-client.js';
@@ -1328,6 +1328,12 @@ describe('ChildSessionManager', () => {
         this.detachCalls++;
       }
 
+      /** How often the manager said the target was sent a logpoint (issue #1212). */
+      logpointNotes = 0;
+      noteLogpoints(): void {
+        this.logpointNotes++;
+      }
+
       hasArmedOrPending(): boolean {
         return this.armed;
       }
@@ -1455,6 +1461,21 @@ describe('ChildSessionManager', () => {
       }
       const child = MockMinimalDapClient.lastInstance!;
       expect(child.requests.map((r) => r.command)).not.toContain('pause');
+    });
+
+    it("tells the bridge when the program's target is sent a logpoint, in the form it travels in (issue #1212)", async () => {
+      // A target that holds a logpoint is the one to tell when its logpoints cannot be delivered.
+      const mgr = makeManager(JsDebugAdapterPolicy);
+      await adopt(mgr);
+
+      mgr.storeBreakpoints('/absolute/path/to/file.js', [{ line: 9 }, { line: 15, condition: 'n > 1' }]);
+      expect(bridge.logpointNotes).toBe(0);
+
+      // On the wire the logMessage is gone: the condition is the compiled logpoint.
+      mgr.storeBreakpoints('/absolute/path/to/file.js', [
+        { line: 9, condition: `(() => { ${JS_LOGPOINT_BINDING}('n'); return false; })()` }
+      ]);
+      expect(bridge.logpointNotes).toBeGreaterThan(0);
     });
 
     it('routes stopped events through the bridge and preserves order around a held stop', async () => {

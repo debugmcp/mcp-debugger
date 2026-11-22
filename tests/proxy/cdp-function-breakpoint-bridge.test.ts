@@ -878,17 +878,82 @@ describe('CdpFunctionBreakpointBridge', () => {
         expect.stringMatching(/logpoints that hit in this process are not delivered.*requestCDPProxy timed out/)
       ]);
 
-      // A second attach that gets the binding in, then fails later: delivered, so no sentence.
-      const quiet: DebugProtocol.OutputEvent[] = [];
-      const other = new FakeCdpClient();
-      other.handlers.set('Debugger.enable', () => {
+    });
+
+    it('an attach that fails after the binding went in takes the binding out again and says the channel is down', async () => {
+      // The binding lives on the adapter's own session with the target: left
+      // in, every later hit would call it, queue nothing, and reach nobody.
+      const outputs: DebugProtocol.OutputEvent[] = [];
+      bridge.on('outputEvent', (evt: DebugProtocol.OutputEvent) => outputs.push(evt));
+      bridge.noteLogpoints();
+      cdp.handlers.set('Debugger.enable', () => {
         throw new Error('Debugger.enable failed');
       });
-      const bound = new CdpFunctionBreakpointBridge({ clientFactory: () => other as never, stopEventHoldMs: 40 });
-      bound.on('outputEvent', (evt: DebugProtocol.OutputEvent) => quiet.push(evt));
-      bound.noteLogpoints();
-      await bound.attachToChild(new FakeChildClient() as never);
-      expect(quiet).toHaveLength(0);
+
+      await attach();
+
+      const order = cdp.calls.map((c) => c.method);
+      expect(cdp.callsFor('Runtime.removeBinding')).toEqual([{ method: 'Runtime.removeBinding', params: { name: JS_LOGPOINT_BINDING } }]);
+      expect(order.indexOf('Runtime.addBinding')).toBeLessThan(order.indexOf('Runtime.removeBinding'));
+      // Before the socket goes, and bounded.
+      expect(cdp.disposeCalls).toBe(1);
+      expect(cdp.timeouts.get('Runtime.removeBinding')).toEqual([1000]);
+      expect(bridge.isAttached()).toBe(false);
+      expect(outputs.map((o) => o.body.output)).toEqual([
+        expect.stringMatching(/logpoints that hit in this process are not delivered.*Debugger\.enable failed/)
+      ]);
+    });
+
+    it('says nothing when the binding cannot be taken out again: the process ended while the attach was finishing', async () => {
+      // Measured with a fork that hits two logpoints and exits at once: both
+      // lines arrive, then `Debugger.enable` fails because the target is gone.
+      const outputs: DebugProtocol.OutputEvent[] = [];
+      bridge.on('outputEvent', (evt: DebugProtocol.OutputEvent) => outputs.push(evt));
+      bridge.noteLogpoints();
+      cdp.handlers.set('Debugger.enable', () => {
+        throw new Error('Debugger.enable: Connection is closed');
+      });
+      cdp.handlers.set('Runtime.removeBinding', () => {
+        throw new Error('Runtime.removeBinding: Connection is closed');
+      });
+
+      await attach();
+
+      expect(cdp.callsFor('Runtime.removeBinding')).toHaveLength(1);
+      expect(cdp.disposeCalls).toBe(1);
+      expect(outputs).toHaveLength(0);
+    });
+
+    it('says it again for a later failure once an attach in between had the channel up', async () => {
+      const outputs: DebugProtocol.OutputEvent[] = [];
+      bridge.on('outputEvent', (evt: DebugProtocol.OutputEvent) => outputs.push(evt));
+      bridge.noteLogpoints();
+      child.failProxyRequest = true;
+      await attach();
+      expect(outputs).toHaveLength(1);
+
+      // The channel comes up: nothing is down any more, and a logpoint sent now says nothing.
+      child.failProxyRequest = false;
+      await attach();
+      bridge.noteLogpoints();
+      expect(outputs).toHaveLength(1);
+
+      // Down again: said again.
+      bridge.detach();
+      child.failProxyRequest = true;
+      await attach();
+      expect(outputs).toHaveLength(2);
+    });
+
+    it('a flush that reports nothing lost says nothing', async () => {
+      const outputs: DebugProtocol.OutputEvent[] = [];
+      bridge.on('outputEvent', (evt: DebugProtocol.OutputEvent) => outputs.push(evt));
+      const lookup = cdp.handlers.get('Runtime.evaluate')!;
+      cdp.handlers.set('Runtime.evaluate', (p) => (p.expression === JS_LOGPOINT_FLUSH ? { result: { type: 'number', value: 0 } } : lookup(p)));
+
+      await attach();
+
+      expect(outputs).toHaveLength(0);
     });
 
     it('removes the binding on a graceful detach while connected', async () => {
@@ -955,6 +1020,9 @@ describe('CdpFunctionBreakpointBridge', () => {
       expect(cdp.listenerCount('cdp-event')).toBe(0);
       expect(bridge.isAttached()).toBe(false);
       expect(outputs).toHaveLength(0);
+      // Also for a target that holds a logpoint: it was let go of, its channel did not fail.
+      bridge.noteLogpoints();
+      expect(outputs).toHaveLength(0);
     });
 
     it('settle() is one round trip on the socket that asks the target nothing, and an error answers it', async () => {
@@ -983,6 +1051,20 @@ describe('CdpFunctionBreakpointBridge', () => {
       answer();
       await settling;
       expect(settled).toBe(true);
+    });
+
+    it('settle() is bounded at 500 ms by default: a round trip nobody answers is sent with that bound', async () => {
+      await attach();
+      cdp.handlers.set('JsDebug.mcpDebuggerBarrier', () => {
+        throw new Error('CDP call timeout');
+      });
+
+      await bridge.settle();
+
+      const bound = cdp.timeouts.get('JsDebug.mcpDebuggerBarrier') ?? [];
+      expect(bound).toHaveLength(1);
+      expect(bound[0]).toBeGreaterThan(400);
+      expect(bound[0]).toBeLessThanOrEqual(500);
     });
 
     it('settle() without a socket resolves at once and sends nothing', async () => {

@@ -203,6 +203,37 @@ describe('compileJsLogpoint', () => {
       expect(kept()).toEqual(['m7']);
     });
 
+    it('a hit that delivers the kept messages gives the character budget back', () => {
+      const condition = compiledFor('{s}');
+      const unbound = new Function('s', `return (${condition});`);
+      const big = 'x'.repeat(JS_LOGPOINT_QUEUE_CHARS / 2);
+      unbound(big);
+      unbound(big);
+      // Delivered by a hit, not by the proxy's flush.
+      new Function(JS_LOGPOINT_BINDING, 's', `return (${condition});`)(() => undefined, 'now');
+
+      unbound(big);
+      unbound(big);
+
+      expect(kept()).toHaveLength(2);
+      expect(globals[JS_LOGPOINT_DROPPED]).toBeUndefined();
+    });
+
+    it('never throws out of the condition: js-debug reports a throwing condition on the program\'s stderr', () => {
+      // The global object cannot take the queue, or `globalThis` is shadowed where the logpoint sits.
+      const frozen = new Function('globalThis', 'n', `return (${compiledFor('m{n}')});`);
+      expect(frozen(Object.freeze({}), 1)).toBe(false);
+      expect(frozen(null, 2)).toBe(false);
+      expect(frozen(undefined, 3)).toBe(false);
+      expect(kept()).toEqual([]);
+
+      // With the binding in, the message is delivered whatever the queue did.
+      const emitted: string[] = [];
+      const shadowed = new Function(JS_LOGPOINT_BINDING, 'globalThis', 'n', `return (${compiledFor('m{n}')});`);
+      expect(shadowed((m: string) => emitted.push(m), null, 4)).toBe(false);
+      expect(emitted).toEqual(['m4']);
+    });
+
     it('keeps a bounded number of characters too, and counts what did not fit', () => {
       const unbound = new Function('s', `return (${compiledFor('{s}')});`);
       const big = 'x'.repeat(JS_LOGPOINT_QUEUE_CHARS / 4);

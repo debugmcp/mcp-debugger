@@ -98,5 +98,12 @@ the fork's connection.
    first statement did not have the binding before: `LP one` arrived as a `stdout` line (the
    `console.log` fall-back) in 12 of 12 runs on main, and as a `console` line (the debugger's
    channel) in 12 of 12 with the change.
-8. **Not measured here:** Linux and macOS (the two sockets may race differently; the wait does not
-   depend on which is first), and a fork under an attach root.
+8. **Linux** (Ubuntu 24.04, 2 vCPU, Node 22.23.2 and 24.14.1, the same build): the tree suite passes,
+   the piped fork delivers its four lines in order with the protocol intact, the exits-at-once fork
+   delivers both lines in 12 of 12 runs under each Node version, and so does the program's own
+   target. The run without the wait was not repeated there.
+9. **What the round trip does not cover** (read in the vendored proxy, not measured): events js-debug
+   has queued for a session it holds paused (a target between its creation and its bind, which
+   cannot run yet), a `terminated` that has another cause than the target's own connection closing,
+   and notifications the process never flushed before it exited.
+10. **Not measured here:** macOS, and a fork under an attach root.

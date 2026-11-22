@@ -339,8 +339,28 @@ export class CdpFunctionBreakpointBridge extends EventEmitter {
         client?.dispose();
         return;
       }
+      // A binding that went in before the failure stays in the process
+      // when this socket closes (it lives on the adapter's own session
+      // with the target): every later hit would call it, queue nothing,
+      // and reach nobody. So it is taken out again, bounded, before the
+      // socket goes: hits are then kept in the process as they are for
+      // any target without a channel, and the session is told.
+      //
+      // When the binding cannot be taken out, the usual reason is that the
+      // process has ended: its end is what failed the attach (measured: a
+      // fork that logs twice and exits at once fails `Debugger.enable`
+      // with "Connection is closed" after both lines were delivered).
+      // Nothing more will hit there, and a warning would be about lines
+      // that arrived. So that case says nothing.
       if (!this.bindingInstalled) {
         this.logpointChannelDown(message);
+      } else if (client?.isConnected()) {
+        const removed = await client
+          .send('Runtime.removeBinding', { name: JS_LOGPOINT_BINDING }, 1000)
+          .then(() => true, () => false);
+        if (removed) {
+          this.logpointChannelDown(message);
+        }
       }
       // Roll back any partial connection
       this.clearClientState();
@@ -357,7 +377,9 @@ export class CdpFunctionBreakpointBridge extends EventEmitter {
    * The owner sent this target a logpoint (issue #1212). The bridge does
    * not see breakpoints, and a target without a logpoint has nothing to be
    * told about its channel: a fork that ends before its socket is open is
-   * the common case of a channel that never came up.
+   * the common case of a channel that never came up. Once said, it stays
+   * said: the bridge is not told when the last logpoint is removed, and a
+   * warning too many is the cheaper error.
    */
   noteLogpoints(): void {
     this.logpointsSent = true;
@@ -390,7 +412,7 @@ export class CdpFunctionBreakpointBridge extends EventEmitter {
       event: 'output',
       body: {
         category: 'console',
-        output: `[mcp-debugger] Warning: logpoints that hit in this process are not delivered: the debugger's channel into it could not be opened (${reason}). Their messages are kept out of the program's own output.\n`
+        output: `[mcp-debugger] Warning: logpoints that hit in this process are not delivered: the debugger's channel into it is not available (${reason}). Their messages are kept out of the program's own output.\n`
       }
     } as DebugProtocol.OutputEvent);
   }

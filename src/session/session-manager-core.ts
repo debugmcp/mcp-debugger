@@ -1136,9 +1136,9 @@ export abstract class SessionManagerCore extends EventEmitter {
    * (js-debug, the policy's `childOutput: 'launch-session'` pin); undefined
    * when the session's own buffer is the place to read (a root, a debugpy
    * child, or a child under an attach root, whose console output is
-   * per-target). The child's own buffer is never empty by rule: what the
-   * debugger itself produces for that process is there, the lines of the
-   * logpoints it hit among them (issue #1212).
+   * per-target). The child's own buffer holds what the debugger itself
+   * produces for that process, the lines of the logpoints it hit among
+   * them (issue #1212); it is empty when there was none.
    */
   public outputOnFor(sessionId: string): string | undefined {
     const session = this.sessionStore.get(sessionId);
