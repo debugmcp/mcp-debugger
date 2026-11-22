@@ -179,7 +179,7 @@ describe('set_breakpoint stale-build warning (#938)', () => {
     });
 
     it('warns on a .NET source newer than the launched DLL, naming both', async () => {
-      mockSessionManager.getSession.mockReturnValue({ id: 'test-session', sessionLifecycle: 'active', transformedLaunch: launched });
+      mockSessionManager.getSession.mockReturnValue({ id: 'test-session', sessionLifecycle: 'active', run: { transformedLaunch: launched } });
 
       const content = await setBreakpoint(CS, {});
 
@@ -199,12 +199,12 @@ describe('set_breakpoint stale-build warning (#938)', () => {
 
     it('says nothing about a DLL as new as the source, nor on an attach session', async () => {
       files[DLL].mtimeMs = 20_000;
-      mockSessionManager.getSession.mockReturnValue({ id: 'test-session', sessionLifecycle: 'active', transformedLaunch: launched });
+      mockSessionManager.getSession.mockReturnValue({ id: 'test-session', sessionLifecycle: 'active', run: { transformedLaunch: launched } });
       expect((await setBreakpoint(CS, {})).warning ?? '').not.toMatch(/may be stale/);
 
       files[DLL].mtimeMs = 10_000;
       mockSessionManager.getSession.mockReturnValue({
-        id: 'test-session', sessionLifecycle: 'active', attachMode: true, attachLocality: 'pid', transformedLaunch: launched
+        id: 'test-session', sessionLifecycle: 'active', run: { attachMode: true, attachLocality: 'pid', transformedLaunch: launched }
       });
       expect((await setBreakpoint(CS, {})).warning ?? '').not.toMatch(/may be stale/);
     });
@@ -213,7 +213,7 @@ describe('set_breakpoint stale-build warning (#938)', () => {
     // checker: the launch answer, when the program is paused in the source
     // as the launch answers, and the stack, when its top frame is there.
     it('start_debugging carries the sentence as note when the launch answers paused in the source (issue #951)', async () => {
-      mockSessionManager.getSession.mockReturnValue({ id: 'test-session', sessionLifecycle: 'active', transformedLaunch: launched });
+      mockSessionManager.getSession.mockReturnValue({ id: 'test-session', sessionLifecycle: 'active', run: { transformedLaunch: launched } });
       mockSessionManager.startDebugging.mockResolvedValue({
         success: true,
         state: 'paused',
@@ -243,7 +243,7 @@ describe('set_breakpoint stale-build warning (#938)', () => {
         sessionLifecycle: 'active',
         state: 'paused',
         proxyManager: { getCurrentThreadId: () => 1, setCurrentThreadId: vi.fn() },
-        transformedLaunch: launched
+        run: { transformedLaunch: launched }
       });
       mockSessionManager.getStackTraceDetailed.mockResolvedValue({
         frames: [{ id: 1, name: 'HelloWorld.Add', file: CS, line: 4, column: 1 }],

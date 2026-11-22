@@ -4781,7 +4781,7 @@ describe('SessionManager - DAP Operations', () => {
       await vi.runAllTimersAsync();
 
       expect(dependencies.mockProxyManager.startCalls[0].breakOnExceptions).toBe('uncaught');
-      expect(sessionManager.getSession(session.id)?.effectiveBreakOnExceptions).toBe('uncaught');
+      expect(sessionManager.getSession(session.id)?.run.effectiveBreakOnExceptions).toBe('uncaught');
     });
 
     it("user-provided 'none' wins over the policy launch default (issue #244)", async () => {
@@ -4794,7 +4794,7 @@ describe('SessionManager - DAP Operations', () => {
       await vi.runAllTimersAsync();
 
       expect(dependencies.mockProxyManager.startCalls[0].breakOnExceptions).toBe('none');
-      expect(sessionManager.getSession(session.id)?.effectiveBreakOnExceptions).toBe('none');
+      expect(sessionManager.getSession(session.id)?.run.effectiveBreakOnExceptions).toBe('none');
     });
 
     it("user-provided 'all' wins over the policy launch default (issue #244)", async () => {
@@ -4827,7 +4827,7 @@ describe('SessionManager - DAP Operations', () => {
       await vi.runAllTimersAsync();
 
       expect(dependencies.mockProxyManager.startCalls[0].breakOnExceptions).toBeUndefined();
-      expect(sessionManager.getSession(session.id)?.effectiveBreakOnExceptions).toBeUndefined();
+      expect(sessionManager.getSession(session.id)?.run.effectiveBreakOnExceptions).toBeUndefined();
     });
 
     it('applies no default to languages without one (ruby, issue #244)', async () => {
@@ -4840,7 +4840,7 @@ describe('SessionManager - DAP Operations', () => {
       await vi.runAllTimersAsync();
 
       expect(dependencies.mockProxyManager.startCalls[0].breakOnExceptions).toBeUndefined();
-      expect(sessionManager.getSession(session.id)?.effectiveBreakOnExceptions).toBeUndefined();
+      expect(sessionManager.getSession(session.id)?.run.effectiveBreakOnExceptions).toBeUndefined();
     });
 
     // Issue #1032: the verdict on whether an uncaught exception will stop the
@@ -4853,7 +4853,7 @@ describe('SessionManager - DAP Operations', () => {
       await sessionManager.startDebugging(session.id, 'test.rb');
       await vi.runAllTimersAsync();
 
-      expect(sessionManager.getSession(session.id)?.launchExceptionFilters).toEqual({
+      expect(sessionManager.getSession(session.id)?.run.launchExceptionFilters).toEqual({
         ids: [], beyondMode: [], noUncaughtStop: 'unavailable'
       });
     });
@@ -4864,7 +4864,7 @@ describe('SessionManager - DAP Operations', () => {
       const result = await sessionManager.startDebugging(session.id, 'test.rb', undefined, undefined, undefined, undefined, 'uncaught');
       await vi.runAllTimersAsync();
 
-      expect(sessionManager.getSession(session.id)?.launchExceptionFilters).toEqual({
+      expect(sessionManager.getSession(session.id)?.run.launchExceptionFilters).toEqual({
         ids: [], beyondMode: [], noUncaughtStop: 'unavailable'
       });
       expect(result.data?.warning).toMatch(/breakOnExceptions 'uncaught' arms no exception filter on the ruby adapter/);
@@ -4877,7 +4877,7 @@ describe('SessionManager - DAP Operations', () => {
       const result = await sessionManager.startDebugging(session.id, 'test.py');
       await vi.runAllTimersAsync();
 
-      expect(sessionManager.getSession(session.id)?.launchExceptionFilters).toEqual({
+      expect(sessionManager.getSession(session.id)?.run.launchExceptionFilters).toEqual({
         ids: ['uncaught'], beyondMode: [], noUncaughtStop: undefined
       });
       expect(result.data?.warning ?? '').not.toMatch(/arms no exception filter/);
@@ -4887,14 +4887,14 @@ describe('SessionManager - DAP Operations', () => {
       const optedOut = await sessionManager.createSession({ language: DebugLanguage.MOCK, executablePath: 'python' });
       await sessionManager.startDebugging(optedOut.id, 'test.py', undefined, undefined, undefined, undefined, 'none');
       await vi.runAllTimersAsync();
-      expect(sessionManager.getSession(optedOut.id)?.launchExceptionFilters?.noUncaughtStop).toBe('opted-out');
+      expect(sessionManager.getSession(optedOut.id)?.run.launchExceptionFilters?.noUncaughtStop).toBe('opted-out');
 
       const attachShaped = await sessionManager.createSession({ language: DebugLanguage.MOCK, executablePath: 'python' });
       await sessionManager.startDebugging(
         attachShaped.id, 'attach://remote', undefined, { request: 'attach', __attachMode: true } as never
       );
       await vi.runAllTimersAsync();
-      expect(sessionManager.getSession(attachShaped.id)?.launchExceptionFilters?.noUncaughtStop).toBe('not-requested');
+      expect(sessionManager.getSession(attachShaped.id)?.run.launchExceptionFilters?.noUncaughtStop).toBe('not-requested');
     });
 
     it('records description and text from the stopped event body on lastStop', async () => {

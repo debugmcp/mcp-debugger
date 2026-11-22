@@ -389,7 +389,7 @@ describe('Server Inspection Tools Tests', () => {
         (await stackTraceOf(session, frames, policy)).note;
 
       it('notes source-map labels on a js-debug attach with the attach-side sourceMaps switch (issue #655)', async () => {
-        const content = await stackTraceOf({ language: 'javascript', attachMode: true }, jsFrames, JsDebugAdapterPolicy);
+        const content = await stackTraceOf({ language: 'javascript', run: { attachMode: true } }, jsFrames, JsDebugAdapterPolicy);
         // The flag itself reaches the payload, not only the note.
         expect(content.stackFrames.map((frame) => frame.unresolvedSource)).toEqual([undefined, true]);
         expect(content.note).toContain('1 frame(s) have no openable source path on this host (unresolvedSource: true)');
@@ -405,7 +405,7 @@ describe('Server Inspection Tools Tests', () => {
       });
 
       it("explains CodeLLDB's native frames as such and never offers the js-debug remedy (issue #816)", async () => {
-        const note = await stackNote({ language: 'cpp', attachMode: true }, cppFrames, CppAdapterPolicy);
+        const note = await stackNote({ language: 'cpp', run: { attachMode: true } }, cppFrames, CppAdapterPolicy);
         expect(note).toContain('3 frame(s) have no openable source path on this host (unresolvedSource: true)');
         expect(note).toMatch(/native frames without debug info/);
         expect(note).toMatch(/program's own frames/);

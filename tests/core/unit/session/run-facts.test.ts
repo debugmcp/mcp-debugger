@@ -47,9 +47,9 @@ describe('runFactsOf', () => {
   const launched = { program: '/w/node_modules/vitest/vitest.mjs', launchConfig: { program: '/w/node_modules/vitest/vitest.mjs' } };
   const request = { scriptPath: '/w/node_modules/vitest/vitest.mjs', dapLaunchArgs: { justMyCode: false } };
   const logDir = path.join('/logs', 'root', 'run-1');
-  const root = session({ id: 'root', attachMode: false, transformedLaunch: launched, lastLaunch: request, logDir });
-  // What adoption gives a child today: the parent's run directory, and none of the launch facts.
-  const child = session({ id: 'child', parentSessionId: 'root', logDir });
+  const root = session({ id: 'root', run: { attachMode: false, transformedLaunch: launched, lastLaunch: request }, logDir });
+  // What adoption gives a child: the parent's run directory and the run record its root writes.
+  const child = session({ id: 'child', parentSessionId: 'root', logDir, run: root.run });
 
   it("gives a child its root's launch: what ran, what was asked for, and the worker's one log", () => {
     const facts = runFactsOf(child, tree(root, child));
@@ -65,8 +65,9 @@ describe('runFactsOf', () => {
   });
 
   it("gives a child its root's attach: attached, where the target lives, and no launch", () => {
-    const attachRoot = session({ id: 'root', attachMode: true, attachLocality: 'remote', transformedLaunch: launched, logDir });
-    const facts = runFactsOf(child, tree(attachRoot, child));
+    const attachRoot = session({ id: 'root', run: { attachMode: true, attachLocality: 'remote', transformedLaunch: launched }, logDir });
+    const attached = session({ id: 'child', parentSessionId: 'root', logDir, run: attachRoot.run });
+    const facts = runFactsOf(attached, tree(attachRoot, attached));
     expect(facts.attached).toBe(true);
     expect(facts.targetLocality).toBe('remote');
     // An attach debugs some other process, whatever the session launched before.

@@ -292,7 +292,7 @@ describe('Server Coverage - Error Paths and Edge Cases', () => {
       mockSessionManager.getSession.mockReturnValue({
         id: 'test-session',
         state: SessionState.RUNNING,
-        launchDebuggerOff: true,
+        run: { launchDebuggerOff: true },
         sessionLifecycle: SessionLifecycleState.ACTIVE,
         proxyManager: mockProxy
       });

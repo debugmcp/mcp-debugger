@@ -226,7 +226,7 @@ describe('SessionManager - restart and relaunch', () => {
 
     it('refuses attach sessions with an attach-specific error', async () => {
       const session = await createLaunchedSession();
-      sessionManager.getSession(session.id)!.attachMode = true;
+      sessionManager.getSession(session.id)!.run.attachMode = true;
 
       const result = await sessionManager.restartDebugging(session.id);
 
@@ -401,7 +401,7 @@ describe('SessionManager - restart and relaunch', () => {
 
     it('restarts an attach session when the adapter advertises restart, and says why when it does not', async () => {
       const session = await pausedLaunchedSession();
-      sessionManager.getSession(session.id)!.attachMode = true;
+      sessionManager.getSession(session.id)!.run.attachMode = true;
 
       const refused = await sessionManager.restartDebugging(session.id);
       expect(refused.success).toBe(false);

@@ -80,10 +80,10 @@ describe('SessionManager dry run (issue #812)', () => {
     const after = sessionManager.getSession(session.id)!;
     expect(after.state).toBe(SessionState.CREATED);
     expect(after.sessionLifecycle).toBe(SessionLifecycleState.CREATED);
-    expect(after.lastLaunch).toBeUndefined();
+    expect(after.run.lastLaunch).toBeUndefined();
     expect(after.logDir).toBeUndefined();
-    expect(after.transformedLaunch).toBeUndefined();
-    expect(after.launchConfigNotices ?? []).toEqual([]);
+    expect(after.run.transformedLaunch).toBeUndefined();
+    expect(after.run.launchConfigNotices ?? []).toEqual([]);
   });
 
   it('leaves a paused program paused: the live proxy is not torn down and the run\'s records survive', async () => {
@@ -91,7 +91,8 @@ describe('SessionManager dry run (issue #812)', () => {
     await sessionManager.setBreakpoint(session.id, { file: 'test.py', line: 5 });
     await launchToEntryStop(session.id);
     const before = sessionManager.getSession(session.id)!;
-    const { proxyManager, lastStop, outputBuffer, logDir, transformedLaunch } = before;
+    const { proxyManager, lastStop, outputBuffer, logDir } = before;
+    const { transformedLaunch } = before.run;
     const verifiedBefore = sessionManager.listBreakpoints(session.id)[0].verified;
     expect(lastStop?.reason).toBe('entry');
 
@@ -106,7 +107,7 @@ describe('SessionManager dry run (issue #812)', () => {
     expect(after.lastStop).toBe(lastStop);
     expect(after.outputBuffer).toBe(outputBuffer);
     expect(after.logDir).toBe(logDir);
-    expect(after.transformedLaunch).toBe(transformedLaunch);
+    expect(after.run.transformedLaunch).toBe(transformedLaunch);
     expect(sessionManager.listBreakpoints(session.id)[0].verified).toBe(verifiedBefore);
     expect(proxy().stopCalls).toBe(0);
     expect(proxy().startCalls).toHaveLength(1);
@@ -127,7 +128,8 @@ describe('SessionManager dry run (issue #812)', () => {
     expect((await launch).state).toBe(SessionState.STOPPED);
     const before = sessionManager.getSession(session.id)!;
     expect(before.exitCode).toBe(7);
-    const { outputBuffer, transformedLaunch } = before;
+    const { outputBuffer } = before;
+    const { transformedLaunch } = before.run;
 
     const dry = await sessionManager.startDebugging(session.id, 'test.py', [], {}, true);
 
@@ -136,8 +138,8 @@ describe('SessionManager dry run (issue #812)', () => {
     const after = sessionManager.getSession(session.id)!;
     expect(after.exitCode).toBe(7);
     expect(after.outputBuffer).toBe(outputBuffer);
-    expect(after.transformedLaunch).toBe(transformedLaunch);
-    expect(after.lastLaunch?.scriptArgs).toEqual(['--real']);
+    expect(after.run.transformedLaunch).toBe(transformedLaunch);
+    expect(after.run.lastLaunch?.scriptArgs).toEqual(['--real']);
     expect(sessionManager.listBreakpoints(session.id)).toHaveLength(1);
 
     const restart = sessionManager.restartDebugging(session.id);
@@ -236,7 +238,7 @@ describe('SessionManager dry run (issue #812)', () => {
     expect(dry.canContinue).toBe(true);
     const after = sessionManager.getSession(session.id)!;
     expect(after.state).toBe(SessionState.CREATED);
-    expect(after.toolchainValidation).toBeUndefined();
+    expect(after.run.toolchainValidation).toBeUndefined();
   });
 
   it('says an incompatible toolchain with behavior "error" cannot be continued past, as a launch does', async () => {
@@ -290,12 +292,12 @@ describe('SessionManager dry run (issue #812)', () => {
       Object.assign(new FakeDebugAdapter(), { supportedLaunchKeys: ['program'] })
     );
     const session = await createSession('Notices');
-    sessionManager.getSession(session.id)!.launchConfigNotices = ['a note from the last real launch'];
+    sessionManager.getSession(session.id)!.run.launchConfigNotices = ['a note from the last real launch'];
 
     const dry = await sessionManager.startDebugging(session.id, 'test.py', [], {}, true, { typo: 1 });
 
     expect(dry.success).toBe(true);
     expect(dry.data?.warning).toBe('adapterLaunchConfig.typo: forwarded to the adapter but unrecognized');
-    expect(sessionManager.getSession(session.id)!.launchConfigNotices).toEqual(['a note from the last real launch']);
+    expect(sessionManager.getSession(session.id)!.run.launchConfigNotices).toEqual(['a note from the last real launch']);
   });
 });

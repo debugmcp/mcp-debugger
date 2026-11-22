@@ -101,7 +101,7 @@ describe('Server Breakpoint Management Tools', () => {
         id: 'test-session',
         state: 'running',
         sessionLifecycle: 'ACTIVE',
-        launchDebuggerOff: true
+        run: { launchDebuggerOff: true }
       });
       mockSessionManager.listBreakpoints.mockReturnValue([
         { id: 'bp-1', file: '/a.py', line: 10, verified: false, message: 'Unbound breakpoint' }
@@ -126,7 +126,7 @@ describe('Server Breakpoint Management Tools', () => {
         id: 'test-session',
         state: 'running',
         sessionLifecycle: 'ACTIVE',
-        launchDebuggerOff: true
+        run: { launchDebuggerOff: true }
       });
       mockSessionManager.listBreakpoints.mockReturnValue([
         { id: 'bp-1', file: '/a.py', line: 10, verified: true }
@@ -143,7 +143,7 @@ describe('Server Breakpoint Management Tools', () => {
         id: 'test-session',
         state: 'stopped',
         sessionLifecycle: 'ACTIVE',
-        launchDebuggerOff: true
+        run: { launchDebuggerOff: true }
       });
       mockSessionManager.listBreakpoints.mockReturnValue([
         { id: 'bp-1', file: '/a.py', line: 10, verified: false }

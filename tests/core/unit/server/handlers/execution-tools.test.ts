@@ -321,7 +321,7 @@ describe('execution tool handlers', () => {
       ctx.sessionManager.getSession.mockReturnValue({
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE,
-        transformedLaunch: launched
+        run: { transformedLaunch: launched }
       });
       ctx.sessionManager.getSessionPolicy.mockReturnValue(JsDebugAdapterPolicy);
       ctx.lineReader = { getLineContext: vi.fn().mockResolvedValue(null) };

@@ -200,10 +200,10 @@ export class AttachController {
 
     // Update to INITIALIZING state and set lifecycle to ACTIVE
     this.ctx.updateState(session, SessionState.INITIALIZING);
+    session.run.attachMode = true;
+    session.run.attachLocality = attachLocality;
     this.ctx.updateSession(sessionId, {
       sessionLifecycle: SessionLifecycleState.ACTIVE,
-      attachMode: true,
-      attachLocality,
     });
     session.failureDiagnostics = undefined;
     // Same per-attempt reset as startDebugging: an attach that fails before a
@@ -216,7 +216,7 @@ export class AttachController {
     session.lastProxyError = undefined;
     session.lastProxyExit = undefined;
     // An attach debugs regardless of any earlier noDebug launch (issue #749).
-    session.launchDebuggerOff = undefined;
+    session.run.launchDebuggerOff = undefined;
 
     try {
       // For attach mode, we use a placeholder scriptPath
@@ -239,7 +239,7 @@ export class AttachController {
 
       // Attach never receives a policy default (issue #244) — record the
       // user's value (possibly undefined) for read-back symmetry.
-      session.effectiveBreakOnExceptions = breakOnExceptions;
+      session.run.effectiveBreakOnExceptions = breakOnExceptions;
       const policy = this.ctx.selectPolicy(session.language);
 
       const attachConfigData = await this.proxyLauncher.start(session, {
@@ -503,12 +503,12 @@ export class AttachController {
       // Surface adapterConfig keys the adapter's attach transform dropped
       // (issue #450) and keys forwarded to the adapter unrecognized (issue
       // #466) — "unknown attach keys should either work or warn".
-      const droppedKeys = session.attachDroppedConfigKeys;
-      const forwardedKeys = session.attachForwardedUnknownConfigKeys;
-      const transformNotices = session.attachTransformNotices;
-      session.attachDroppedConfigKeys = undefined;
-      session.attachForwardedUnknownConfigKeys = undefined;
-      session.attachTransformNotices = undefined;
+      const droppedKeys = session.run.attachDroppedConfigKeys;
+      const forwardedKeys = session.run.attachForwardedUnknownConfigKeys;
+      const transformNotices = session.run.attachTransformNotices;
+      session.run.attachDroppedConfigKeys = undefined;
+      session.run.attachForwardedUnknownConfigKeys = undefined;
+      session.run.attachTransformNotices = undefined;
       const warningParts: string[] = [...resync.warnings];
       if (attachPauseSkipped) {
         warningParts.push(ErrorMessages.attachPauseNotRequested);
@@ -625,7 +625,7 @@ export class AttachController {
     // anything is touched: a session ends a program it launched, so a detach
     // that would leave it running is refused by name.
     const session = this.ctx.getSession(sessionId);
-    if (!terminateProcess && session.proxyManager && session.programOwnership === 'owned') {
+    if (!terminateProcess && session.proxyManager && session.run.programOwnership === 'owned') {
       return { success: false, state: session.state, error: ErrorMessages.detachOwnedProgramRefused() };
     }
     return this.inFlight.run(sessionId, 'detach', 'detach_from_process', this.ctx, () =>

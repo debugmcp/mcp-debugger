@@ -85,7 +85,7 @@ describe('Server Control Tools Tests', () => {
         id: 'test-session',
         state: 'running',
         sessionLifecycle: 'ACTIVE',
-        launchDebuggerOff: true
+        run: { launchDebuggerOff: true }
       });
       // The request still went to the adapter; its own answer is kept.
       mockSessionManager.setBreakpoint.mockResolvedValue({
@@ -128,7 +128,7 @@ describe('Server Control Tools Tests', () => {
         id: 'test-session',
         state: 'paused',
         sessionLifecycle: 'ACTIVE',
-        launchDebuggerOff: true
+        run: { launchDebuggerOff: true }
       });
       mockSessionManager.setBreakpoint.mockResolvedValue({
         breakpoint: { id: 'bp-1', file: '/path/to/test.py', line: 10, verified: false, message: 'Unbound breakpoint' }
@@ -149,7 +149,7 @@ describe('Server Control Tools Tests', () => {
         id: 'test-session',
         state: 'stopped',
         sessionLifecycle: 'ACTIVE',
-        launchDebuggerOff: true
+        run: { launchDebuggerOff: true }
       });
       mockSessionManager.setBreakpoint.mockResolvedValue({
         breakpoint: { id: 'bp-1', file: '/path/to/test.py', line: 10, verified: false }
@@ -169,7 +169,7 @@ describe('Server Control Tools Tests', () => {
         id: 'test-session',
         state: 'running',
         sessionLifecycle: 'ACTIVE',
-        launchDebuggerOff: true
+        run: { launchDebuggerOff: true }
       });
       mockSessionManager.setBreakpoint.mockResolvedValue({
         breakpoint: { id: 'bp-1', file: '/path/to/test.py', line: 10, verified: true }

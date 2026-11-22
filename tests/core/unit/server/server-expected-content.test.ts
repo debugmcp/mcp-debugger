@@ -238,7 +238,7 @@ describe('set_breakpoint expectedContent (#271)', () => {
     mockSessionManager.getSession.mockReturnValue({
       id: 'test-session',
       sessionLifecycle: 'active',
-      attachMode: true
+      run: { attachMode: true }
     });
 
     await expect(

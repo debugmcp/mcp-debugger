@@ -418,7 +418,7 @@ describe('BreakpointController.resyncAll hands the failures back (issue #754)', 
     const { controller } = makeController();
     vi.spyOn(controller, 'syncBreakpointsForFile').mockImplementation(async (_session, file) => refused(`${file} is not available`));
     const { session } = refusingSession([{ id: 'a', file: '/host/app.rb', line: 1 }, { id: 'b', file: '/host/lib.rb', line: 1 }]);
-    Object.assign(session, { language: 'ruby', attachMode: true });
+    Object.assign(session, { language: 'ruby', run: { attachMode: true } });
 
     const { warnings } = await controller.resyncAll(session);
 

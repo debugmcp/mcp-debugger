@@ -93,7 +93,7 @@ function failureData<T extends object>(
 
 /** Preparation and adapter notes share the existing warning surface, once each. */
 function launchWarnings(session: ManagedSession, ...notes: (string | undefined)[]): string | undefined {
-  return joinWarnings(...notes, ...(session.launchConfigNotices ?? []), ...(session.adapterNotices ?? []));
+  return joinWarnings(...notes, ...(session.run.launchConfigNotices ?? []), ...(session.adapterNotices ?? []));
 }
 
 const OUTPUT_BEFORE_FAILURE_LINES = 8;
@@ -507,10 +507,10 @@ export class DebugLauncher {
     // Explicitly set lifecycle state to ACTIVE when starting debugging.
     // attachMode is cleared: a launch supersedes any prior attach, and a
     // sticky flag would wrongly refuse restart_debugging forever (#238).
+    session.run.attachMode = false;
+    session.run.attachLocality = undefined;
     this.ctx.updateSession(sessionId, {
       sessionLifecycle: SessionLifecycleState.ACTIVE,
-      attachMode: false,
-      attachLocality: undefined,
     });
     // Per-attempt terminal evidence. A prior program/proxy exit must not
     // influence whether this launch is reported as successful. lastStop is
@@ -523,19 +523,19 @@ export class DebugLauncher {
     session.failureDiagnostics = undefined;
     session.lastStop = undefined;
     session.snapshotDiffBase = undefined;
-    session.launchConfigNotices = [];
+    session.run.launchConfigNotices = [];
     session.adapterNotices = [];
-    session.launchExceptionFilters = undefined;
+    session.run.launchExceptionFilters = undefined;
     // The previous launch's debugger-off decision does not carry over
     // (issue #749); this attempt decides again below.
-    session.launchDebuggerOff = undefined;
+    session.run.launchDebuggerOff = undefined;
     this.ctx.logger.info(`[SessionManager] Session ${sessionId} lifecycle state set to ACTIVE`);
 
     // Record the launch spec for restart_debugging BEFORE attempting the
     // launch — a start that dies mid-way is still meaningfully replayable.
     // A dry run was answered above and never reaches this point, so
     // lastLaunch means "most recent real launch".
-    session.lastLaunch = {
+    session.run.lastLaunch = {
       scriptPath,
       scriptArgs,
       dapLaunchArgs,
@@ -553,7 +553,7 @@ export class DebugLauncher {
     // proxy starts, so the core's per-launch reset (which runs inside
     // proxyLauncher.start) is not the place to clear it — the block above is.
     if (debuggerOff) {
-      session.launchDebuggerOff = true;
+      session.run.launchDebuggerOff = true;
     }
     let effectiveLaunchArgs = launchArgs;
     // This attempt's output buffer is the one the proxy start creates: a
@@ -563,7 +563,7 @@ export class DebugLauncher {
     try {
       const effectiveBreakOnExceptions =
         this.resolveBreakOnExceptionsDefault(session, policy, breakOnExceptions, isAttachShaped);
-      session.effectiveBreakOnExceptions = effectiveBreakOnExceptions;
+      session.run.effectiveBreakOnExceptions = effectiveBreakOnExceptions;
 
       // What the proxy is about to start with (issue #851): its own snapshot
       // of the breakpoints is taken inside start().
@@ -603,7 +603,7 @@ export class DebugLauncher {
         breakOnExceptions !== undefined && breakOnExceptions !== 'none' &&
         exceptionArming.ids.length === 0 && exceptionArming.noUncaughtStop === 'unavailable'
       ) {
-        (session.launchConfigNotices ??= []).push(
+        (session.run.launchConfigNotices ??= []).push(
           ErrorMessages.exceptionModeArmsNothing(breakOnExceptions, session.language, supportedExceptionModes(policy))
         );
       }
@@ -775,7 +775,7 @@ export class DebugLauncher {
       // keeps the record and the warning: the flag still keeps its
       // breakpoints from binding.)
       const debuggerOnAnyway =
-        debuggerOff && (finalSession.launchDebuggerOff !== true || adapterVerifiedABreakpoint(finalSession));
+        debuggerOff && (finalSession.run.launchDebuggerOff !== true || adapterVerifiedABreakpoint(finalSession));
       const noDebugNote = debuggerOnAnyway
         ? buildNoDebugLaunchWarning(finalSession, { noDebug }, breakOnExceptions, false)
         : noDebugWarning;
@@ -1014,14 +1014,14 @@ export class DebugLauncher {
       session.adapterCapabilities?.supportsRestartRequest === true &&
       session.proxyManager?.isRunning() === true;
 
-    if (session.attachMode && !nativeRestart) {
+    if (session.run.attachMode && !nativeRestart) {
       return {
         success: false,
         state: session.state,
         error: 'Cannot restart an attach session: there is no launch configuration to replay, and the adapter offers no restart request. Detach and re-attach instead.'
       };
     }
-    if (!session.lastLaunch && !nativeRestart) {
+    if (!session.run.lastLaunch && !nativeRestart) {
       return {
         success: false,
         state: session.state,
@@ -1038,7 +1038,7 @@ export class DebugLauncher {
       return this.hotRestart(session, anchorResolution);
     }
 
-    const spec = session.lastLaunch;
+    const spec = session.run.lastLaunch;
     if (!spec) {
       return {
         success: false,
@@ -1095,7 +1095,7 @@ export class DebugLauncher {
   ): Promise<DebugResult<LaunchResultData>> {
     const sessionId = session.id;
     const proxyManager = session.proxyManager!;
-    const target = session.lastLaunch?.scriptPath ?? 'the attached program';
+    const target = session.run.lastLaunch?.scriptPath ?? 'the attached program';
     this.ctx.logger.info(
       `[SessionManager] Restarting session ${sessionId} in place: the adapter offers a restart request (hot restart)`
     );
@@ -1144,7 +1144,7 @@ export class DebugLauncher {
       : undefined;
     let stillRunning: string | undefined;
     if (readiness === 'running' && finalState === SessionState.RUNNING) {
-      const requestedEntry = finalSession.lastLaunch?.dapLaunchArgs?.stopOnEntry;
+      const requestedEntry = finalSession.run.lastLaunch?.dapLaunchArgs?.stopOnEntry;
       const arming = describeLaunchArming(finalSession, typeof requestedEntry === 'boolean' ? requestedEntry : undefined);
       stillRunning = ErrorMessages.launchStillRunning(
         arming.armed ? arming.summary : undefined,

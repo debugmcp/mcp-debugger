@@ -56,6 +56,43 @@ describe('SessionManager child sessions (issue #1081)', () => {
   const childOf = (rootId: string) => sessionManager.getAllSessions().find((s) => s.parentSessionId === rootId);
   const releases = () => dependencies.mockProxyManager.dapRequestCalls.filter((c) => c.command === 'childRelease');
 
+  describe('one run record for the tree', () => {
+    it('a child reads how its tree was started from the record its root writes, and a later write by the root is seen by the child', async () => {
+      const rootId = await startRoot({ justMyCode: false });
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+      await vi.runAllTimersAsync();
+      const root = sessionManager.getSession(rootId)!;
+      const child = sessionManager.getSession(childOf(rootId)!.id)!;
+
+      // The same object, not a copy taken at adoption.
+      expect(child.run).toBe(root.run);
+      expect(child.run.lastLaunch).toMatchObject({ scriptPath: 'test.py', dapLaunchArgs: { justMyCode: false } });
+      expect(child.run.effectiveBreakOnExceptions).toBe(root.run.effectiveBreakOnExceptions);
+
+      root.run.launchDebuggerOff = true;
+      expect(child.run.launchDebuggerOff).toBe(true);
+    });
+
+    it("a session nothing was started on has an empty record of its own, and two roots do not share one", async () => {
+      const first = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      const second = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      expect(sessionManager.getSession(first.id)!.run).toEqual({});
+      expect(sessionManager.getSession(first.id)!.run).not.toBe(sessionManager.getSession(second.id)!.run);
+    });
+
+    it("the notes of the root's launch are said on the root: a child's output does not start with them", async () => {
+      const rootId = await startRoot();
+      sessionManager.getSession(rootId)!.run.launchConfigNotices = ['a note about how the root was launched'];
+
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+      await vi.runAllTimersAsync();
+
+      const child = sessionManager.getSession(childOf(rootId)!.id)!;
+      expect(child.outputBuffer?.renderText() ?? '').not.toContain('a note about how the root was launched');
+      expect(child.adapterNotices ?? []).toEqual([]);
+    });
+  });
+
   it('adopts a reported child as a session of its own, linked to the parent', async () => {
     const rootId = await startRoot();
 
@@ -136,8 +173,8 @@ describe('SessionManager child sessions (issue #1081)', () => {
     const rootId = await startRoot();
     await sessionManager.setFunctionBreakpoint(rootId, { functionName: 'compute', condition: 'i > 2' });
     const root = sessionManager.getSession(rootId)!;
-    root.effectiveBreakOnExceptions = 'all';
-    root.launchExceptionFilters = { ids: ['raised'], beyondMode: [], noUncaughtStop: undefined };
+    root.run.effectiveBreakOnExceptions = 'all';
+    root.run.launchExceptionFilters = { ids: ['raised'], beyondMode: [], noUncaughtStop: undefined };
     const original = Array.from(root.functionBreakpoints.values())[0];
     original.adapterId = 19;
     original.verified = true;
@@ -151,8 +188,8 @@ describe('SessionManager child sessions (issue #1081)', () => {
     expect(copied.adapterId).toBeUndefined();
     expect(copied.verified).toBe(false);
     expect(original.adapterId).toBe(19);
-    expect(child.effectiveBreakOnExceptions).toBe('all');
-    expect(child.launchExceptionFilters).toEqual({ ids: ['raised'], beyondMode: [], noUncaughtStop: undefined });
+    expect(child.run.effectiveBreakOnExceptions).toBe('all');
+    expect(child.run.launchExceptionFilters).toEqual({ ids: ['raised'], beyondMode: [], noUncaughtStop: undefined });
     expect(dependencies.mockProxyManager.childViews.get(child.id)!.adoptCalls[0].functionBreakpoints)
       .toEqual([{ name: 'compute', condition: 'i > 2' }]);
   });
@@ -669,8 +706,8 @@ describe('SessionManager child sessions (issue #1081)', () => {
 
     it('closing an attach root releases every descendant (targets kept) and says released', async () => {
       const { rootId, childView, grandchildView } = await tree();
-      sessionManager.getSession(rootId)!.attachMode = true;
-      sessionManager.getSession(rootId)!.programOwnership = 'borrowed';
+      sessionManager.getSession(rootId)!.run.attachMode = true;
+      sessionManager.getSession(rootId)!.run.programOwnership = 'borrowed';
 
       const outcome = await sessionManager.closeSessionReporting(rootId);
 
@@ -704,8 +741,8 @@ describe('SessionManager child sessions (issue #1081)', () => {
   describe('the detach cascade (issue #1081): an attach root with children', () => {
     async function attachTree() {
       const rootId = await startRoot();
-      sessionManager.getSession(rootId)!.attachMode = true;
-      sessionManager.getSession(rootId)!.programOwnership = 'borrowed';
+      sessionManager.getSession(rootId)!.run.attachMode = true;
+      sessionManager.getSession(rootId)!.run.programOwnership = 'borrowed';
       dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
       await vi.runAllTimersAsync();
       const childId = childOf(rootId)!.id;
@@ -812,8 +849,8 @@ describe('SessionManager child sessions (issue #1081)', () => {
 
     it('a detach with no children answers as before', async () => {
       const rootId = await startRoot();
-      sessionManager.getSession(rootId)!.attachMode = true;
-      sessionManager.getSession(rootId)!.programOwnership = 'borrowed';
+      sessionManager.getSession(rootId)!.run.attachMode = true;
+      sessionManager.getSession(rootId)!.run.programOwnership = 'borrowed';
 
       const detached = await sessionManager.detachFromProcess(rootId);
 
@@ -1334,8 +1371,8 @@ describe('SessionManager child sessions (issue #1081)', () => {
 
     it('reads child and grandchild output from their own connections under an attach root', async () => {
       const { rootId, childId, grandchildId, childView } = await jsTree();
-      sessionManager.getSession(rootId)!.attachMode = true;
-      sessionManager.getSession(rootId)!.programOwnership = 'borrowed';
+      sessionManager.getSession(rootId)!.run.attachMode = true;
+      sessionManager.getSession(rootId)!.run.programOwnership = 'borrowed';
       childView.simulateEvent('output', { category: 'stdout', output: 'child console output\n' });
 
       expect(sessionManager.outputOnFor(childId)).toBeUndefined();
