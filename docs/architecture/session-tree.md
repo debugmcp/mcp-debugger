@@ -446,6 +446,19 @@ A child is a session of its own, and what is read about it is read where it is t
   `tests/unit/architecture/run-facts-seam.test.ts` holds the session and server layers to it.
   One worker serves a tree and writes one proxy log, named after the root, so a child's
   `debug://sessions/<child>/proxy-log` is its tree's.
+  Two limits of reading the root's facts for a child, both known:
+  - **The stale-build check decides by the root's program.** That is right for a worker of a
+    runner that transforms sources in memory (vitest, tsx) and wrong under a process manager
+    in `node_modules` that transforms nothing (nodemon, pm2) and whose child runs compiled
+    files: the note that belongs there is not given. What decides it correctly is the child's
+    own program, and js-debug's report of a child carries only its script's basename
+    ([#1227](https://github.com/debugmcp/mcp-debugger/issues/1227)).
+  - **A child's stop reasons are read as a launch's**, also under an attach root: the stop
+    rules take attach-ness from the start arguments the session was wired with, and a child is
+    wired with a launch's. That is the same choice as the first-stop rule above, and
+    [#1223](https://github.com/debugmcp/mcp-debugger/issues/1223) asks whether it should be.
+  When the root can no longer be reached from a session (its row is gone), the view names no
+  proxy log: a log named after a child is the file nobody writes.
 
 ### The adoption contract on `AdapterPolicy`
 

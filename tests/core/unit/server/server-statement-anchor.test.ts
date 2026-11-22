@@ -435,6 +435,37 @@ describe('set_breakpoint statement anchors (#271)', () => {
       expect(content.note).toBeUndefined();
       expect(content.content).toBe('    total = sum(prices)');
     });
+
+    describe("a child of a remote attach debugs that attach's target (issue #1214)", () => {
+      // The attach fields are written on the root alone; the child has a parent and nothing else.
+      beforeEach(() => {
+        const sessions: Record<string, Record<string, unknown>> = {
+          'root-session': { id: 'root-session', sessionLifecycle: 'active', attachMode: true, attachLocality: 'remote' },
+          'test-session': { id: 'test-session', sessionLifecycle: 'active', parentSessionId: 'root-session' }
+        };
+        mockSessionManager.getSession.mockImplementation((sessionId: string) => sessions[sessionId]);
+      });
+
+      it('names the remote target when refusing content addressing', async () => {
+        const err = await rejection({ line: 6, expectedContent: 'return total' });
+
+        expect(err.message).toMatch(/not supported for a remote attach session/);
+        expect(err.message).toMatch(/drop expectedContent and keep line/);
+        expect(mockDependencies.fileSystem.pathExists).not.toHaveBeenCalled();
+      });
+
+      it('skips the host file check and omits content and context, and says so', async () => {
+        const result = await callSetBreakpoint({ line: 2 });
+
+        const content = JSON.parse(result.content[0].text);
+        expect(content.success).toBe(true);
+        expect(content.content).toBeUndefined();
+        expect(content.context).toBeUndefined();
+        expect(content.note).toMatch(/content and context omitted/);
+        expect(mockDependencies.fileSystem.pathExists).not.toHaveBeenCalled();
+        expect(mockDependencies.fileSystem.readFile).not.toHaveBeenCalled();
+      });
+    });
   });
 
   it('keeps the class-name wording for non-file source identifiers', async () => {

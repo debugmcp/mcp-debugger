@@ -4,6 +4,7 @@
  * with the parent's breakpoints under the per-tree cap, and wired like a root.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import path from 'node:path';
 import { ErrorMessages } from '../../../../src/utils/error-messages.js';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import { DebugLanguage, JsDebugAdapterPolicy, SessionState, type AdapterPolicy, type DapClientBehavior } from '@debugmcp/shared';
@@ -44,10 +45,10 @@ describe('SessionManager child sessions (issue #1081)', () => {
     dependencies.mockProxyManager.reset();
   });
 
-  async function startRoot(): Promise<string> {
+  async function startRoot(dapLaunchArgs?: Parameters<SessionManager['startDebugging']>[3]): Promise<string> {
     const session = await sessionManager.createSession({ language: DebugLanguage.MOCK });
     await sessionManager.setBreakpoint(session.id, { file: '/w/child.py', line: 7 });
-    await sessionManager.startDebugging(session.id, 'test.py');
+    await sessionManager.startDebugging(session.id, 'test.py', undefined, dapLaunchArgs);
     await vi.runAllTimersAsync();
     return session.id;
   }
@@ -258,6 +259,35 @@ describe('SessionManager child sessions (issue #1081)', () => {
       view.simulateEvent('terminated');
       await vi.runAllTimersAsync();
       expect(dependencies.mockProxyManager.stopCalls).toBe(1);
+    });
+
+    it.each(['exit', 'error'] as const)("a child connection's failure (%s) points at its tree's one log, the root's, never a file named after the child (#1222)", async (event) => {
+      const { rootId, childId, view } = await rootWithChild();
+      const root = sessionManager.getSession(rootId)!;
+      const treeLog = {
+        proxyLogPath: path.join(root.logDir!, `proxy-${rootId}.log`),
+        proxyLogResource: `debug://sessions/${rootId}/proxy-log`
+      };
+
+      if (event === 'exit') {
+        view.simulateEvent('exit', 134, undefined, false);
+      } else {
+        view.simulateEvent('error', new Error('adapter socket closed'));
+      }
+
+      const child = sessionManager.getSession(childId)!;
+      expect(child.state).toBe(SessionState.ERROR);
+      // Recorded before the handler returns...
+      expect(child.failureDiagnostics).toEqual(treeLog);
+      // ...and again by the log record written after it.
+      await vi.waitFor(() => {
+        expect(dependencies.mockLogger.error).toHaveBeenCalledWith(
+          `[SessionManager] Detailed error in proxyExit for session ${childId}:`,
+          expect.objectContaining(treeLog)
+        );
+      });
+      await vi.runAllTimersAsync();
+      expect(child.failureDiagnostics).toEqual(treeLog);
     });
 
     it('contains failure to stop a terminated child connection', async () => {
@@ -1181,6 +1211,60 @@ describe('SessionManager child sessions (issue #1081)', () => {
     });
   });
 
+  // Issue #1214: a child was adopted, never launched. What the launch asked
+  // for is its root's, and the sentences that depend on it read the root.
+  describe("a child's pending step_into reads what its tree's launch asked for (issue #1214)", () => {
+    /** The raw paused frame the step goes out from: dependency code, which a default js launch skips. */
+    const DEPENDENCY_FRAME = { id: 1, name: 'handle', source: { path: '/app/node_modules/router/index.js' }, line: 160, column: 5 };
+
+    async function pendingStepIntoOnChild(dapLaunchArgs?: Parameters<SessionManager['startDebugging']>[3]) {
+      const describePendingStop = vi.fn(JsDebugAdapterPolicy.describePendingStop);
+      const facade = sessionManager as unknown as { selectPolicy: (language: string) => AdapterPolicy };
+      const original = facade.selectPolicy.bind(sessionManager);
+      vi.spyOn(facade, 'selectPolicy').mockImplementation((language) => ({ ...original(language), describePendingStop }));
+      const rootId = await startRoot(dapLaunchArgs);
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+      await vi.runAllTimersAsync();
+      const childId = childOf(rootId)!.id;
+      const view = dependencies.mockProxyManager.childViews.get(childId)!;
+      view.simulateStopped(3, 'breakpoint', { reason: 'breakpoint', threadId: 3 });
+      await vi.runAllTimersAsync();
+      expect(sessionManager.getSession(childId)!.state).toBe(SessionState.PAUSED);
+      // The step goes out and never lands.
+      view.setDapRequestHandler(async (command: string) =>
+        command === 'stackTrace'
+          ? { success: true, body: { stackFrames: [DEPENDENCY_FRAME], totalFrames: 1 } }
+          : { success: true, body: {} });
+
+      const step = sessionManager.stepInto(childId);
+      await vi.advanceTimersByTimeAsync(6000);
+      const data = (await step).data as { message?: string; pending?: boolean };
+      return { data, describePendingStop };
+    }
+
+    it('explains the skipped code it went out from, as for a root, under a default launch', async () => {
+      const { data, describePendingStop } = await pendingStepIntoOnChild();
+
+      expect(data.pending).toBe(true);
+      expect(data.message).toContain('The step was issued from skipped code (/app/node_modules/router/index.js:160)');
+      expect(describePendingStop).toHaveBeenCalledWith(expect.objectContaining({
+        operation: 'step',
+        attachMode: false,
+        launch: expect.objectContaining({ dapLaunchArgs: expect.objectContaining({ justMyCode: true }) })
+      }));
+    });
+
+    it('says nothing of skipped code when the launch asked for justMyCode: false', async () => {
+      const { data, describePendingStop } = await pendingStepIntoOnChild({ justMyCode: false });
+
+      expect(data.pending).toBe(true);
+      expect(data.message).toBe(ErrorMessages.stepStillRunning(5));
+      expect(describePendingStop).toHaveBeenCalledWith(expect.objectContaining({
+        launch: expect.objectContaining({ dapLaunchArgs: expect.objectContaining({ justMyCode: false }) })
+      }));
+    });
+  });
+
   it('releases the report and removes the row if creating its proxy view fails', async () => {
     const rootId = await startRoot();
     vi.spyOn(dependencies.mockProxyManager, 'createChildView').mockImplementation(() => {
@@ -1324,6 +1408,24 @@ describe('SessionManager child sessions (issue #1081)', () => {
       // The wait saw nothing: the hold never entered PAUSED, and the resume ran in the settle's own call stack.
       expect((await wait).data?.pending).toBe(true);
       // Nor does the root count it as a stop of its tree (issue #1128): nobody saw it.
+      expect(child(rootId).descendantStops).toBeUndefined();
+    });
+
+    it("resumes the child's unexplained first stop by the launch's rule, where the child's own connection forces no pause", async () => {
+      // A policy that adopts in-session: its child connections run the
+      // child-safe derivative, whose behaviour says no forced pause.
+      const { rootId, childId, view, requests } = await jsChild(TOP_FRAME, FIRST_STATEMENT, { supportsReverseStartDebugging: true });
+      expect(sessionManager.clientBehaviorOf(child(rootId)).pauseAfterChildAttach).toBe(true);
+      expect(sessionManager.clientBehaviorOf(child(childId)).pauseAfterChildAttach).toBe(false);
+
+      // A pause no breakpoint, exception, user pause or debugger statement explains.
+      view.simulateStopped(3, 'pause', { reason: 'pause', threadId: 3 });
+      await vi.runAllTimersAsync();
+
+      expect(requests).toContain('continue');
+      expect(child(childId).state).toBe(SessionState.RUNNING);
+      expect(child(childId).lastStop).toBeUndefined();
+      expect(dependencies.mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('Auto-continuing (stopOnEntry=false) [reason=pause, firstStop=true]'));
       expect(child(rootId).descendantStops).toBeUndefined();
     });
 

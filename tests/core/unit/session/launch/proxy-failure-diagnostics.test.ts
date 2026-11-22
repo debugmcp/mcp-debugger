@@ -71,6 +71,21 @@ describe('collectProxyFailureDiagnostics', () => {
     });
   });
 
+  it("points at the log owner's file and resource when one is named, and at the session's own otherwise (#1222)", () => {
+    // A child session: its tree has one worker and one log, named after the root.
+    const childRunDir = path.join('/tmp', 'logs', 'child-1', 'run-1');
+    const child = { id: 'child-1', logDir: childRunDir };
+
+    expect(collectProxyFailureDiagnostics(child, new Error('adapter exited'), { id: 'sess-1', logDir: runDir })).toEqual({
+      proxyLogPath,
+      proxyLogResource
+    });
+    expect(collectProxyFailureDiagnostics(child, new Error('adapter exited'))).toEqual({
+      proxyLogPath: path.join(childRunDir, 'proxy-child-1.log'),
+      proxyLogResource: 'debug://sessions/child-1/proxy-log'
+    });
+  });
+
   it('invents nothing for a failure that happened before a log directory existed', () => {
     expect(
       collectProxyFailureDiagnostics({ id: 'sess-1', logDir: undefined }, new Error('bad config'))
@@ -303,6 +318,27 @@ describe('logProxyFailure', () => {
         'attachToProcess'
       )
     ).resolves.toEqual({ proxyLogPath, proxyLogResource });
+  });
+
+  it("reads, logs and returns the log owner's pointers, naming the failed session in the log line (#1222)", async () => {
+    const logger = createMockLogger();
+    const fileSystem = createMockFileSystem();
+    const child = { id: 'child-1', logDir: path.join('/tmp', 'logs', 'child-1', 'run-1') };
+
+    const diagnostics = await logProxyFailure(
+      { logger, fileSystem },
+      child,
+      new Error('adapter exited'),
+      'proxyExit',
+      { id: 'sess-1', logDir: runDir }
+    );
+
+    expect(diagnostics).toEqual({ proxyLogPath, proxyLogResource });
+    expect(fileSystem.readTail).toHaveBeenCalledWith(proxyLogPath, PROXY_LOG_TAIL_MAX_BYTES);
+    expect(logger.error).toHaveBeenCalledWith(
+      '[SessionManager] Detailed error in proxyExit for session child-1:',
+      expect.objectContaining({ proxyLogPath, proxyLogResource })
+    );
   });
 
   it('logs the proxy log tail but returns only the pointers', async () => {

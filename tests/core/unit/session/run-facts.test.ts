@@ -33,6 +33,14 @@ describe('rootOfTree', () => {
     const b = session({ id: 'b', parentSessionId: 'a' });
     expect(['a', 'b']).toContain(rootOfTree(a, tree(a, b)).id);
   });
+
+  it('reads a lookup that throws as no row: the session itself', () => {
+    const child = session({ id: 'child', parentSessionId: 'root' });
+    const throwing = (): ManagedSession | undefined => {
+      throw new Error('session store unavailable');
+    };
+    expect(rootOfTree(child, throwing)).toBe(child);
+  });
 });
 
 describe('runFactsOf', () => {
@@ -63,6 +71,26 @@ describe('runFactsOf', () => {
     expect(facts.targetLocality).toBe('remote');
     // An attach debugs some other process, whatever the session launched before.
     expect(facts.launch).toBeUndefined();
+  });
+
+  it('names no log when the walk cannot reach the root: a log named after a child is a file no worker writes (#1222)', () => {
+    // The parent's row is gone.
+    const orphan = session({ id: 'child', parentSessionId: 'root', logDir });
+    expect(runFactsOf(orphan, tree(orphan)).proxyLogPath).toBeUndefined();
+    // The chain loops.
+    const a = session({ id: 'a', parentSessionId: 'b', logDir });
+    const b = session({ id: 'b', parentSessionId: 'a', logDir });
+    expect(runFactsOf(a, tree(a, b)).proxyLogPath).toBeUndefined();
+    expect(runFactsOf(b, tree(a, b)).proxyLogPath).toBeUndefined();
+  });
+
+  it('reads a lookup that throws as no row, and answers instead of throwing', () => {
+    const throwing = (): ManagedSession | undefined => {
+      throw new Error('session store unavailable');
+    };
+    const facts = runFactsOf(child, throwing);
+    expect(facts.rootSessionId).toBe('child');
+    expect(facts.proxyLogPath).toBeUndefined();
   });
 
   it('answers a session that has started nothing with nothing', () => {

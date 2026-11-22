@@ -2265,6 +2265,15 @@ export abstract class SessionManagerCore extends EventEmitter {
           });
           return;
         }
+        // Function records share the id (issue #1220): the event is one of
+        // theirs and names neither. It ends here, as the rule above says:
+        // it must not go on to the location match below and be taken by a
+        // line breakpoint that sits where the function is bound.
+        for (const candidate of session.functionBreakpoints.values()) {
+          if (candidate.adapterId === eventBp.id) {
+            return;
+          }
+        }
       }
 
       const all = Array.from(session.breakpoints.values());

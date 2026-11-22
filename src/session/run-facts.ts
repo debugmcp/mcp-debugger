@@ -36,7 +36,11 @@ export interface RunFacts {
   launch: ManagedSession['transformedLaunch'];
   /** The caller's launch request, the one a restart replays; undefined before a launch. */
   request: ManagedSession['lastLaunch'];
-  /** The worker's log of this run: one per tree, named after the root. Undefined before a run directory exists. */
+  /**
+   * The worker's log of this run: one per tree, named after the root.
+   * Undefined before a run directory exists, and when the tree's root can
+   * no longer be reached from this session.
+   */
   proxyLogPath: string | undefined;
 }
 
@@ -69,6 +73,11 @@ export function rootOfTree<T extends TreeNode>(session: T, get: (sessionId: stri
 /** The facts of the run `session` belongs to, read off its tree's root. */
 export function runFactsOf(session: ManagedSession, get: (sessionId: string) => ManagedSession | undefined): RunFacts {
   const root = rootOfTree(session, get);
+  // The walk can end below the root: a parent's row is gone, or the chain
+  // loops. What it ended on is then some child, and a log named after a
+  // child is a file no worker writes (issue #1222): no path is better
+  // than that one.
+  const reachedRoot = root.parentSessionId === undefined;
   const attached = root.attachMode === true;
   return {
     rootSessionId: root.id,
@@ -76,6 +85,6 @@ export function runFactsOf(session: ManagedSession, get: (sessionId: string) => 
     targetLocality: root.attachLocality,
     launch: attached ? undefined : root.transformedLaunch,
     request: root.lastLaunch,
-    proxyLogPath: root.logDir ? proxyLogPathFor(root.logDir, root.id) : undefined
+    proxyLogPath: reachedRoot && root.logDir ? proxyLogPathFor(root.logDir, root.id) : undefined
   };
 }

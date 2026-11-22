@@ -28,15 +28,58 @@ function sources(relative: string): string[] {
   });
 }
 
-/** Property reads of the run fields, comments aside. */
-const RUN_FIELD_READ = /\.(attachMode|attachLocality|transformedLaunch|lastLaunch)\b/;
+/**
+ * The shapes a read of a run field takes: a property (`session.attachMode`,
+ * `session?.attachMode`), an indexed access (`session['attachMode']`), and a
+ * destructuring (`const { attachMode } = session`, over several lines too).
+ * An object literal that names a field (`{ attachMode: true }`) writes it.
+ */
+const RUN_FIELD_READS = [
+  /\.(attachMode|attachLocality|transformedLaunch|lastLaunch)\b/,
+  /\[\s*(['"`])(attachMode|attachLocality|transformedLaunch|lastLaunch)\1\s*\]/,
+  /\{[^{}]*\b(attachMode|attachLocality|transformedLaunch|lastLaunch)\b[^{}]*\}\s*=(?![=>])/
+];
+
+/** Whether source text reads a run field, comment lines aside. */
+function readsRunField(source: string): boolean {
+  const code = source
+    .split('\n')
+    .filter((line) => !/^\s*(\/?\*|\/\/)/.test(line))
+    .join('\n');
+  return RUN_FIELD_READS.some((shape) => shape.test(code));
+}
+
 const readers = ['src/session', 'src/server', 'src/server.ts']
   .flatMap(sources)
-  .filter((file) =>
-    fs.readFileSync(path.join(ROOT, file), 'utf8')
-      .split('\n')
-      .some((line) => RUN_FIELD_READ.test(line) && !/^\s*(\/?\*|\/\/)/.test(line)))
+  .filter((file) => readsRunField(fs.readFileSync(path.join(ROOT, file), 'utf8')))
   .sort();
+
+describe('what the run-facts seam guard reads as a read of a run field', () => {
+  it.each([
+    ['a property', 'const attached = session.attachMode === true;'],
+    ['an optional property', 'const where = session?.attachLocality;'],
+    ['an indexed access', "const launch = session['transformedLaunch'];"],
+    ['an indexed access in double quotes', 'const request = session["lastLaunch"];'],
+    ['an indexed access in backquotes', 'const attached = session[`attachMode`];'],
+    ['a destructuring', 'const { attachMode } = session;'],
+    ['a renaming destructuring among other fields', 'const { id, lastLaunch: request } = root;'],
+    ['a destructuring over several lines', 'const {\n  id,\n  transformedLaunch,\n} = session;'],
+    ['a destructuring assignment', '({ attachLocality: where } = session);']
+  ])('catches %s', (_shape, source) => {
+    expect(readsRunField(source)).toBe(true);
+  });
+
+  it.each([
+    ['a line comment', "// session.attachMode is the root's"],
+    ['a doc comment line', ' * reads session.lastLaunch off the root'],
+    ['an object literal that writes the fields', 'this.ctx.updateSession(sessionId, { attachMode: true, attachLocality });'],
+    ['a literal property built from the view', '  attachMode: run.attached,'],
+    ["an arrow's return type", 'const none = (): { attachMode: boolean } => ({ attachMode: false });'],
+    ['a comparison', 'const same = { attachMode } === expected;']
+  ])('leaves alone %s', (_shape, source) => {
+    expect(readsRunField(source)).toBe(false);
+  });
+});
 
 describe('the run-facts seam of the session layer', () => {
   it('reads the run fields only where they are written, and in the view', () => {

@@ -50,4 +50,13 @@ describe('applyHitBreakpointIds', () => {
     expect(upgraded).toEqual([]);
     expect(fn.verified).toBe(false);
   });
+
+  it('credits no function breakpoint for an id two of them share (#1220)', () => {
+    const first = { id: 'f', functionName: 'handle', verified: false, adapterId: 7 } as FunctionBreakpoint;
+    const second = { id: 'g', functionName: 'render', verified: false, adapterId: 7 } as FunctionBreakpoint;
+    const upgraded = applyHitBreakpointIds(sessionOf([line('a', 5, 1, true)], [first, second]), [7]);
+    expect(upgraded).toEqual([]);
+    expect(first.verified).toBe(false);
+    expect(second.verified).toBe(false);
+  });
 });
