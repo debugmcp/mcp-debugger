@@ -475,6 +475,26 @@ describe('ChildConnections: adopting a reported child', () => {
     ]);
   });
 
+  it('a debugpy attach refused after configurationDone still refuses the held request: that is what unblocks the child (issue #1219)', async () => {
+    // debugpy answers the attach only after configurationDone, so every
+    // attach failure it reports arrives with configurationDone already
+    // out. The disconnect lever is js-debug's; refusing the request is
+    // debugpy's, and it must stay so.
+    connectionManager.sendConfigurationDone.mockImplementation(async () => {
+      calls.push('configurationDone');
+      rejectAttach(new Error('attach refused'));
+    });
+    const { adopting } = await startAdoption();
+    const failed = expect(adopting).rejects.toThrow('attach refused');
+    childClient.emit('initialized');
+    await failed;
+
+    expect(calls).toContain('configurationDone');
+    expect(root.respondToReverseRequest).toHaveBeenCalledWith(expect.objectContaining({ seq: 7 }), {}, false, expect.stringContaining('attach refused'));
+    expect(connectionManager.disconnect).not.toHaveBeenCalled();
+    expect(childClient.shutdown).toHaveBeenCalled();
+  });
+
   it('sends a debugpy child its function breakpoints as a request: only an adapter without one is answered here (issue #1219)', async () => {
     const reportId = reportAChild();
     const adopting = connections.adopt('child-1', { reportId, functionBreakpoints: [{ name: 'main' }] });
@@ -593,7 +613,7 @@ describe('ChildConnections under the throwaway-attach lever (js-debug, issue #10
     sent.filter((m) => m.type === type && extra(m));
   const reported = () => sentOf('status', (m) => m.status === 'child_reported');
 
-  function build(options: { releaseTimeoutMs?: number; launchConfig?: Record<string, unknown> } = {}): void {
+  function build(options: { releaseTimeoutMs?: number; launchConfig?: Record<string, unknown>; breakOnExceptions?: 'none' | 'all' } = {}): void {
     sent.length = 0;
     vi.clearAllMocks();
     root = createMockDapClient();
@@ -622,7 +642,7 @@ describe('ChildConnections under the throwaway-attach lever (js-debug, issue #10
         host: '127.0.0.1',
         port: 9229,
         adapterId: 'pwa-node',
-        breakOnExceptions: 'none',
+        breakOnExceptions: options.breakOnExceptions ?? 'none',
         ...(options.launchConfig ? { launchConfig: options.launchConfig as never } : {})
       }
     });
@@ -843,9 +863,126 @@ describe('ChildConnections under the throwaway-attach lever (js-debug, issue #10
 
       await vi.waitFor(() => expect(connectionManager.disconnect).toHaveBeenCalledWith(childClient, false));
       await vi.waitFor(() => expect(childClient.shutdown).toHaveBeenCalled());
+      await vi.waitFor(() => expect(connections.liveCount()).toBe(0));
       expect(dapClientFactory.create).toHaveBeenCalledTimes(1);
       expect(connections.has('child-1')).toBe(false);
-      expect(connections.liveCount()).toBe(0);
+    });
+
+    /** An adoption whose attach is still open when configurationDone has gone out. */
+    async function adoptionPastConfigurationDone(): Promise<{ adopting: Promise<unknown> }> {
+      connectionManager.sendConfigurationDone.mockImplementation(async () => {});
+      root.emit('child-report', { request: jsStartDebugging(7), report: jsReport });
+      const adopting = connections.adopt('child-1', { reportId: reported()[0].reportId as string, breakpoints: [] });
+      adopting.catch(() => undefined);
+      await new Promise((resolve) => setImmediate(resolve));
+      childClient.emit('initialized');
+      await vi.waitFor(() => expect(connectionManager.sendConfigurationDone).toHaveBeenCalled());
+      return { adopting };
+    }
+
+    it('counts that disconnect as a release in flight: the worker is not empty until it has settled', async () => {
+      let acknowledge!: () => void;
+      connectionManager.disconnect.mockImplementation(() => new Promise((resolve) => { acknowledge = () => resolve({ answered: true }); }));
+      const empty = vi.fn();
+      connections.on('empty', empty);
+      const { adopting } = await adoptionPastConfigurationDone();
+
+      rejectAttach(new Error('attach failed late'));
+      await expect(adopting).rejects.toThrow('attach failed late');
+      await vi.waitFor(() => expect(connectionManager.disconnect).toHaveBeenCalled());
+      expect(connections.liveCount()).toBe(1);
+      expect(empty).not.toHaveBeenCalled();
+
+      acknowledge();
+      await vi.waitFor(() => expect(connections.liveCount()).toBe(0));
+      expect(empty).toHaveBeenCalledTimes(1);
+    });
+
+    it('falls back to the throwaway attach when nothing acknowledges that disconnect: the target may still be pending', async () => {
+      // The socket died, or the adapter never read configurationDone.
+      connectionManager.disconnect.mockResolvedValue({ answered: false, error: 'socket closed' });
+      const { adopting } = await adoptionPastConfigurationDone();
+
+      rejectAttach(new Error('attach failed late'));
+      await expect(adopting).rejects.toThrow('attach failed late');
+
+      await throwawayRan(releaseClient);
+      expect(connectionManager.disconnect).toHaveBeenCalledWith(childClient, false);
+      expect(childClient.shutdown).toHaveBeenCalled();
+      await vi.waitFor(() => expect(connections.liveCount()).toBe(0));
+    });
+
+    it('a configurationDone that fails is a failure after it went out: the child is let go on its own connection', async () => {
+      connectionManager.sendConfigurationDone.mockImplementation(async () => { throw new Error('configurationDone refused'); });
+      root.emit('child-report', { request: jsStartDebugging(7), report: jsReport });
+      const adopting = connections.adopt('child-1', { reportId: reported()[0].reportId as string, breakpoints: [] });
+      const failed = expect(adopting).rejects.toThrow('configurationDone refused');
+      await new Promise((resolve) => setImmediate(resolve));
+      childClient.emit('initialized');
+      await failed;
+
+      await vi.waitFor(() => expect(connectionManager.disconnect).toHaveBeenCalledWith(childClient, false));
+      await vi.waitFor(() => expect(connections.liveCount()).toBe(0));
+      expect(dapClientFactory.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('an attach that fails while configurationDone is still unanswered ends the adoption at once', async () => {
+      connectionManager.sendConfigurationDone.mockImplementation(() => new Promise(() => {}));
+      root.emit('child-report', { request: jsStartDebugging(7), report: jsReport });
+      const adopting = connections.adopt('child-1', { reportId: reported()[0].reportId as string, breakpoints: [] });
+      const failed = expect(adopting).rejects.toThrow('attach failed late');
+      await new Promise((resolve) => setImmediate(resolve));
+      childClient.emit('initialized');
+      await vi.waitFor(() => expect(connectionManager.sendConfigurationDone).toHaveBeenCalled());
+
+      rejectAttach(new Error('attach failed late'));
+      await failed;
+      await vi.waitFor(() => expect(connectionManager.disconnect).toHaveBeenCalledWith(childClient, false));
+    });
+
+    it('close() during such a handshake keeps its own path: it sends the disconnect, and the throwaway attach still runs', async () => {
+      const { adopting } = await adoptionPastConfigurationDone();
+
+      await connections.close('child-1', { terminateDebuggee: false });
+      await expect(adopting).rejects.toThrow('child session closed during adoption');
+
+      expect(connectionManager.disconnect).toHaveBeenCalledTimes(1);
+      await throwawayRan(releaseClient);
+      expect(connectionManager.disconnect).toHaveBeenCalledTimes(1);
+    });
+
+    it('an attach that failed together with the last step before configurationDone still stops there', async () => {
+      // Every step resolves at once, so a race alone would let the
+      // settled step win over the failure queued beside it.
+      root.emit('child-report', { request: jsStartDebugging(7), report: jsReport });
+      const adopting = connections.adopt('child-1', { reportId: reported()[0].reportId as string, breakpoints: [] });
+      const failed = expect(adopting).rejects.toThrow('attach refused');
+      await new Promise((resolve) => setImmediate(resolve));
+      childClient.emit('initialized');
+      rejectAttach(new Error('attach refused'));
+      await failed;
+
+      expect(connectionManager.sendConfigurationDone).not.toHaveBeenCalled();
+      await throwawayRan(releaseClient);
+    });
+
+    it('an attach that fails while the exception filters are still being set never reaches configurationDone', async () => {
+      build({ breakOnExceptions: 'all' });
+      let releaseFilters!: () => void;
+      connectionManager.setExceptionBreakpoints.mockImplementation(() => new Promise((resolve) => { releaseFilters = () => resolve({ body: {} }); }));
+      root.emit('child-report', { request: jsStartDebugging(7), report: jsReport });
+      const adopting = connections.adopt('child-1', { reportId: reported()[0].reportId as string, breakpoints: [] });
+      const failed = expect(adopting).rejects.toThrow('attach timed out');
+      await new Promise((resolve) => setImmediate(resolve));
+      childClient.emit('initialized');
+      await vi.waitFor(() => expect(connectionManager.setExceptionBreakpoints).toHaveBeenCalled());
+
+      rejectAttach(new Error('attach timed out'));
+      await failed;
+      releaseFilters();
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(connectionManager.sendConfigurationDone).not.toHaveBeenCalled();
     });
   });
 

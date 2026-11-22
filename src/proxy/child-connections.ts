@@ -218,6 +218,7 @@ export class ChildConnections extends EventEmitter {
     let onInitialized: (() => void) | undefined;
     // Once configurationDone is on the wire the adapter may bind the target
     // to this connection; a failure after that is cleaned up differently.
+    // "Sent", not "processed": the adapter may not have read it yet.
     let configurationDoneSent = false;
     try {
       client = deps.dapClientFactory.create(deps.host, deps.port, this.policyForConnections(deps), { traceLabel: label });
@@ -246,8 +247,12 @@ export class ChildConnections extends EventEmitter {
         client,
         contract.buildChildAttachArguments(held.report, deps.launchConfig as Readonly<Record<string, unknown>> | undefined)
       );
+      let attachFailed: { error: unknown } | undefined;
       const attachFailure = new Promise<never>((_, reject) => {
-        attach.catch(reject);
+        attach.catch((error: unknown) => {
+          attachFailed = { error };
+          reject(error);
+        });
       });
       // Raced wherever the handshake waits below; handled here for the
       // moments when nothing is racing it.
@@ -270,6 +275,12 @@ export class ChildConnections extends EventEmitter {
       await step(this.sendExceptionBreakpoints(deps, client, childSessionId));
       await step(this.sendBreakpoints(deps, client, childSessionId, args.breakpoints ?? []));
       await step(this.sendFunctionBreakpoints(client, childSessionId, args.functionBreakpoints ?? []));
+      // The race above is not a gate: a step that had already settled wins
+      // over a failure that arrived with it. This check is the gate.
+      const failedBeforeConfigurationDone = attachFailed as { error: unknown } | undefined;
+      if (failedBeforeConfigurationDone) {
+        throw failedBeforeConfigurationDone.error;
+      }
       configurationDoneSent = true;
       await step(deps.connectionManager.sendConfigurationDone(client));
       await wait(attach);
@@ -285,8 +296,8 @@ export class ChildConnections extends EventEmitter {
       clearTimeout(initializedTimer);
       const message = error instanceof Error ? error.message : String(error);
       logger.warn(`[ChildConnections] Adoption of child ${held.report.targetId} as session ${childSessionId} failed: ${message}`);
-      // close() marks the connection before it cancels the handshake, and
-      // disconnects the socket itself.
+      // close() marks the connection before it cancels the handshake and
+      // sends its own disconnect; that path is left as it was.
       const cancelledByClose = connection?.closed === true;
       if (connection) {
         connection.closed = true;
@@ -297,11 +308,14 @@ export class ChildConnections extends EventEmitter {
       }
       if (client && configurationDoneSent && !cancelledByClose && this.lever() === 'throwaway-attach') {
         // The adapter binds the target to this connection once it has
-        // configurationDone, and a second attach to a target that is no
-        // longer pending is never answered (issue #1219: the fork ran to
-        // its first breakpoint and stayed there, under a closed socket).
-        // The child is let go the way an adopted one is: a disconnect on
-        // its own connection, which leaves it running.
+        // read configurationDone, and a second attach to a target that is
+        // no longer pending is never answered (issue #1219: the fork ran
+        // to its first breakpoint and stayed there, under a closed socket).
+        // So the first lever is the one an adopted child gets: a disconnect
+        // on its own connection. It lets a child the adapter has started
+        // run on. It is best effort: a target the adapter had not started
+        // yet is not resumed by it, and when nothing acknowledges it the
+        // throwaway attach follows, for a target that is still pending.
         this.letGoOnItsConnection(deps, client, held, message);
       } else {
         // The report is no longer held, so the server's release command that
@@ -492,35 +506,39 @@ export class ChildConnections extends EventEmitter {
 
   /**
    * Let go of a child whose adoption failed after configurationDone went
-   * out: a disconnect on the connection the target is bound to, with the
-   * process kept. Counted with the releases, so the worker does not stop
-   * the adapter underneath it.
+   * out: a disconnect on the connection the target is bound to by then, with
+   * the process kept. When the adapter does not acknowledge it (the socket
+   * is gone, or the adapter never read configurationDone and the target is
+   * still pending), the throwaway attach runs as it would have before, so
+   * this path releases whatever the old one could. Counted with the
+   * releases, so the worker does not stop the adapter underneath it.
    */
   private letGoOnItsConnection(deps: ChildAdoptionDeps, client: IDapClient, held: HeldReport, reason: string): void {
     const { logger } = this.options;
     const child = `${held.report.targetId} (${held.report.name})`;
     const releasing = deps.connectionManager
       .disconnect(client, false)
-      .then((outcome) => {
-        if (outcome?.answered === false) {
-          logger.warn(
-            `[ChildConnections] Child ${child}: the adapter did not acknowledge the disconnect after a failed adoption (${outcome.error ?? 'no answer'}); the process may still be held by the adapter`
-          );
-        } else {
-          logger.warn(
-            `[ChildConnections] Child ${child} released to run UNDEBUGGED (adoption failed: ${reason}) — breakpoints will not bind in that process`
-          );
-        }
-      })
-      .catch((error: unknown) => {
-        logger.error(`[ChildConnections] Failed to release child ${child}: ${error instanceof Error ? error.message : String(error)}`);
-      })
-      .finally(() => {
+      .then(async (outcome) => {
         try {
           client.shutdown(`child adoption failed: ${reason}`);
         } catch {
           // best effort
         }
+        if (outcome?.answered === false) {
+          logger.warn(
+            `[ChildConnections] Child ${child}: the adapter did not acknowledge the disconnect after a failed adoption (${outcome.error ?? 'no answer'}); trying the throwaway attach in case the target is still pending`
+          );
+          await this.releaseByThrowaway(held, `adoption failed: ${reason}`);
+          return;
+        }
+        logger.warn(
+          `[ChildConnections] Child ${child} let go on its own connection (adoption failed: ${reason}) — breakpoints will not bind in that process`
+        );
+      })
+      .catch((error: unknown) => {
+        logger.error(`[ChildConnections] Failed to release child ${child}: ${error instanceof Error ? error.message : String(error)}`);
+      })
+      .finally(() => {
         this.releases.delete(releasing);
         this.emitEmptyIfSo();
       });

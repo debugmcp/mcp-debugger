@@ -145,7 +145,9 @@ over*; JavaScript spike, row "Breakpoints"). So:
 
 - At adoption the server re-sends the parent's current breakpoint set (line, function and
   exception filters) to the child during the hold before `configurationDone`, which is the one
-  window in which they bind before user code. From then on each session's set is its own:
+  window in which they bind before user code. A js-debug child is not sent the function
+  breakpoints: js-debug has no request for them and arms them over CDP in the session's own
+  program only, so the child lists each one unverified, with the reason (issue #1219). From then on each session's set is its own:
   `set_breakpoint` on the child id changes the child only, and a later `set_breakpoint` on the
   parent is not mirrored to children already running.
 - `stopOnEntry` on the child's attach is a no-op (measured for debugpy; js-debug's
