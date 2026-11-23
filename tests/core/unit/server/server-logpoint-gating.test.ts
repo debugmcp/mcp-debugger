@@ -54,6 +54,7 @@ describe('set_breakpoint logMessage gating', () => {
     callToolHandler = getToolHandlers(mockServer).callToolHandler;
 
     mockSessionManager.getSession.mockReturnValue({
+      run: {},
       id: 'test-session',
       sessionLifecycle: 'active'
     });
@@ -98,6 +99,7 @@ describe('set_breakpoint logMessage gating', () => {
   it('rejects logMessage when live adapter capabilities deny logpoints', async () => {
     mockSessionManager.getSessionPolicy.mockReturnValue({ name: 'python', supportsLogPoints: true });
     mockSessionManager.getSession.mockReturnValue({
+      run: {},
       id: 'test-session',
       sessionLifecycle: 'active',
       adapterCapabilities: { supportsLogPoints: false }
@@ -159,6 +161,7 @@ describe('set_breakpoint logMessage gating', () => {
       validateLogMessage: () => 'bad interpolation'
     });
     mockSessionManager.getSession.mockReturnValue({
+      run: {},
       id: 'test-session',
       sessionLifecycle: 'active',
       adapterCapabilities: { supportsLogPoints: true }

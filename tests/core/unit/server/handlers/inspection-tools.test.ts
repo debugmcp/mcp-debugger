@@ -69,7 +69,7 @@ describe('inspection tool handlers', () => {
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE,
         state: 'paused',
-        transformedLaunch: launched
+        run: { transformedLaunch: launched }
       });
       ctx.sessionManager.getSessionPolicy.mockReturnValue(DotnetAdapterPolicy);
       ctx.buildStaleness = { check: vi.fn().mockResolvedValue(evidence) };
@@ -139,6 +139,7 @@ describe('inspection tool handlers', () => {
   describe('handleEvaluateExpression', () => {
     it('should handle expression evaluation in terminated session', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.TERMINATED
       });
@@ -156,6 +157,7 @@ describe('inspection tool handlers', () => {
   describe('handleGetSourceContext', () => {
     beforeEach(() => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -246,6 +248,7 @@ describe('inspection tool handlers', () => {
 
     it('returns source context when lineReader returns content', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE,
         name: 'my-session'
@@ -283,6 +286,7 @@ describe('inspection tool handlers', () => {
   describe('handleGetLocalVariables', () => {
     beforeEach(() => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -291,6 +295,7 @@ describe('inspection tool handlers', () => {
 
     describe('a paused session whose anchored thread has no frames (issue #1132)', () => {
       const paused = () => ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE,
         state: SessionState.PAUSED
@@ -478,7 +483,7 @@ describe('inspection tool handlers', () => {
         id: 'test-session',
         state: 'running',
         sessionLifecycle: 'ACTIVE',
-        launchDebuggerOff: true
+        run: { launchDebuggerOff: true }
       });
       ctx.sessionManager.getLocalVariables.mockResolvedValue({
         variables: [],
@@ -591,6 +596,7 @@ describe('inspection tool handlers', () => {
 
     it('returns graceful error for terminated session', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE,
         name: 'my-session'
@@ -620,6 +626,7 @@ describe('inspection tool handlers', () => {
       text: 'bad token'
     };
     ctx.sessionManager.getSession.mockReturnValue({
+      run: {},
       id: 'test-session',
       sessionLifecycle: SessionLifecycleState.ACTIVE,
       state: 'paused',
@@ -650,6 +657,7 @@ describe('inspection tool handlers', () => {
         text: `token ${SECRET} rejected`
       };
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE,
         state: 'paused',
@@ -689,6 +697,7 @@ describe('inspection tool handlers', () => {
 
     function endedSession(session: Record<string, unknown>): void {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.TERMINATED,
         state: 'stopped',
@@ -703,7 +712,7 @@ describe('inspection tool handlers', () => {
     }
 
     it.each(TOOLS)('%s: a launched program that ended points at restart_debugging', async (_name, call) => {
-      endedSession({ lastLaunch: { scriptPath: '/app/main.py' } });
+      endedSession({ run: { lastLaunch: { scriptPath: '/app/main.py' } } });
 
       const payload = JSON.parse((await call()).content[0].text);
 
@@ -714,7 +723,7 @@ describe('inspection tool handlers', () => {
     });
 
     it.each(TOOLS)('%s: an attach session points at attach_to_process, never at a restart it would be refused', async (_name, call) => {
-      endedSession({ attachMode: true });
+      endedSession({ run: { attachMode: true } });
 
       const payload = JSON.parse((await call()).content[0].text);
 
@@ -728,7 +737,7 @@ describe('inspection tool handlers', () => {
 
     it.each(TOOLS)('%s: a child session names its parent', async (_name, call) => {
       // A child of an attach root: the child rule wins, whatever else the row carries.
-      endedSession({ parentSessionId: 'parent-1', attachMode: true });
+      endedSession({ parentSessionId: 'parent-1', run: { attachMode: true } });
 
       const payload = JSON.parse((await call()).content[0].text);
 

@@ -122,6 +122,7 @@ describe('SessionManagerOperations attach modes', () => {
     mockProxyManager.removeListener.mockImplementation(() => mockProxyManager);
 
     mockSession = {
+      run: {},
       id: 'test-session',
       name: 'Test Session',
       language: DebugLanguage.RUBY,
@@ -362,10 +363,7 @@ describe('SessionManagerOperations attach modes', () => {
 
       await operations.attachToProcess('test-session', request);
 
-      expect(mockSessionStore.update).toHaveBeenCalledWith(
-        'test-session',
-        expect.objectContaining({ attachMode: true, attachLocality: locality })
-      );
+      expect(mockSession.run).toMatchObject({ attachMode: true, attachLocality: locality });
     });
   });
 
@@ -441,7 +439,7 @@ describe('SessionManagerOperations attach modes', () => {
       // The exception arming is recorded for an attach too (issue #1032): no mode was
       // requested, and cpp's empty uncaught table is covered by the engine's own
       // abort-signal stop on POSIX only.
-      expect(mockSession.launchExceptionFilters).toEqual({
+      expect(mockSession.run.launchExceptionFilters).toEqual({
         ids: [], beyondMode: [], noUncaughtStop: process.platform === 'win32' ? 'unavailable' : undefined
       });
       expect(setCurrentThreadId).toHaveBeenCalledWith(37436);
@@ -716,7 +714,7 @@ describe('SessionManagerOperations attach modes', () => {
 
       expect(result.success).toBe(true);
       expect(result.data?.warning).toBeUndefined();
-      expect(mockSession.attachDroppedConfigKeys).toBeUndefined();
+      expect(mockSession.run.attachDroppedConfigKeys).toBeUndefined();
     });
 
     it('does not report adapterConfig.processId as ignored when the adapter consumes it into pid (issue #903)', async () => {
@@ -740,7 +738,7 @@ describe('SessionManagerOperations attach modes', () => {
 
       expect(result.success).toBe(true);
       expect(result.data?.warning).toBeUndefined();
-      expect(mockSession.attachDroppedConfigKeys).toBeUndefined();
+      expect(mockSession.run.attachDroppedConfigKeys).toBeUndefined();
     });
 
     it('never suggests a key for itself when a supported key really was dropped', async () => {
@@ -891,7 +889,7 @@ describe('SessionManagerOperations attach modes', () => {
       expect(warning).toContain('deviceId: ignored: only Flutter runners use deviceId');
       expect(warning.indexOf('port: attaching')).toBeLessThan(warning.indexOf('were ignored: localRoot'));
       expect(result.data?.message).toBe('Attached to process at 127.0.0.1:12345');
-      expect(mockSession.attachTransformNotices).toBeUndefined();
+      expect(mockSession.run.attachTransformNotices).toBeUndefined();
     });
 
     it('does not leak the adapter attach-transform notes into a later attach on the same session (issue #908)', async () => {
@@ -1101,9 +1099,14 @@ describe('SessionManagerOperations attach modes', () => {
       });
 
       expect(result.success).toBe(true);
-      // Files refused with the same words share one sentence.
+      // Files refused with the same words share one sentence. The hint is the
+      // one a Ruby attach has always carried for this refusal: this harness's
+      // store is a mock that used to swallow the write that says "attached",
+      // so the test never saw it; the run record is written directly.
       expect(result.data?.warning).toBe(
-        'The debugger refused the re-send of the breakpoints for app.js, lib.js: /abs/app.js is not available'
+        'The debugger refused the re-send of the breakpoints for app.js, lib.js: /abs/app.js is not available; ' +
+        "Hint: attach sessions send breakpoint paths to the remote debugger verbatim; the path must be valid on the debug target's filesystem. " +
+        'Use target-side paths, or pass localfsMap in the attach config to map local paths to remote ones.'
       );
       for (const id of ['bp-1', 'bp-2', 'bp-3']) {
         expect(mockSession.breakpoints.get(id)).toMatchObject({

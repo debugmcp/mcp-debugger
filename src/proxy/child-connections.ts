@@ -20,13 +20,14 @@
 import { EventEmitter } from 'events';
 import { randomUUID } from 'node:crypto';
 import { dapSourcePath } from '../utils/dap-source.js';
+import { ErrorMessages } from '../utils/error-messages.js';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { resolveExceptionFilters } from '@debugmcp/shared';
 import type { AdapterPolicy, ChildAdoptionContract, ChildReport, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
 import type { DapConnectionManager } from './dap-proxy-connection-manager.js';
 import { createChildSafePolicy } from './child-safe-policy.js';
-import { CdpProxyClient } from './cdp-proxy-client.js';
-import { JsStepper } from './js-stepper.js';
+import type { CdpProxyClient } from './cdp-proxy-client.js';
+import { JsTargetServices } from './js-target-services.js';
 import { releaseByThrowawayAttach } from './throwaway-release.js';
 import type {
   BreakpointSyncResult,
@@ -74,7 +75,7 @@ export interface ChildConnectionsOptions {
   releaseTimeoutMs?: number;
   /** Absent for a worker whose policy reports no children: adopt() then refuses. */
   adoption?: ChildAdoptionDeps;
-  /** DI seam for tests: the CDP socket of a child whose steps the proxy serves (issue #1130). */
+  /** DI seam for tests: the CDP socket of a child's target (issues #1130, #1212). */
   cdpClientFactory?: () => CdpProxyClient;
 }
 
@@ -102,10 +103,19 @@ interface ChildConnection {
   closed: boolean;
   /** Cancel a handshake that is still opening this connection. */
   cancelAdoption?: (reason: string) => void;
-  /** The proxy's own stepper for this child, when the adapter's is kept off (issue #1130). */
-  stepper?: JsStepper;
-  /** That stepper's CDP socket: the child's own, from `requestCDPProxy`. */
-  cdp?: CdpProxyClient;
+  /**
+   * The child's own CDP socket and what the proxy runs on it: its stepper
+   * (issue #1130) and the channel its logpoints are delivered on (issue
+   * #1212). The same composition the program's own target has. Absent for
+   * an adapter that has neither (debugpy).
+   */
+  services?: JsTargetServices;
+  /**
+   * Set once the adapter reported the child's end while its CDP socket may
+   * still hold its last logpoint lines: what the connection sends from then
+   * on (the `terminated`, the closed status) leaves after them, in order.
+   */
+  ending?: Promise<void>;
 }
 
 /** Forwarded as-is under the child's session id; `terminated` and `close` have their own handling. */
@@ -215,6 +225,10 @@ export class ChildConnections extends EventEmitter {
     let connection: ChildConnection | undefined;
     let initializedTimer: NodeJS.Timeout | undefined;
     let onInitialized: (() => void) | undefined;
+    // Once configurationDone is on the wire the adapter may bind the target
+    // to this connection; a failure after that is cleaned up differently.
+    // "Sent", not "bound": the adapter binds the target a little later.
+    let configurationDoneSent = false;
     try {
       client = deps.dapClientFactory.create(deps.host, deps.port, this.policyForConnections(deps), { traceLabel: label });
       let cancelAdoption!: (reason: string) => void;
@@ -242,9 +256,16 @@ export class ChildConnections extends EventEmitter {
         client,
         contract.buildChildAttachArguments(held.report, deps.launchConfig as Readonly<Record<string, unknown>> | undefined)
       );
+      let attachFailed: { error: unknown } | undefined;
       const attachFailure = new Promise<never>((_, reject) => {
-        attach.catch(reject);
+        attach.catch((error: unknown) => {
+          attachFailed = { error };
+          reject(error);
+        });
       });
+      // Raced wherever the handshake waits below; handled here for the
+      // moments when nothing is racing it.
+      attachFailure.catch(() => undefined);
       const initializedTimeout = new Promise<never>((_, reject) => {
         initializedTimer = setTimeout(
           () => reject(new Error(`Timeout waiting for initialized event after the child attach (${deps.initializedTimeoutMs ?? CHILD_INITIALIZED_TIMEOUT_MS} ms)`)),
@@ -254,38 +275,77 @@ export class ChildConnections extends EventEmitter {
       await wait(Promise.race([initializedSeen, attachFailure, initializedTimeout]));
       clearTimeout(initializedTimer);
 
-      await wait(this.sendExceptionBreakpoints(deps, client, childSessionId));
-      await wait(this.sendBreakpoints(deps, client, childSessionId, args.breakpoints ?? []));
-      await wait(this.sendFunctionBreakpoints(client, childSessionId, args.functionBreakpoints ?? []));
-      await wait(deps.connectionManager.sendConfigurationDone(client));
+      // An attach that has already failed ends the handshake where it is
+      // (issue #1219). Going on to configurationDone would bind the target
+      // to a connection this adoption is about to abandon, and the release
+      // by a throwaway attach cannot reach a target that is no longer
+      // pending.
+      const step = <T>(operation: Promise<T>): Promise<T> => wait(Promise.race([operation, attachFailure]));
+      await step(this.sendExceptionBreakpoints(deps, client, childSessionId));
+      await step(this.sendBreakpoints(deps, client, childSessionId, args.breakpoints ?? []));
+      await step(this.sendFunctionBreakpoints(client, childSessionId, args.functionBreakpoints ?? []));
+      // The race above is not a gate: a step that had already settled wins
+      // over a failure that arrived with it. This check is the gate.
+      const failedBeforeConfigurationDone = attachFailed as { error: unknown } | undefined;
+      if (failedBeforeConfigurationDone) {
+        throw failedBeforeConfigurationDone.error;
+      }
+      configurationDoneSent = true;
+      await step(deps.connectionManager.sendConfigurationDone(client));
+      // Here and not after the attach (issue #1212): the adapter answers
+      // `requestCDPProxy` from this moment on, and lets the child run about
+      // 20 ms later, right before it answers the attach. Asked now, the
+      // logpoint binding is in the child before its first statement. Not
+      // awaited: the child is adopted either way, and the socket's replay
+      // covers a pause that comes before it is open.
+      this.startServices(deps, connection, args.breakpoints ?? []);
       await wait(attach);
 
       connection.cancelAdoption = undefined;
       this.answer(held, true);
-      // Not awaited: the child is adopted either way, and the socket's replay
-      // covers a pause that comes before it is open.
-      void this.openStepper(deps, connection);
       logger.info(`[ChildConnections] Child ${held.report.targetId} adopted as session ${childSessionId}`);
       return { sessionId: childSessionId, capabilities };
     } catch (error) {
       clearTimeout(initializedTimer);
       const message = error instanceof Error ? error.message : String(error);
       logger.warn(`[ChildConnections] Adoption of child ${held.report.targetId} as session ${childSessionId} failed: ${message}`);
+      // close() marks the connection before it cancels the handshake and
+      // sends its own disconnect; that path is left as it was.
+      const cancelledByClose = connection?.closed === true;
       if (connection) {
         connection.closed = true;
         connection.cancelAdoption = undefined;
+        this.closeServices(connection);
         if (this.clients.get(childSessionId) === connection) {
           this.clients.delete(childSessionId);
         }
       }
-      // The report is no longer held, so the server's release command that
-      // follows finds nothing: let the child go here, by the policy's lever.
-      this.giveUp(held, `adoption failed: ${message}`);
-      this.emitEmptyIfSo();
-      try {
-        client?.shutdown(`child adoption failed: ${message}`);
-      } catch {
-        // best effort
+      if (client && configurationDoneSent && !cancelledByClose && this.lever() === 'throwaway-attach') {
+        // The adapter binds the target to this connection once it has
+        // read configurationDone, and a second attach to a target that is
+        // no longer pending is never answered (issue #1219: the fork ran
+        // to its first breakpoint and stayed there, under a closed socket).
+        // So the first lever is the one an adopted child gets: a disconnect
+        // on its own connection. It lets a child the adapter has started
+        // run on. It is best effort: a target the adapter had not started
+        // yet is not resumed by it, and when nothing acknowledges it the
+        // throwaway attach follows, for a target that is still pending.
+        this.letGoOnItsConnection(deps, client, held, message);
+      } else {
+        // The report is no longer held, so the server's release command that
+        // follows finds nothing: let the child go here, by the policy's lever.
+        this.giveUp(held, `adoption failed: ${message}`);
+        if (!cancelledByClose) {
+          // When close() cancelled the handshake it is still awaiting its own
+          // disconnect on connection.client: shutting the client down or
+          // announcing empty here would abort that disconnect mid-flight.
+          this.emitEmptyIfSo();
+          try {
+            client?.shutdown(`child adoption failed: ${message}`);
+          } catch {
+            // best effort
+          }
+        }
       }
       throw error;
     } finally {
@@ -317,7 +377,13 @@ export class ChildConnections extends EventEmitter {
     connection.closed = true;
     this.clients.delete(sessionId);
     connection.cancelAdoption?.('child session closed during adoption');
-    this.closeStepper(connection);
+    // Before the disconnect below, while the child's CDP socket is still
+    // up: letting go of the services is what takes the proxy's things out
+    // of a child that runs on (issue #1212; measured, the clear it sends
+    // lands). Not awaited: this connection no longer counts as live, and
+    // an await here would let the worker's shutdown overtake the
+    // disconnect.
+    this.closeServices(connection);
     const deps = this.options.adoption;
     try {
       await deps?.connectionManager.disconnect(connection.client, options.terminateDebuggee);
@@ -419,78 +485,153 @@ export class ChildConnections extends EventEmitter {
    * adapter as it is (issue #1130).
    */
   stepRequest(sessionId: string, command: string, args?: unknown): Promise<DebugProtocol.Response> | null {
-    const stepper = this.clients.get(sessionId)?.stepper;
+    const stepper = this.clients.get(sessionId)?.services?.stepper;
     return stepper?.handles(command, args) ? stepper.request(command, args) : null;
   }
 
-  /** Any other request for the child: one that resumes or ends it ends a step still in flight. */
-  async beforeRequest(sessionId: string, command: string): Promise<void> {
-    await this.clients.get(sessionId)?.stepper?.beforeRequest(command);
+  /**
+   * Any other request for the child: one that resumes or ends it ends a
+   * step still in flight, and breakpoints on their way to it are looked at
+   * for a logpoint (issue #1212: a child that holds one is told when its
+   * logpoints cannot be delivered).
+   */
+  async beforeRequest(sessionId: string, command: string, args?: unknown): Promise<void> {
+    const services = this.clients.get(sessionId)?.services;
+    if (command === 'setBreakpoints') {
+      services?.noteBreakpoints((args as { breakpoints?: unknown[] } | undefined)?.breakpoints);
+    }
+    await services?.stepper?.beforeRequest(command);
   }
 
   /**
-   * A child of an adapter whose own stepper is kept off gets the proxy's
-   * (issue #1130), over that child's own CDP socket: the adapter hands one
-   * out per target. Not fatal: without it the child's steps are the engine's
-   * plain ones, and a landing in skipped code is shown as such.
+   * The answer to a `setFunctionBreakpoints` for a child whose adapter has no
+   * such request, or null when the request goes to the adapter as it is
+   * (issue #1219). An adapter that arms function breakpoints through the CDP
+   * bridge (js-debug, issue #295) arms them in the session's own program
+   * only: nothing syncs them onto a child's bridge (issue #1226), and the
+   * adapter sends nothing back for a request it does not know, so a caller
+   * would wait out its deadline. Each one is answered as it is: not armed,
+   * with the reason.
    */
-  private async openStepper(deps: ChildAdoptionDeps, connection: ChildConnection): Promise<void> {
-    if (!deps.policy.getDapClientBehavior().stepsThroughSkippedCode) {
+  unarmedFunctionBreakpoints(
+    sessionId: string,
+    command: string,
+    args?: unknown
+  ): DebugProtocol.SetFunctionBreakpointsResponse | null {
+    if (command !== 'setFunctionBreakpoints' || !this.clients.has(sessionId) || !this.functionBreakpointsNeedTheBridge()) {
+      return null;
+    }
+    const asked = (args as { breakpoints?: unknown[] } | undefined)?.breakpoints ?? [];
+    return {
+      seq: 0,
+      type: 'response',
+      request_seq: 0,
+      command,
+      success: true,
+      body: {
+        breakpoints: asked.map(() => ({ verified: false, message: ErrorMessages.functionBreakpointsNotArmedInChildSession() }))
+      }
+    };
+  }
+
+  /** Whether this adapter's function breakpoints exist only where the CDP bridge is: the session's own program. */
+  private functionBreakpointsNeedTheBridge(): boolean {
+    return this.options.adoption?.policy.functionBreakpointsVia === 'cdp';
+  }
+
+  /**
+   * Let go of a child whose adoption failed after configurationDone went
+   * out: a disconnect on the connection the target is bound to by then, with
+   * the process kept. When the adapter does not acknowledge it (the socket
+   * is gone, or the target is not bound to this connection yet and is
+   * still pending), the throwaway attach runs as it would have before, so
+   * this path releases whatever the old one could. Counted with the
+   * releases, so the worker does not stop the adapter underneath it.
+   */
+  private letGoOnItsConnection(deps: ChildAdoptionDeps, client: IDapClient, held: HeldReport, reason: string): void {
+    const { logger } = this.options;
+    const child = `${held.report.targetId} (${held.report.name})`;
+    const releasing = deps.connectionManager
+      .disconnect(client, false)
+      .then(async (outcome) => {
+        try {
+          client.shutdown(`child adoption failed: ${reason}`);
+        } catch {
+          // best effort
+        }
+        if (outcome?.answered === false) {
+          logger.warn(
+            `[ChildConnections] Child ${child}: the adapter did not acknowledge the disconnect after a failed adoption (${outcome.error ?? 'no answer'}); trying the throwaway attach in case the target is still pending`
+          );
+          await this.releaseByThrowaway(held, `adoption failed: ${reason}`);
+          return;
+        }
+        logger.warn(
+          `[ChildConnections] Child ${child} let go on its own connection (adoption failed: ${reason}) — breakpoints will not bind in that process`
+        );
+      })
+      .catch((error: unknown) => {
+        logger.error(`[ChildConnections] Failed to release child ${child}: ${error instanceof Error ? error.message : String(error)}`);
+      })
+      .finally(() => {
+        this.releases.delete(releasing);
+        this.emitEmptyIfSo();
+      });
+    this.releases.add(releasing);
+  }
+
+  /**
+   * The child's own CDP socket and what the proxy runs on it, for an adapter
+   * that hands one out per target (js-debug): the proxy's stepper when the
+   * adapter's is kept off (issue #1130), and the channel the child's
+   * logpoints are delivered on (issue #1212). One composition, the same the
+   * program's own target has. Not fatal: without the socket the child's
+   * steps are the engine's plain ones, and the session is told its
+   * logpoints are not delivered.
+   *
+   * A logpoint's line leaves here under the child's session id: it is this
+   * process that hit it. Function breakpoints stay unarmed in a child (issue
+   * #1219): nothing syncs them onto this socket.
+   */
+  private startServices(deps: ChildAdoptionDeps, connection: ChildConnection, adopted: readonly unknown[]): void {
+    const stepper = deps.policy.getDapClientBehavior().stepsThroughSkippedCode === true;
+    const bridge = deps.policy.functionBreakpointsVia === 'cdp';
+    if (!stepper && !bridge) {
       return;
     }
     const { client, sessionId } = connection;
-    const { logger } = this.options;
-    const stepper = new JsStepper({
-      target: { sendRequest: (command, args, timeoutMs) => client.sendRequest(command, args, timeoutMs) as Promise<never> },
-      deliver: (event) => this.sendEvent(sessionId, event.event, event.body)
+    const { logger, cdpClientFactory } = this.options;
+    const services = new JsTargetServices({
+      stepper,
+      bridge,
+      sendRequest: (command, args, timeoutMs) => client.sendRequest(command, args, timeoutMs),
+      deliverStep: (event) => this.sendEvent(sessionId, event.event, event.body),
+      ...(cdpClientFactory ? { cdpClientFactory } : {})
     });
     // The session's choice is the root's: its start request's `smartStep`, a
     // launch's or an attach's. The launch configuration is the fallback for a
     // root that cannot say.
-    stepper.setEnabled(
+    services.stepper?.setEnabled(
       deps.stepsThroughSkippedCode?.() ?? (deps.launchConfig as { smartStep?: unknown } | undefined)?.smartStep === true
     );
-    connection.stepper = stepper;
-    let cdp: CdpProxyClient | undefined;
-    try {
-      const response = (await client.sendRequest('requestCDPProxy', {}, 5000)) as { body?: { host?: string; port?: number; path?: string } };
-      if (connection.closed) {
-        return;
-      }
-      const info = response?.body;
-      if (!info?.host || !info.port || !info.path) {
-        throw new Error(`requestCDPProxy returned no address: ${JSON.stringify(info)}`);
-      }
-      cdp = this.options.cdpClientFactory?.() ?? new CdpProxyClient();
-      stepper.attachCdp(cdp);
-      await cdp.connect(info.host, info.port, info.path);
-      if (connection.closed) {
-        stepper.detachCdp();
-        cdp.dispose();
-        return;
-      }
-      connection.cdp = cdp;
-      await cdp.send('JsDebug.subscribe', { events: ['Debugger.paused', 'Debugger.resumed'] });
-      // Re-enabling the (already enabled) domain makes the proxy replay the
-      // pause the target is in, if any.
-      await cdp.send('Debugger.enable', {});
-      logger.info(`[ChildConnections] Child session ${sessionId}: the proxy stepper is on its CDP socket`);
-    } catch (error) {
-      stepper.detachCdp();
-      cdp?.dispose();
-      if (connection.cdp === cdp) {
-        connection.cdp = undefined;
-      }
-      logger.warn(
-        `[ChildConnections] Child session ${sessionId}: no CDP socket for the proxy stepper, its steps stay the adapter's: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
+    // Sent as they arrive, never behind `ending`: these lines are what a
+    // child's end waits for.
+    services.bridge?.on('outputEvent', (event: DebugProtocol.Event) => {
+      this.sendEvent(sessionId, 'output', event.body);
+    });
+    connection.services = services;
+    // The breakpoints this child was adopted with went out before the
+    // socket existed: say now whether a logpoint was among them.
+    services.noteBreakpoints(adopted);
+    void services
+      .attach({ sendRequest: (command, args, timeoutMs) => client.sendRequest(command, args, timeoutMs) })
+      .then(() => {
+        logger.info(`[ChildConnections] Child session ${sessionId}: its CDP socket was asked for (stepper ${stepper ? 'on' : 'off'}, logpoint channel ${bridge ? 'on' : 'off'})`);
+      });
   }
 
-  private closeStepper(connection: ChildConnection): void {
-    connection.stepper?.detachCdp();
-    connection.cdp?.dispose();
-    connection.cdp = undefined;
+  private closeServices(connection: ChildConnection): void {
+    connection.services?.detach();
   }
 
   /** The policy for a connection opened here: never an in-session adopter (issue #1082). */
@@ -543,20 +684,51 @@ export class ChildConnections extends EventEmitter {
 
   private wireChildEvents(connection: ChildConnection): void {
     const { client, sessionId } = connection;
+    // In arrival order, and after a held end once there is one (see `ending`).
+    // A link that throws must not take the links after it along: the last
+    // one removes the connection, and a root's worker waits for that.
+    const held = (send: () => void) => (): void => {
+      try {
+        send();
+      } catch (error) {
+        this.options.logger.warn(
+          `[ChildConnections] Child session ${sessionId}: a message held behind its end failed to send: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    };
+    const inOrder = (send: () => void): void => {
+      if (connection.ending) {
+        connection.ending = connection.ending.then(held(send));
+      } else {
+        send();
+      }
+    };
     for (const event of FORWARDED_CHILD_EVENTS) {
       client.on(event, (body: unknown) => {
         // A step's own pauses and resumes are the stepper's (issue #1130): of
         // their `stopped` events it reports one itself.
         if ((event === 'stopped' || event === 'continued') &&
-            connection.stepper?.withholds({ seq: 0, type: 'event', event, body } as DebugProtocol.Event)) {
+            connection.services?.stepper?.withholds({ seq: 0, type: 'event', event, body } as DebugProtocol.Event)) {
           return;
         }
-        this.sendEvent(sessionId, event, body);
+        inOrder(() => this.sendEvent(sessionId, event, body));
       });
     }
     client.on('terminated', (body: unknown) => {
       connection.terminatedSeen = true;
-      this.sendEvent(sessionId, 'terminated', body);
+      const services = connection.services;
+      if (!services?.bridge || connection.closed) {
+        inOrder(() => this.sendEvent(sessionId, 'terminated', body));
+        return;
+      }
+      // The child's last logpoint lines come on its CDP socket, and were
+      // measured to arrive about 1 ms after this event (issue #1212). The
+      // parent takes a child's output until its end: hold the end behind
+      // one bounded round trip on that socket.
+      const settled = services.settle().catch(() => undefined);
+      connection.ending = (connection.ending ?? Promise.resolve())
+        .then(() => settled)
+        .then(held(() => this.sendEvent(sessionId, 'terminated', body)));
     });
     client.on('error', (error: unknown) => {
       const message: ErrorMessage = {
@@ -566,11 +738,13 @@ export class ChildConnections extends EventEmitter {
       };
       this.options.messageSender.send(message);
     });
-    client.on('close', () => this.onConnectionClosed(connection));
+    // Behind a held end too: closing takes the CDP socket with it, and the
+    // connection counts as live until its end has been reported.
+    client.on('close', () => inOrder(() => this.onConnectionClosed(connection)));
   }
 
   private onConnectionClosed(connection: ChildConnection): void {
-    this.closeStepper(connection);
+    this.closeServices(connection);
     if (this.clients.get(connection.sessionId) !== connection) {
       // Closed by this worker already (close()/closeAll()), reported then.
       return;
@@ -664,6 +838,23 @@ export class ChildConnections extends EventEmitter {
     functionBreakpoints: NonNullable<ChildAdoptArgs['functionBreakpoints']>
   ): Promise<void> {
     if (functionBreakpoints.length === 0) {
+      return;
+    }
+    if (this.functionBreakpointsNeedTheBridge()) {
+      // Nothing to send (issue #1219): the adapter has no such request and
+      // would leave it unanswered. The parent's copies are reported as
+      // they are in this child: not armed.
+      const message: StatusMessage = {
+        type: 'status',
+        status: 'function_breakpoints_synced',
+        sessionId,
+        functionBreakpoints: functionBreakpoints.map((bp) => ({
+          name: bp.name,
+          verified: false,
+          message: ErrorMessages.functionBreakpointsNotArmedInChildSession()
+        }))
+      };
+      this.options.messageSender.send(message);
       return;
     }
     try {

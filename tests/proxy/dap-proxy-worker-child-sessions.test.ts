@@ -20,6 +20,7 @@ import type {
 } from '../../src/proxy/dap-proxy-interfaces.js';
 import { CHILD_ADOPT_COMMAND, CHILD_CLOSE_COMMAND, CHILD_RELEASE_COMMAND, ProxyState } from '../../src/proxy/dap-proxy-interfaces.js';
 import { JsDebugAdapterPolicy, PythonAdapterPolicy } from '@debugmcp/shared';
+import { ErrorMessages } from '../../src/utils/error-messages.js';
 import { createMockDapClient } from '../test-utils/mocks/dap-client.js';
 import { createMockLogger } from '../test-utils/helpers/test-dependencies.js';
 import { createMockFileSystem, createMockProcessSpawner } from '../test-utils/mocks/dap-proxy-doubles.js';
@@ -511,6 +512,27 @@ describe('DapProxyWorker child sessions (issue #1081)', () => {
 
     const stepTheFork = (requestId: string): Promise<void> =>
       worker.handleCommand({ cmd: 'dap', sessionId: 'child-1', requestId, dapCommand: 'next', dapArgs: { threadId: 1 } });
+
+    it("answers a fork's setFunctionBreakpoints itself: js-debug has no such request and would leave it unanswered (issue #1219)", async () => {
+      await pausedFork({ rootSteps: true });
+
+      await worker.handleCommand({
+        cmd: 'dap', sessionId: 'child-1', requestId: 'fn-1',
+        dapCommand: 'setFunctionBreakpoints', dapArgs: { breakpoints: [{ name: 'handle' }] }
+      });
+
+      expect(childClient.sendRequest.mock.calls.map(([command]) => command)).not.toContain('setFunctionBreakpoints');
+      expect(rootClient.sendRequest.mock.calls.map(([command]) => command)).not.toContain('setFunctionBreakpoints');
+      expect(responseTo('fn-1')).toMatchObject({
+        success: true,
+        sessionId: 'child-1',
+        response: {
+          command: 'setFunctionBreakpoints',
+          success: true,
+          body: { breakpoints: [{ verified: false, message: ErrorMessages.functionBreakpointsNotArmedInChildSession() }] }
+        }
+      });
+    });
 
     // The child's stepper takes over the choice of the root's own start
     // request, which the root's client answers; the init payload's launch

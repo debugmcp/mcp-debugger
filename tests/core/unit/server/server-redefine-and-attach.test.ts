@@ -67,7 +67,7 @@ describe('hot_reload and attach stopOnEntry tests', () => {
       mockSessionManager.getSession.mockReturnValue({
         id: 'attach-session',
         sessionLifecycle: 'active',
-        attachMode: true
+        run: { attachMode: true }
       });
       mockSessionManager.getSessionPolicy.mockReturnValue({});
       mockSessionManager.setBreakpoint.mockResolvedValue({

@@ -46,8 +46,8 @@ describe('SessionManager - the fate of a borrowed program (issue #1148)', () => 
     await vi.runAllTimersAsync();
     expect((await started).state).toBe(SessionState.RUNNING);
     const managed = sessionManager.getSession(session.id)!;
-    managed.attachMode = true;
-    managed.programOwnership = 'borrowed';
+    managed.run.attachMode = true;
+    managed.run.programOwnership = 'borrowed';
     return session.id;
   }
 
@@ -76,7 +76,7 @@ describe('SessionManager - the fate of a borrowed program (issue #1148)', () => 
       await started;
 
       const given = dependencies.mockProxyManager.startCalls.at(-1)!;
-      expect(sessionManager.getSession(session.id)!.programOwnership).toBe(
+      expect(sessionManager.getSession(session.id)!.run.programOwnership).toBe(
         launchConfigIsAttach(given.launchConfig as Record<string, unknown>) ? 'borrowed' : 'owned'
       );
     });
@@ -86,7 +86,7 @@ describe('SessionManager - the fate of a borrowed program (issue #1148)', () => 
       const started = sessionManager.startDebugging(session.id, 'test.py', [], { stopOnEntry: false });
       await vi.runAllTimersAsync();
       await started;
-      expect(sessionManager.getSession(session.id)!.programOwnership).toBe('owned');
+      expect(sessionManager.getSession(session.id)!.run.programOwnership).toBe('owned');
 
       const ended = await sessionManager.detachFromProcess(session.id, true);
 
@@ -247,7 +247,7 @@ describe('SessionManager - the fate of a borrowed program (issue #1148)', () => 
       // An attach made through start_debugging with attach-shaped arguments:
       // the worker detaches at shutdown, and the close must say what it saw.
       const sessionId = await borrowedSession();
-      sessionManager.getSession(sessionId)!.attachMode = false;
+      sessionManager.getSession(sessionId)!.run.attachMode = false;
       dependencies.mockProxyManager.detachResult = { trigger: 'close', acknowledged: true, by: 'response' };
 
       const outcome = await sessionManager.closeSessionReporting(sessionId);

@@ -56,3 +56,69 @@ What does **not** carry over:
 3. Re-send breakpoints per child; there is no `exited`, only `terminated`; output is tree-wide on the root and must be attributed by the worker if per-child buffers are wanted (the `name` in the report carries the pid; so do the `Debugger attached.` lines' order, nothing else).
 4. Ending: only the root's `disconnect` ends the tree, and it does not answer; `terminate`/`disconnect` on a program or child session leave processes alive. Keep the worker's timeout-then-tree-kill.
 5. A child never outlives the launch: the program's exit kills unreported children within 300 ms, so an orphaned-child policy is not needed for js-debug (it is for Python, where a paused child outlives its parent).
+
+## Logpoints in a fork (issue #1212)
+
+Measured 2026-11-22 on Windows 11, Node 24.14.1, js-debug v1.140.0, first with a bare DAP driver against
+js-debug's own server and then through mcp-debugger. Times are from the `configurationDone` response on
+the fork's connection.
+
+1. **Before the fix.** mcp-debugger compiles a logpoint into a breakpoint condition that calls a CDP
+   binding, and only the program's own target had the binding. In a fork the condition fell back to
+   `console.log`. With the fork's stdio piped to a parent that parses it, the text went down that pipe:
+   the parent reported a corrupted protocol and exited 3 instead of 0, and `get_output` showed the
+   lines on no session.
+2. **When a fork's CDP socket can be opened.** `requestCDPProxy` on the fork's connection is never
+   answered before `configurationDone` (js-debug logs `Unknown request` and sends nothing), so it must
+   not be pipelined with it. Sent right after the `configurationDone` response, it is answered at about
+   3 ms. The WebSocket is open at 6 to 9 ms, `Runtime.addBinding` is answered at about 22 ms, and the
+   attach is answered at 24 to 26 ms. js-debug lets the fork run right before it answers the attach.
+3. **Why the binding gets there first.** The proxy forwards to js-debug's own CDP session with the
+   target, where commands are processed in order: an `addBinding` that is on the wire before js-debug's
+   `Runtime.runIfWaitingForDebugger` (sent after its own init, about 20 ms) is installed before the
+   fork's first statement. With a warm socket, 24 of 24 runs delivered the first statement through the
+   binding, also with every core busy and for a fork that lives about 10 ms. The misses were the
+   driver's own cold first WebSocket: the hit was then kept in the process and the flush returned it.
+4. **The end of a fork.** The fork's last `Runtime.bindingCalled` arrives about 1 ms AFTER the DAP
+   `terminated` for it: two sockets from the same adapter process. js-debug's proxy answers a method of
+   its own `JsDebug` domain itself, and one it does not have with an error at once, so one such round
+   trip sent after `terminated` is answered after everything the proxy had relayed by then. Whether
+   the proxy has relayed all of a target's events when the adapter sends `terminated` is not stated
+   anywhere in js-debug: item 5 is the evidence.
+5. **Through the server** (a parent that forks a child which hits two logpoints and exits at once,
+   12 runs in one server): with the fork's `terminated` held behind that round trip, both lines are on
+   the fork's session in 12 of 12 runs; with the wait skipped, in 0 of 12. A fork that lives for three
+   200 ms ticks delivers its first statement and all three ticks, in order, and its parent reads an
+   intact protocol and exits 0.
+6. **A `worker_threads` worker** is a target of its own and is adopted as a child session like a
+   fork. Its logpoint lines went the same way: before, into the process's stdout (they showed on the
+   launch session as `stdout` lines between the program's own); now, on the worker's session.
+7. **The program's own target** (an ES module that hits two logpoints and exits at once, 12 runs
+   each). Its end loses nothing with or without this change: both lines arrive in 12 of 12. Its
+   first statement did not have the binding before: `LP one` arrived as a `stdout` line (the
+   `console.log` fall-back) in 12 of 12 runs on main, and as a `console` line (the debugger's
+   channel) in 12 of 12 with the change.
+8. **Linux** (Ubuntu 24.04, 2 vCPU, Node 22.23.2 and 24.14.1, the same build): the tree suite passes,
+   the piped fork delivers its four lines in order with the protocol intact, the exits-at-once fork
+   delivers both lines in 12 of 12 runs under each Node version, and so does the program's own
+   target. The run without the wait was not repeated there.
+9. **What the round trip does not cover** (read in the vendored proxy, not measured): events js-debug
+   has queued for a session it holds paused (a target between its creation and its bind, which
+   cannot run yet), a `terminated` that has another cause than the target's own connection closing,
+   and notifications the process never flushed before it exited.
+10. **`Runtime.removeBinding` leaves the function in the process** (Node 24.14.1, straight to the
+    inspector): after it, `typeof` of the binding is still `'function'`, a call does not throw, and
+    the function is there for the next socket too. It only ends the notifications. A compiled
+    logpoint decides by that `typeof`, so a function without a listener swallows every later hit.
+    `delete globalThis.<name>` removes it, and `Runtime.addBinding` puts it back.
+11. **What a release leaves behind** (a long-lived process that reports on itself; through the
+    server). Detach from an attached process: on main the function stays (`binding: "function"`);
+    with the release evaluated before the adapter's `disconnect`, the process has neither the
+    function nor a queue. The same evaluation sent after the disconnect does nothing: the adapter
+    has closed the target's CDP socket by then. Closing a fork's session (js-debug releases it):
+    neither is left. The same on Linux under Node 22 and 24. With a logpoint that hits about a
+    hundred times a second, six detaches each left the function gone and one or two messages in
+    a queue: hits between the clean-up and the adapter's own detach, when the logpoint is still
+    set and the function is not there. Removing the logpoints from the adapter before the
+    clean-up would close that window (#1233).
+12. **Not measured here:** macOS, and a fork under an attach root.

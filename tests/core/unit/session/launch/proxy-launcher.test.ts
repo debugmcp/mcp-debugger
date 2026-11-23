@@ -62,6 +62,7 @@ function makeSession(overrides: Partial<ManagedSession> = {}): ManagedSession {
     updatedAt: new Date(),
     breakpoints: new Map<string, Breakpoint>(),
     functionBreakpoints: new Map<string, FunctionBreakpoint>(),
+    run: {},
     ...overrides
   } as unknown as ManagedSession;
 }
@@ -474,8 +475,10 @@ describe('ProxyLauncher.prepareAdapter', () => {
     });
     const h = makeHarness({ adapter });
     const session = makeSession({
-      launchConfigNotices: ['note from the last real launch'],
-      transformedLaunch: { program: path.join('/old', 'app'), launchConfig: {} }
+      run: {
+        launchConfigNotices: ['note from the last real launch'],
+        transformedLaunch: { program: path.join('/old', 'app'), launchConfig: {} }
+      }
     });
     const request: ProxyLaunchRequest = { scriptPath: SCRIPT, adapterLaunchConfig: { typo: 1 } };
     const inputs = await h.launcher.prepareLaunchInputs(session, request);
@@ -491,8 +494,8 @@ describe('ProxyLauncher.prepareAdapter', () => {
     // The session is exactly as it was: the record is the caller's to commit, or to answer with.
     expect(h.ctx.updateSession).not.toHaveBeenCalled();
     expect(h.ctx.setupProxyEventHandlers).not.toHaveBeenCalled();
-    expect(session.launchConfigNotices).toEqual(['note from the last real launch']);
-    expect(session.transformedLaunch?.program).toBe(path.join('/old', 'app'));
+    expect(session.run.launchConfigNotices).toEqual(['note from the last real launch']);
+    expect(session.run.transformedLaunch?.program).toBe(path.join('/old', 'app'));
     expect(session.proxyManager).toBeUndefined();
     expect(adapter.dispose).not.toHaveBeenCalled();
 
@@ -521,7 +524,7 @@ describe('ProxyLauncher.prepareAdapter', () => {
     expect(outcome.record.transformedLaunch).toBeUndefined();
     expect(adapter.dispose).toHaveBeenCalledTimes(1);
     expect(h.ctx.updateSession).not.toHaveBeenCalled();
-    expect(session.launchConfigNotices).toBeUndefined();
+    expect(session.run.launchConfigNotices).toBeUndefined();
   });
 
   it('turns an incompatible toolchain verdict into the MSVC sentinel before resolving the executable, writing nothing', async () => {
@@ -579,12 +582,12 @@ describe('ProxyLauncher.start', () => {
     const adapter = new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE });
     const proxyManager = new MockProxyManager();
     const h = makeHarness({ adapter, proxyManager });
-    // The first toolchainValidation write is the clear at the top of start();
-    // the second is the commit, which goes through the store and throws once
-    // the session is gone.
-    let toolchainWrites = 0;
+    // start() touches the session's row through the store twice: at its top,
+    // where the run's toolchain verdict is cleared, and at the commit, which
+    // throws once the session is gone.
+    let touches = 0;
     vi.mocked(h.ctx.updateSession).mockImplementation((_id, patch) => {
-      if ('toolchainValidation' in patch && ++toolchainWrites === 2) {
+      if (Object.keys(patch).length === 0 && ++touches === 2) {
         throw new Error('Session not found: sess-1');
       }
     });
@@ -604,7 +607,7 @@ describe('ProxyLauncher.start', () => {
     const session = makeSession();
     let noticesAtHandlerSetup: string[] | undefined;
     vi.mocked(h.ctx.setupProxyEventHandlers).mockImplementation((s) => {
-      noticesAtHandlerSetup = [...(s.launchConfigNotices ?? [])];
+      noticesAtHandlerSetup = [...(s.run.launchConfigNotices ?? [])];
     });
 
     await h.launcher.start(session, { scriptPath: SCRIPT, adapterLaunchConfig: { typo: 1 } });
@@ -640,10 +643,10 @@ describe('ProxyLauncher.start', () => {
     await expect(h.launcher.start(session, { scriptPath: SCRIPT,
       dapLaunchArgs: launchArgs({ outFiles: 'from-dap' }), adapterLaunchConfig: { outFiles: 'from-adapter' }
     })).rejects.toThrow('Cannot read envFile');
-    expect(session.launchConfigNotices).toEqual(['adapterLaunchConfig.outFiles: expected an array of strings; using the default']);
+    expect(session.run.launchConfigNotices).toEqual(['adapterLaunchConfig.outFiles: expected an array of strings; using the default']);
     adapter.withAttachSupport();
     await h.launcher.start(session, { scriptPath: 'attach://pid', dapLaunchArgs: launchArgs({ request: 'attach' }) });
-    expect(session.launchConfigNotices).toEqual([]);
+    expect(session.run.launchConfigNotices).toEqual([]);
   });
 
   it('records the adapter attach-transform notes on the session, redacted and logged, and leaves launchConfigNotices empty (issue #908)', async () => {
@@ -662,12 +665,12 @@ describe('ProxyLauncher.start', () => {
 
     await h.launcher.start(session, { scriptPath: 'attach://pid', dapLaunchArgs: launchArgs({ request: 'attach' }) });
 
-    expect(session.attachTransformNotices).toHaveLength(3);
-    expect(session.attachTransformNotices?.[0]).toBe('port: attaching to ws://127.0.0.1:8181/ws — needs --disable-service-auth-codes');
-    expect(session.attachTransformNotices?.[1]).toMatch(/^env: /);
-    expect(session.attachTransformNotices?.[1]).not.toContain(token);
-    expect(session.attachTransformNotices?.[2]).toBe('attach without "sources": the C view only');
-    expect(session.launchConfigNotices).toEqual([]);
+    expect(session.run.attachTransformNotices).toHaveLength(3);
+    expect(session.run.attachTransformNotices?.[0]).toBe('port: attaching to ws://127.0.0.1:8181/ws — needs --disable-service-auth-codes');
+    expect(session.run.attachTransformNotices?.[1]).toMatch(/^env: /);
+    expect(session.run.attachTransformNotices?.[1]).not.toContain(token);
+    expect(session.run.attachTransformNotices?.[2]).toBe('attach without "sources": the C view only');
+    expect(session.run.launchConfigNotices).toEqual([]);
     expect(h.ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining('attach: port: attaching to ws://127.0.0.1:8181/ws'));
   });
 
@@ -685,11 +688,11 @@ describe('ProxyLauncher.start', () => {
 
     await expect(h.launcher.start(session, { scriptPath: 'attach://pid', dapLaunchArgs: launchArgs({ request: 'attach' }) }))
       .rejects.toThrow('Dart attach needs');
-    expect(session.attachTransformNotices).toEqual(['deviceId: ignored: only Flutter runners use deviceId (this attach uses dart)']);
+    expect(session.run.attachTransformNotices).toEqual(['deviceId: ignored: only Flutter runners use deviceId (this attach uses dart)']);
     expect(h.ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining('attach: deviceId: ignored'));
 
     await h.launcher.start(session, { scriptPath: 'attach://pid', dapLaunchArgs: launchArgs({ request: 'attach' }) });
-    expect(session.attachTransformNotices).toBeUndefined();
+    expect(session.run.attachTransformNotices).toBeUndefined();
   });
 
   it('reports caller-only drops and forwarded typos from either bag with the winning provenance', async () => {
@@ -707,7 +710,7 @@ describe('ProxyLauncher.start', () => {
       dapLaunchArgs: launchArgs({ dropped: 'secret', sourceMapPathOverides: {} }),
       adapterLaunchConfig: { envFile: 'app.env', request: 'attach' }
     });
-    expect(session.launchConfigNotices).toEqual([
+    expect(session.run.launchConfigNotices).toEqual([
       'dapLaunchArgs.dropped: ignored by the launch transform',
       'dapLaunchArgs.sourceMapPathOverides: forwarded to the adapter but unrecognized (did you mean sourceMapPathOverrides?)',
       'adapterLaunchConfig.request: ignored; reserved for the launch/attach operation'
@@ -722,14 +725,14 @@ describe('ProxyLauncher.start', () => {
     const h = makeHarness({ adapter, proxyManager: new MockProxyManager() });
     const session = makeSession();
     await h.launcher.start(session, { scriptPath: SCRIPT, dapLaunchArgs: launchArgs({}), adapterLaunchConfig: { [token]: true } });
-    expect(session.launchConfigNotices).toEqual([
+    expect(session.run.launchConfigNotices).toEqual([
       'adapterLaunchConfig.<redacted:github-pat>: forwarded to the adapter but unrecognized'
     ]);
     expect(JSON.stringify(vi.mocked(h.ctx.logger.warn).mock.calls)).not.toContain(token);
 
     vi.mocked(h.ctx.redactionEnabled).mockReturnValue(false);
     await h.launcher.start(session, { scriptPath: SCRIPT, dapLaunchArgs: launchArgs({}), adapterLaunchConfig: { [token]: true } });
-    expect(session.launchConfigNotices).toEqual([`adapterLaunchConfig.${token}: forwarded to the adapter but unrecognized`]);
+    expect(session.run.launchConfigNotices).toEqual([`adapterLaunchConfig.${token}: forwarded to the adapter but unrecognized`]);
   });
 
   it('awaits an async transformAttachConfig and forwards its result as the attach config', async () => {
@@ -776,7 +779,7 @@ describe('ProxyLauncher.start', () => {
 
     await h.launcher.start(session, { scriptPath: SCRIPT });
 
-    expect(session.transformedLaunch).toEqual({
+    expect(session.run.transformedLaunch).toEqual({
       program: BIN,
       launchConfig: expect.objectContaining({ program: BIN, mode: 'exec' })
     });
@@ -796,11 +799,11 @@ describe('ProxyLauncher.start', () => {
     await h.launcher.start(session, { scriptPath: SCRIPT });
 
     // The session layer defaulted cwd to the script's directory; the engine resolves the program against it, and so does the record.
-    expect(session.transformedLaunch?.program).toBe(path.resolve(path.dirname(SCRIPT), 'bin', 'Debug', 'app.dll'));
-    expect(session.transformedLaunch?.launchConfig).toMatchObject({ cwd: path.dirname(SCRIPT) });
-    expect(session.transformedLaunch?.launchConfig).not.toHaveProperty('env');
-    expect(session.transformedLaunch?.launchConfig).not.toHaveProperty('envFile');
-    expect(JSON.stringify(session.transformedLaunch)).not.toContain('ghp_x');
+    expect(session.run.transformedLaunch?.program).toBe(path.resolve(path.dirname(SCRIPT), 'bin', 'Debug', 'app.dll'));
+    expect(session.run.transformedLaunch?.launchConfig).toMatchObject({ cwd: path.dirname(SCRIPT) });
+    expect(session.run.transformedLaunch?.launchConfig).not.toHaveProperty('env');
+    expect(session.run.transformedLaunch?.launchConfig).not.toHaveProperty('envFile');
+    expect(JSON.stringify(session.run.transformedLaunch)).not.toContain('ghp_x');
   });
 
   it('clears the recorded launch when the transform fails, and on an attach (issue #950)', async () => {
@@ -808,17 +811,17 @@ describe('ProxyLauncher.start', () => {
     const h = makeHarness({ adapter, proxyManager: new MockProxyManager() });
     const session = makeSession();
     await h.launcher.start(session, { scriptPath: SCRIPT });
-    expect(session.transformedLaunch?.program).toBe(SCRIPT);
+    expect(session.run.transformedLaunch?.program).toBe(SCRIPT);
 
     adapter.transformLaunchConfig.mockRejectedValueOnce(new Error('compile failed'));
     await expect(h.launcher.start(session, { scriptPath: SCRIPT })).rejects.toThrow('compile failed');
-    expect(session.transformedLaunch).toBeUndefined();
+    expect(session.run.transformedLaunch).toBeUndefined();
 
     await h.launcher.start(session, { scriptPath: SCRIPT });
-    expect(session.transformedLaunch?.program).toBe(SCRIPT);
+    expect(session.run.transformedLaunch?.program).toBe(SCRIPT);
     adapter.withAttachSupport();
     await h.launcher.start(session, { scriptPath: 'attach://pid', dapLaunchArgs: launchArgs({ request: 'attach' }) });
-    expect(session.transformedLaunch).toBeUndefined();
+    expect(session.run.transformedLaunch).toBeUndefined();
   });
 
   it('builds the adapter command from the resolved executable and hands the plan to the ProxyManager', async () => {
