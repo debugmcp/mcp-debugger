@@ -284,6 +284,25 @@ describe('Server Output Resources Tests', () => {
       expect(text).not.toContain('super-secret-value');
     });
 
+    it("reads a child session's proxy log from the one file its tree's worker writes: the root's (issue #1222)", async () => {
+      const logDir = path.join('/logs', 'sess-1', 'run-123');
+      mockSessionManager.getSession.mockImplementation((sessionId: string) =>
+        sessionId === 'child-1'
+          ? mockSession({ id: 'child-1', parentSessionId: 'sess-1', logDir })
+          : mockSession({ id: 'sess-1', logDir })
+      );
+      vi.mocked(mockDependencies.fileSystem.readTail).mockResolvedValue('[Worker] child connection opened');
+
+      const { readResourceHandler } = getResourceHandlers(mockServer);
+      const result = await readResourceHandler({
+        method: 'resources/read',
+        params: { uri: 'debug://sessions/child-1/proxy-log' }
+      });
+
+      expect(mockDependencies.fileSystem.readTail).toHaveBeenCalledWith(path.join(logDir, 'proxy-sess-1.log'), 64 * 1024);
+      expect(textOf(result.contents[0])).toContain('child connection opened');
+    });
+
     it('rejects a proxy-log URI before the session has a run directory', async () => {
       mockSessionManager.getSession.mockReturnValue(mockSession({ logDir: undefined }));
       const { readResourceHandler } = getResourceHandlers(mockServer);

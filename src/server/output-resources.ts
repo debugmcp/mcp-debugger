@@ -13,7 +13,7 @@ import { Server, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import type { IFileSystem } from '@debugmcp/shared';
 import { WireMcpError } from '../errors/debug-errors.js';
 import type { SessionManager } from '../session/session-manager.js';
-import { proxyLogPathFor } from '../proxy/session-log-layout.js';
+import { runFactsOf } from '../session/run-facts.js';
 import { readProxyLogTail } from '../session/launch/proxy-failure-diagnostics.js';
 import { outputOnNote } from './handlers/output-tools.js';
 import { ownerKeyOf } from './owner-key.js';
@@ -95,7 +95,9 @@ export function registerResourceHandlers(
           description: `stdout/stderr/console output captured for ${session.language} debug session '${session.name}'`,
           mimeType: 'text/plain'
         }];
-        if (sessionManager.getSession(session.id)?.logDir) {
+        // The tree's log (issue #1222): one worker, one file, named after the root.
+        const managed = sessionManager.getSession(session.id);
+        if (managed && runFactsOf(managed, (id) => sessionManager.getSession(id)).proxyLogPath) {
           resources.push({
             uri: proxyLogResourceUri(session.id),
             name: `Debug proxy log — ${session.name}`,
@@ -126,13 +128,13 @@ export function registerResourceHandlers(
       throw unknownResource(uri);
     }
     if (proxyLogSessionId) {
-      if (!session.logDir) {
+      // One worker serves a tree and writes one log, named after the root
+      // (issue #1222): a child's proxy log is its tree's.
+      const proxyLogPath = runFactsOf(session, (id) => sessionManager.getSession(id)).proxyLogPath;
+      if (!proxyLogPath) {
         throw unknownResource(uri);
       }
-      const text = await readProxyLogTail(
-        fileSystem,
-        proxyLogPathFor(session.logDir, session.id)
-      );
+      const text = await readProxyLogTail(fileSystem, proxyLogPath);
       return {
         contents: [{ uri, mimeType: 'text/plain', text: text ?? '' }]
       };

@@ -805,6 +805,30 @@ describe('SessionManager - DAP Operations', () => {
       expect(gone.boundLine).toBeUndefined();
     });
 
+    it('ends an event whose id two function breakpoints share: it changes neither, nor the line breakpoint at its location (#1220)', async () => {
+      const { session } = await createSessionWithUnverifiedBp(undefined);
+      const managed = sessionManager.getSession(session.id)!;
+      managed.functionBreakpoints.set('first', { id: 'first', functionName: 'main', verified: false, adapterId: 7 });
+      managed.functionBreakpoints.set('second', { id: 'second', functionName: 'helper', verified: false, adapterId: 7 });
+
+      // Bound where the line breakpoint sits: the location fallback would take it.
+      dependencies.mockProxyManager.simulateEvent('breakpoint', {
+        reason: 'changed',
+        breakpoint: { id: 7, verified: true, line: 10, source: { path: 'test.py' } }
+      });
+
+      for (const fn of managed.functionBreakpoints.values()) {
+        expect(fn).toMatchObject({ verified: false, adapterId: 7 });
+        expect(fn.verifiedBy).toBeUndefined();
+        expect(fn.boundFile).toBeUndefined();
+        expect(fn.boundLine).toBeUndefined();
+      }
+      const [stored] = sessionManager.listBreakpoints(session.id);
+      expect(stored.verified).toBe(false);
+      expect(stored.verifiedBy).toBeUndefined();
+      expect(stored.adapterId).toBeUndefined();
+    });
+
     it('falls back to file and line matching and adopts the adapter id', async () => {
       const { session } = await createSessionWithUnverifiedBp(undefined);
 

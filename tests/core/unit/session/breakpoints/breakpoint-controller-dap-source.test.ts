@@ -11,6 +11,7 @@
  * wipe the other's breakpoints in the adapter).
  */
 import { describe, it, expect, vi } from 'vitest';
+import { connectionBehaviorOf } from '../../../../../src/session/connection-behavior.js';
 import path from 'node:path';
 import { BreakpointController } from '../../../../../src/session/breakpoints/breakpoint-controller.js';
 import type { BreakpointContext } from '../../../../../src/session/operations-context.js';
@@ -43,6 +44,7 @@ function harness() {
     logger: createMockLogger(),
     getSession: vi.fn().mockReturnValue(session),
     selectPolicy: vi.fn().mockReturnValue({}),
+    clientBehaviorOf: (s: ManagedSession) => connectionBehaviorOf(s, ctx.selectPolicy(s.language)),
     selectStorePolicy: vi.fn()
   } as unknown as BreakpointContext;
   const sent = () => sendDapRequest.mock.calls.map(([, args]) => {

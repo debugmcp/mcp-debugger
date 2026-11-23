@@ -9,7 +9,7 @@ import {
   SessionState, SessionLifecycleState, DebugLanguage, DebugSessionInfo, mapLegacyState,
   isTerminalSessionState, AdapterPolicy, SessionOutputEntry, redactSecretsInString
 } from '@debugmcp/shared';
-import type { Breakpoint, FunctionBreakpoint, ProgramEndExplanation, SessionStopInfo, StackFrame, StopTopFrameLine } from '@debugmcp/shared';
+import type { Breakpoint, DapClientBehavior, FunctionBreakpoint, ProgramEndExplanation, SessionStopInfo, StackFrame, StopTopFrameLine } from '@debugmcp/shared';
 import { USER_BREAK_REASONS } from '@debugmcp/shared';
 import { stopProvesDebuggerOn } from './debugger-off.js';
 import { isRedactionEnabled } from '../utils/redaction-mode.js';
@@ -39,6 +39,8 @@ import { ISessionStoreFactory } from '../factories/session-store-factory.js';
 import { IProxyManager, type ChildReportedEvent } from '../proxy/proxy-manager.js';
 import { isChildProxyView } from '../proxy/child-proxy-view.js';
 import { maxChildSessions, MAX_CHILD_SESSIONS_ENV } from './child-session-cap.js';
+import { connectionBehaviorOf } from './connection-behavior.js';
+import { rootOfTree, runFactsOf } from './run-facts.js';
 import { IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
 import type { BreakpointSyncResult, FunctionBreakpointSyncResult } from '../proxy/dap-proxy-interfaces.js';
 import { CHILD_RELEASE_COMMAND } from '../proxy/dap-proxy-interfaces.js';
@@ -63,6 +65,7 @@ import {
   setAdapterMessage,
   setCuratedMessage,
   settleStoredMessage,
+  soleHolderOf,
   stampRefusalMessage
 } from './breakpoints/hit-verification.js';
 
@@ -944,6 +947,16 @@ export abstract class SessionManagerCore extends EventEmitter {
     return this.sessionStore.selectPolicy(session.language);
   }
 
+  /**
+   * The DAP client behaviour of the connection a session talks through
+   * (issue #1211): its policy's for a root, the child-safe derivative's for
+   * an adopted child. The one way this layer reads client behaviour; see
+   * `connectionBehaviorOf`.
+   */
+  public clientBehaviorOf(session: Pick<ManagedSession, 'language' | 'parentSessionId'>): Partial<DapClientBehavior> {
+    return connectionBehaviorOf(session, this.sessionStore.selectPolicy(session.language));
+  }
+
 
   public getSession(sessionId: string): ManagedSession | undefined {
     return this.sessionStore.get(sessionId);
@@ -1135,11 +1148,11 @@ export abstract class SessionManagerCore extends EventEmitter {
     } catch {
       return undefined;
     }
-    const root = this.rootOf(session);
+    const run = runFactsOf(session, (id) => this.sessionStore.get(id));
     // A launch owns the stdout/stderr pipes; an attach does not. js-debug's
     // default console capture on attach emits on each target's connection,
     // so pointing at the root would hide the child's actual output.
-    return root.id === session.id || root.attachMode ? undefined : root.id;
+    return run.rootSessionId === session.id || run.attached ? undefined : run.rootSessionId;
   }
 
   /**
@@ -1331,17 +1344,7 @@ export abstract class SessionManagerCore extends EventEmitter {
 
   /** The launch or attach root of a session's tree. */
   protected rootOf(session: ManagedSession): ManagedSession {
-    let current = session;
-    const seen = new Set<string>([current.id]);
-    while (current.parentSessionId) {
-      const parent = this.sessionStore.get(current.parentSessionId);
-      if (!parent || seen.has(parent.id)) {
-        break;
-      }
-      seen.add(parent.id);
-      current = parent;
-    }
-    return current;
+    return rootOfTree(session, (sessionId) => this.sessionStore.get(sessionId));
   }
 
   /** Block new adoptions until this teardown and any overlapping teardown finish. */
@@ -1597,13 +1600,16 @@ export abstract class SessionManagerCore extends EventEmitter {
    */
   private recordProxyFailure(session: ManagedSession, error: unknown): void {
     const generation = session.proxyGeneration;
-    session.failureDiagnostics = collectProxyFailureDiagnostics(session, error);
+    // The worker's log is the tree's, named after the root (issue #1222).
+    const logOwner = this.rootOf(session);
+    session.failureDiagnostics = collectProxyFailureDiagnostics(session, error, logOwner);
 
     void logProxyFailure(
       { logger: this.logger, fileSystem: this.fileSystem },
       session,
       error,
-      'proxyExit'
+      'proxyExit',
+      logOwner
     ).then((diagnostics) => {
       if (session.proxyGeneration === generation && session.state === SessionState.ERROR) {
         session.failureDiagnostics = diagnostics;
@@ -1797,9 +1803,16 @@ export abstract class SessionManagerCore extends EventEmitter {
     // answersUserPause below).
     let firstStopMayBeNonEntry = false;
     try {
-      const policy = this.sessionStore.selectPolicy(session.language);
-      firstStopMayBeNonEntry =
-        policy.getDapClientBehavior?.().pauseAfterChildAttach === true;
+      // Read off the tree's root on purpose. The forced pause this flag
+      // stands for is issued on the launch's own connection; an adopted
+      // child's connection issues none, and its own value is false. A
+      // child keeps the root's reading here all the same: under it a
+      // child's first stop that no breakpoint, exception or user pause
+      // explains is resumed unseen, and whether such a stop should be
+      // shown instead is a question of its own (js-debug has leaked its
+      // own entry break into a child's first stop under load, issue
+      // #1097), not part of reading the child's breakpoints correctly.
+      firstStopMayBeNonEntry = this.clientBehaviorOf(this.rootOf(session)).pauseAfterChildAttach === true;
     } catch (err) {
       this.logger.debug(`[SessionManager ${sessionId}] Could not determine adapter policy for first-stop heuristic: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -2207,14 +2220,14 @@ export abstract class SessionManagerCore extends EventEmitter {
       if (!eventBp) {
         return;
       }
-      const mirrorsToChild = mirrorsBreakpointsToChild(() => this.sessionStore.selectPolicy(session.language));
+      const mirrorsToChild = mirrorsBreakpointsToChild(() => this.clientBehaviorOf(session));
       // Function breakpoints (issue #271 phase 3) match by adapterId ONLY —
       // DAP breakpoint events carry no function name, and letting them join
       // the (file,line) fallback below would let a function breakpoint bound
       // at some location steal a line breakpoint's event (or vice versa).
       if (typeof eventBp.id === 'number' && session.functionBreakpoints) {
-        const fnTarget = Array.from(session.functionBreakpoints.values())
-          .find(bp => bp.adapterId === eventBp.id);
+        // An id two records hold addresses neither (issue #1220).
+        const fnTarget = soleHolderOf(Array.from(session.functionBreakpoints.values()), eventBp.id);
         if (fnTarget) {
           // The same rules as the line branch below (issue #754): a stop that
           // proved the record bound outranks an unbound event (#673),
@@ -2252,11 +2265,23 @@ export abstract class SessionManagerCore extends EventEmitter {
           });
           return;
         }
+        // Function records share the id (issue #1220): the event is one of
+        // theirs and names neither. It ends here, as the rule above says:
+        // it must not go on to the location match below and be taken by a
+        // line breakpoint that sits where the function is bound.
+        for (const candidate of session.functionBreakpoints.values()) {
+          if (candidate.adapterId === eventBp.id) {
+            return;
+          }
+        }
       }
 
       const all = Array.from(session.breakpoints.values());
+      // By the adapter's id while exactly one record holds it; an id that
+      // two records hold says nothing about which of them this is, and
+      // the event goes by its location below (issue #1220).
       let target = typeof eventBp.id === 'number'
-        ? all.find(bp => bp.adapterId === eventBp.id)
+        ? soleHolderOf(all, eventBp.id)
         : undefined;
       const matchedByAdapterId = target !== undefined;
       if (!target && eventBp.source?.path !== undefined && typeof eventBp.line === 'number') {
@@ -2582,11 +2607,14 @@ export abstract class SessionManagerCore extends EventEmitter {
     // only path that ever stamps these breakpoints. Matched by the echoed
     // store id — exact, immune to the worker's path canonicalization.
     const handleBreakpointsSynced = (results: BreakpointSyncResult[]) => {
-      // js-debug's worker path never emits this status (queueing policies
-      // skip handleInitializedEvent), but guard anyway: parent responses
-      // are non-authoritative for mirroring policies — never downgrade
-      // child-verified state or clobber child-space adapter ids.
-      const mirrorsToChild = mirrorsBreakpointsToChild(() => this.sessionStore.selectPolicy(session.language));
+      // A mirroring connection (js-debug's root) does not send this status
+      // today (queueing policies skip handleInitializedEvent); if it did,
+      // its answers would be the launcher session's, which never downgrade
+      // child-verified state or replace child-space adapter ids. An adopted
+      // child's connection does send it: the adoption's own setBreakpoints
+      // answers (ChildConnections.sendBreakpoints), the adapter's word for
+      // that process, stamped in full below (issue #1211).
+      const mirrorsToChild = mirrorsBreakpointsToChild(() => this.clientBehaviorOf(session));
       for (const result of results) {
         if (typeof result.id !== 'string') {
           continue; // legacy payload without an echo key

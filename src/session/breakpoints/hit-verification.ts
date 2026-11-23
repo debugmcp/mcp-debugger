@@ -19,7 +19,7 @@
  * replace-all for a `node_modules` location it cannot map to a UI location,
  * while the CDP breakpoint underneath keeps firing.
  */
-import type { AdapterPolicy, Breakpoint, FunctionBreakpoint } from '@debugmcp/shared';
+import type { Breakpoint, DapClientBehavior, FunctionBreakpoint } from '@debugmcp/shared';
 import { normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
 import { dapSourcePath } from '../../utils/dap-source.js';
 import type { ManagedSession } from '../session-store.js';
@@ -179,19 +179,34 @@ export function settleStoredMessage(record: Breakpoint | FunctionBreakpoint): vo
 }
 
 /**
- * Whether the session's policy mirrors breakpoints to a child session
- * (js-debug, issues #500/#495). A lookup that throws — an unknown language, a
- * policy without client behaviour — reads as "no": the default handling, the
- * same answer in every writer that asks.
+ * Whether the connection a session talks through mirrors breakpoints to an
+ * in-session child (js-debug's root connection, issues #500/#495). The read
+ * is the connection's own behaviour (`connectionBehaviorOf`): a root's and an
+ * adopted child's differ (issue #1211). A read that throws — an unknown
+ * language, a policy without client behaviour — is "no": the default
+ * handling, the same answer in every writer that asks.
  */
 export function mirrorsBreakpointsToChild(
-  lookup: () => Pick<AdapterPolicy, 'getDapClientBehavior'> | undefined
+  read: () => Pick<DapClientBehavior, 'mirrorBreakpointsToChild'> | undefined
 ): boolean {
   try {
-    return !!lookup()?.getDapClientBehavior?.().mirrorBreakpointsToChild;
+    return !!read()?.mirrorBreakpointsToChild;
   } catch {
     return false;
   }
+}
+
+/**
+ * The record an adapter id names: the one record that holds it, or nothing
+ * when none or more than one does (issue #1220). An adapter can give two live
+ * breakpoints one id: js-debug numbers the breakpoints of a pending target
+ * from one counter before its attach and from another after it, both starting
+ * low (measured on a fork's connection). An id two records hold does not say
+ * which of them an event or a hit is about, so it addresses neither.
+ */
+export function soleHolderOf<T extends { adapterId?: number }>(records: readonly T[], adapterId: number): T | undefined {
+  const holders = records.filter((record) => record.adapterId === adapterId);
+  return holders.length === 1 ? holders[0] : undefined;
 }
 
 /**
@@ -232,7 +247,9 @@ export interface HitUpgrade {
  * note, a stamped refusal or a stale adapter verdict cannot outlive the hit
  * that disproves it; a curated note (a stale content anchor reported at
  * restart) is kept. Upgrade-only: verified records
- * are untouched, unknown or non-numeric ids are ignored.
+ * are untouched, unknown or non-numeric ids are ignored, and so is an id
+ * that more than one record holds (issue #1220: the stop says which id, not
+ * which of the records).
  */
 export function applyHitBreakpointIds(
   session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints'>,
@@ -245,7 +262,11 @@ export function applyHitBreakpointIds(
     if (typeof id !== 'number') {
       continue;
     }
-    const line = lineBreakpoints.find(bp => bp.adapterId === id);
+    const lineHolders = lineBreakpoints.filter(bp => bp.adapterId === id);
+    if (lineHolders.length > 1) {
+      continue;
+    }
+    const line = lineHolders[0];
     if (line) {
       if (!line.verified) {
         line.verified = true;
@@ -255,7 +276,7 @@ export function applyHitBreakpointIds(
       }
       continue;
     }
-    const fn = functionBreakpoints.find(bp => bp.adapterId === id);
+    const fn = soleHolderOf(functionBreakpoints, id);
     if (fn && !fn.verified) {
       fn.verified = true;
       fn.verifiedBy = 'hit';

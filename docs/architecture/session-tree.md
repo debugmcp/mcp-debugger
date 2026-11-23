@@ -158,6 +158,10 @@ over*; JavaScript spike, row "Breakpoints"). So:
   line or adapter-owned source keeps the breakpoint stop. A newer stop or resume invalidates
   the pending lookup so its delayed answer cannot resume a later breakpoint.
 - `list_breakpoints` on the child reports the child's verified set with the child's adapter ids.
+  The child's records are written from its own connection's answers (issue #1211): the ids of the
+  adoption's `setBreakpoints`, the bind events that follow, the line a breakpoint bound on when
+  that is not the line asked for, and every `set_breakpoint` on the child's id afterwards. See
+  *What a child reads, and where* below.
 
 ### Output
 
@@ -404,6 +408,57 @@ The tree-specific responsibilities in the core are:
 - the tree-aware wait: `waitForStop` subscribes to the state of the session and its descendants,
   including newly adopted descendants, and applies the four-rule priority above after each change;
 - connection-scoped terminal cleanup, the cascade on close, and the per-tree cap.
+
+### What a child reads, and where
+
+A child is a session of its own, and what is read about it is read where it is true.
+
+- **Its connection's behaviour.** An adapter policy describes a language's adapter; one part of
+  it, `getDapClientBehavior()`, describes a connection. js-debug's root connection adopts the
+  program in-session, routes commands to it and mirrors breakpoints to it, so its own answers
+  are provisional. Every other connection of the worker runs the child-safe derivative
+  (`createChildSafePolicy`), and there the adapter's answers are the truth for that process.
+  The session layer reads client behaviour through `connectionBehaviorOf(session, policy)`
+  (`src/session/connection-behavior.ts`) and nowhere else: a root gets its policy's, a child
+  the derivative's. Reading the language's policy for a child gave it the root's behaviour,
+  and a child's breakpoints never received the adapter's ids that way (issue #1211).
+  `tests/unit/architecture/connection-behaviour-seam.test.ts` holds the session and server
+  layers to the one reader, and `tests/unit/proxy/child-safe-policy.test.ts` pins that the
+  derivative changes nothing else those layers read. One site reads the root's behaviour for
+  a child on purpose: the first-stop rule (`pauseAfterChildAttach`), commented where it is.
+- **An adapter id names a record only while one record holds it.** js-debug numbers a pending
+  target's breakpoints from one counter before its attach and from another after it, so a
+  breakpoint added to a child later can come back with the id an earlier one still holds
+  (issue #1220, measured). An id two records share addresses neither: an event carrying it
+  goes by its location, and no hit is credited by it (`soleHolderOf`,
+  `src/session/breakpoints/hit-verification.ts`). The `setBreakpoints` answer is positional,
+  so each record still gets its own state and line.
+- **Its tree's run.** A launch or an attach is called on one session and written there: launch
+  or attach, where an attach's target lives, what the adapter's transform handed the engine,
+  what the caller asked for, the run directory the worker logs into. A child is adopted, never
+  launched, and has none of that; those are facts of the run, the same for every session of the
+  tree. A reader that asked the session it was handed got "nothing was launched" for a child:
+  a worker of vitest was warned that `dist/` was stale (the check exempts a runner under
+  `node_modules`, and could not see one), a child of a remote attach was read as local, and a
+  child's proxy-log resource named a file nobody writes (issues #1214, #1222). Outside the
+  modules that write those fields they are read through `runFactsOf(session, lookup)`
+  (`src/session/run-facts.ts`), which reads the tree's root:
+  `tests/unit/architecture/run-facts-seam.test.ts` holds the session and server layers to it.
+  One worker serves a tree and writes one proxy log, named after the root, so a child's
+  `debug://sessions/<child>/proxy-log` is its tree's.
+  Two limits of reading the root's facts for a child, both known:
+  - **The stale-build check decides by the root's program.** That is right for a worker of a
+    runner that transforms sources in memory (vitest, tsx) and wrong under a process manager
+    in `node_modules` that transforms nothing (nodemon, pm2) and whose child runs compiled
+    files: the note that belongs there is not given. What decides it correctly is the child's
+    own program, and js-debug's report of a child carries only its script's basename
+    ([#1227](https://github.com/debugmcp/mcp-debugger/issues/1227)).
+  - **A child's stop reasons are read as a launch's**, also under an attach root: the stop
+    rules take attach-ness from the start arguments the session was wired with, and a child is
+    wired with a launch's. That is the same choice as the first-stop rule above, and
+    [#1223](https://github.com/debugmcp/mcp-debugger/issues/1223) asks whether it should be.
+  When the root can no longer be reached from a session (its row is gone), the view names no
+  proxy log: a log named after a child is the file nobody writes.
 
 ### The adoption contract on `AdapterPolicy`
 

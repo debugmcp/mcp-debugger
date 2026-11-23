@@ -4,6 +4,7 @@
  * with the parent's breakpoints under the per-tree cap, and wired like a root.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import path from 'node:path';
 import { ErrorMessages } from '../../../../src/utils/error-messages.js';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import { DebugLanguage, JsDebugAdapterPolicy, SessionState, type AdapterPolicy, type DapClientBehavior } from '@debugmcp/shared';
@@ -44,10 +45,10 @@ describe('SessionManager child sessions (issue #1081)', () => {
     dependencies.mockProxyManager.reset();
   });
 
-  async function startRoot(): Promise<string> {
+  async function startRoot(dapLaunchArgs?: Parameters<SessionManager['startDebugging']>[3]): Promise<string> {
     const session = await sessionManager.createSession({ language: DebugLanguage.MOCK });
     await sessionManager.setBreakpoint(session.id, { file: '/w/child.py', line: 7 });
-    await sessionManager.startDebugging(session.id, 'test.py');
+    await sessionManager.startDebugging(session.id, 'test.py', undefined, dapLaunchArgs);
     await vi.runAllTimersAsync();
     return session.id;
   }
@@ -258,6 +259,35 @@ describe('SessionManager child sessions (issue #1081)', () => {
       view.simulateEvent('terminated');
       await vi.runAllTimersAsync();
       expect(dependencies.mockProxyManager.stopCalls).toBe(1);
+    });
+
+    it.each(['exit', 'error'] as const)("a child connection's failure (%s) points at its tree's one log, the root's, never a file named after the child (#1222)", async (event) => {
+      const { rootId, childId, view } = await rootWithChild();
+      const root = sessionManager.getSession(rootId)!;
+      const treeLog = {
+        proxyLogPath: path.join(root.logDir!, `proxy-${rootId}.log`),
+        proxyLogResource: `debug://sessions/${rootId}/proxy-log`
+      };
+
+      if (event === 'exit') {
+        view.simulateEvent('exit', 134, undefined, false);
+      } else {
+        view.simulateEvent('error', new Error('adapter socket closed'));
+      }
+
+      const child = sessionManager.getSession(childId)!;
+      expect(child.state).toBe(SessionState.ERROR);
+      // Recorded before the handler returns...
+      expect(child.failureDiagnostics).toEqual(treeLog);
+      // ...and again by the log record written after it.
+      await vi.waitFor(() => {
+        expect(dependencies.mockLogger.error).toHaveBeenCalledWith(
+          `[SessionManager] Detailed error in proxyExit for session ${childId}:`,
+          expect.objectContaining(treeLog)
+        );
+      });
+      await vi.runAllTimersAsync();
+      expect(child.failureDiagnostics).toEqual(treeLog);
     });
 
     it('contains failure to stop a terminated child connection', async () => {
@@ -1181,6 +1211,60 @@ describe('SessionManager child sessions (issue #1081)', () => {
     });
   });
 
+  // Issue #1214: a child was adopted, never launched. What the launch asked
+  // for is its root's, and the sentences that depend on it read the root.
+  describe("a child's pending step_into reads what its tree's launch asked for (issue #1214)", () => {
+    /** The raw paused frame the step goes out from: dependency code, which a default js launch skips. */
+    const DEPENDENCY_FRAME = { id: 1, name: 'handle', source: { path: '/app/node_modules/router/index.js' }, line: 160, column: 5 };
+
+    async function pendingStepIntoOnChild(dapLaunchArgs?: Parameters<SessionManager['startDebugging']>[3]) {
+      const describePendingStop = vi.fn(JsDebugAdapterPolicy.describePendingStop);
+      const facade = sessionManager as unknown as { selectPolicy: (language: string) => AdapterPolicy };
+      const original = facade.selectPolicy.bind(sessionManager);
+      vi.spyOn(facade, 'selectPolicy').mockImplementation((language) => ({ ...original(language), describePendingStop }));
+      const rootId = await startRoot(dapLaunchArgs);
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+      await vi.runAllTimersAsync();
+      const childId = childOf(rootId)!.id;
+      const view = dependencies.mockProxyManager.childViews.get(childId)!;
+      view.simulateStopped(3, 'breakpoint', { reason: 'breakpoint', threadId: 3 });
+      await vi.runAllTimersAsync();
+      expect(sessionManager.getSession(childId)!.state).toBe(SessionState.PAUSED);
+      // The step goes out and never lands.
+      view.setDapRequestHandler(async (command: string) =>
+        command === 'stackTrace'
+          ? { success: true, body: { stackFrames: [DEPENDENCY_FRAME], totalFrames: 1 } }
+          : { success: true, body: {} });
+
+      const step = sessionManager.stepInto(childId);
+      await vi.advanceTimersByTimeAsync(6000);
+      const data = (await step).data as { message?: string; pending?: boolean };
+      return { data, describePendingStop };
+    }
+
+    it('explains the skipped code it went out from, as for a root, under a default launch', async () => {
+      const { data, describePendingStop } = await pendingStepIntoOnChild();
+
+      expect(data.pending).toBe(true);
+      expect(data.message).toContain('The step was issued from skipped code (/app/node_modules/router/index.js:160)');
+      expect(describePendingStop).toHaveBeenCalledWith(expect.objectContaining({
+        operation: 'step',
+        attachMode: false,
+        launch: expect.objectContaining({ dapLaunchArgs: expect.objectContaining({ justMyCode: true }) })
+      }));
+    });
+
+    it('says nothing of skipped code when the launch asked for justMyCode: false', async () => {
+      const { data, describePendingStop } = await pendingStepIntoOnChild({ justMyCode: false });
+
+      expect(data.pending).toBe(true);
+      expect(data.message).toBe(ErrorMessages.stepStillRunning(5));
+      expect(describePendingStop).toHaveBeenCalledWith(expect.objectContaining({
+        launch: expect.objectContaining({ dapLaunchArgs: expect.objectContaining({ justMyCode: false }) })
+      }));
+    });
+  });
+
   it('releases the report and removes the row if creating its proxy view fails', async () => {
     const rootId = await startRoot();
     vi.spyOn(dependencies.mockProxyManager, 'createChildView').mockImplementation(() => {
@@ -1324,6 +1408,24 @@ describe('SessionManager child sessions (issue #1081)', () => {
       // The wait saw nothing: the hold never entered PAUSED, and the resume ran in the settle's own call stack.
       expect((await wait).data?.pending).toBe(true);
       // Nor does the root count it as a stop of its tree (issue #1128): nobody saw it.
+      expect(child(rootId).descendantStops).toBeUndefined();
+    });
+
+    it("resumes the child's unexplained first stop by the launch's rule, where the child's own connection forces no pause", async () => {
+      // A policy that adopts in-session: its child connections run the
+      // child-safe derivative, whose behaviour says no forced pause.
+      const { rootId, childId, view, requests } = await jsChild(TOP_FRAME, FIRST_STATEMENT, { supportsReverseStartDebugging: true });
+      expect(sessionManager.clientBehaviorOf(child(rootId)).pauseAfterChildAttach).toBe(true);
+      expect(sessionManager.clientBehaviorOf(child(childId)).pauseAfterChildAttach).toBe(false);
+
+      // A pause no breakpoint, exception, user pause or debugger statement explains.
+      view.simulateStopped(3, 'pause', { reason: 'pause', threadId: 3 });
+      await vi.runAllTimersAsync();
+
+      expect(requests).toContain('continue');
+      expect(child(childId).state).toBe(SessionState.RUNNING);
+      expect(child(childId).lastStop).toBeUndefined();
+      expect(dependencies.mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('Auto-continuing (stopOnEntry=false) [reason=pause, firstStop=true]'));
       expect(child(rootId).descendantStops).toBeUndefined();
     });
 
@@ -1590,3 +1692,128 @@ describe('SessionManager child sessions (issue #1081)', () => {
   });
 });
 
+describe('a child session is read under its own connection (issues #1211, #1220)', () => {
+  // js-debug's shape. The root connection adopts the program in-session and
+  // mirrors breakpoints to it, so the root's own answers are provisional
+  // (issues #495, #500). Every other connection of the worker runs the
+  // child-safe derivative of the policy, where the adapter's answers are the
+  // truth. Measured on a real fork (issue #1211): the adoption's
+  // setBreakpoints answers `{ id: 1, verified: false }`, the bind follows as
+  // `breakpoint changed { id: 1, line: 6 }`, and the stop names `[1]`.
+  const FILE = '/w/child.js';
+  let sessionManager: SessionManager;
+  let dependencies: ReturnType<typeof createMockDependencies>;
+  const jsLike: Partial<AdapterPolicy> = {
+    supportsReverseStartDebugging: true,
+    getDapClientBehavior: () => JsDebugAdapterPolicy.getDapClientBehavior(),
+    childAdoption: JsDebugAdapterPolicy.childAdoption
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    dependencies = createMockDependencies();
+    sessionManager = new SessionManager(
+      { logDirBase: '/tmp/test-sessions', defaultDapLaunchArgs: { stopOnEntry: false, justMyCode: true } },
+      dependencies
+    );
+    overridePolicy(sessionManager, jsLike);
+    // The operations layer has a lookup of its own (see overridePolicy).
+    const facade = sessionManager as unknown as { selectPolicy: (language: string) => AdapterPolicy };
+    const original = facade.selectPolicy.bind(sessionManager);
+    vi.spyOn(facade, 'selectPolicy').mockImplementation((language) => ({ ...original(language), ...jsLike }));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+    dependencies.mockProxyManager.reset();
+  });
+
+  /** A root with one breakpoint at FILE:5, and the child adopted with its copy. */
+  async function adoptedChild() {
+    const root = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+    await sessionManager.setBreakpoint(root.id, { file: FILE, line: 5 });
+    await sessionManager.startDebugging(root.id, 'parent.js');
+    await vi.runAllTimersAsync();
+    dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+    await vi.runAllTimersAsync();
+    const row = sessionManager.getAllSessions().find((s) => s.parentSessionId === root.id)!;
+    const child = sessionManager.getSession(row.id)!;
+    const view = dependencies.mockProxyManager.childViews.get(child.id)!;
+    const record = Array.from(child.breakpoints.values())[0];
+    return { rootId: root.id, child, view, record };
+  }
+
+  const answering = (view: MockChildProxyView, breakpoints: Array<Record<string, unknown>>): void => {
+    view.setDapRequestHandler(async (command) =>
+      command === 'setBreakpoints' ? { success: true, body: { breakpoints } } : { success: true, body: {} });
+  };
+
+  it("stamps the adoption's own answer on the child's records, and the bind event that follows moves the record to the line it bound on (#1211)", async () => {
+    const { view, record } = await adoptedChild();
+
+    view.simulateEvent('breakpoints-synced', [
+      { id: record.id, file: FILE, line: 5, verified: false, adapterId: 1, message: 'breakpoint.provisionalBreakpoint' }
+    ]);
+    expect(record.adapterId).toBe(1);
+    expect(record.verified).toBe(false);
+
+    // The shifted-line shape: a same-line event would match by location on any build.
+    view.simulateEvent('breakpoint', { reason: 'changed', breakpoint: { id: 1, verified: true, line: 6, source: { path: FILE } } });
+    expect(record).toMatchObject({ adapterId: 1, verified: true, verifiedBy: 'adapter', line: 6 });
+  });
+
+  it("still reads the root's own answers as the mirroring connection's: provisional, and never its ids (#495)", async () => {
+    const { rootId } = await adoptedChild();
+    const rootRecord = Array.from(sessionManager.getSession(rootId)!.breakpoints.values())[0];
+    expect(rootRecord.adapterId).toBeUndefined();
+
+    dependencies.mockProxyManager.simulateEvent('breakpoints-synced', [
+      { id: rootRecord.id, file: FILE, line: 5, verified: false, adapterId: 9 }
+    ]);
+    dependencies.mockProxyManager.simulateEvent('breakpoint', {
+      reason: 'changed', breakpoint: { id: 9, verified: true, line: 5, source: { path: FILE } }
+    });
+
+    expect(rootRecord.adapterId).toBeUndefined();
+  });
+
+  it("takes a set_breakpoint on a child from the adapter's own answer: ids, verified state and bound lines", async () => {
+    const { child, view, record: first } = await adoptedChild();
+    answering(view, [
+      { id: 1, verified: true, line: 6, source: { path: FILE } },
+      { id: 2, verified: true, line: 8, source: { path: FILE } }
+    ]);
+
+    await sessionManager.setBreakpoint(child.id, { file: FILE, line: 8 });
+
+    const second = Array.from(child.breakpoints.values()).find((bp) => bp !== first)!;
+    expect(first).toMatchObject({ adapterId: 1, verified: true, line: 6 });
+    expect(second).toMatchObject({ adapterId: 2, verified: true, verifiedBy: 'adapter', line: 8 });
+  });
+
+  it('an adapter id that two records share addresses neither of them: an event goes by its location, or changes nothing (#1220)', async () => {
+    const { child, view, record: first } = await adoptedChild();
+    view.simulateEvent('breakpoints-synced', [{ id: first.id, file: FILE, line: 5, verified: false, adapterId: 1 }]);
+    view.simulateEvent('breakpoint', { reason: 'changed', breakpoint: { id: 1, verified: true, line: 6, source: { path: FILE } } });
+    // js-debug numbers a breakpoint added after the attach from another
+    // counter, and gives it the id the earlier one still holds (measured).
+    answering(view, [
+      { id: 1, verified: true, line: 6, source: { path: FILE } },
+      { id: 1, verified: true, line: 8, source: { path: FILE } }
+    ]);
+    await sessionManager.setBreakpoint(child.id, { file: FILE, line: 8 });
+    const second = Array.from(child.breakpoints.values()).find((bp) => bp !== first)!;
+    // The answer is positional: each record has its own state, whatever the ids say.
+    expect(first).toMatchObject({ adapterId: 1, verified: true, line: 6 });
+    expect(second).toMatchObject({ adapterId: 1, verified: true, line: 8 });
+
+    view.simulateEvent('breakpoint', { reason: 'changed', breakpoint: { id: 1, verified: true, line: 8, source: { path: FILE } } });
+    expect(first.line).toBe(6);
+    expect(second.line).toBe(8);
+
+    view.simulateEvent('breakpoint', { reason: 'changed', breakpoint: { id: 1, verified: false } });
+    expect(first.verified).toBe(true);
+    expect(second.verified).toBe(true);
+  });
+});

@@ -13,7 +13,7 @@ import {
 import type { FunctionBreakpointRemoval } from '../../session/session-manager-operations.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { requireSessionId, type WithSessionId } from '../tool-validation.js';
-import { debuggerOffWhyFor, describeStaleBuild, isForeignAttach, readLineContext } from './shared.js';
+import { debuggerOffWhyFor, describeStaleBuild, isForeignAttach, readLineContext, runFactsFor } from './shared.js';
 import { failureResult, jsonResult, sessionErrorResultOrThrow, type ToolResult } from '../tool-result.js';
 
 /**
@@ -200,8 +200,8 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
     // attach whose target is not on this host (issue #899): the host file is
     // not the debuggee's source then, and an answer that refuses content
     // addressing for that reason must not quote the file anyway.
-    const attachSession = ctx.sessionManager.getSession(args.sessionId);
-    const hostFileIsForeign = attachSession !== undefined && isForeignAttach(attachSession);
+    const run = runFactsFor(ctx, args.sessionId);
+    const hostFileIsForeign = run !== undefined && isForeignAttach(run);
     // The build behind the echo (issue #938): when the adapter binds this
     // file through a compiled one that is older than it, the content and the
     // line are the newer source's, not the running code's. Say so. Both are
@@ -249,7 +249,7 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
       ...(hostFileIsForeign
         ? {
             note:
-              attachSession?.attachLocality === 'remote'
+              run?.targetLocality === 'remote'
                 ? 'content and context omitted: the target of this attach is not on the mcp-debugger host, so the host file is not the debuggee\'s source'
                 : 'content and context omitted: the target host of this attach is not known, so the host file may not be the debuggee\'s source'
           }

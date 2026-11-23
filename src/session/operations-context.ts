@@ -16,6 +16,7 @@
  */
 import type {
   AdapterPolicy,
+  DapClientBehavior,
   DebugLanguage,
   IAdapterRegistry,
   IFileSystem,
@@ -110,6 +111,13 @@ export interface OperationsContext {
    * the store's, behind a try/catch).
    */
   selectStorePolicy(language: DebugLanguage): AdapterPolicy;
+  /**
+   * The DAP client behaviour of the connection `session` talks through
+   * (issue #1211): its policy's for a root, the child-safe derivative's for
+   * an adopted child (`connectionBehaviorOf`). Resolved through the data
+   * layer's lookup, like `selectPolicy`.
+   */
+  clientBehaviorOf(session: Pick<ManagedSession, 'language' | 'parentSessionId'>): Partial<DapClientBehavior>;
 
   findFreePort(): Promise<number>;
   setupProxyEventHandlers(
@@ -242,7 +250,7 @@ export type AttachContext = Pick<
 /** Breakpoint tooling: the store, the wire, and both policy sources. */
 export type BreakpointContext = Pick<
   OperationsContext,
-  'logger' | 'getSession' | 'selectPolicy' | 'selectStorePolicy' | 'onStateChange'
+  'logger' | 'getSession' | 'selectPolicy' | 'selectStorePolicy' | 'clientBehaviorOf' | 'onStateChange'
 >;
 
 /**
