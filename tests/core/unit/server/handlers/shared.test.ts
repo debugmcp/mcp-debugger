@@ -100,7 +100,7 @@ describe('describeStaleBuild (issues #938/#950)', () => {
   beforeEach(() => {
     ctx = createMockToolContext();
     ctx.buildStaleness = { check: vi.fn().mockResolvedValue(evidence) };
-    ctx.sessionManager.getSession.mockReturnValue({ id: 's1', transformedLaunch: launched });
+    ctx.sessionManager.getSession.mockReturnValue({ id: 's1', run: { transformedLaunch: launched } });
     ctx.sessionManager.getSessionPolicy.mockReturnValue(JsDebugAdapterPolicy);
   });
 
@@ -130,7 +130,7 @@ describe('describeStaleBuild (issues #938/#950)', () => {
   });
 
   it('asks nothing for an attach whose target is not on this host: the host file is not the debuggee\'s source', async () => {
-    ctx.sessionManager.getSession.mockReturnValue({ id: 's1', attachMode: true, attachLocality: 'remote' });
+    ctx.sessionManager.getSession.mockReturnValue({ id: 's1', run: { attachMode: true, attachLocality: 'remote' } });
 
     expect(await describeStaleBuild(ctx, 's1', '/app/src/a.ts', 'breakpoint')).toBeUndefined();
     expect(ctx.buildStaleness.check).not.toHaveBeenCalled();
@@ -138,7 +138,7 @@ describe('describeStaleBuild (issues #938/#950)', () => {
 
   it('hands the transformed launch to the checker whatever the program is: how the sources run is the policy\'s word, not the core\'s (issue #950)', async () => {
     const tsx = { program: '/app/src/main.ts', launchConfig: { program: '/app/src/main.ts' } };
-    ctx.sessionManager.getSession.mockReturnValue({ id: 's1', transformedLaunch: tsx });
+    ctx.sessionManager.getSession.mockReturnValue({ id: 's1', run: { transformedLaunch: tsx } });
 
     await describeStaleBuild(ctx, 's1', '/app/src/a.ts', 'breakpoint');
 
@@ -146,7 +146,7 @@ describe('describeStaleBuild (issues #938/#950)', () => {
   });
 
   it('hands no launch before one exists', async () => {
-    ctx.sessionManager.getSession.mockReturnValue({ id: 's1' });
+    ctx.sessionManager.getSession.mockReturnValue({ run: {}, id: 's1' });
 
     await describeStaleBuild(ctx, 's1', '/app/src/a.ts', 'breakpoint');
 
@@ -155,7 +155,7 @@ describe('describeStaleBuild (issues #938/#950)', () => {
 
   it('hands no launch on an attach session: the attached process is not the one launched before', async () => {
     ctx.sessionManager.getSession.mockReturnValue({
-      id: 's1', attachMode: true, attachLocality: 'pid', transformedLaunch: launched
+      id: 's1', run: { attachMode: true, attachLocality: 'pid', transformedLaunch: launched }
     });
 
     expect(await describeStaleBuild(ctx, 's1', '/app/src/a.ts', 'breakpoint')).toMatch(/may be stale/);
@@ -280,7 +280,8 @@ describe('a child session reads the run of its tree (issue #1214)', () => {
   const sessions = (root: Record<string, unknown>): void => {
     const rows: Record<string, Record<string, unknown>> = {
       root: { id: 'root', ...root },
-      child: { id: 'child', parentSessionId: 'root' }
+      // Adoption gives a child the run record of its root.
+      child: { id: 'child', parentSessionId: 'root', run: root.run }
     };
     ctx.sessionManager.getSession.mockImplementation((sessionId: string) => rows[sessionId]);
   };
@@ -292,7 +293,7 @@ describe('a child session reads the run of its tree (issue #1214)', () => {
   });
 
   it("hands the stale-build check the launch of the child's root: a worker of a runner is not a session that has launched nothing", async () => {
-    sessions({ transformedLaunch: runner });
+    sessions({ run: { transformedLaunch: runner } });
 
     await describeStaleBuild(ctx, 'child', '/app/src/a.ts', 'stop');
 
@@ -301,14 +302,14 @@ describe('a child session reads the run of its tree (issue #1214)', () => {
 
   it('says nothing for a child of an attach whose target is not on this host, as for the attach itself', async () => {
     ctx.buildStaleness.check.mockResolvedValue({ generated: '/app/dist/a.js' });
-    sessions({ attachMode: true, attachLocality: 'remote' });
+    sessions({ run: { attachMode: true, attachLocality: 'remote' } });
 
     expect(await describeStaleBuild(ctx, 'child', '/app/src/a.ts', 'stop')).toBeUndefined();
     expect(ctx.buildStaleness.check).not.toHaveBeenCalled();
   });
 
   it('reads no launch for a child of a local attach', async () => {
-    sessions({ attachMode: true, attachLocality: 'pid', transformedLaunch: runner });
+    sessions({ run: { attachMode: true, attachLocality: 'pid', transformedLaunch: runner } });
 
     await describeStaleBuild(ctx, 'child', '/app/src/a.ts', 'stop');
 

@@ -70,6 +70,7 @@ describe('set_breakpoint statement anchors (#271)', () => {
     callToolHandler = getToolHandlers(mockServer).callToolHandler;
 
     mockSessionManager.getSession.mockReturnValue({
+      run: {},
       id: 'test-session',
       sessionLifecycle: 'active'
     });
@@ -321,7 +322,7 @@ describe('set_breakpoint statement anchors (#271)', () => {
     mockSessionManager.getSession.mockReturnValue({
       id: 'test-session',
       sessionLifecycle: 'active',
-      attachMode: true
+      run: { attachMode: true }
     });
 
     const err = await callSetBreakpoint({ statement: 'return total' }).then(
@@ -339,7 +340,7 @@ describe('set_breakpoint statement anchors (#271)', () => {
     mockSessionManager.getSession.mockReturnValue({
       id: 'test-session',
       sessionLifecycle: 'active',
-      attachMode: true
+      run: { attachMode: true }
     });
 
     const err = await callSetBreakpoint({ line: 6, expectedContent: 'return total' }).then(
@@ -360,8 +361,7 @@ describe('set_breakpoint statement anchors (#271)', () => {
       mockSessionManager.getSession.mockReturnValue({
         id: 'test-session',
         sessionLifecycle: 'active',
-        attachMode: true,
-        attachLocality
+        run: { attachMode: true, attachLocality }
       });
     }
     const rejection = (args: Record<string, unknown>) =>
@@ -437,11 +437,12 @@ describe('set_breakpoint statement anchors (#271)', () => {
     });
 
     describe("a child of a remote attach debugs that attach's target (issue #1214)", () => {
-      // The attach fields are written on the root alone; the child has a parent and nothing else.
+      // The attach is the run's: adoption gives the child the record its root wrote.
       beforeEach(() => {
+        const run = { attachMode: true, attachLocality: 'remote' };
         const sessions: Record<string, Record<string, unknown>> = {
-          'root-session': { id: 'root-session', sessionLifecycle: 'active', attachMode: true, attachLocality: 'remote' },
-          'test-session': { id: 'test-session', sessionLifecycle: 'active', parentSessionId: 'root-session' }
+          'root-session': { id: 'root-session', sessionLifecycle: 'active', run },
+          'test-session': { id: 'test-session', sessionLifecycle: 'active', parentSessionId: 'root-session', run }
         };
         mockSessionManager.getSession.mockImplementation((sessionId: string) => sessions[sessionId]);
       });

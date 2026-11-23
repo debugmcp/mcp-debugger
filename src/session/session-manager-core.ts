@@ -1149,10 +1149,13 @@ export abstract class SessionManagerCore extends EventEmitter {
       return undefined;
     }
     const run = runFactsOf(session, (id) => this.sessionStore.get(id));
+    const reachedRoot = this.sessionStore.get(run.rootSessionId)?.parentSessionId === undefined;
     // A launch owns the stdout/stderr pipes; an attach does not. js-debug's
     // default console capture on attach emits on each target's connection,
-    // so pointing at the root would hide the child's actual output.
-    return run.rootSessionId === session.id || run.attached ? undefined : run.rootSessionId;
+    // so pointing at the root would hide the child's actual output. When the
+    // walk could not reach the root (an orphaned subtree), an intermediate
+    // child holds no tree output either.
+    return !reachedRoot || run.attached ? undefined : run.rootSessionId;
   }
 
   /**
@@ -1531,8 +1534,11 @@ export abstract class SessionManagerCore extends EventEmitter {
       this.touchActivity(parent.id);
       child = this.sessionStore.getOrThrow(info.id);
       child.logDir = parent.logDir;
-      child.effectiveBreakOnExceptions = parent.effectiveBreakOnExceptions;
-      child.launchExceptionFilters = parent.launchExceptionFilters;
+      // One run, one record: the child reads how its tree was started from
+      // the object its root writes (the exception arming, the launch, the
+      // attach), where two of those facts used to be copied at this point
+      // and the rest were left empty.
+      child.run = parent.run;
       // The parent's current breakpoint set, re-sent to the child before it
       // runs (the hold before configurationDone is where they bind); from then
       // on each session's set is its own.
@@ -2146,7 +2152,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       // `debugger;` statement (relabelled 'breakpoint') under noDebug with
       // its breakpoints still off.
       if (stopProvesDebuggerOn(reason, rawReason, body)) {
-        session.launchDebuggerOff = undefined;
+        session.run.launchDebuggerOff = undefined;
       }
     };
 
@@ -2856,7 +2862,11 @@ export abstract class SessionManagerCore extends EventEmitter {
     // Preparation precedes this generation's reset. Seed its notices only
     // after the notice array and output buffer have been initialized, using
     // the same containment for subscribers that throw as worker notices.
-    for (const note of session.launchConfigNotices ?? []) handleAdapterNotice(note);
+    // The launch's own session only: a child shares the run record, and the
+    // notes of its root's launch are about that launch, said once, there.
+    if (!session.parentSessionId) {
+      for (const note of session.run.launchConfigNotices ?? []) handleAdapterNotice(note);
+    }
 
     // Store handlers in WeakMap
     this.sessionEventHandlers.set(session, handlers);

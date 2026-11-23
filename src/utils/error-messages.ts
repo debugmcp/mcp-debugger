@@ -1069,7 +1069,7 @@ export const ErrorMessages = {
    * restart_debugging on a session whose attach is still in flight will not
    * become available when the attach finishes — restart replays a launch
    * configuration and an attach session has none. That pairing gets the
-   * terminal answer the post-attach `session.attachMode` check would give,
+   * terminal answer the post-attach `session.run.attachMode` check would give,
    * which `attachMode` is written too late (after the attach's first awaits)
    * to deliver on its own.
    */

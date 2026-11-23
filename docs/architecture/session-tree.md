@@ -433,19 +433,37 @@ A child is a session of its own, and what is read about it is read where it is t
   goes by its location, and no hit is credited by it (`soleHolderOf`,
   `src/session/breakpoints/hit-verification.ts`). The `setBreakpoints` answer is positional,
   so each record still gets its own state and line.
-- **Its tree's run.** A launch or an attach is called on one session and written there: launch
-  or attach, where an attach's target lives, what the adapter's transform handed the engine,
-  what the caller asked for, the run directory the worker logs into. A child is adopted, never
-  launched, and has none of that; those are facts of the run, the same for every session of the
-  tree. A reader that asked the session it was handed got "nothing was launched" for a child:
-  a worker of vitest was warned that `dist/` was stale (the check exempts a runner under
-  `node_modules`, and could not see one), a child of a remote attach was read as local, and a
-  child's proxy-log resource named a file nobody writes (issues #1214, #1222). Outside the
-  modules that write those fields they are read through `runFactsOf(session, lookup)`
-  (`src/session/run-facts.ts`), which reads the tree's root:
-  `tests/unit/architecture/run-facts-seam.test.ts` holds the session and server layers to it.
-  One worker serves a tree and writes one proxy log, named after the root, so a child's
+- **Its tree's run.** A launch or an attach is called on one session, the root: launch or
+  attach, where an attach's target lives, what the adapter's transform handed the engine, what
+  the caller asked for, the exception arming, the debugger-off decision, the notes and the
+  toolchain verdict of the start. A child is adopted, never launched; those are facts of the
+  run, the same for every session of the tree. They live in one record, `Run`
+  (`src/session/session-store.ts`), which the root owns and every child references
+  (`session.run`; adoption does `child.run = parent.run`), so a reader holding any session of
+  the tree reads the same object and there is no wrong session to ask. They were fields of the
+  session before, written on the root and empty on a child, and a reader that asked the
+  session it was handed got "nothing was launched" for a child: a worker of vitest was warned
+  that `dist/` was stale (the check exempts a runner under `node_modules`, and could not see
+  one), a child of a remote attach was read as local, and a child's proxy-log resource named a
+  file nobody writes (issues #1214, #1222). The server layer reads the record through one
+  view, `runFactsOf(session, lookup)` (`src/session/run-facts.ts`), which also gives the two
+  things that are the root's row and not the record: the root's id and the run directory. One
+  worker serves a tree and writes one proxy log, named after the root, so a child's
   `debug://sessions/<child>/proxy-log` is its tree's.
+  The record is written by the launch-shaped code (the launcher, the proxy launcher, the attach
+  controller), each fact reset where it always was, and in one place by the core: a stop that
+  proves the debugger on clears the debugger-off decision. A dry run leaves the record as it
+  was. The launch-shaped operations refuse a child session at the session layer too
+  (`refuseChildSession`, `src/session/in-flight-guard.ts`), not only in the tool handlers: on a
+  child they would write, replay or judge by its root's run.
+  Three things follow from sharing the record and are meant: a stop in a child that proves the
+  debugger on clears the run's decision; a child reads that decision as its root does (while
+  the proof by a verified breakpoint stays each session's own, so for a moment the two can
+  answer differently); and a child's exception arming is the live one, where it was a copy
+  taken at adoption. One thing does not follow: the notes of the root's launch are seeded into
+  the root's output only. The record is mutated in place and not replaced per run, so a child
+  row that outlives its run reads what its root reads; the readers that are new to children
+  are gated on a live state.
   Two limits of reading the root's facts for a child, both known:
   - **The stale-build check decides by the root's program.** That is right for a worker of a
     runner that transforms sources in memory (vitest, tsx) and wrong under a process manager

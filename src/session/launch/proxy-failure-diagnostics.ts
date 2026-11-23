@@ -102,17 +102,20 @@ export interface ProxySetupFailureDeps extends ProxyFailureLogDeps {
  * where the proxy log for the session's current run lives.
  */
 export function collectProxyFailureDiagnostics(
-  session: Pick<ManagedSession, 'id' | 'logDir'>,
+  session: Pick<ManagedSession, 'id' | 'logDir' | 'parentSessionId'>,
   error: unknown,
   /** Whose log this is: the tree's root for a child session (one worker, one log; issue #1222). */
-  logOwner: Pick<ManagedSession, 'id' | 'logDir'> = session
+  logOwner: Pick<ManagedSession, 'id' | 'logDir' | 'parentSessionId'> = session
 ): ProxyFailureDiagnostics {
   const diagnostics: ProxyFailureDiagnostics = {};
 
   // The log path comes from the session, not from the error, so it is derived
   // FIRST: it is the pointer that survives a hostile error object, and losing
-  // it would drop `data` from the tool result entirely.
-  if (logOwner.logDir) {
+  // it would drop `data` from the tool result entirely. Only a root owns a
+  // proxy log (issue #1222): if the walk stopped at an orphaned or cycled
+  // child (`parentSessionId !== undefined`), `proxy-<childId>.log` is a file
+  // nobody writes and a resource URI the server rejects.
+  if (logOwner.parentSessionId === undefined && logOwner.logDir) {
     diagnostics.proxyLogPath = proxyLogPathFor(logOwner.logDir, logOwner.id);
     diagnostics.proxyLogResource = proxyLogResourceUri(logOwner.id);
   }
@@ -242,10 +245,10 @@ function logSafely(logger: ILogger, message: string, meta: unknown): void {
  */
 export async function logProxyFailure(
   deps: ProxyFailureLogDeps,
-  session: Pick<ManagedSession, 'id' | 'logDir'>,
+  session: Pick<ManagedSession, 'id' | 'logDir' | 'parentSessionId'>,
   error: unknown,
   operation: ProxyFailureOperation,
-  logOwner: Pick<ManagedSession, 'id' | 'logDir'> = session
+  logOwner: Pick<ManagedSession, 'id' | 'logDir' | 'parentSessionId'> = session
 ): Promise<ProxyFailureDiagnostics> {
   const header = `[SessionManager] Detailed error in ${operation} for session ${session.id}:`;
   let diagnostics: ProxyFailureDiagnostics = {};

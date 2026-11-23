@@ -54,6 +54,7 @@ describe('SessionManagerOperations launch gate (issue #360)', () => {
 
   beforeEach(() => {
     mockSession = {
+      run: {},
       id: 'test-session',
       name: 'Test Session',
       language: DebugLanguage.JAVASCRIPT,
@@ -114,7 +115,7 @@ describe('SessionManagerOperations launch gate (issue #360)', () => {
     expect(mockSession.state).toBe(SessionState.CREATED);
     expect(mockSessionStore.updateState).not.toHaveBeenCalled();
     expect(mockSessionStore.update).not.toHaveBeenCalled();
-    expect(mockSession.lastLaunch).toBeUndefined();
+    expect(mockSession.run.lastLaunch).toBeUndefined();
     expect(mockDependencies.adapterRegistry.create).not.toHaveBeenCalled();
   });
 

@@ -150,8 +150,8 @@ export function isForeignAttach(run: Pick<RunFacts, 'attached' | 'targetLocality
 
 /**
  * The run a session belongs to (issue #1214): how its tree's program was
- * started, read off the tree's root, or nothing for an unknown id. A child
- * session was adopted, not launched, and has no launch facts of its own.
+ * started, or nothing for an unknown id. A child session was adopted, not
+ * launched: the record it reads is its tree's.
  */
 export function runFactsFor(ctx: ToolContext, sessionId: string): RunFacts | undefined {
   const session = ctx.sessionManager.getSession(sessionId);
@@ -182,8 +182,8 @@ export async function describeStaleBuild(
   logLabel: string
 ): Promise<string | undefined> {
   try {
-    // The run's, not the session's (issue #1214): a child was never
-    // launched, and its own fields say what a session before its launch says.
+    // The run's (issue #1214): a child was never launched, and what decides
+    // here is how its tree was started.
     const run = runFactsFor(ctx, sessionId);
     if (!run || isForeignAttach(run)) {
       return undefined;
