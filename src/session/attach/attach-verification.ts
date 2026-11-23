@@ -35,6 +35,8 @@ export type AttachVerifyResult =
 
 /** What the window's own timer resolves with: told apart from any response. */
 const WINDOW_CLOSED = Symbol('attach verification window closed');
+/** What a latched proxy error/exit resolves with so in-flight waits end at once. */
+const PROXY_GONE = Symbol('attach verification proxy gone');
 /** How long past its bound a probe's own answer is still waited for (the worker's timeout crossing the IPC channel). */
 const PROBE_ANSWER_GRACE_MS = 250;
 
@@ -59,10 +61,15 @@ export async function verifyAttachThreads(
     // a generic "Proxy not initialized", masking the real error — so latch
     // the first proxy error/exit as the failure and stop polling.
     let proxyGone = false;
+    let notifyProxyGone!: () => void;
+    const gone = new Promise<typeof PROXY_GONE>((resolve) => {
+      notifyProxyGone = () => resolve(PROXY_GONE);
+    });
     const onProxyError = (err: Error): void => {
       if (!proxyGone) {
         proxyGone = true;
         lastFailure = err.message;
+        notifyProxyGone();
       }
     };
     // How the adapter ended, in its own terms (issue #897): a real process
@@ -80,6 +87,7 @@ export async function verifyAttachThreads(
           : code === null && !signal
             ? 'it closed its DAP connection'
             : `it exited (code=${code}${signal ? `, signal=${signal}` : ''})`;
+        notifyProxyGone();
       }
     };
     proxyManager.on('error', onProxyError);
@@ -93,19 +101,20 @@ export async function verifyAttachThreads(
       // only by the parent's backstop, a margin later, and its error then
       // named a longer time than the window that had been asked for
       // ("within 20000ms (last failure: … within 25s)"). So the wait ends
-      // with the window; the worker's own answer, a little after its bound,
-      // still gets the grace to arrive and be the failure that is quoted.
+      // with the window — or the moment the proxy reports an error or exit —
+      // while the worker's own answer, a little after its bound, still gets
+      // the grace to arrive and be the failure that is quoted.
       let windowClosed: NodeJS.Timeout | undefined;
       const closed = new Promise<typeof WINDOW_CLOSED>((resolve) => {
         windowClosed = setTimeout(() => resolve(WINDOW_CLOSED), remainingMs + PROBE_ANSWER_GRACE_MS);
       });
       let threadsResponse: DebugProtocol.ThreadsResponse | undefined;
       try {
-        const settled = await Promise.race([probe, closed]);
-        if (settled === WINDOW_CLOSED) {
+        const settled = await Promise.race([probe, closed, gone]);
+        if (settled === WINDOW_CLOSED || settled === PROXY_GONE) {
           // Nobody waits for it any more; its late rejection is not an error of this call.
           probe.catch(() => undefined);
-          if (!proxyGone) {
+          if (settled === WINDOW_CLOSED && !proxyGone) {
             lastFailure = `the debug adapter did not answer 'threads' before the window closed`;
           }
           return;
@@ -143,7 +152,17 @@ export async function verifyAttachThreads(
       // Retry until the deadline if the debugger has not reported threads yet.
       while (!threads && !proxyGone && Date.now() < deadline) {
         const sleepMs = Math.min(pollIntervalMs, Math.max(deadline - Date.now(), 1));
-        await new Promise((resolve) => setTimeout(resolve, sleepMs));
+        let sleepTimer: NodeJS.Timeout | undefined;
+        try {
+          await Promise.race([
+            new Promise<void>((resolve) => {
+              sleepTimer = setTimeout(resolve, sleepMs);
+            }),
+            gone
+          ]);
+        } finally {
+          clearTimeout(sleepTimer);
+        }
         if (proxyGone || Date.now() >= deadline) {
           break;
         }

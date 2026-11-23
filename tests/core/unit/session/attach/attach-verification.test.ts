@@ -119,12 +119,30 @@ describe('verifyAttachThreads', () => {
     }
   });
 
-  it('reports the adapter going away as that, not as a timeout', async () => {
+  it('reports the adapter going away as that, failing fast instead of waiting out the window', async () => {
     const proxy = fakeProxy(() => new Promise(() => undefined));
     setTimeout(() => proxy.emit('exit', 1, undefined, false), 20);
+    const started = Date.now();
 
-    const result = await verifyAttachThreads(ctx, { proxyManager: proxy as never, verifyTimeoutMs: 120, pollIntervalMs: 10 });
+    const result = await verifyAttachThreads(ctx, { proxyManager: proxy as never, verifyTimeoutMs: 5000, pollIntervalMs: 10 });
 
+    expect(Date.now() - started).toBeLessThan(500);
     expect(result).toMatchObject({ ok: false, proxyGone: true, lastFailure: 'it exited (code=1)' });
+  });
+
+  it('wakes a poll-interval sleep immediately when the proxy errors mid-poll, leaving no timer behind', async () => {
+    vi.useFakeTimers();
+    try {
+      const proxy = fakeProxy(async () => threads([]));
+      const pending = verifyAttachThreads(ctx, { proxyManager: proxy as never, verifyTimeoutMs: 20000, pollIntervalMs: 5000 });
+      await vi.advanceTimersByTimeAsync(10);
+      proxy.emit('error', new Error('ptrace EPERM'));
+
+      const result = await pending;
+      expect(result).toEqual({ ok: false, proxyGone: true, lastFailure: 'ptrace EPERM' });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
