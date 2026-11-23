@@ -39,7 +39,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import http from 'node:http';
-import net from 'node:net';
 import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -70,43 +69,36 @@ let server: StdioClientHandle;
 let targets: Target[] = [];
 const call = <T extends ToolAnswer = ToolAnswer>(name: string, args: Record<string, unknown> = {}): Promise<T> => server.call<T>(name, args);
 
-async function getFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer();
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address();
-      const port = typeof address === 'object' && address ? address.port : 0;
-      probe.close(() => (port ? resolve(port) : reject(new Error('no free port'))));
-    });
-    probe.on('error', reject);
-  });
-}
-
-/** Start a server fixture under `node --inspect` and wait for the port it prints. */
+/** Start a server fixture under `node --inspect=127.0.0.1:0` and read both kernel-assigned ports. */
 async function startTarget(script: string): Promise<Target> {
-  const inspectPort = await getFreePort();
-  const proc = spawn(process.execPath, [`--inspect=127.0.0.1:${inspectPort}`, script], {
+  const proc = spawn(process.execPath, ['--inspect=127.0.0.1:0', script], {
     cwd: path.dirname(script),
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe']
   });
   let buffer = '';
-  const target: Target = { proc, inspectPort, httpPort: 0 };
+  const target: Target = { proc, inspectPort: 0, httpPort: 0 };
   // Register before readiness so afterEach also cleans up a failed startup.
   targets.push(target);
-  target.httpPort = await new Promise<number>((resolve, reject) => {
+  const ports = await new Promise<{ inspectPort: number; httpPort: number }>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`the server did not print its port: ${buffer}`)), 30000);
     const onData = (chunk: Buffer) => {
       buffer += chunk.toString();
       const listening = /listening (\d+)/.exec(buffer);
+      const inspector = /Debugger listening on ws:\/\/127\.0\.0\.1:(\d+)\//.exec(buffer);
       // The inspector's own banner goes to stderr first; wait for both.
-      if (listening && buffer.includes('Debugger listening on')) { clearTimeout(timer); resolve(Number(listening[1])); }
+      if (listening && inspector) {
+        clearTimeout(timer);
+        resolve({ inspectPort: Number(inspector[1]), httpPort: Number(listening[1]) });
+      }
     };
     proc.stdout!.on('data', onData);
     proc.stderr!.on('data', onData);
     proc.on('error', (error) => { clearTimeout(timer); reject(error); });
     proc.on('exit', (code) => { clearTimeout(timer); reject(new Error(`the server exited ${code} before listening: ${buffer}`)); });
   });
+  target.inspectPort = ports.inspectPort;
+  target.httpPort = ports.httpPort;
   return target;
 }
 

@@ -16,7 +16,6 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import path from 'node:path';
-import net from 'node:net';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startStdioClient, type StdioClientHandle, type ToolAnswer } from '../../../test-utils/helpers/mcp-stdio-client.js';
@@ -81,22 +80,9 @@ async function pollUntil<T>(read: () => Promise<T>, accept: (value: T) => boolea
   return last;
 }
 
-async function getFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer();
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address();
-      const port = typeof address === 'object' && address ? address.port : 0;
-      probe.close(() => (port ? resolve(port) : reject(new Error('no free port'))));
-    });
-    probe.on('error', reject);
-  });
-}
-
-/** Start a script under `node --inspect` and wait until its inspector listens. */
+/** Start a script under `node --inspect=127.0.0.1:0` and read the kernel-assigned inspector port. */
 async function startTarget(script: string): Promise<Target> {
-  const port = await getFreePort();
-  const proc = spawn(process.execPath, [`--inspect=127.0.0.1:${port}`, script], {
+  const proc = spawn(process.execPath, ['--inspect=127.0.0.1:0', script], {
     cwd: treeDir,
     windowsHide: true,
     stdio: ['pipe', 'pipe', 'pipe']
@@ -104,14 +90,15 @@ async function startTarget(script: string): Promise<Target> {
   let buffer = '';
   // close also waits for the output pipes, so the exit assertions see the final lines.
   const exited = new Promise<number | null>((resolve) => proc.on('close', (code) => resolve(code)));
-  const target: Target = { proc, port, output: () => buffer, exited, go: (mode = 'go') => { proc.stdin!.write(`${mode}\n`); } };
+  const target: Target = { proc, port: 0, output: () => buffer, exited, go: (mode = 'go') => { proc.stdin!.write(`${mode}\n`); } };
   // Register before readiness so afterEach also cleans up a failed startup.
   targets.push(target);
-  await new Promise<void>((resolve, reject) => {
+  target.port = await new Promise<number>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`node --inspect not listening: ${buffer}`)), 30000);
     const onData = (chunk: Buffer) => {
       buffer += chunk.toString();
-      if (buffer.includes('Debugger listening on')) { clearTimeout(timer); resolve(); }
+      const match = /Debugger listening on ws:\/\/127\.0\.0\.1:(\d+)\//.exec(buffer);
+      if (match) { clearTimeout(timer); resolve(Number(match[1])); }
     };
     proc.stdout!.on('data', onData);
     proc.stderr!.on('data', onData);
