@@ -1020,9 +1020,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     const finishClose = this.beginSubtreeClose(sessionId);
     try {
       for (const descendant of this.descendantsDeepestFirst(sessionId)) {
-        // A child whose adapter can only release it (js-debug, issue #1082)
-        // is closed with its target kept, whatever the cascade.
-        const releaseChild = releaseDescendants || (descendant.proxyManager !== undefined && this.childCloseSemantics(descendant) === 'release');
+        const releaseChild = this.shouldReleaseDescendant(descendant, releaseDescendants);
         // Capture each outcome at its own close, not before the cascade: a
         // later child can end naturally while an earlier close is awaited.
         const released = releaseChild || descendant.programEndExplanation?.data?.released === true;
@@ -1127,6 +1125,11 @@ export abstract class SessionManagerCore extends EventEmitter {
     } catch {
       return 'terminate';
     }
+  }
+
+  /** A borrowed tree keeps its external targets. A release-only adapter keeps them on either kind of tree. */
+  private shouldReleaseDescendant(descendant: ManagedSession, preserveTargets: boolean): boolean {
+    return preserveTargets || (descendant.proxyManager !== undefined && this.childCloseSemantics(descendant) === 'release');
   }
 
   /**
@@ -1276,12 +1279,10 @@ export abstract class SessionManagerCore extends EventEmitter {
   }
 
   /**
-   * Tear down the session's proxy (listeners, worker process, adapter slot)
-   * while PRESERVING the session record — breakpoints, output buffer, launch
-   * spec and lifecycle state survive for a relaunch. Contrast closeSession,
-   * which removes the session from the store entirely. stop() runs cleanup()
-   * even without a live proxy process, so the adapter registry slot is
-   * always released (issue #238).
+   * Close descendants and drain the previous worker while preserving the root
+   * session and its breakpoints (#238, #502). Launch and attach both call this
+   * before writing the new run. A worker exit can clear every proxy handle
+   * while its children's terminal rows are still available for inspection (#1231).
    */
   protected async stopProxyPreservingSession(session: ManagedSession): Promise<number> {
     const finishClose = this.beginSubtreeClose(session.id);
@@ -1297,9 +1298,11 @@ export abstract class SessionManagerCore extends EventEmitter {
     clearPauseIntent(session);
     // Children belong to a run (issue #1081): a relaunch, or the teardown of
     // a launch that failed, closes the previous run's children first.
+    const preserveTargets = !session.parentSessionId && borrowsProgram(session);
     let childrenClosed = 0;
     for (const descendant of this.descendantsDeepestFirst(session.id)) {
-      if (await this.closeSingleSession(descendant.id)) {
+      const releaseChild = this.shouldReleaseDescendant(descendant, preserveTargets);
+      if (await this.closeSingleSession(descendant.id, { releaseChild })) {
         childrenClosed += 1;
       }
     }

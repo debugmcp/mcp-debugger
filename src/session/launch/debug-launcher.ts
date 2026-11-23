@@ -482,24 +482,12 @@ export class DebugLauncher {
       return this.dryRun(session, { scriptPath, scriptArgs, dapLaunchArgs, adapterLaunchConfig, breakOnExceptions });
     }
 
-    // Children belong to a run (issue #1081): a relaunch closes the previous
-    // run's, and the answer says how many.
-    let childrenClosed = 0;
-    if (session.proxyManager || session.pendingProxyStop || session.deferredWorkerStop) {
-      if (session.proxyManager) {
-        this.ctx.logger.warn(
-          `[SessionManager] Session ${sessionId} already has an active proxy. Terminating before starting new.`
-        );
-      }
-      // Session-preserving teardown: closeSession here used to REMOVE the
-      // session from the store, so the state update below threw
-      // SessionNotFoundError and the session was silently destroyed (#238).
-      // Not gated on a live handle alone: a terminal event handler nulls
-      // proxyManager and leaves its stop() in flight as pendingProxyStop,
-      // which this awaits too (#502) — otherwise the relaunch races the old
-      // worker's exit (a debuggee port still bound, lastProxyPid overwritten).
-      childrenClosed = (await this.ctx.stopProxyPreservingSession(session)) ?? 0;
+    if (session.proxyManager) {
+      this.ctx.logger.warn(
+        `[SessionManager] Session ${sessionId} already has an active proxy. Terminating before starting new.`
+      );
     }
+    const childrenClosed = await this.ctx.stopProxyPreservingSession(session);
 
     // Update to INITIALIZING state and set lifecycle to ACTIVE
     this.ctx.updateState(session, SessionState.INITIALIZING);

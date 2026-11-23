@@ -330,6 +330,33 @@ describe('SessionManager child sessions (issue #1081)', () => {
       expect(dependencies.mockProxyManager.stopCalls).toBe(1);
     });
 
+    it.each(['launch', 'attach'] as const)('a new %s retires the children of a crashed worker (#1231)', async (mode) => {
+      const { rootId, childId, view } = await rootWithChild();
+      const proxy = dependencies.mockProxyManager;
+      // A process exit reaches the child views first, then the root. An IPC
+      // termination status would also carry an 'expected' flag and schedule a reap.
+      view.onWorkerExit(1);
+      proxy.simulateExit(1);
+      expect(sessionManager.getSession(childId)!.state).toBe(SessionState.ERROR);
+      expect(sessionManager.getSession(rootId)!.state).toBe(SessionState.ERROR);
+
+      if (mode === 'launch') {
+        const started = await sessionManager.startDebugging(rootId, 'next.py', undefined, { stopOnEntry: false });
+        expect(started.success, started.error).toBe(true);
+        expect(started.data?.childrenClosed).toBe(1);
+      } else {
+        proxy.setDapRequestHandler(async (command) => command === 'threads'
+          ? { success: true, body: { threads: [{ id: 1, name: 'main' }] } }
+          : { success: true, body: {} });
+        const attached = await sessionManager.attachToProcess(rootId, { port: 5678, stopOnEntry: false });
+        expect(attached.success, attached.error).toBe(true);
+      }
+
+      const wait = await sessionManager.waitForStop(rootId, 100);
+      expect(wait.data).toMatchObject({ sessionId: rootId, pending: true });
+      expect(sessionManager.getAllSessions().map((s) => s.id)).toEqual([rootId]);
+    });
+
     it.each(['exit', 'error'] as const)("a child connection's failure (%s) points at its tree's one log, the root's, never a file named after the child (#1222)", async (event) => {
       const { rootId, childId, view } = await rootWithChild();
       const root = sessionManager.getSession(rootId)!;
@@ -751,6 +778,27 @@ describe('SessionManager child sessions (issue #1081)', () => {
       expect(sessionManager.getAllSessions()).toHaveLength(0);
     });
 
+    it.each(['launch', 'attach'] as const)('a new %s releases every child of the previous borrowed run (#1244)', async (mode) => {
+      const { rootId, childView, grandchildView } = await tree();
+      const previousRun = sessionManager.getSession(rootId)!.run;
+      previousRun.attachMode = true;
+      previousRun.programOwnership = 'borrowed';
+      // The mock reuses its proxy on the new run. Suppress the old worker's deferred exit.
+      vi.spyOn(dependencies.mockProxyManager, 'stop').mockResolvedValue();
+      dependencies.mockProxyManager.setDapRequestHandler(async (command) => command === 'threads'
+        ? { success: true, body: { threads: [{ id: 1, name: 'main' }] } }
+        : { success: true, body: {} });
+
+      const result = mode === 'launch'
+        ? await sessionManager.startDebugging(rootId, 'next.py', undefined, { stopOnEntry: false })
+        : await sessionManager.attachToProcess(rootId, { port: 5678, stopOnEntry: false });
+
+      expect(result.success, result.error).toBe(true);
+      expect(childView.stopOptions).toEqual([{ terminateDebuggee: false }]);
+      expect(grandchildView.stopOptions).toEqual([{ terminateDebuggee: false }]);
+      expect(sessionManager.getAllSessions().map((s) => s.id)).toEqual([rootId]);
+    });
+
     it('a session with no tree answers the bare outcome, and a missing one closed: false', async () => {
       const rootId = await startRoot();
       expect(await sessionManager.closeSessionReporting(rootId)).toEqual({ closed: true, closedSessionIds: [rootId] });
@@ -1148,6 +1196,8 @@ describe('SessionManager child sessions (issue #1081)', () => {
       expect(restarted.success).toBe(true);
       expect(restarted.data?.childrenClosed).toBe(2);
       expect(restarted.data?.children).toBeUndefined();
+      // The old launch owned this target. Its adapter's default close ends it.
+      expect(childView.stopOptions).toEqual([undefined]);
       expect(removed).toHaveBeenCalledTimes(2);
       expect(removed).not.toHaveBeenCalledWith(rootId);
     });

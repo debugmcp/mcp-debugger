@@ -38,15 +38,17 @@ describe('SessionManager - State Machine Integrity', () => {
         executablePath: 'python'
       });
     
-    // CREATED → INITIALIZING. The transition is no longer synchronous: the
-    // issue-#360 launch gate awaits an availability probe first, so flush
-    // microtasks (not timers) before observing the state.
+    expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.CREATED);
+    // Observe the state as the adapter finishes configuring, before the
+    // launcher's event handlers advance it to the entry stop.
+    let stateAtConfiguration: SessionState | undefined;
+    dependencies.mockProxyManager.once('adapter-configured', () => {
+      stateAtConfiguration = sessionManager.getSession(session.id)?.state;
+    });
     const startPromise = sessionManager.startDebugging(session.id, 'test.py');
-    await Promise.resolve().then(() => {}).then(() => {}).then(() => {});
-    expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.INITIALIZING);
-
     await vi.runAllTimersAsync();
     await startPromise;
+    expect(stateAtConfiguration).toBe(SessionState.INITIALIZING);
     
     // INITIALIZING → PAUSED (because stopOnEntry=true by default)
     expect(sessionManager.getSession(session.id)?.state).toBe(SessionState.PAUSED);
