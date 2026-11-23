@@ -1396,6 +1396,12 @@ describe('SessionManager child sessions (issue #1081)', () => {
       expect(sessionManager.outputOnFor(rootId)).toBeUndefined();
       expect(sessionManager.outputOnFor('no-such-session')).toBeUndefined();
 
+      // An orphaned subtree whose walk ends below the root never points a
+      // grandchild at an intermediate child that holds no tree output.
+      sessionManager.getSession(childId)!.parentSessionId = 'gone-root';
+      expect(sessionManager.outputOnFor(grandchildId)).toBeUndefined();
+      sessionManager.getSession(childId)!.parentSessionId = rootId;
+
       // A debugpy child carries its own lines: no pointer.
       overridePolicy(sessionManager, { childAdoption: { ...JsDebugAdapterPolicy.childAdoption!, childOutput: 'own-connection' } });
       expect(sessionManager.outputOnFor(childId)).toBeUndefined();

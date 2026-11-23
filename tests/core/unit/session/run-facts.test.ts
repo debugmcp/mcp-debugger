@@ -66,13 +66,14 @@ describe('runFactsOf', () => {
   });
 
   it("gives a child its root's attach: attached, where the target lives, and no launch", () => {
-    const attachRoot = session({ id: 'root', run: { attachMode: true, attachLocality: 'remote', transformedLaunch: launched }, logDir });
+    const attachRoot = session({ id: 'root', run: { attachMode: true, attachLocality: 'remote', transformedLaunch: launched, lastLaunch: request }, logDir });
     const attached = session({ id: 'child', parentSessionId: 'root', logDir, run: attachRoot.run });
     const facts = runFactsOf(attached, tree(attachRoot, attached));
     expect(facts.attached).toBe(true);
     expect(facts.targetLocality).toBe('remote');
     // An attach debugs some other process, whatever the session launched before.
     expect(facts.launch).toBeUndefined();
+    expect(facts.request).toBeUndefined();
   });
 
   it('names no log when the walk cannot reach the root: a log named after a child is a file no worker writes (#1222)', () => {

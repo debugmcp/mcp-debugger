@@ -1149,10 +1149,13 @@ export abstract class SessionManagerCore extends EventEmitter {
       return undefined;
     }
     const run = runFactsOf(session, (id) => this.sessionStore.get(id));
+    const reachedRoot = this.sessionStore.get(run.rootSessionId)?.parentSessionId === undefined;
     // A launch owns the stdout/stderr pipes; an attach does not. js-debug's
     // default console capture on attach emits on each target's connection,
-    // so pointing at the root would hide the child's actual output.
-    return run.rootSessionId === session.id || run.attached ? undefined : run.rootSessionId;
+    // so pointing at the root would hide the child's actual output. When the
+    // walk could not reach the root (an orphaned subtree), an intermediate
+    // child holds no tree output either.
+    return !reachedRoot || run.attached ? undefined : run.rootSessionId;
   }
 
   /**

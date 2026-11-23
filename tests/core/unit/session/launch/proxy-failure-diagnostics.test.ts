@@ -84,6 +84,10 @@ describe('collectProxyFailureDiagnostics', () => {
       proxyLogPath: path.join(childRunDir, 'proxy-child-1.log'),
       proxyLogResource: 'debug://sessions/child-1/proxy-log'
     });
+    // An orphaned or cycled child whose root walk ended below the root names no
+    // log: proxy-<childId>.log is a file nobody writes (#1222).
+    const orphanChild = { id: 'child-1', parentSessionId: 'gone-root', logDir: childRunDir };
+    expect(collectProxyFailureDiagnostics(orphanChild, new Error('adapter exited'), orphanChild)).toEqual({});
   });
 
   it('invents nothing for a failure that happened before a log directory existed', () => {

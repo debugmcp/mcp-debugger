@@ -38,7 +38,10 @@ export interface RunFacts {
    * session launched before.
    */
   launch: Run['transformedLaunch'];
-  /** The caller's launch request, the one a restart replays; undefined before a launch. */
+  /**
+   * The caller's launch request, the one a restart replays; undefined before a
+   * launch, and for an attach.
+   */
   request: Run['lastLaunch'];
   /**
    * The worker's log of this run: one per tree, named after the root.
@@ -92,7 +95,7 @@ export function runFactsOf(session: RunFactsSource, get: (sessionId: string) => 
     attached,
     targetLocality: run.attachLocality,
     launch: attached ? undefined : run.transformedLaunch,
-    request: run.lastLaunch,
+    request: attached ? undefined : run.lastLaunch,
     proxyLogPath: reachedRoot && root.logDir ? proxyLogPathFor(root.logDir, root.id) : undefined
   };
 }
