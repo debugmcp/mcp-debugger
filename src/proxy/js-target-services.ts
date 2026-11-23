@@ -108,6 +108,14 @@ export class JsTargetServices {
     return this.bridge?.settle(timeoutMs) ?? Promise.resolve();
   }
 
+  /**
+   * The target is about to be released to run on: take the proxy's things
+   * out of it while its socket is still up. See the bridge's `release`.
+   */
+  release(timeoutMs?: number): Promise<void> {
+    return this.bridge?.release(timeoutMs) ?? Promise.resolve();
+  }
+
   /** The target's connection is gone, or the proxy is letting go of it: close the socket and what rides on it. */
   detach(): void {
     this.stepper?.detachCdp();

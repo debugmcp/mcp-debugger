@@ -348,6 +348,16 @@ export class ChildSessionManager extends EventEmitter {
     return this.stepper?.handles(command, args) ? this.stepper.request(command, args) : null;
   }
 
+  /**
+   * The session is about to release the program to run on (a `disconnect`
+   * that does not end it: a detach from an attached process). Whatever the
+   * proxy put into the process is taken out first, while its CDP socket is
+   * still there (issue #1212). Bounded; never rejects.
+   */
+  async beforeRelease(): Promise<void> {
+    await this.services.release();
+  }
+
   /** Any other request for the target: one that resumes or ends it ends a step still in flight. */
   async beforeChildRequest(command: string): Promise<void> {
     await this.stepper?.beforeRequest(command);

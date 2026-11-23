@@ -1412,6 +1412,29 @@ describe("ChildConnections: an adopted child's proxy stepper (issue #1130)", () 
     await expect(connections.beforeRequest('nobody', 'continue')).resolves.toBeUndefined();
   });
 
+  it("close() takes the proxy's things out of a child that runs on, before its socket and its connection go (issue #1212)", async () => {
+    // js-debug cannot end a target it adopted: closing a child releases it,
+    // whatever terminateDebuggee says. Nothing of the proxy's stays in it.
+    const cdp = await pausedChild();
+    const manager = (connections as unknown as { options: { adoption: ChildAdoptionDeps } }).options.adoption.connectionManager as unknown as {
+      disconnect: ReturnType<typeof vi.fn>;
+    };
+    let evaluatesAtDisconnect = -1;
+    let disposedAtDisconnect: boolean | undefined;
+    manager.disconnect.mockImplementation(async () => {
+      evaluatesAtDisconnect = cdp.sent.filter((m) => m === 'Runtime.evaluate').length;
+      disposedAtDisconnect = cdp.disposed;
+    });
+    const evaluatesBefore = cdp.sent.filter((m) => m === 'Runtime.evaluate').length;
+
+    await connections.close('child-1', { terminateDebuggee: true });
+
+    // One more evaluation than the attach's flush: the clear, sent before the disconnect.
+    expect(evaluatesAtDisconnect).toBeGreaterThan(evaluatesBefore);
+    expect(disposedAtDisconnect).toBe(true);
+    expect(cdp.disposed).toBe(true);
+  });
+
   it("close() takes the stepper off the child's CDP socket and closes the socket", async () => {
     const cdp = await pausedChild();
     // The stepper and the logpoint channel listen on the one socket.

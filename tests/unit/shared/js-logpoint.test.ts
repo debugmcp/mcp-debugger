@@ -7,6 +7,7 @@ import {
   JS_LOGPOINT_QUEUE,
   JS_LOGPOINT_QUEUE_CHARS,
   JS_LOGPOINT_QUEUE_LIMIT,
+  JS_LOGPOINT_UNBIND,
   parseJsLogMessage,
   validateJsLogpoint,
   compileJsLogpoint
@@ -201,6 +202,41 @@ describe('compileJsLogpoint', () => {
       // Cleared, a later hit starts over.
       unbound(7);
       expect(kept()).toEqual(['m7']);
+    });
+
+    it("takes the binding's function out of the process, which Runtime.removeBinding does not: a later hit is kept again", () => {
+      // Measured on Node 24: after Runtime.removeBinding the function is still a
+      // property of the global object, and a call to it reaches nobody.
+      globals[JS_LOGPOINT_BINDING] = () => undefined;
+      const hit = new Function('n', `return (${compiledFor('m{n}')});`);
+      try {
+        hit(1);
+        expect(kept()).toEqual([]);
+
+        expect(new Function(`return ${JS_LOGPOINT_UNBIND};`)()).toBe(true);
+
+        expect(JS_LOGPOINT_BINDING in globals).toBe(false);
+        hit(2);
+        expect(kept()).toEqual(['m2']);
+        // Asked again with nothing there, it still answers that the function is gone.
+        expect(new Function(`return ${JS_LOGPOINT_UNBIND};`)()).toBe(true);
+      } finally {
+        delete globals[JS_LOGPOINT_BINDING];
+      }
+    });
+
+    it("the clear the proxy evaluates when it lets go leaves neither the kept messages nor the binding's function", () => {
+      globals[JS_LOGPOINT_BINDING] = () => undefined;
+      globals[JS_LOGPOINT_QUEUE] = ['left over'];
+      globals[JS_LOGPOINT_DROPPED] = 2;
+      try {
+        expect(new Function(`return ${JS_LOGPOINT_CLEAR};`)()).toBe(0);
+        expect(JS_LOGPOINT_BINDING in globals).toBe(false);
+        expect(JS_LOGPOINT_QUEUE in globals).toBe(false);
+        expect(JS_LOGPOINT_DROPPED in globals).toBe(false);
+      } finally {
+        delete globals[JS_LOGPOINT_BINDING];
+      }
     });
 
     it('a hit that delivers the kept messages gives the character budget back', () => {

@@ -58,6 +58,7 @@ describe('MinimalDapClient', () => {
     stepRequest: Mock<ChildSessionManager['stepRequest']>;
     beforeChildRequest: Mock<ChildSessionManager['beforeChildRequest']>;
     setStepThroughSkippedCode: Mock<ChildSessionManager['setStepThroughSkippedCode']>;
+    beforeRelease: Mock<ChildSessionManager['beforeRelease']>;
   };
 
   const createChildSessionManagerStub = (): ChildSessionManagerStub => {
@@ -77,6 +78,7 @@ describe('MinimalDapClient', () => {
     emitter.stepRequest = vi.fn<ChildSessionManager['stepRequest']>().mockReturnValue(null);
     emitter.beforeChildRequest = vi.fn<ChildSessionManager['beforeChildRequest']>().mockResolvedValue(undefined);
     emitter.setStepThroughSkippedCode = vi.fn<ChildSessionManager['setStepThroughSkippedCode']>();
+    emitter.beforeRelease = vi.fn<ChildSessionManager['beforeRelease']>().mockResolvedValue(undefined);
     return emitter;
   };
 
@@ -1122,6 +1124,59 @@ describe('MinimalDapClient', () => {
         childSessionManagerFactory: () => stubManager as unknown as ChildSessionManager
       });
       expect(managed.flushChildEvents()).toBe(chain);
+      managed.shutdown();
+    });
+
+    it('releases the program before a disconnect that leaves it running, and not before one that ends it (issue #1212)', async () => {
+      // The adapter's disconnect closes the target's CDP socket: what the proxy
+      // put into the process has to come out first.
+      const order: string[] = [];
+      const stubManager = createChildSessionManagerStub();
+      let finishRelease!: () => void;
+      stubManager.beforeRelease.mockImplementation(() => {
+        order.push('release asked');
+        return new Promise<void>((resolve) => {
+          finishRelease = () => { order.push('release done'); resolve(); };
+        });
+      });
+      const managed = new MinimalDapClient('localhost', 5678, JsDebugAdapterPolicy, {
+        childSessionManagerFactory: () => stubManager as unknown as ChildSessionManager
+      });
+      const fakeSocket = {
+        destroyed: false,
+        write: vi.fn((raw: Buffer | string, cb?: (err?: Error | null) => void) => {
+          cb?.(null);
+          const [, body] = raw.toString('utf8').split('\r\n\r\n');
+          const request = JSON.parse(body) as DebugProtocol.Request;
+          order.push(`${request.command} written`);
+          setImmediate(() => {
+            void (managed as any).handleProtocolMessage({
+              seq: request.seq, type: 'response', request_seq: request.seq, command: request.command, success: true
+            } satisfies DebugProtocol.Response);
+          });
+          return true;
+        }),
+        end: vi.fn(),
+        destroy: vi.fn()
+      } as unknown as net.Socket;
+      (managed as any).socket = fakeSocket;
+
+      const detaching = managed.sendRequest('disconnect', { terminateDebuggee: false });
+      await vi.waitFor(() => expect(finishRelease).toBeDefined());
+      await new Promise((resolve) => setImmediate(resolve));
+      // Awaited: nothing is on the wire while the release is out.
+      expect(order).toEqual(['release asked']);
+      finishRelease();
+      await detaching;
+      expect(order).toEqual(['release asked', 'release done', 'disconnect written']);
+
+      // A disconnect that ends the program has nothing to leave clean.
+      order.length = 0;
+      stubManager.beforeRelease.mockClear();
+      await managed.sendRequest('disconnect', { terminateDebuggee: true });
+      await managed.sendRequest('disconnect');
+      expect(stubManager.beforeRelease).not.toHaveBeenCalled();
+      expect(order).toEqual(['disconnect written', 'disconnect written']);
       managed.shutdown();
     });
 

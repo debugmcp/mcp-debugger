@@ -329,16 +329,19 @@ its first statement runs: the socket is asked for the moment the fork's `configu
 answered, and js-debug lets the fork run about 20 ms later. A hit that comes before the binding
 is kept in the process and delivered, in order, as soon as the binding is in. What is kept is
 bounded (1000 messages and 1,000,000 characters; when the binding goes in, a line says how many
-did not fit), sits on globals that are not enumerable, and is deleted when the debugger lets go
-of a process it has a socket to. The
+did not fit) and sits on globals that are not enumerable. When the debugger lets go of a process
+that runs on (a detach from an attached process, a closed fork or worker session) it first takes
+out what it put in: what was kept, and the binding's function itself, which CDP's
+`Runtime.removeBinding` leaves behind (measured: after a detach the process used to keep the
+function; it now has neither). The
 end of a fork is reported after one round trip on its CDP socket (at most 500 ms): its last
 lines were measured to arrive about 1 ms after the adapter's `terminated`. A fork that hits two
 logpoints and exits at once delivered both lines in 12 of 12 runs with that wait, and in 0 of 12
 without it. What is still lost: the lines of a process whose CDP socket never opens, or whose
 socket is lost while it runs. If it was sent a logpoint and the socket could not be set up, its
 session carries one `[mcp-debugger] Warning` line saying that its logpoints are not delivered;
-such a process keeps what it queued (within the bounds above) until it exits. Function
-breakpoints are not armed in a fork (#1219, #1226).
+such a process keeps what it queued (within the bounds above) until it exits, because there is
+no socket to take it out through. Function breakpoints are not armed in a fork (#1219, #1226).
 
 The program's own process gains from the same change: a logpoint on its first statement used to
 go out through its `console.log` (measured on an ES module: the line arrived as `stdout` in 12

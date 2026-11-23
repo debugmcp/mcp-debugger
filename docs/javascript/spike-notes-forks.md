@@ -106,4 +106,15 @@ the fork's connection.
    has queued for a session it holds paused (a target between its creation and its bind, which
    cannot run yet), a `terminated` that has another cause than the target's own connection closing,
    and notifications the process never flushed before it exited.
-10. **Not measured here:** macOS, and a fork under an attach root.
+10. **`Runtime.removeBinding` leaves the function in the process** (Node 24.14.1, straight to the
+    inspector): after it, `typeof` of the binding is still `'function'`, a call does not throw, and
+    the function is there for the next socket too. It only ends the notifications. A compiled
+    logpoint decides by that `typeof`, so a function without a listener swallows every later hit.
+    `delete globalThis.<name>` removes it, and `Runtime.addBinding` puts it back.
+11. **What a release leaves behind** (a long-lived process that reports on itself; through the
+    server). Detach from an attached process: on main the function stays (`binding: "function"`);
+    with the release evaluated before the adapter's `disconnect`, the process has neither the
+    function nor a queue. The same evaluation sent after the disconnect does nothing: the adapter
+    has closed the target's CDP socket by then. Closing a fork's session (js-debug releases it):
+    neither is left.
+12. **Not measured here:** macOS, and a fork under an attach root.

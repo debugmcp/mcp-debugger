@@ -18,7 +18,7 @@
 import { EventEmitter } from 'events';
 import { fileURLToPath } from 'url';
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import { JS_LOGPOINT_BINDING, JS_LOGPOINT_CLEAR, JS_LOGPOINT_FLUSH } from '@debugmcp/shared';
+import { JS_LOGPOINT_BINDING, JS_LOGPOINT_CLEAR, JS_LOGPOINT_FLUSH, JS_LOGPOINT_UNBIND } from '@debugmcp/shared';
 import { CdpProxyClient } from './cdp-proxy-client.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -340,25 +340,28 @@ export class CdpFunctionBreakpointBridge extends EventEmitter {
         return;
       }
       // A binding that went in before the failure stays in the process
-      // when this socket closes (it lives on the adapter's own session
-      // with the target): every later hit would call it, queue nothing,
-      // and reach nobody. So it is taken out again, bounded, before the
-      // socket goes: hits are then kept in the process as they are for
-      // any target without a channel, and the session is told.
+      // when this socket closes: its function is a property of the
+      // process's global object, and every later hit would call it, keep
+      // nothing, and reach nobody. So the function is taken out again,
+      // bounded, before the socket goes (`Runtime.removeBinding` alone
+      // leaves it in: see JS_LOGPOINT_UNBIND): hits are then kept in the
+      // process as they are for any target without a channel, and the
+      // session is told.
       //
-      // When the binding cannot be taken out, the usual reason is that the
-      // process has ended: its end is what failed the attach (measured: a
-      // fork that logs twice and exits at once fails `Debugger.enable`
-      // with "Connection is closed" after both lines were delivered).
-      // Nothing more will hit there, and a warning would be about lines
-      // that arrived. So that case says nothing.
+      // When it cannot be taken out, the usual reason is that the process
+      // has ended: its end is what failed the attach (measured: a fork
+      // that logs twice and exits at once fails `Debugger.enable` with
+      // "Connection is closed" after both lines were delivered). Nothing
+      // more will hit there, and a warning would be about lines that
+      // arrived. So that case says nothing.
       if (!this.bindingInstalled) {
         this.logpointChannelDown(message);
       } else if (client?.isConnected()) {
-        const removed = await client
-          .send('Runtime.removeBinding', { name: JS_LOGPOINT_BINDING }, 1000)
-          .then(() => true, () => false);
-        if (removed) {
+        const gone = await client
+          .send<{ result?: { value?: unknown } }>('Runtime.evaluate', { expression: JS_LOGPOINT_UNBIND, returnByValue: true }, 1000)
+          .then((answer) => answer?.result?.value === true, () => false);
+        void client.send('Runtime.removeBinding', { name: JS_LOGPOINT_BINDING }, 1000).catch(() => undefined);
+        if (gone) {
           this.logpointChannelDown(message);
         }
       }
@@ -415,6 +418,24 @@ export class CdpFunctionBreakpointBridge extends EventEmitter {
         output: `[mcp-debugger] Warning: logpoints that hit in this process are not delivered: the debugger's channel into it is not available (${reason}). Their messages are kept out of the program's own output.\n`
       }
     } as DebugProtocol.OutputEvent);
+  }
+
+  /**
+   * Take out of a process that will live on what the proxy put into it: the
+   * binding's function and anything its logpoints kept (issue #1212). Awaited
+   * by whoever is about to send the adapter the `disconnect` that releases
+   * the target, because that disconnect takes this socket with it: measured,
+   * a `detach()` that runs afterwards finds it closed and the function stays
+   * in the process. One bounded round trip; never rejects.
+   */
+  async release(timeoutMs = 500): Promise<void> {
+    const client = this.client;
+    if (!client?.isConnected()) {
+      return;
+    }
+    await client
+      .send('Runtime.evaluate', { expression: JS_LOGPOINT_CLEAR, returnByValue: true }, timeoutMs)
+      .catch(() => undefined);
   }
 
   /** The CDP socket is open: what rides on it is live. */
@@ -505,8 +526,11 @@ export class CdpFunctionBreakpointBridge extends EventEmitter {
     if (client?.isConnected()) {
       // Best effort: a target that outlives the session (attach) should not
       // keep a dangling global, nor what its logpoints kept while the
-      // binding was absent (issue #1212). The sends are not awaited; the
-      // socket closes right after.
+      // binding was absent (issue #1212). The evaluation is what removes
+      // the binding's function; `Runtime.removeBinding` only ends the
+      // notifications (measured, see JS_LOGPOINT_UNBIND). The sends are
+      // not awaited, and the socket closes right after: a command sent
+      // before a close was measured to land.
       void client.send('Runtime.evaluate', { expression: JS_LOGPOINT_CLEAR, returnByValue: true }).catch(() => undefined);
       if (this.bindingInstalled) {
         void client.send('Runtime.removeBinding', { name: JS_LOGPOINT_BINDING }).catch(() => undefined);

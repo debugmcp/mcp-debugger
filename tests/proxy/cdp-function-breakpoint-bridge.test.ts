@@ -15,7 +15,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { CdpFunctionBreakpointBridge, MAX_SCRIPT_URLS } from '../../src/proxy/cdp-function-breakpoint-bridge.js';
-import { JS_LOGPOINT_BINDING, JS_LOGPOINT_CLEAR, JS_LOGPOINT_FLUSH } from '@debugmcp/shared';
+import { JS_LOGPOINT_BINDING, JS_LOGPOINT_CLEAR, JS_LOGPOINT_FLUSH, JS_LOGPOINT_UNBIND } from '@debugmcp/shared';
 
 type CdpHandler = (params: Record<string, unknown>) => unknown;
 
@@ -880,31 +880,37 @@ describe('CdpFunctionBreakpointBridge', () => {
 
     });
 
-    it('an attach that fails after the binding went in takes the binding out again and says the channel is down', async () => {
-      // The binding lives on the adapter's own session with the target: left
-      // in, every later hit would call it, queue nothing, and reach nobody.
+    it("an attach that fails after the binding went in takes the binding's function out of the process and says the channel is down", async () => {
+      // The function is a property of the process's global object: left in,
+      // every later hit would call it, keep nothing, and reach nobody. And
+      // Runtime.removeBinding alone leaves it in (measured).
       const outputs: DebugProtocol.OutputEvent[] = [];
       bridge.on('outputEvent', (evt: DebugProtocol.OutputEvent) => outputs.push(evt));
       bridge.noteLogpoints();
       cdp.handlers.set('Debugger.enable', () => {
         throw new Error('Debugger.enable failed');
       });
+      const lookup = cdp.handlers.get('Runtime.evaluate')!;
+      cdp.handlers.set('Runtime.evaluate', (p) => (p.expression === JS_LOGPOINT_UNBIND ? { result: { type: 'boolean', value: true } } : lookup(p)));
 
       await attach();
 
+      const unbind = cdp.calls.filter((c) => c.method === 'Runtime.evaluate' && c.params.expression === JS_LOGPOINT_UNBIND);
+      expect(unbind).toHaveLength(1);
+      expect(unbind[0].params).toMatchObject({ returnByValue: true });
       const order = cdp.calls.map((c) => c.method);
       expect(cdp.callsFor('Runtime.removeBinding')).toEqual([{ method: 'Runtime.removeBinding', params: { name: JS_LOGPOINT_BINDING } }]);
-      expect(order.indexOf('Runtime.addBinding')).toBeLessThan(order.indexOf('Runtime.removeBinding'));
+      expect(order.indexOf('Runtime.addBinding')).toBeLessThan(order.lastIndexOf('Runtime.evaluate'));
       // Before the socket goes, and bounded.
       expect(cdp.disposeCalls).toBe(1);
-      expect(cdp.timeouts.get('Runtime.removeBinding')).toEqual([1000]);
+      expect(cdp.timeouts.get('Runtime.evaluate')?.at(-1)).toBe(1000);
       expect(bridge.isAttached()).toBe(false);
       expect(outputs.map((o) => o.body.output)).toEqual([
         expect.stringMatching(/logpoints that hit in this process are not delivered.*Debugger\.enable failed/)
       ]);
     });
 
-    it('says nothing when the binding cannot be taken out again: the process ended while the attach was finishing', async () => {
+    it("says nothing when the function cannot be taken out again: the process ended while the attach was finishing", async () => {
       // Measured with a fork that hits two logpoints and exits at once: both
       // lines arrive, then `Debugger.enable` fails because the target is gone.
       const outputs: DebugProtocol.OutputEvent[] = [];
@@ -913,14 +919,36 @@ describe('CdpFunctionBreakpointBridge', () => {
       cdp.handlers.set('Debugger.enable', () => {
         throw new Error('Debugger.enable: Connection is closed');
       });
-      cdp.handlers.set('Runtime.removeBinding', () => {
-        throw new Error('Runtime.removeBinding: Connection is closed');
+      const lookup = cdp.handlers.get('Runtime.evaluate')!;
+      cdp.handlers.set('Runtime.evaluate', (p) => {
+        if (p.expression === JS_LOGPOINT_UNBIND) {
+          throw new Error('Runtime.evaluate: Connection is closed');
+        }
+        return lookup(p);
       });
 
       await attach();
 
-      expect(cdp.callsFor('Runtime.removeBinding')).toHaveLength(1);
+      expect(cdp.calls.filter((c) => c.params.expression === JS_LOGPOINT_UNBIND)).toHaveLength(1);
       expect(cdp.disposeCalls).toBe(1);
+      expect(outputs).toHaveLength(0);
+    });
+
+    it('says nothing either when the process answers that the function is still there', async () => {
+      // A global that cannot be changed: the hits are not kept, and a sentence
+      // saying they are would be wrong. (They are not delivered either; the
+      // case is a program that froze its global object.)
+      const outputs: DebugProtocol.OutputEvent[] = [];
+      bridge.on('outputEvent', (evt: DebugProtocol.OutputEvent) => outputs.push(evt));
+      bridge.noteLogpoints();
+      cdp.handlers.set('Debugger.enable', () => {
+        throw new Error('Debugger.enable failed');
+      });
+      const lookup = cdp.handlers.get('Runtime.evaluate')!;
+      cdp.handlers.set('Runtime.evaluate', (p) => (p.expression === JS_LOGPOINT_UNBIND ? { result: { type: 'boolean', value: false } } : lookup(p)));
+
+      await attach();
+
       expect(outputs).toHaveLength(0);
     });
 
@@ -961,6 +989,43 @@ describe('CdpFunctionBreakpointBridge', () => {
       bridge.detach();
       expect(cdp.callsFor('Runtime.removeBinding')).toEqual([{ method: 'Runtime.removeBinding', params: { name: JS_LOGPOINT_BINDING } }]);
       expect(cdp.disposeCalls).toBe(1);
+    });
+
+    it("release() takes the proxy's things out of a process that will live on: one awaited, bounded evaluation, while the socket is up", async () => {
+      // Whoever sends the adapter the disconnect that releases the target awaits
+      // this first: measured, the disconnect takes the socket with it, and a
+      // detach() afterwards finds it closed and leaves the function in the process.
+      await expect(bridge.release()).resolves.toBeUndefined();
+      expect(cdp.calls).toHaveLength(0);
+
+      await attach();
+      let answer!: () => void;
+      const lookup = cdp.handlers.get('Runtime.evaluate')!;
+      cdp.handlers.set('Runtime.evaluate', (p) =>
+        p.expression === JS_LOGPOINT_CLEAR ? new Promise<void>((resolve) => { answer = resolve; }) : lookup(p));
+      const before = cdp.calls.length;
+      let released = false;
+      const releasing = bridge.release().then(() => { released = true; });
+      await vi.waitFor(() => expect(answer).toBeDefined());
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(released).toBe(false);
+      expect(cdp.calls.slice(before)).toEqual([
+        { method: 'Runtime.evaluate', params: { expression: JS_LOGPOINT_CLEAR, returnByValue: true } }
+      ]);
+      expect(cdp.timeouts.get('Runtime.evaluate')?.at(-1)).toBe(500);
+      // The socket is not closed by it: detach() does that.
+      expect(cdp.disposeCalls).toBe(0);
+
+      answer();
+      await releasing;
+      expect(released).toBe(true);
+
+      // A process that cannot answer does not fail the release.
+      cdp.handlers.set('Runtime.evaluate', () => {
+        throw new Error('Connection is closed');
+      });
+      await expect(bridge.release()).resolves.toBeUndefined();
     });
 
     it('leaves nothing of the kept messages in a process it lets go of, binding or not (issue #1212)', async () => {

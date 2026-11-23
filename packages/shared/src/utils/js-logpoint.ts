@@ -52,10 +52,31 @@ export const JS_LOGPOINT_QUEUE_LIMIT = 1000;
 /** How many characters of undelivered messages a process keeps, all messages together. */
 export const JS_LOGPOINT_QUEUE_CHARS = 1_000_000;
 
-/** Evaluated by the proxy when it lets go of a process: nothing of the queue stays behind. */
+/**
+ * Evaluated by the proxy to take the binding's function out of the process,
+ * and answers whether it is gone. CDP's `Runtime.removeBinding` does not do
+ * that: it stops the notifications and leaves the function where it is
+ * (measured on Node 24: `typeof` stays `'function'`, a call does not throw,
+ * and it is still there for the next socket). A compiled logpoint decides
+ * by that `typeof`, so a function left behind without a listener swallows
+ * every later hit: neither delivered nor kept. `Runtime.addBinding` puts the
+ * function back. The process's default context only.
+ */
+export const JS_LOGPOINT_UNBIND = `(() => {
+  try { delete globalThis.${JS_LOGPOINT_BINDING}; } catch (e) { /* a global that cannot be changed keeps it */ }
+  return typeof ${JS_LOGPOINT_BINDING} !== 'function';
+})()`;
+
+/**
+ * Evaluated by the proxy when it lets go of a process: nothing of this stays
+ * behind, neither what was kept nor the binding's function.
+ */
 export const JS_LOGPOINT_CLEAR = `(() => {
-  delete globalThis.${JS_LOGPOINT_QUEUE};
-  delete globalThis.${JS_LOGPOINT_DROPPED};
+  try {
+    delete globalThis.${JS_LOGPOINT_QUEUE};
+    delete globalThis.${JS_LOGPOINT_DROPPED};
+    delete globalThis.${JS_LOGPOINT_BINDING};
+  } catch (e) { /* a global that cannot be changed keeps them */ }
   return 0;
 })()`;
 

@@ -377,6 +377,11 @@ export class ChildConnections extends EventEmitter {
     connection.closed = true;
     this.clients.delete(sessionId);
     connection.cancelAdoption?.('child session closed during adoption');
+    // A child that is let go to run on keeps nothing of the proxy's (issue
+    // #1212): asked and awaited while its CDP socket is still up.
+    if (options.terminateDebuggee === false || this.options.adoption?.policy.childAdoption?.closeChild === 'release') {
+      await connection.services?.release();
+    }
     this.closeServices(connection);
     const deps = this.options.adoption;
     try {

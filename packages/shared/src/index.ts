@@ -315,6 +315,7 @@ export {
   JS_LOGPOINT_QUEUE,
   JS_LOGPOINT_QUEUE_CHARS,
   JS_LOGPOINT_QUEUE_LIMIT,
+  JS_LOGPOINT_UNBIND,
   parseJsLogMessage,
   validateJsLogpoint,
   compileJsLogpoint,
