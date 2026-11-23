@@ -321,11 +321,16 @@ export class ChildConnections extends EventEmitter {
         // The report is no longer held, so the server's release command that
         // follows finds nothing: let the child go here, by the policy's lever.
         this.giveUp(held, `adoption failed: ${message}`);
-        this.emitEmptyIfSo();
-        try {
-          client?.shutdown(`child adoption failed: ${message}`);
-        } catch {
-          // best effort
+        if (!cancelledByClose) {
+          // When close() cancelled the handshake it is still awaiting its own
+          // disconnect on connection.client: shutting the client down or
+          // announcing empty here would abort that disconnect mid-flight.
+          this.emitEmptyIfSo();
+          try {
+            client?.shutdown(`child adoption failed: ${message}`);
+          } catch {
+            // best effort
+          }
         }
       }
       throw error;

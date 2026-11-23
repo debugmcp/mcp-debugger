@@ -506,6 +506,26 @@ describe('ChildConnections: adopting a reported child', () => {
     expect(connections.unarmedFunctionBreakpoints('child-1', 'setFunctionBreakpoints', { breakpoints: [{ name: 'main' }] })).toBeNull();
   });
 
+  it('close() during a reject-request handshake does not shut the socket down or announce empty before its disconnect finishes (issue #1219)', async () => {
+    let finishDisconnect!: () => void;
+    connectionManager.disconnect.mockImplementation(() => new Promise((resolve) => {
+      finishDisconnect = () => resolve({ answered: true });
+    }));
+    const empty = vi.fn();
+    connections.on('empty', empty);
+    const { adopting } = await startAdoption();
+
+    const closing = connections.close('child-1', { terminateDebuggee: true });
+    await expect(adopting).rejects.toThrow('child session closed during adoption');
+    expect(childClient.shutdown).not.toHaveBeenCalled();
+    expect(empty).not.toHaveBeenCalled();
+
+    finishDisconnect();
+    await closing;
+    expect(childClient.shutdown).toHaveBeenCalledWith('child session closed');
+    expect(empty).toHaveBeenCalledTimes(1);
+  });
+
   it('continues adoption if function breakpoints are unsupported', async () => {
     childClient.sendRequest.mockRejectedValueOnce(new Error('unsupported functions'));
     const adopting = connections.adopt('child-1', { reportId: reportAChild(), functionBreakpoints: [{ name: 'worker' }] });
@@ -988,15 +1008,36 @@ describe('ChildConnections under the throwaway-attach lever (js-debug, issue #10
       await vi.waitFor(() => expect(connectionManager.disconnect).toHaveBeenCalledWith(childClient, false));
     });
 
-    it('close() during such a handshake keeps its own path: it sends the disconnect, and the throwaway attach still runs', async () => {
+    it('close() during such a handshake keeps its own path: it sends the disconnect without adopt() shutting the socket down underneath it, and the throwaway attach still runs', async () => {
+      let finishDisconnect!: () => void;
+      connectionManager.disconnect.mockImplementation(() => new Promise((resolve) => {
+        finishDisconnect = () => resolve({ answered: true });
+      }));
       const { adopting } = await adoptionPastConfigurationDone();
 
-      await connections.close('child-1', { terminateDebuggee: false });
+      const closing = connections.close('child-1', { terminateDebuggee: false });
       await expect(adopting).rejects.toThrow('child session closed during adoption');
-
+      // close() is still awaiting its disconnect on childClient: adopt()'s
+      // catch must not have destroyed childClient underneath it.
       expect(connectionManager.disconnect).toHaveBeenCalledTimes(1);
+      expect(childClient.shutdown).not.toHaveBeenCalled();
+
+      finishDisconnect();
+      await closing;
+      expect(childClient.shutdown).toHaveBeenCalledWith('child session closed');
       await throwawayRan(releaseClient);
       expect(connectionManager.disconnect).toHaveBeenCalledTimes(1);
+    });
+
+    it('contains an unexpected disconnect rejection in letGoOnItsConnection and still settles releases', async () => {
+      connectionManager.disconnect.mockRejectedValueOnce(new Error('disconnect transport exploded'));
+      const { adopting } = await adoptionPastConfigurationDone();
+
+      rejectAttach(new Error('attach failed late'));
+      await expect(adopting).rejects.toThrow('attach failed late');
+
+      await vi.waitFor(() => expect(connections.liveCount()).toBe(0));
+      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('disconnect transport exploded'));
     });
 
     it('an attach that failed together with the last step before configurationDone still stops there', async () => {
