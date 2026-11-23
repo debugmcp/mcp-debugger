@@ -96,13 +96,16 @@ interface Target { proc: ChildProcess; port: number; output: () => string; exite
 
 let targets: Target[] = [];
 
+const PORT_IN_USE_PATTERN = /Address already in use|EADDRINUSE|10048/i;
+
 /**
  * Start attach_parent.py under `python -m debugpy --listen` and wait for its
  * READY line. No TCP probe: a session-less connect makes the adapter exit
  * (docs/python/spike-notes-subprocess.md), and the script prints READY after
- * debugpy has its listener up.
+ * debugpy has its listener up. Retries if a parallel test grabs the ephemeral
+ * port between `getFreePort()` closing its probe socket and `debugpy` binding.
  */
-async function startTarget(extraArgs: string[] = []): Promise<Target> {
+async function startTargetOnce(extraArgs: string[] = []): Promise<Target> {
   const port = await getFreePort();
   const proc = spawn(PYTHON, ['-m', 'debugpy', '--listen', `127.0.0.1:${port}`, ...extraArgs, attachParent], {
     cwd: treeDir,
@@ -127,6 +130,24 @@ async function startTarget(extraArgs: string[] = []): Promise<Target> {
     proc.on('exit', (code) => { clearTimeout(timer); reject(new Error(`debugpy target exited ${code} before ready: ${buffer}`)); });
   });
   return target;
+}
+
+async function startTarget(extraArgs: string[] = []): Promise<Target> {
+  const maxAttempts = 4;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await startTargetOnce(extraArgs);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (attempt < maxAttempts && PORT_IN_USE_PATTERN.test(message)) {
+        const failed = targets.pop();
+        if (failed && failed.proc.exitCode === null) failed.proc.kill();
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error('unreachable');
 }
 
 /** The target's exit, with its own pipe's last lines: the proof that nothing killed it. */
