@@ -2052,6 +2052,13 @@ export class DapProxyWorker {
   /** A child session's DAP request, answered on the child's envelope (issue #1081). */
   private async forwardToChild(childClient: IDapClient, payload: DapCommandPayload): Promise<void> {
     try {
+      // Function breakpoints of an adapter that has no request for them are
+      // answered here: sent, they would never be answered (issue #1219).
+      const unarmed = this.childConnections?.unarmedFunctionBreakpoints(payload.sessionId, payload.dapCommand, payload.dapArgs);
+      if (unarmed) {
+        this.sendDapResponse(payload.requestId, true, unarmed, undefined, payload.sessionId);
+        return;
+      }
       // A step of a child that steps through skipped code is its proxy
       // stepper's (issue #1130); any other request may end a step in flight.
       const stepped = this.childConnections?.stepRequest(payload.sessionId, payload.dapCommand, payload.dapArgs);
