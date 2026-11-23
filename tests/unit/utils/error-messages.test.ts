@@ -7,14 +7,16 @@ describe('ErrorMessages', () => {
     const message = ErrorMessages.dapRequestTimeout('stackTrace', 10);
     expect(message).toContain('stackTrace');
     expect(message).toContain('10s');
-    expect(message).toContain('Try restart_debugging to relaunch the session.');
   });
 
-  it('does not send an attach session to restart_debugging, which refuses it (issue #1213)', () => {
-    const message = ErrorMessages.dapRequestTimeout('threads', 25, true);
+  it('names the way back for every kind of session, not restart_debugging for all of them (issue #1213)', () => {
+    // restart_debugging replays a launch: it refuses an attach session and a child session.
+    const message = ErrorMessages.dapRequestTimeout('threads', 25);
     expect(message).toContain("did not respond to 'threads' request within 25s");
     expect(message).not.toContain('Try restart_debugging');
-    expect(message).toContain('use attach_to_process to attach again');
+    expect(message).toContain('restart_debugging if this session was started with start_debugging');
+    expect(message).toContain('attach_to_process if it was attached (restart_debugging refuses an attach session)');
+    expect(message).toContain('a child session comes back with its parent');
   });
 
   it('builds dap request timeout hint naming the timeout tool arg', () => {

@@ -36,6 +36,18 @@ describe('verifyAttachThreads', () => {
     expect(bound).toBeLessThanOrEqual(400);
   });
 
+  it("leaves no timer behind when the debugger answers: the window's own timer is cleared", async () => {
+    vi.useFakeTimers();
+    try {
+      const proxy = fakeProxy(async () => threads([{ id: 1, name: 'main' }]));
+      const result = await verifyAttachThreads(ctx, { proxyManager: proxy as never, verifyTimeoutMs: 20000, pollIntervalMs: 250 });
+      expect(result.ok).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('polls again while the debugger reports no thread yet', async () => {
     let calls = 0;
     const proxy = fakeProxy(async () => (++calls < 3 ? threads([]) : threads([{ id: 7, name: 'worker' }])));

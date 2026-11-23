@@ -119,15 +119,19 @@ export const ErrorMessages = {
    * Default timeout: 35 seconds
    * @param command - The DAP command that timed out (e.g., 'stackTrace', 'variables')
    * @param timeout - The timeout duration in seconds
-   * @param attached - The session attached to a program it did not start: the recovery is another attach
    */
-  dapRequestTimeout: (command: string, timeout: number, attached = false) =>
+  dapRequestTimeout: (command: string, timeout: number) =>
     `Debug adapter did not respond to '${command}' request within ${timeout}s. ` +
     `This typically means the debug adapter has crashed or lost connection. ` +
-    // restart_debugging replays a launch and refuses an attach session (issue #1213).
-    (attached
-      ? `This session attached to its program, so restart_debugging cannot relaunch it: use attach_to_process to attach again. `
-      : `Try restart_debugging to relaunch the session. `) +
+    // One sentence for every kind of session (issue #1213). It used to say
+    // "Try restart_debugging" to all of them, and restart_debugging replays a
+    // launch: it refuses an attach session and a child session. The layer
+    // that words this cannot tell the kinds apart reliably (launch arguments
+    // can be attach-shaped, and a child's requests travel on its root's
+    // worker), so it names each way back and whose it is.
+    `To go on, start the program again: restart_debugging if this session was started with start_debugging, ` +
+    `attach_to_process if it was attached (restart_debugging refuses an attach session); ` +
+    `a child session comes back with its parent. ` +
     `If the problem persists, check the debug adapter logs.`,
 
   /**

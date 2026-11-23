@@ -179,11 +179,18 @@ export async function verifyAttachThreads(
  * Send a DAP 'threads' request bounded by the remaining verification window.
  *
  * The bound is passed to the request itself (`timeoutMs`, honoured end to end
- * by the worker's request tracker) rather than raced against a local timer:
- * a request the deadline abandons is then cancelled everywhere, instead of
- * sitting in the ProxyManager's pending set for the verify-failure stop() to
- * drain — a full stopDrainTimeoutMs wait ending in a spurious "still pending"
- * warning for a request nobody was waiting on.
+ * by the worker's request tracker): a request its own deadline ends is then
+ * cancelled everywhere, instead of sitting in the ProxyManager's pending set
+ * for the verify-failure stop() to drain.
+ *
+ * `verifyAttachThreads` also stops waiting when the window closes (issue
+ * #1213). That only ever abandons a request in the one case the bound cannot
+ * cover, a worker that answers nothing at all, and there the price named
+ * above is paid on purpose: the stop() that follows drains the abandoned
+ * request for stopDrainTimeoutMs and logs it as still pending. It is paid
+ * once, in a teardown that already has to wait out an unresponsive worker,
+ * and it is less than the five seconds the parent's backstop used to add to
+ * the verification itself.
  */
 export async function sendThreadsRequestBounded(
   proxyManager: NonNullable<ManagedSession['proxyManager']>,
