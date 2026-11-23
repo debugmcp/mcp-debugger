@@ -935,6 +935,60 @@ describe('CdpFunctionBreakpointBridge', () => {
       expect(outputs).toHaveLength(0);
     });
 
+    it('says nothing when the CDP WebSocket closes after Runtime.addBinding succeeded: onClosed resetting bindingInstalled does not trigger a false warning', async () => {
+      const outputs: DebugProtocol.OutputEvent[] = [];
+      bridge.on('outputEvent', (evt: DebugProtocol.OutputEvent) => outputs.push(evt));
+      bridge.noteLogpoints();
+      cdp.handlers.set('Debugger.enable', () => {
+        // Real CdpProxyClient.onClosed sets connected=false and emits 'closed'
+        // synchronously before the pending Debugger.enable rejection settles.
+        cdp.connected = false;
+        cdp.emit('closed');
+        throw new Error('CDP proxy connection closed');
+      });
+
+      await attach();
+
+      expect(bridge.isAttached()).toBe(false);
+      expect(outputs).toHaveLength(0);
+    });
+
+    it('abandons rollback without clobbering a newer attach or warning when detach() runs during JS_LOGPOINT_UNBIND', async () => {
+      const outputs: DebugProtocol.OutputEvent[] = [];
+      bridge.on('outputEvent', (evt: DebugProtocol.OutputEvent) => outputs.push(evt));
+      bridge.noteLogpoints();
+      let finishUnbind!: () => void;
+      const firstCdp = cdp;
+      firstCdp.handlers.set('Debugger.enable', () => {
+        throw new Error('Debugger.enable failed');
+      });
+      const lookup = firstCdp.handlers.get('Runtime.evaluate')!;
+      firstCdp.handlers.set('Runtime.evaluate', (p) =>
+        p.expression === JS_LOGPOINT_UNBIND
+          ? new Promise((resolve) => {
+              finishUnbind = () => resolve({ result: { type: 'boolean', value: true } });
+            })
+          : lookup(p)
+      );
+
+      const firstAttach = attach();
+      await vi.waitFor(() => expect(finishUnbind).toBeDefined());
+
+      // Detach and attach a fresh client while the first attach's rollback is still awaiting unbind.
+      bridge.detach();
+      const secondCdp = new FakeCdpClient();
+      currentClient = secondCdp;
+      await attach();
+      expect(bridge.isAttached()).toBe(true);
+
+      finishUnbind();
+      await firstAttach;
+
+      // Neither a stale warning nor a cleared secondCdp!
+      expect(outputs).toHaveLength(0);
+      expect(bridge.isAttached()).toBe(true);
+    });
+
     it.each([
       ['answers that the function is still there (a global that cannot be changed)', () => ({ result: { type: 'boolean', value: false } })],
       ['does not answer in time (its main thread is blocked): the socket is open, so it is there', () => {

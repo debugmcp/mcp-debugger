@@ -3053,6 +3053,24 @@ describe('MinimalDapClient', () => {
         expect(childClient.sendRequest).toHaveBeenCalledExactlyOnceWith('continue', { threadId: 1 }, 30000);
         routed.shutdown();
       });
+
+      it('re-checks socket/shutdown state after awaiting beforeRelease on a detaching disconnect (#1212)', async () => {
+        const stubManager = createChildSessionManagerStub();
+        let finishRelease!: () => void;
+        (stubManager as unknown as { beforeRelease: Mock }).beforeRelease = vi.fn(
+          () => new Promise<void>((resolve) => { finishRelease = resolve; })
+        );
+        const childClient = { sendRequest: vi.fn() } as unknown as MinimalDapClient;
+        const { routed, parentWrite } = routedTo(stubManager, childClient);
+
+        const disconnecting = routed.sendRequest('disconnect', { terminateDebuggee: false });
+        await new Promise((resolve) => setImmediate(resolve));
+        routed.shutdown();
+        finishRelease();
+
+        await expect(disconnecting).rejects.toThrow(/Socket not connected or destroyed|Client is disconnecting or disconnected/);
+        expect(parentWrite).not.toHaveBeenCalled();
+      });
     });
 
     it('end to end with the real child-session manager and stepper: an attach that asked for smartStep', async () => {

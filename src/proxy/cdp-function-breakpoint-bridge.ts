@@ -259,6 +259,7 @@ export class CdpFunctionBreakpointBridge extends EventEmitter {
 
   private async doAttachToChild(child: ChildDapRequestor): Promise<void> {
     let client: CdpProxyClient | null = null;
+    let boundInThisAttach = false;
     const detachCount = this.detachCount;
     const abandoned = (): boolean => detachCount !== this.detachCount;
     try {
@@ -307,6 +308,7 @@ export class CdpFunctionBreakpointBridge extends EventEmitter {
       // session is told so.
       const bindingRefused = await bound;
       if (bindingRefused === null) {
+        boundInThisAttach = true;
         this.bindingInstalled = true;
         this.undeliveredBecause = null;
         this.undeliveredTold = false;
@@ -359,19 +361,28 @@ export class CdpFunctionBreakpointBridge extends EventEmitter {
       // an answer, whatever it says (a global that cannot be changed
       // keeps the function), and no answer in time (a main thread
       // blocked in a native call: the evaluation runs when it returns).
-      if (!this.bindingInstalled) {
+      // `boundInThisAttach`, not `this.bindingInstalled`: when the socket
+      // itself closed, `onClosed` already ran `clearClientState()` and reset
+      // `this.bindingInstalled` before this `catch` resumed.
+      if (!boundInThisAttach) {
         this.logpointChannelDown(message);
       } else if (client?.isConnected()) {
         const ended = await client
           .send('Runtime.evaluate', { expression: JS_LOGPOINT_UNBIND, returnByValue: true }, 1000)
           .then(() => false, (failure: unknown) => !(failure instanceof CdpCallTimeoutError));
+        if (abandoned()) {
+          client.dispose();
+          return;
+        }
         void client.send('Runtime.removeBinding', { name: JS_LOGPOINT_BINDING }, 1000).catch(() => undefined);
         if (!ended) {
           this.logpointChannelDown(message);
         }
       }
       // Roll back any partial connection
-      this.clearClientState();
+      if (this.client === client || this.client === null) {
+        this.clearClientState();
+      }
       client?.dispose();
       for (const entry of this.desired) {
         if (entry.valid && !entry.cdpBreakpointId) {
@@ -653,7 +664,9 @@ export class CdpFunctionBreakpointBridge extends EventEmitter {
     const onEvent = (method: string, params: unknown): void => this.onCdpEvent(method, params as Record<string, unknown>);
     const onClosed = (): void => {
       logger.warn('[CdpFnBpBridge] CDP proxy connection closed; function breakpoints disarmed until re-attach');
-      this.clearClientState();
+      if (this.client === client) {
+        this.clearClientState();
+      }
     };
     client.on('cdp-event', onEvent);
     client.on('closed', onClosed);

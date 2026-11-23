@@ -1623,6 +1623,22 @@ describe("ChildConnections: an adopted child's proxy stepper (issue #1130)", () 
       await adoptWithoutChannel([{ file: '/abs/child.js', line: 3 }, { file: '/abs/child.js', line: 5, logMessage: 'n={n}' }]);
       expect(outputs()).toHaveLength(1);
       expect(outputs()[0]).toMatch(/^\[mcp-debugger\] Warning: logpoints that hit in this process are not delivered/);
+
+      // An empty-string logMessage is still a logpoint (toWireBreakpoint compiles it).
+      await adoptWithoutChannel([{ file: '/abs/child.js', line: 5, logMessage: '' }]);
+      expect(outputs()).toHaveLength(1);
+    });
+
+    it('still opens a CDP socket for the stepper when a policy enables stepping without the CDP bridge', async () => {
+      build({
+        policy: { ...JsDebugAdapterPolicy, functionBreakpointsVia: undefined } as AdapterPolicy,
+        rootSteps: () => true
+      });
+      await adoptChild();
+      const cdp = await stepperOnItsSocket();
+      expect(cdp.sent).toEqual(['JsDebug.subscribe', 'Debugger.enable']);
+      await connections.close('child-1', { terminateDebuggee: false });
+      expect(cdp.disposed).toBe(true);
     });
 
     it('a logpoint set on a child later is noticed on its way to the adapter, in the form it travels in', async () => {

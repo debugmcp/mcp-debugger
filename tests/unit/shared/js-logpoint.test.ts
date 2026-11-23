@@ -286,6 +286,17 @@ describe('compileJsLogpoint', () => {
       const shadowed = new Function(JS_LOGPOINT_BINDING, 'globalThis', 'n', `return (${compiledFor('m{n}')});`);
       expect(shadowed((m: string) => emitted.push(m), null, 4)).toBe(false);
       expect(emitted).toEqual(['m4']);
+
+      // Even if user code replaces the binding with a throwing function, the condition still never throws.
+      expect(
+        shadowed(
+          () => {
+            throw new Error('shadowed binding threw');
+          },
+          null,
+          5
+        )
+      ).toBe(false);
     });
 
     it('keeps a bounded number of characters too, and counts what did not fit', () => {

@@ -167,10 +167,11 @@ over*; JavaScript spike, row "Breakpoints"). So:
 
 ### Output
 
-The launch session's buffer is the whole tree's output. That is already true for both adapters
-and nothing is deduplicated: forks inherit the parent's pipes, so every child line arrives as an
-`output` event on the launch session's connection (Python spike, *Output*; JavaScript spike,
-*Output*).
+The launch session's buffer carries everything the tree writes to inherited stdio. That is already
+true for both adapters and nothing is deduplicated: children with inherited stdio share the
+parent's pipes, so those lines arrive as `output` events on the launch session's connection, while
+what a child writes to a pipe (`fork` with `silent: true`, `spawn` with `stdio: 'pipe'`) is read
+by its parent process only (Python spike, *Output*; JavaScript spike, *Output*).
 
 A child's own buffer carries its own lines **where the adapter can attribute them**:
 
@@ -334,7 +335,7 @@ fold children into the one session, or ignore them. Surveyed 2026-11-03:
 | adapter | engine | mechanism | release lever | child output | today's route to a child | source |
 |---|---|---|---|---|---|---|
 | python | debugpy 1.8.20 | `startDebugging` when advertised, else a `debugpyAttach` event with the same body; child parked until a client attaches | reject the request: the adapter unblocks the child itself, 100 ms | own lines on the child connection with `redirectOutput`, plus the parent's pipe copy | none (a parked child cannot be attached by the agent: no port is reported to it) | [spike notes](../python/spike-notes-subprocess.md), measured |
-| javascript | js-debug 1.140.0 | one `startDebugging { __pendingTargetId }` per process, incl. the program itself; child parked in `waitForDebugger` | a throwaway attach-then-detach ([#501](https://github.com/debugmcp/mcp-debugger/issues/501)); rejecting parks the child forever | tree-wide on the root connection, no attribution | `attach_to_process` by pid or inspector port, which is a new root, not a child | [spike notes](../javascript/spike-notes-forks.md), measured |
+| javascript | js-debug 1.140.0 | one `startDebugging { __pendingTargetId }` per process, incl. the program itself; child parked in `waitForDebugger` | a throwaway attach-then-detach ([#501](https://github.com/debugmcp/mcp-debugger/issues/501)); rejecting parks the child forever | inherited stdio on the root connection, no attribution; logpoint lines on each child's own session ([#1212](https://github.com/debugmcp/mcp-debugger/issues/1212)) | `attach_to_process` by pid or inspector port, which is a new root, not a child | [spike notes](../javascript/spike-notes-forks.md), measured |
 | javascript (browser) | js-debug `pwa-chrome` | the same `startDebugging`, one per page, frame and worker | as above | unmeasured | none | [#989](https://github.com/debugmcp/mcp-debugger/issues/989), unmeasured |
 | ruby | debug gem 1.11.0 (rdbg) | **out of band**: with `fork_mode: both` (the default) the forked child runs `SESSION.activate on_fork: true` and opens its own debug server — the same TCP port with `RUBY_DEBUG_PORT_RANGE` unset (ten retries, then it raises), the next free port in the range otherwise — announced only by a `Debugger can attach via TCP/IP (host:port)` line on the child's stderr; nothing on the parent's DAP connection. A second reading of `server.rb` (2026-11-11) disagrees with that last clause: the TCP server's `accept` calls `super` first, which serves the inherited, already-connected socket (`@sock_for_fork`, `already_connected: true`) before it opens a listener of its own. Unmeasured either way; the [#1085](https://github.com/debugmcp/mcp-debugger/issues/1085) spike settles it | not needed: the child is not parked | the child's stderr reaches the launch session through the inherited pipe | `attach_to_process` by port against the child's own server (the adapter already connects to `rdbg --open` sockets directly), a new root | debug gem source read 2026-11-03: `lib/debug/session.rb` `__fork_setup_for_debugger`, `lib/debug/server.rb` `UI_TcpServer#accept`; Ruby on Windows has no `fork`, so a measurement needs Linux |
 | rust, cpp, cobol | CodeLLDB / LLDB 22.1.8 | **follow**: `target.process.follow-fork-mode` is `parent` or `child` — the debugger keeps one process and releases the other; `stop-on-exec` is `true`; Linux and FreeBSD only; never an automatic report. Since CodeLLDB 1.12 the scripting API has `codelldb.start_debugging(request, configuration)` (the vendored `adapter/scripts/codelldb/api.py`), which makes the adapter send a `startDebugging` reverse request: a script-driven second session, unmeasured here | not applicable | not applicable | cpp and cobol: `attach_to_process` by pid, a new root; rust: no attach mode | setting values read from the vendored `lldb.exe` 2026-11-03 (`follow-fork-mode = parent`); [LLVM D100503](https://reviews.llvm.org/D100503) |

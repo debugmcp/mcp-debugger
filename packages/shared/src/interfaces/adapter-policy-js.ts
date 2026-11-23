@@ -242,7 +242,7 @@ const jsDebugChildAdoption: ChildAdoptionContract = {
   // Rejecting a report parks the child forever (measured); a throwaway
   // attach-then-detach is the only release (#501).
   releaseLever: 'throwaway-attach',
-  // The whole tree's output arrives on the root connection; child connections carry none.
+  // Inherited stdout/stderr arrives on the root connection; a child's own connection carries its logpoints and notices (#1212).
   childOutput: 'launch-session',
   // `disconnect` on a fork, with either flag, leaves it running (measured).
   closeChild: 'release',

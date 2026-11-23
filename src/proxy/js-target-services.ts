@@ -41,8 +41,12 @@ export class JsTargetServices {
   readonly stepper: JsStepper | null;
   /** Present when the policy delivers function breakpoints over CDP. */
   readonly bridge: CdpFunctionBreakpointBridge | null;
+  private readonly cdpClientFactory?: () => CdpProxyClient;
+  private stepperOnlyClient: CdpProxyClient | null = null;
+  private detachCount = 0;
 
   constructor(options: JsTargetServicesOptions) {
+    this.cdpClientFactory = options.cdpClientFactory;
     this.stepper = options.stepper
       ? new JsStepper({
           target: {
@@ -73,13 +77,47 @@ export class JsTargetServices {
    * not delivered.
    */
   async attach(target: ChildDapRequestor): Promise<void> {
-    if (!this.bridge) {
+    if (this.bridge) {
+      await this.bridge.attachToChild(target);
+      if (!this.bridge.isAttached()) {
+        // No socket after all: the stepper lets go of the one it was handed.
+        this.stepper?.detachCdp();
+      }
       return;
     }
-    await this.bridge.attachToChild(target);
-    if (!this.bridge.isAttached()) {
-      // No socket after all: the stepper lets go of the one it was handed.
-      this.stepper?.detachCdp();
+    if (!this.stepper) {
+      return;
+    }
+    const detachCount = this.detachCount;
+    let cdp: CdpProxyClient | null = null;
+    try {
+      const response = (await target.sendRequest('requestCDPProxy', {}, 5000)) as {
+        body?: { host?: string; port?: number; path?: string };
+      };
+      if (detachCount !== this.detachCount) {
+        return;
+      }
+      const info = response?.body;
+      if (!info?.host || !info.port || !info.path) {
+        throw new Error(`requestCDPProxy returned no address: ${JSON.stringify(info)}`);
+      }
+      cdp = this.cdpClientFactory?.() ?? new CdpProxyClient();
+      this.stepper.attachCdp(cdp);
+      await cdp.connect(info.host, info.port, info.path);
+      if (detachCount !== this.detachCount) {
+        this.stepper.detachCdp();
+        cdp.dispose();
+        return;
+      }
+      this.stepperOnlyClient = cdp;
+      await cdp.send('JsDebug.subscribe', { events: ['Debugger.paused', 'Debugger.resumed'] });
+      await cdp.send('Debugger.enable', {});
+    } catch {
+      this.stepper.detachCdp();
+      cdp?.dispose();
+      if (this.stepperOnlyClient === cdp) {
+        this.stepperOnlyClient = null;
+      }
     }
   }
 
@@ -94,7 +132,7 @@ export class JsTargetServices {
     const carriesLogpoint = (breakpoints ?? []).some((breakpoint) => {
       const { logMessage, condition } = (breakpoint ?? {}) as { logMessage?: unknown; condition?: unknown };
       return (
-        (typeof logMessage === 'string' && logMessage.length > 0) ||
+        typeof logMessage === 'string' ||
         (typeof condition === 'string' && condition.includes(JS_LOGPOINT_BINDING))
       );
     });
@@ -118,7 +156,10 @@ export class JsTargetServices {
 
   /** The target's connection is gone, or the proxy is letting go of it: close the socket and what rides on it. */
   detach(): void {
+    this.detachCount++;
     this.stepper?.detachCdp();
+    this.stepperOnlyClient?.dispose();
+    this.stepperOnlyClient = null;
     this.bridge?.detach();
   }
 }

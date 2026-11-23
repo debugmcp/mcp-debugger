@@ -313,7 +313,7 @@ const STRINGIFY = `const __mcpStr = (v) => {
         else hide('${JS_LOGPOINT_DROPPED}', (g.${JS_LOGPOINT_DROPPED} | 0) + 1);
       }
     } catch (e) { /* the queue is best effort; see the header */ }
-    if (bound) ${JS_LOGPOINT_BINDING}(m);
+    if (bound) { try { ${JS_LOGPOINT_BINDING}(m); } catch (e) { /* never throw out of the condition */ } }
   };`;
 
 /**
