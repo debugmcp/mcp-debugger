@@ -1412,9 +1412,10 @@ describe("ChildConnections: an adopted child's proxy stepper (issue #1130)", () 
     await expect(connections.beforeRequest('nobody', 'continue')).resolves.toBeUndefined();
   });
 
-  it("close() takes the proxy's things out of a child that runs on, before its socket and its connection go (issue #1212)", async () => {
+  it("close() sends the clear that takes the proxy's things out of a child before the disconnect that releases it (issue #1212)", async () => {
     // js-debug cannot end a target it adopted: closing a child releases it,
-    // whatever terminateDebuggee says. Nothing of the proxy's stays in it.
+    // whatever terminateDebuggee says. The adapter's disconnect takes the
+    // child's CDP socket with it, so the clear is on the wire first.
     const cdp = await pausedChild();
     const manager = (connections as unknown as { options: { adoption: ChildAdoptionDeps } }).options.adoption.connectionManager as unknown as {
       disconnect: ReturnType<typeof vi.fn>;
@@ -1639,6 +1640,37 @@ describe("ChildConnections: an adopted child's proxy stepper (issue #1130)", () 
 
       expect(outputs()).toHaveLength(1);
       expect(outputs()[0]).toMatch(/logpoints that hit in this process are not delivered/);
+    });
+
+    it("a held end whose message cannot be sent does not take the connection's removal with it", async () => {
+      // The last link removes the connection, and a root's worker waits for that to exit.
+      build({ rootSteps: () => true });
+      await adoptChild();
+      const cdp = await stepperOnItsSocket();
+      let answerBarrier!: () => void;
+      cdp.held.set('JsDebug.mcpDebuggerBarrier', new Promise<void>((resolve) => { answerBarrier = resolve; }));
+      const sender = (connections as unknown as { options: { messageSender: { send: (message: unknown) => void } } }).options.messageSender;
+      const deliver = sender.send;
+      sender.send = (message: unknown) => {
+        const m = message as Record<string, unknown>;
+        if (m.type === 'dapEvent' && m.event === 'terminated') {
+          throw new Error('channel closed');
+        }
+        deliver(message);
+      };
+      const empty = vi.fn();
+      connections.on('empty', empty);
+      sent.length = 0;
+
+      childClient.emit('terminated', {});
+      childClient.emit('close');
+      await vi.waitFor(() => expect(cdp.sent).toContain('JsDebug.mcpDebuggerBarrier'));
+      answerBarrier();
+
+      await vi.waitFor(() => expect(connections.has('child-1')).toBe(false));
+      expect(childTraffic()).toEqual(['dap_connection_closed']);
+      expect(empty).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('a message held behind its end failed to send: channel closed'));
     });
 
     it('close() by this worker does not wait for a held end', async () => {

@@ -19,7 +19,7 @@ import { EventEmitter } from 'events';
 import { fileURLToPath } from 'url';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { JS_LOGPOINT_BINDING, JS_LOGPOINT_CLEAR, JS_LOGPOINT_FLUSH, JS_LOGPOINT_UNBIND } from '@debugmcp/shared';
-import { CdpProxyClient } from './cdp-proxy-client.js';
+import { CdpCallTimeoutError, CdpProxyClient } from './cdp-proxy-client.js';
 import { createLogger } from '../utils/logger.js';
 
 // redirectable: re-pointed into the per-session proxy log at worker init (#519)
@@ -348,20 +348,25 @@ export class CdpFunctionBreakpointBridge extends EventEmitter {
       // process as they are for any target without a channel, and the
       // session is told.
       //
-      // When it cannot be taken out, the usual reason is that the process
-      // has ended: its end is what failed the attach (measured: a fork
-      // that logs twice and exits at once fails `Debugger.enable` with
-      // "Connection is closed" after both lines were delivered). Nothing
-      // more will hit there, and a warning would be about lines that
-      // arrived. So that case says nothing.
+      // One case says nothing: the process has ended. Its end is what
+      // failed the attach (measured: a fork that logs twice and exits at
+      // once fails `Debugger.enable` with "Connection is closed" after
+      // both lines were delivered), nothing more will hit there, and a
+      // warning would be about lines that arrived. The adapter answers a
+      // command for such a target with an error at once, or the socket
+      // is closed. Every other outcome is a process that is still there,
+      // whose logpoints are not delivered from now on, and it is told:
+      // an answer, whatever it says (a global that cannot be changed
+      // keeps the function), and no answer in time (a main thread
+      // blocked in a native call: the evaluation runs when it returns).
       if (!this.bindingInstalled) {
         this.logpointChannelDown(message);
       } else if (client?.isConnected()) {
-        const gone = await client
-          .send<{ result?: { value?: unknown } }>('Runtime.evaluate', { expression: JS_LOGPOINT_UNBIND, returnByValue: true }, 1000)
-          .then((answer) => answer?.result?.value === true, () => false);
+        const ended = await client
+          .send('Runtime.evaluate', { expression: JS_LOGPOINT_UNBIND, returnByValue: true }, 1000)
+          .then(() => false, (failure: unknown) => !(failure instanceof CdpCallTimeoutError));
         void client.send('Runtime.removeBinding', { name: JS_LOGPOINT_BINDING }, 1000).catch(() => undefined);
-        if (gone) {
+        if (!ended) {
           this.logpointChannelDown(message);
         }
       }
@@ -426,9 +431,16 @@ export class CdpFunctionBreakpointBridge extends EventEmitter {
    * by whoever is about to send the adapter the `disconnect` that releases
    * the target, because that disconnect takes this socket with it: measured,
    * a `detach()` that runs afterwards finds it closed and the function stays
-   * in the process. One bounded round trip; never rejects.
+   * in the process. One bounded round trip; never rejects. The bound is
+   * short on purpose: the caller's disconnect has a deadline of its own,
+   * and a process that answers at all answers in milliseconds.
+   *
+   * Not airtight: the logpoints are the adapter's breakpoints, and they stay
+   * set until the adapter has detached. One that hits in the milliseconds
+   * between this and that finds no function, is kept (within the queue's
+   * bounds), and nobody reads it.
    */
-  async release(timeoutMs = 500): Promise<void> {
+  async release(timeoutMs = 250): Promise<void> {
     const client = this.client;
     if (!client?.isConnected()) {
       return;

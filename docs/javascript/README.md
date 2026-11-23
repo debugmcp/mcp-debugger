@@ -333,13 +333,18 @@ did not fit) and sits on globals that are not enumerable. When the debugger lets
 that runs on (a detach from an attached process, a closed fork or worker session) it first takes
 out what it put in: what was kept, and the binding's function itself, which CDP's
 `Runtime.removeBinding` leaves behind (measured: after a detach the process used to keep the
-function; it now has neither). The
+function; it now has neither). One exception, also measured: the logpoints stay set until the
+adapter itself has detached, a few milliseconds later, and one that hits in between is kept and
+never read. A logpoint hitting about a hundred times a second left one or two messages behind
+at each detach; an idle one leaves none (#1233). The
 end of a fork is reported after one round trip on its CDP socket (at most 500 ms): its last
 lines were measured to arrive about 1 ms after the adapter's `terminated`. A fork that hits two
 logpoints and exits at once delivered both lines in 12 of 12 runs with that wait, and in 0 of 12
 without it. What is still lost: the lines of a process whose CDP socket never opens, or whose
-socket is lost while it runs. If it was sent a logpoint and the socket could not be set up, its
-session carries one `[mcp-debugger] Warning` line saying that its logpoints are not delivered;
+socket is lost while it runs. If it was sent a logpoint and the socket could not be set up while
+the process is still there, its session carries one `[mcp-debugger] Warning` line saying that
+its logpoints are not delivered (a process that ended while the socket was being set up is not
+warned about: nothing more will hit in it);
 such a process keeps what it queued (within the bounds above) until it exits, because there is
 no socket to take it out through. Function breakpoints are not armed in a fork (#1219, #1226).
 

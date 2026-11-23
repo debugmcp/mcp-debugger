@@ -15,6 +15,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import { CdpFunctionBreakpointBridge, MAX_SCRIPT_URLS } from '../../src/proxy/cdp-function-breakpoint-bridge.js';
+import { CdpCallTimeoutError } from '../../src/proxy/cdp-proxy-client.js';
 import { JS_LOGPOINT_BINDING, JS_LOGPOINT_CLEAR, JS_LOGPOINT_FLUSH, JS_LOGPOINT_UNBIND } from '@debugmcp/shared';
 
 type CdpHandler = (params: Record<string, unknown>) => unknown;
@@ -934,10 +935,13 @@ describe('CdpFunctionBreakpointBridge', () => {
       expect(outputs).toHaveLength(0);
     });
 
-    it('says nothing either when the process answers that the function is still there', async () => {
-      // A global that cannot be changed: the hits are not kept, and a sentence
-      // saying they are would be wrong. (They are not delivered either; the
-      // case is a program that froze its global object.)
+    it.each([
+      ['answers that the function is still there (a global that cannot be changed)', () => ({ result: { type: 'boolean', value: false } })],
+      ['does not answer in time (its main thread is blocked): the socket is open, so it is there', () => {
+        throw new CdpCallTimeoutError('CDP call timeout after 1000ms: Runtime.evaluate');
+      }]
+    ])('tells a process that is still there, also when it %s', async (_case, unbindAnswer) => {
+      // Only a process that has ended is left untold; this one's logpoints are not delivered from now on.
       const outputs: DebugProtocol.OutputEvent[] = [];
       bridge.on('outputEvent', (evt: DebugProtocol.OutputEvent) => outputs.push(evt));
       bridge.noteLogpoints();
@@ -945,11 +949,13 @@ describe('CdpFunctionBreakpointBridge', () => {
         throw new Error('Debugger.enable failed');
       });
       const lookup = cdp.handlers.get('Runtime.evaluate')!;
-      cdp.handlers.set('Runtime.evaluate', (p) => (p.expression === JS_LOGPOINT_UNBIND ? { result: { type: 'boolean', value: false } } : lookup(p)));
+      cdp.handlers.set('Runtime.evaluate', (p) => (p.expression === JS_LOGPOINT_UNBIND ? unbindAnswer() : lookup(p)));
 
       await attach();
 
-      expect(outputs).toHaveLength(0);
+      expect(outputs.map((o) => o.body.output)).toEqual([
+        expect.stringMatching(/logpoints that hit in this process are not delivered.*Debugger\.enable failed/)
+      ]);
     });
 
     it('says it again for a later failure once an attach in between had the channel up', async () => {
@@ -1013,7 +1019,7 @@ describe('CdpFunctionBreakpointBridge', () => {
       expect(cdp.calls.slice(before)).toEqual([
         { method: 'Runtime.evaluate', params: { expression: JS_LOGPOINT_CLEAR, returnByValue: true } }
       ]);
-      expect(cdp.timeouts.get('Runtime.evaluate')?.at(-1)).toBe(500);
+      expect(cdp.timeouts.get('Runtime.evaluate')?.at(-1)).toBe(250);
       // The socket is not closed by it: detach() does that.
       expect(cdp.disposeCalls).toBe(0);
 
@@ -1026,6 +1032,12 @@ describe('CdpFunctionBreakpointBridge', () => {
         throw new Error('Connection is closed');
       });
       await expect(bridge.release()).resolves.toBeUndefined();
+
+      // And a socket that has closed is asked nothing.
+      cdp.connected = false;
+      const asked = cdp.calls.length;
+      await bridge.release();
+      expect(cdp.calls).toHaveLength(asked);
     });
 
     it('leaves nothing of the kept messages in a process it lets go of, binding or not (issue #1212)', async () => {

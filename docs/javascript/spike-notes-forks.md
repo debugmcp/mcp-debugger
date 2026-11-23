@@ -116,5 +116,9 @@ the fork's connection.
     with the release evaluated before the adapter's `disconnect`, the process has neither the
     function nor a queue. The same evaluation sent after the disconnect does nothing: the adapter
     has closed the target's CDP socket by then. Closing a fork's session (js-debug releases it):
-    neither is left.
+    neither is left. The same on Linux under Node 22 and 24. With a logpoint that hits about a
+    hundred times a second, six detaches each left the function gone and one or two messages in
+    a queue: hits between the clean-up and the adapter's own detach, when the logpoint is still
+    set and the function is not there. Removing the logpoints from the adapter before the
+    clean-up would close that window (#1233).
 12. **Not measured here:** macOS, and a fork under an attach root.

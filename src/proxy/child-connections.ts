@@ -377,11 +377,12 @@ export class ChildConnections extends EventEmitter {
     connection.closed = true;
     this.clients.delete(sessionId);
     connection.cancelAdoption?.('child session closed during adoption');
-    // A child that is let go to run on keeps nothing of the proxy's (issue
-    // #1212): asked and awaited while its CDP socket is still up.
-    if (options.terminateDebuggee === false || this.options.adoption?.policy.childAdoption?.closeChild === 'release') {
-      await connection.services?.release();
-    }
+    // Before the disconnect below, while the child's CDP socket is still
+    // up: letting go of the services is what takes the proxy's things out
+    // of a child that runs on (issue #1212; measured, the clear it sends
+    // lands). Not awaited: this connection no longer counts as live, and
+    // an await here would let the worker's shutdown overtake the
+    // disconnect.
     this.closeServices(connection);
     const deps = this.options.adoption;
     try {

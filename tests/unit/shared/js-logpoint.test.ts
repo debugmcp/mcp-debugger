@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import vm from 'node:vm';
 import {
   JS_LOGPOINT_BINDING,
   JS_LOGPOINT_CLEAR,
@@ -223,6 +224,23 @@ describe('compileJsLogpoint', () => {
       } finally {
         delete globals[JS_LOGPOINT_BINDING];
       }
+    });
+
+    it('answers that the function is still there when the program made it impossible to remove', () => {
+      // In a context of its own: a property that cannot be removed would stay in this process for good.
+      const context = vm.createContext({});
+      vm.runInContext(
+        `Object.defineProperty(globalThis, '${JS_LOGPOINT_BINDING}', { value: () => undefined, configurable: false });`,
+        context
+      );
+
+      expect(vm.runInContext(JS_LOGPOINT_UNBIND, context)).toBe(false);
+      // The clear does not throw on it either.
+      expect(vm.runInContext(JS_LOGPOINT_CLEAR, context)).toBe(0);
+      // And where it can be removed, the same context answers yes.
+      const free = vm.createContext({});
+      vm.runInContext(`globalThis.${JS_LOGPOINT_BINDING} = () => undefined;`, free);
+      expect(vm.runInContext(JS_LOGPOINT_UNBIND, free)).toBe(true);
     });
 
     it("the clear the proxy evaluates when it lets go leaves neither the kept messages nor the binding's function", () => {

@@ -1328,6 +1328,16 @@ describe('ChildSessionManager', () => {
         this.detachCalls++;
       }
 
+      /** Releases asked of the bridge, and a gate a test can hold one behind (issue #1212). */
+      releaseCalls = 0;
+      releaseGate: Promise<void> | null = null;
+      async release(): Promise<void> {
+        this.releaseCalls++;
+        if (this.releaseGate) {
+          await this.releaseGate;
+        }
+      }
+
       /** How often the manager said the target was sent a logpoint (issue #1212). */
       logpointNotes = 0;
       noteLogpoints(): void {
@@ -1461,6 +1471,27 @@ describe('ChildSessionManager', () => {
       }
       const child = MockMinimalDapClient.lastInstance!;
       expect(child.requests.map((r) => r.command)).not.toContain('pause');
+    });
+
+    it("beforeRelease() has the bridge take the proxy's things out of the program, and waits for it (issue #1212)", async () => {
+      // The root client awaits this ahead of a disconnect that leaves the
+      // program running: after that disconnect the target's CDP socket is gone.
+      const mgr = makeManager(JsDebugAdapterPolicy);
+      await adopt(mgr);
+      let open!: () => void;
+      bridge.releaseGate = new Promise<void>((resolve) => { open = resolve; });
+
+      let released = false;
+      const releasing = mgr.beforeRelease().then(() => { released = true; });
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(bridge.releaseCalls).toBe(1);
+      expect(released).toBe(false);
+
+      open();
+      await releasing;
+      expect(released).toBe(true);
+      // The socket is not closed by it.
+      expect(bridge.detachCalls).toBe(0);
     });
 
     it("tells the bridge when the program's target is sent a logpoint, in the form it travels in (issue #1212)", async () => {
