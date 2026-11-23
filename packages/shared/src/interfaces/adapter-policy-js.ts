@@ -263,6 +263,9 @@ export const JS_PAUSE_WAKE_DELAY_MS = 150;
 const JS_PAUSE_WAKE_EXPRESSION =
   `(function(){try{var t=setTimeout(function(){},${JS_PAUSE_WAKE_DELAY_MS});if(t&&typeof t.unref==='function')t.unref()}catch(e){}})()`;
 
+/** The names Vite's SSR module transform binds in a module's scope (issue #1215). */
+const VITE_SSR_BINDING_PREFIX = '__vite_ssr_';
+
 export const JsDebugAdapterPolicy = {
   name: 'js-debug',
   supportsLogPoints: true,
@@ -659,6 +662,17 @@ export const JsDebugAdapterPolicy = {
 
           // Skip debugger internals
           if (name.startsWith('$') || name.startsWith('_$')) {
+            return false;
+          }
+
+          // Skip what a module transform put in scope (issue #1215): Vite's
+          // SSR runner, which vitest runs every module through, binds each
+          // import as `__vite_ssr_import_<n>__` beside `__vite_ssr_exports__`,
+          // `__vite_ssr_import_meta__` and the like. They are the transform's,
+          // not the program's, the way a C# display class is the compiler's:
+          // a dozen of them filled the stop snapshot before a function's own
+          // locals. `includeSpecial` still lists them.
+          if (name.startsWith(VITE_SSR_BINDING_PREFIX)) {
             return false;
           }
 
