@@ -180,7 +180,7 @@ describe('SessionManager - in-flight launch guard (issue #711)', () => {
     await sessionManager.startDebugging(session.id, 'test.py');
     // A plain detach is for a borrowed program (issue #1151); on a launched
     // one it is refused before it could be in flight.
-    sessionManager.getSession(session.id)!.programOwnership = 'borrowed';
+    sessionManager.getSession(session.id)!.run.programOwnership = 'borrowed';
 
     const gate = deferred();
     const proxy = dependencies.mockProxyManager;

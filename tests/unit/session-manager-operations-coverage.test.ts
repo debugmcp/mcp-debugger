@@ -131,6 +131,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     // Create mock session (aligned with new session model)
     mockSession = {
+      run: {},
       id: 'test-session',
       name: 'Test Session',
       language: DebugLanguage.PYTHON,
@@ -281,16 +282,13 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       expect((capturedError as Error).message).toBe('MSVC_TOOLCHAIN_DETECTED');
       expect((capturedError as { toolchainValidation?: unknown }).toolchainValidation).toBe(validation);
-      expect(mockSessionStore.update).toHaveBeenCalledWith(
-        mockSession.id,
-        expect.objectContaining({ toolchainValidation: validation })
-      );
+      expect(mockSession.run.toolchainValidation).toBe(validation);
       expect(adapterStub.dispose).toHaveBeenCalledTimes(1);
     });
 
     it('clears a stale toolchain verdict when the transform rejects for another reason', async () => {
       mockSession.language = DebugLanguage.CPP;
-      mockSession.toolchainValidation = {
+      mockSession.run.toolchainValidation = {
         compatible: false,
         behavior: 'warn',
         toolchain: 'msvc',
@@ -307,10 +305,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       await expect(
         internals(operations).proxyLauncher.start(mockSession, { scriptPath: 'main.cpp' })
       ).rejects.toThrow('C/C++ compile failed: syntax error');
-      expect(mockSessionStore.update).toHaveBeenCalledWith(
-        mockSession.id,
-        expect.objectContaining({ toolchainValidation: undefined })
-      );
+      expect(mockSession.run.toolchainValidation).toBeUndefined();
     });
 
     it('wraps unresolved executable errors for non-python languages', async () => {
@@ -413,10 +408,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       expect(capturedError).toBeInstanceOf(Error);
       expect((capturedError as Error).message).toBe('MSVC_TOOLCHAIN_DETECTED');
       expect((capturedError as { toolchainValidation?: unknown }).toolchainValidation).toBe(validation);
-      expect(mockSessionStore.update).toHaveBeenCalledWith(
-        mockSession.id,
-        expect.objectContaining({ toolchainValidation: validation })
-      );
+      expect(mockSession.run.toolchainValidation).toBe(validation);
       expect(adapterStub.resolveExecutablePath).not.toHaveBeenCalled();
     });
   });
@@ -431,7 +423,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
         toolchain: 'msvc',
         message: 'MSVC binaries provide limited debugger data'
       };
-      mockSession.toolchainValidation = validation;
+      mockSession.run.toolchainValidation = validation;
 
       const startProxySpy = vi
         .spyOn(internals(operations).proxyLauncher, 'start')
@@ -472,7 +464,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     it('does not classify an unrelated launch failure from a stale session verdict', async () => {
       mockSession.proxyManager = undefined;
       mockSession.language = DebugLanguage.CPP;
-      mockSession.toolchainValidation = {
+      mockSession.run.toolchainValidation = {
         compatible: false,
         behavior: 'warn',
         toolchain: 'msvc',
@@ -575,8 +567,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       vi.useFakeTimers();
       try {
         mockSession.state = SessionState.PAUSED;
-        mockSession.attachMode = false;
-        mockSession.lastLaunch = { scriptPath: '/app/dist/index.js', dapLaunchArgs: { justMyCode: true }, launchedAt: 1 };
+        mockSession.run.attachMode = false;
+        mockSession.run.lastLaunch = { scriptPath: '/app/dist/index.js', dapLaunchArgs: { justMyCode: true }, launchedAt: 1 };
         mockProxyManager.sendDapRequest.mockResolvedValue({});
         mockProxyManager.once.mockImplementation(() => {});
 
@@ -745,7 +737,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       it('appends topology guidance for a ruby attach session when rdbg rejects the path', async () => {
         mockSession.language = DebugLanguage.RUBY;
-        mockSession.attachMode = true;
+        mockSession.run.attachMode = true;
         mockSession.state = SessionState.PAUSED;
         mockProxyManager.sendDapRequest.mockRejectedValue(RDBG_ERROR);
 
@@ -759,7 +751,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       it('does not append guidance for a ruby launch session', async () => {
         mockSession.language = DebugLanguage.RUBY;
-        mockSession.attachMode = false;
+        mockSession.run.attachMode = false;
         mockSession.state = SessionState.PAUSED;
         mockProxyManager.sendDapRequest.mockRejectedValue(RDBG_ERROR);
 
@@ -771,7 +763,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       it('does not append guidance for other languages or other errors', async () => {
         mockSession.language = DebugLanguage.PYTHON;
-        mockSession.attachMode = true;
+        mockSession.run.attachMode = true;
         mockSession.state = SessionState.PAUSED;
         mockProxyManager.sendDapRequest.mockRejectedValue(RDBG_ERROR);
 
@@ -787,7 +779,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       it('appends the same guidance on the function-breakpoint sync path', async () => {
         mockSession.language = DebugLanguage.RUBY;
-        mockSession.attachMode = true;
+        mockSession.run.attachMode = true;
         mockSession.state = SessionState.PAUSED;
         mockSession.functionBreakpoints = new Map();
         mockProxyManager.sendDapRequest.mockRejectedValue(RDBG_ERROR);
@@ -4047,7 +4039,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       it('refuses a plain detach on a session that owns its program, and touches nothing', async () => {
         mockSession.state = SessionState.PAUSED;
         mockSession.proxyManager = mockProxyManager;
-        mockSession.programOwnership = 'owned';
+        mockSession.run.programOwnership = 'owned';
 
         const result = await operations.detachFromProcess('test-session', false);
 
@@ -4074,7 +4066,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       it('does not refuse a borrowed program', async () => {
         mockSession.state = SessionState.PAUSED;
         mockSession.proxyManager = mockProxyManager;
-        mockSession.programOwnership = 'borrowed';
+        mockSession.run.programOwnership = 'borrowed';
         mockProxyManager.sendDapRequest.mockResolvedValue({});
 
         const result = await operations.detachFromProcess('test-session', false);
@@ -4085,7 +4077,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
       it('answers a session with no program as before', async () => {
         mockSession.proxyManager = undefined;
-        mockSession.programOwnership = 'owned';
+        mockSession.run.programOwnership = 'owned';
 
         const result = await operations.detachFromProcess('test-session', false);
 
@@ -4813,8 +4805,8 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       vi.useFakeTimers();
       try {
         mockSession.state = SessionState.RUNNING;
-        mockSession.attachMode = false;
-        mockSession.lastLaunch = { scriptPath: '/app/dist/index.js', adapterLaunchConfig: { skipFiles: ['**/node_modules/**'] }, launchedAt: 1 };
+        mockSession.run.attachMode = false;
+        mockSession.run.lastLaunch = { scriptPath: '/app/dist/index.js', adapterLaunchConfig: { skipFiles: ['**/node_modules/**'] }, launchedAt: 1 };
         mockProxyManager.sendDapRequest.mockResolvedValue({});
         const describePendingStop = vi.fn().mockReturnValue('Explained by the policy.');
         vi.spyOn(operations as any, 'selectPolicy').mockReturnValue({ describePendingStop } as any);
@@ -4972,7 +4964,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       vi.useFakeTimers();
       try {
         mockSession.state = SessionState.RUNNING;
-        mockSession.launchDebuggerOff = true;
+        mockSession.run.launchDebuggerOff = true;
         mockProxyManager.sendDapRequest.mockResolvedValue({});
         const describePendingStop = vi.fn().mockReturnValue('Explained by the policy.');
         vi.spyOn(operations as any, 'selectPolicy').mockReturnValue({ describePendingStop } as any);
@@ -5001,7 +4993,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it("keeps the adapter's refusal of a pause as the cause, untouched, and appends the why", async () => {
       mockSession.state = SessionState.RUNNING;
-      mockSession.launchDebuggerOff = true;
+      mockSession.run.launchDebuggerOff = true;
       const refusal = Object.assign(new Error('Internal debugger error: Not supported in noDebug mode.'), { code: 'E_NODEBUG' });
       mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
         if (command === 'pause') {
@@ -5022,7 +5014,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('carries the why on a pause that found no debug target yet (js-debug before the child adopts)', async () => {
       mockSession.state = SessionState.RUNNING;
-      mockSession.launchDebuggerOff = true;
+      mockSession.run.launchDebuggerOff = true;
       mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
         if (command === 'pause') {
           throw new Error(`pause failed: ${NO_DEBUG_TARGET_MARKER}`);
@@ -5039,7 +5031,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('carries the why while the launch is still initializing — the proxy is up and answering', async () => {
       mockSession.state = SessionState.INITIALIZING;
-      mockSession.launchDebuggerOff = true;
+      mockSession.run.launchDebuggerOff = true;
 
       const result = await operations.getStackTraceDetailed('test-session');
 
@@ -5049,7 +5041,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('drops the why once the launch is over — the flag describes a launch that is no longer running', async () => {
       mockSession.state = SessionState.STOPPED;
-      mockSession.launchDebuggerOff = true;
+      mockSession.run.launchDebuggerOff = true;
 
       const result = await operations.getStackTraceDetailed('test-session');
 
@@ -5059,7 +5051,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('says why stepping and continuing find nothing paused', async () => {
       mockSession.state = SessionState.RUNNING;
-      mockSession.launchDebuggerOff = true;
+      mockSession.run.launchDebuggerOff = true;
 
       const step = await operations.stepOver('test-session');
       expect(step.success).toBe(false);
@@ -5073,7 +5065,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('leaves the plain "Not paused" alone when the debugger is on', async () => {
       mockSession.state = SessionState.RUNNING;
-      mockSession.launchDebuggerOff = undefined;
+      mockSession.run.launchDebuggerOff = undefined;
 
       const step = await operations.stepOver('test-session');
       expect(step.error).toBe(ErrorMessages.notPaused());
@@ -5082,7 +5074,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('drops the why once the adapter has verified a breakpoint — the build debugs after all', async () => {
       mockSession.state = SessionState.RUNNING;
-      mockSession.launchDebuggerOff = true;
+      mockSession.run.launchDebuggerOff = true;
       mockSession.breakpoints.set('bp-1', { id: 'bp-1', file: 'a.py', line: 3, verified: true } as never);
 
       const step = await operations.stepOver('test-session');
@@ -5094,7 +5086,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('says why a pause is refused while the launch is still initializing (issue #749)', async () => {
       mockSession.state = SessionState.INITIALIZING;
-      mockSession.launchDebuggerOff = true;
+      mockSession.run.launchDebuggerOff = true;
 
       const result = await operations.pause('test-session', 1);
 
@@ -5106,7 +5098,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('keeps a non-Error refusal of a pause as the cause, as it was thrown', async () => {
       mockSession.state = SessionState.RUNNING;
-      mockSession.launchDebuggerOff = true;
+      mockSession.run.launchDebuggerOff = true;
       const refusal = { code: 'E_NODEBUG', text: 'not an Error instance' };
       mockProxyManager.sendDapRequest.mockImplementation(async (command: string) => {
         if (command === 'pause') {
@@ -5125,7 +5117,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('says why an expression cannot be evaluated', async () => {
       mockSession.state = SessionState.RUNNING;
-      mockSession.launchDebuggerOff = true;
+      mockSession.run.launchDebuggerOff = true;
 
       const result = await operations.evaluateExpression('test-session', '1 + 1');
 
@@ -5136,7 +5128,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
 
     it('says why the stack trace is empty', async () => {
       mockSession.state = SessionState.RUNNING;
-      mockSession.launchDebuggerOff = true;
+      mockSession.run.launchDebuggerOff = true;
 
       const result = await operations.getStackTraceDetailed('test-session');
 

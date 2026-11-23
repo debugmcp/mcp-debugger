@@ -15,9 +15,10 @@ import { resolveExceptionFilters } from '@debugmcp/shared';
 import { createLogger } from '../utils/logger.js';
 import { createChildSafePolicy } from './child-safe-policy.js';
 import type { MinimalDapClient } from './minimal-dap.js';
-import { CdpFunctionBreakpointBridge } from './cdp-function-breakpoint-bridge.js';
-import { CdpProxyClient } from './cdp-proxy-client.js';
-import { JsStepper } from './js-stepper.js';
+import type { CdpFunctionBreakpointBridge } from './cdp-function-breakpoint-bridge.js';
+import type { CdpProxyClient } from './cdp-proxy-client.js';
+import type { JsStepper } from './js-stepper.js';
+import { JsTargetServices } from './js-target-services.js';
 import { sendSetBreakpointsStamping, watchConditionSyntaxErrors, matchStoredBreakpoint } from './breakpoint-condition-errors.js';
 import path from 'path';
 
@@ -152,6 +153,12 @@ export class ChildSessionManager extends EventEmitter {
   private childEnded = false;
   private readonly instanceId: string;
 
+  /**
+   * The CDP socket of the program's target and what rides on it: the same
+   * composition every forked target gets (issue #1212). The two fields below
+   * are its parts, named for the code that uses them.
+   */
+  private readonly services: JsTargetServices;
   // CDP-delivered function breakpoints (issue #295); present only when the
   // policy declares functionBreakpointsVia 'cdp' (js-debug)
   private cdpBridge: CdpFunctionBreakpointBridge | null = null;
@@ -198,29 +205,23 @@ export class ChildSessionManager extends EventEmitter {
     this.port = options.port;
     this.getParentStart = options.getParentStart;
     this.instanceId = createInstanceId();
-    if (this.dapBehavior.stepsThroughSkippedCode) {
-      this.stepper = new JsStepper({
-        target: {
-          sendRequest: (command, args, timeoutMs) => {
-            const child = this.activeChild;
-            if (!child) {
-              return Promise.reject(new Error(`No active child session for '${command}'`));
-            }
-            return child.sendRequest(command, args, timeoutMs) as Promise<never>;
-          }
-        },
-        deliver: (evt) => this.forwardChildEvent(evt)
-      });
-    }
-    if (options.policy.functionBreakpointsVia === 'cdp') {
-      // One CDP socket per target: the bridge opens it, the stepper listens on it too.
-      this.cdpBridge = options.cdpBridgeFactory?.() ?? new CdpFunctionBreakpointBridge({
-        clientFactory: () => {
-          const client = options.cdpClientFactory?.() ?? new CdpProxyClient();
-          this.stepper?.attachCdp(client);
-          return client;
+    this.services = new JsTargetServices({
+      stepper: this.dapBehavior.stepsThroughSkippedCode === true,
+      bridge: options.policy.functionBreakpointsVia === 'cdp',
+      sendRequest: (command, args, timeoutMs) => {
+        const child = this.activeChild;
+        if (!child) {
+          return Promise.reject(new Error(`No active child session for '${command}'`));
         }
-      });
+        return child.sendRequest(command, args, timeoutMs);
+      },
+      deliverStep: (evt) => this.forwardChildEvent(evt),
+      ...(options.cdpBridgeFactory ? { bridgeFactory: options.cdpBridgeFactory } : {}),
+      ...(options.cdpClientFactory ? { cdpClientFactory: options.cdpClientFactory } : {})
+    });
+    this.stepper = this.services.stepper;
+    this.cdpBridge = this.services.bridge;
+    if (this.cdpBridge) {
       this.cdpBridge.on('breakpointEvent', (evt: DebugProtocol.Event) => {
         this.emit('childEvent', evt);
       });
@@ -347,6 +348,16 @@ export class ChildSessionManager extends EventEmitter {
     return this.stepper?.handles(command, args) ? this.stepper.request(command, args) : null;
   }
 
+  /**
+   * The session is about to release the program to run on (a `disconnect`
+   * that does not end it: a detach from an attached process). Whatever the
+   * proxy put into the process is taken out first, while its CDP socket is
+   * still there (issue #1212). Bounded; never rejects.
+   */
+  async beforeRelease(): Promise<void> {
+    await this.services.release();
+  }
+
   /** Any other request for the target: one that resumes or ends it ends a step still in flight. */
   async beforeChildRequest(command: string): Promise<void> {
     await this.stepper?.beforeRequest(command);
@@ -402,6 +413,8 @@ export class ChildSessionManager extends EventEmitter {
     sourcePath: string,
     breakpoints: DebugProtocol.SourceBreakpoint[]
   ): Promise<DebugProtocol.SetBreakpointsResponse> {
+    // A target that is sent a logpoint is told when its logpoints cannot be delivered (issue #1212).
+    this.services.noteBreakpoints(breakpoints);
     const send = (): Promise<DebugProtocol.SetBreakpointsResponse> =>
       child.sendRequest<DebugProtocol.SetBreakpointsResponse>('setBreakpoints', {
         source: { path: sourcePath },
@@ -1009,8 +1022,7 @@ export class ChildSessionManager extends EventEmitter {
 
     child.on('close', () => {
       logger.info(`[ChildSessionManager:${this.instanceId}] [child] DAP client connection closed (current count=${this.childSessions.size})`);
-      this.stepper?.detachCdp();
-      this.cdpBridge?.detach();
+      this.services.detach();
       this.emit('childClosed');
       this.childSessions.clear();
       this.activeChild = null;
@@ -1136,8 +1148,7 @@ export class ChildSessionManager extends EventEmitter {
    */
   async shutdown(): Promise<void> {
     logger.info(`[ChildSessionManager:${this.instanceId}] Shutting down child sessions`);
-    this.stepper?.detachCdp();
-    this.cdpBridge?.detach();
+    this.services.detach();
 
     for (const [id, child] of this.childSessions) {
       try {

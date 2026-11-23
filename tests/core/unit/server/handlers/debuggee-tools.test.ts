@@ -50,7 +50,7 @@ describe('debuggee lifecycle tool handlers', () => {
     ctx.sessionManager.getSession.mockReturnValue({
       id: 'test-session',
       sessionLifecycle: SessionLifecycleState.ACTIVE,
-      transformedLaunch: launched
+      run: { transformedLaunch: launched }
     });
     ctx.sessionManager.getSessionPolicy.mockReturnValue(DotnetAdapterPolicy);
     ctx.fileChecker = { checkExists: vi.fn().mockResolvedValue({ exists: true, effectivePath: '/app/Program.cs' }) };

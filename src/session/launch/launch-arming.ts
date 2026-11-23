@@ -16,13 +16,12 @@
  * answer and the wire cannot drift apart.
  */
 import { resolveExceptionFilters, type AdapterPolicy, type ExceptionBreakMode } from '@debugmcp/shared';
-import type { ManagedSession } from '../session-store.js';
+import type { ManagedSession, Run } from '../session-store.js';
 import type { NoUncaughtStop } from '../../utils/error-messages.js';
 
-export type ArmingSession = Pick<
-  ManagedSession,
-  'breakpoints' | 'functionBreakpoints' | 'adapterCapabilities' | 'effectiveBreakOnExceptions' | 'launchExceptionFilters'
->;
+export type ArmingSession = Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'adapterCapabilities'> & {
+  run: Pick<Run, 'effectiveBreakOnExceptions' | 'launchExceptionFilters'>;
+};
 
 /**
  * The exception arming of one launch or attach: the DAP filter ids the
@@ -62,13 +61,13 @@ export function describeExceptionArming(
 
 /** `describeExceptionArming`, recorded on the session for the answers that read it. */
 export function recordExceptionArming(
-  session: Pick<ManagedSession, 'launchExceptionFilters'>,
+  session: { run: Pick<Run, 'launchExceptionFilters'> },
   policy: AdapterPolicy,
   mode: ExceptionBreakMode | undefined,
   launchConfig?: Record<string, unknown>
 ): ExceptionArming {
   const arming = describeExceptionArming(policy, mode, launchConfig);
-  session.launchExceptionFilters = arming;
+  session.run.launchExceptionFilters = arming;
   return arming;
 }
 
@@ -161,12 +160,13 @@ export function describeLaunchArming(session: ArmingSession, stopOnEntry: boolea
     }
   }
   const functionBreakpoints = session.functionBreakpoints?.size ?? 0;
-  const pausesOnCaughtExceptions = session.effectiveBreakOnExceptions === 'all';
-  const extraExceptionFilters = session.launchExceptionFilters?.beyondMode ?? [];
+  const { effectiveBreakOnExceptions, launchExceptionFilters } = session.run;
+  const pausesOnCaughtExceptions = effectiveBreakOnExceptions === 'all';
+  const extraExceptionFilters = launchExceptionFilters?.beyondMode ?? [];
   const entry = stopOnEntry === true;
-  const noUncaughtStop = session.launchExceptionFilters
-    ? session.launchExceptionFilters.noUncaughtStop
-    : session.effectiveBreakOnExceptions === 'none' ? 'opted-out' : undefined;
+  const noUncaughtStop = launchExceptionFilters
+    ? launchExceptionFilters.noUncaughtStop
+    : effectiveBreakOnExceptions === 'none' ? 'opted-out' : undefined;
 
   const clauses: string[] = [];
   if (lineBreakpoints > 0) {

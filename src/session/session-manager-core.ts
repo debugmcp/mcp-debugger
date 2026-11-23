@@ -26,6 +26,7 @@ import {
   clearPauseIntent,
   getCurrentPauseIntent
 } from './execution/pause-intent.js';
+import { describeTreeAnswer } from './execution/tree-settle.js';
 import { DebugProtocol } from '@vscode/debugprotocol'; 
 import path from 'path';
 import os from 'os';
@@ -1129,12 +1130,15 @@ export abstract class SessionManagerCore extends EventEmitter {
   }
 
   /**
-   * Where a child session's output is read (issue #1082): the id of its
-   * tree's root when the adapter delivers the whole tree's output on the
-   * launch session's connection and none on the child's (js-debug, the
-   * policy's `childOutput: 'launch-session'` pin); undefined when the
-   * session's own buffer is the place to read (a root, a debugpy child,
-   * or a child under an attach root, whose console output is per-target).
+   * Where a child session's program output is read (issue #1082): the id of
+   * its tree's root when the adapter delivers the whole tree's stdout and
+   * stderr on the launch session's connection and none on the child's
+   * (js-debug, the policy's `childOutput: 'launch-session'` pin); undefined
+   * when the session's own buffer is the place to read (a root, a debugpy
+   * child, or a child under an attach root, whose console output is
+   * per-target). The child's own buffer holds what the debugger itself
+   * produces for that process, the lines of the logpoints it hit among
+   * them (issue #1212); it is empty when there was none.
    */
   public outputOnFor(sessionId: string): string | undefined {
     const session = this.sessionStore.get(sessionId);
@@ -1149,10 +1153,13 @@ export abstract class SessionManagerCore extends EventEmitter {
       return undefined;
     }
     const run = runFactsOf(session, (id) => this.sessionStore.get(id));
+    const reachedRoot = this.sessionStore.get(run.rootSessionId)?.parentSessionId === undefined;
     // A launch owns the stdout/stderr pipes; an attach does not. js-debug's
     // default console capture on attach emits on each target's connection,
-    // so pointing at the root would hide the child's actual output.
-    return run.rootSessionId === session.id || run.attached ? undefined : run.rootSessionId;
+    // so pointing at the root would hide the child's actual output. When the
+    // walk could not reach the root (an orphaned subtree), an intermediate
+    // child holds no tree output either.
+    return !reachedRoot || run.attached ? undefined : run.rootSessionId;
   }
 
   /**
@@ -1395,6 +1402,18 @@ export abstract class SessionManagerCore extends EventEmitter {
     return result;
   }
 
+  /**
+   * The `children` list a tree answer on this session carries, built the
+   * way the launch, restart and wait answers build theirs; undefined for a
+   * session with no descendants. For an answer that is read off a session
+   * instead of returned by an operation: `get_output` (issue #1212), where
+   * it tells a caller reading one session which others hold lines of their
+   * own (a child's logpoint lines are on the child).
+   */
+  public treeChildrenOf(sessionId: string): TreeAnswerFields['children'] {
+    return describeTreeAnswer({}, this.descendantsDepthFirst(sessionId)).children;
+  }
+
   /** Every descendant of a session, deepest first (post-order), adoption order within a level. */
   protected descendantsDeepestFirst(sessionId: string): ManagedSession[] {
     const result: ManagedSession[] = [];
@@ -1531,8 +1550,11 @@ export abstract class SessionManagerCore extends EventEmitter {
       this.touchActivity(parent.id);
       child = this.sessionStore.getOrThrow(info.id);
       child.logDir = parent.logDir;
-      child.effectiveBreakOnExceptions = parent.effectiveBreakOnExceptions;
-      child.launchExceptionFilters = parent.launchExceptionFilters;
+      // One run, one record: the child reads how its tree was started from
+      // the object its root writes (the exception arming, the launch, the
+      // attach), where two of those facts used to be copied at this point
+      // and the rest were left empty.
+      child.run = parent.run;
       // The parent's current breakpoint set, re-sent to the child before it
       // runs (the hold before configurationDone is where they bind); from then
       // on each session's set is its own.
@@ -2146,7 +2168,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       // `debugger;` statement (relabelled 'breakpoint') under noDebug with
       // its breakpoints still off.
       if (stopProvesDebuggerOn(reason, rawReason, body)) {
-        session.launchDebuggerOff = undefined;
+        session.run.launchDebuggerOff = undefined;
       }
     };
 
@@ -2856,7 +2878,11 @@ export abstract class SessionManagerCore extends EventEmitter {
     // Preparation precedes this generation's reset. Seed its notices only
     // after the notice array and output buffer have been initialized, using
     // the same containment for subscribers that throw as worker notices.
-    for (const note of session.launchConfigNotices ?? []) handleAdapterNotice(note);
+    // The launch's own session only: a child shares the run record, and the
+    // notes of its root's launch are about that launch, said once, there.
+    if (!session.parentSessionId) {
+      for (const note of session.run.launchConfigNotices ?? []) handleAdapterNotice(note);
+    }
 
     // Store handlers in WeakMap
     this.sessionEventHandlers.set(session, handlers);

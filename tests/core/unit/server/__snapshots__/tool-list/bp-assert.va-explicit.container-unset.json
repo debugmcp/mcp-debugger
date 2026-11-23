@@ -699,7 +699,7 @@
       },
       {
         "name": "get_output",
-        "description": "Get debuggee output (stdout/stderr/console) captured for a session. Buffered per launch (last 1000 entries; adapter telemetry and known adapter-internal diagnostics — e.g. LLDB DWARF-parser noise — filtered out). Works while the program is running and after it finishes, until the session is closed. Pass since=nextSince from the previous response to fetch only new output",
+        "description": "Get debuggee output (stdout/stderr/console) captured for a session. Buffered per launch (last 1000 entries; adapter telemetry and known adapter-internal diagnostics — e.g. LLDB DWARF-parser noise — filtered out). Works while the program is running and after it finishes, until the session is closed. Pass since=nextSince from the previous response to fetch only new output. A session with child sessions lists them in children: the lines of a logpoint are on the session of the process that hit it, read with get_output on that sessionId",
         "inputSchema": {
           "type": "object",
           "properties": {

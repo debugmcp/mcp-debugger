@@ -85,7 +85,7 @@ export interface LastLaunchSpec {
  * What the adapter's transform handed the engine for the current launch
  * (issue #950): the program it runs — for a compiled language the binary or
  * DLL, not the script the caller named — and the transformed config it came
- * from. See ManagedSession.transformedLaunch.
+ * from. See Run.transformedLaunch.
  */
 export interface TransformedLaunch {
   program: string;
@@ -142,7 +142,107 @@ export interface StepStopProvenance {
   origin?: StepOrigin;
 }
 
+/**
+ * How a tree of sessions was started: the facts of one launch or attach.
+ *
+ * A launch or an attach is called on one session, the root, and a child the
+ * adapter reports is adopted, never launched. These facts are the same for
+ * every session of the tree, so they live in one record that the root owns
+ * and every child references (`adoptReportedChild`): a reader holding any
+ * session of the tree reads the same object. They used to be fields of the
+ * session, written on the root and empty on a child, and each reader had to
+ * know to walk to the root (issues #1214, #1222).
+ *
+ * Written by the launch-shaped code (the launcher, the proxy launcher and
+ * the attach controller, which refuse a child session), each field reset
+ * where it was reset before the move, and in one place by the core: a stop
+ * that proves the debugger on clears `launchDebuggerOff`, from whichever
+ * session of the tree stopped. A dry run leaves the record as it was; a real
+ * start that fails has already reset the facts it resets at its top.
+ *
+ * The record is mutated in place, not replaced per run. A child row that
+ * outlives its run (kept as stopped until closed) therefore reads what its
+ * root reads; the readers that are new to children are gated on a live
+ * state, which such a row does not have.
+ */
+export interface Run {
+  // True for sessions established via attach_to_process. Attach targets may
+  // run on a remote filesystem (container, pod, other machine), so host-side
+  // file existence checks do not apply to their source paths.
+  attachMode?: boolean;
+  // Whether this session owns its program or borrows it (issue #1151),
+  // recorded where the proxy launch is committed, from the one fact the
+  // worker's shutdown also reads: a launch owns the program and ends it with
+  // the session; an attach (attach_to_process, or attach-shaped launch
+  // arguments) borrows it and releases it. Undefined until a program started.
+  programOwnership?: 'owned' | 'borrowed';
+  // Where that target lives (issue #903): 'pid' and 'loopback' are this host,
+  // so the host file is the debuggee's own source and content addressing is
+  // allowed (issue #899); cleared with attachMode by a launch.
+  attachLocality?: AttachLocality;
+  // The most recent real launch, replayed by restart_debugging (issue #238).
+  lastLaunch?: LastLaunchSpec;
+  // The current launch as the adapter's transform handed it to the engine
+  // (issue #950). Written by ProxyLauncher.start after the transform, cleared
+  // when a start begins and left clear by an attach; a dry run leaves it as it
+  // was, so it always names the last real launch (issue #812). Read by the
+  // stale-build check, which hands it to the policy so a source can be
+  // compared with the artefact it binds through. Not part of lastLaunch,
+  // which is the caller's replayable request.
+  transformedLaunch?: TransformedLaunch;
+  /** Transform diagnostics, retained even when preparation fails before a proxy exists (#709). */
+  launchConfigNotices?: string[];
+  toolchainValidation?: ToolchainValidationState;
+  // The breakOnExceptions mode actually in effect for the current launch or
+  // attach — the user's value, or the policy's launch default when unset
+  // (issue #244). Previously write-only pass-through; recorded for read-back.
+  effectiveBreakOnExceptions?: ExceptionBreakMode;
+  /**
+   * The exception arming of the last launch or attach (`recordExceptionArming`):
+   * the DAP exception-filter ids it armed (issue #985), the ones beyond the
+   * mode's table — a pytest module launch adds `userUnhandled` to the
+   * `uncaught` default; those stop on an exception the program survives, so
+   * the launch counts as armed (`describeLaunchArming`) — and why no uncaught
+   * exception will stop the program when none will (issue #1032). Reset per
+   * launch attempt.
+   */
+  launchExceptionFilters?: {
+    readonly ids: readonly string[];
+    readonly beyondMode: readonly string[];
+    readonly noUncaughtStop: NoUncaughtStop | undefined;
+  };
+  // The launcher's decision that the current launch runs with the debugger
+  // off — noDebug on an adapter that honours it (issue #710). The raw
+  // record: written per launch, reset per launch and attach, cleared by a
+  // stop only a live debugger produces. Never read directly for a
+  // caller-facing answer — isDebuggerOff/debuggerOffWhy (debugger-off.ts)
+  // gate it on the launch being live, and DebugSessionInfo.debuggerDisabled
+  // is its projection (issue #749).
+  launchDebuggerOff?: boolean;
+  // Caller-provided adapterConfig keys the adapter's attach transform did not
+  // carry into the DAP attach request (issue #450). Recorded per attach by
+  // ProxyLauncher.start; consumed by attachToProcess for the response warning.
+  attachDroppedConfigKeys?: string[];
+  // Caller-provided adapterConfig keys outside the adapter's declared
+  // supportedAttachKeys that were still forwarded to the debug adapter
+  // (issue #466). Same lifecycle as attachDroppedConfigKeys.
+  attachForwardedUnknownConfigKeys?: string[];
+  // The adapter's own attach-transform notes (Dart: the no-auth URI built
+  // from host:port, a deviceId on a Dart runner; COBOL: build options given
+  // without sources), drained from consumeLaunchConfigDiagnostics per
+  // attempt (issue #908): reset when ProxyLauncher.start begins, set after
+  // the transform (undefined when there are none), consumed by
+  // attachToProcess for the response warning.
+  attachTransformNotices?: string[];
+}
+
 export interface ManagedSession extends DebugSessionInfo {
+  /**
+   * How this session's tree was started: one record per run, the root's,
+   * which every child of the tree references. A session nothing was started
+   * on has an empty one.
+   */
+  run: Run;
   executablePath?: string;  // Language-agnostic executable path
   /** The scope the session belongs to (issue #1025, step 2); see CreateSessionParams.ownerKey. */
   ownerKey?: string;
@@ -167,7 +267,6 @@ export interface ManagedSession extends DebugSessionInfo {
   sessionLifecycle: SessionLifecycleState;
   executionState?: ExecutionState;
   logDir?: string;
-  toolchainValidation?: ToolchainValidationState;
   /** Reset per launch; distinguishes a proxy crash from debuggee completion. */
   lastProxyExit?: ProxyExitState;
   /** Last proxy error-event message for the current launch. */
@@ -210,20 +309,6 @@ export interface ManagedSession extends DebugSessionInfo {
   proxyGeneration?: number;
   // Pause request awaiting its stopped event, scoped to proxyGeneration.
   pauseIntent?: PauseIntent;
-  // True for sessions established via attach_to_process. Attach targets may
-  // run on a remote filesystem (container, pod, other machine), so host-side
-  // file existence checks do not apply to their source paths.
-  attachMode?: boolean;
-  // Whether this session owns its program or borrows it (issue #1151),
-  // recorded where the proxy launch is committed, from the one fact the
-  // worker's shutdown also reads: a launch owns the program and ends it with
-  // the session; an attach (attach_to_process, or attach-shaped launch
-  // arguments) borrows it and releases it. Undefined until a program started.
-  programOwnership?: 'owned' | 'borrowed';
-  // Where that target lives (issue #903): 'pid' and 'loopback' are this host,
-  // so the host file is the debuggee's own source and content addressing is
-  // allowed (issue #899); cleared with attachMode by a launch.
-  attachLocality?: AttachLocality;
   // Debuggee output captured from DAP 'output' events (issue #218).
   // Created fresh on each launch/attach; readable until the session is closed.
   outputBuffer?: OutputRingBuffer;
@@ -231,8 +316,6 @@ export interface ManagedSession extends DebugSessionInfo {
   // failing to load Rust formatters). Reset per launch, deduped; joined into
   // the start_debugging warning when they arrive before the launch resolves.
   adapterNotices?: string[];
-  /** Transform diagnostics, retained even when preparation fails before a proxy exists (#709). */
-  launchConfigNotices?: string[];
   // Live capabilities from the adapter's DAP initialize response (issue #243).
   // Reset on each launch; gates best-effort requests like exceptionInfo and
   // lets tooling validate static policy tables against the real adapter.
@@ -265,58 +348,7 @@ export interface ManagedSession extends DebugSessionInfo {
    * that never stopped itself say that its tree did. Reset per launch.
    */
   descendantStops?: number;
-  // The breakOnExceptions mode actually in effect for the current launch or
-  // attach — the user's value, or the policy's launch default when unset
-  // (issue #244). Previously write-only pass-through; recorded for read-back.
-  effectiveBreakOnExceptions?: ExceptionBreakMode;
-  // The launcher's decision that the current launch runs with the debugger
-  // off — noDebug on an adapter that honours it (issue #710). The raw
-  // record: written per launch, reset per launch and attach, cleared by a
-  // stop only a live debugger produces. Never read directly for a
-  // caller-facing answer — isDebuggerOff/debuggerOffWhy (debugger-off.ts)
-  // gate it on the launch being live, and DebugSessionInfo.debuggerDisabled
-  // is its projection (issue #749).
-  launchDebuggerOff?: boolean;
-  // Caller-provided adapterConfig keys the adapter's attach transform did not
-  // carry into the DAP attach request (issue #450). Recorded per attach by
-  // ProxyLauncher.start; consumed by attachToProcess for the response warning.
-  attachDroppedConfigKeys?: string[];
-  // Caller-provided adapterConfig keys outside the adapter's declared
-  // supportedAttachKeys that were still forwarded to the debug adapter
-  // (issue #466). Same lifecycle as attachDroppedConfigKeys.
-  attachForwardedUnknownConfigKeys?: string[];
-  // The adapter's own attach-transform notes (Dart: the no-auth URI built
-  // from host:port, a deviceId on a Dart runner; COBOL: build options given
-  // without sources), drained from consumeLaunchConfigDiagnostics per
-  // attempt (issue #908): reset when ProxyLauncher.start begins, set after
-  // the transform (undefined when there are none), consumed by
-  // attachToProcess for the response warning.
-  attachTransformNotices?: string[];
-  // The most recent real launch, replayed by restart_debugging (issue #238).
-  lastLaunch?: LastLaunchSpec;
-  // The current launch as the adapter's transform handed it to the engine
-  // (issue #950). Written by ProxyLauncher.start after the transform, cleared
-  // when a start begins and left clear by an attach; a dry run leaves it as it
-  // was, so it always names the last real launch (issue #812). Read by the
-  // stale-build check, which hands it to the policy so a source can be
-  // compared with the artefact it binds through. Not part of lastLaunch,
-  // which is the caller's replayable request.
-  transformedLaunch?: TransformedLaunch;
 
-  /**
-   * The exception arming of the last launch or attach (`recordExceptionArming`):
-   * the DAP exception-filter ids it armed (issue #985), the ones beyond the
-   * mode's table — a pytest module launch adds `userUnhandled` to the
-   * `uncaught` default; those stop on an exception the program survives, so
-   * the launch counts as armed (`describeLaunchArming`) — and why no uncaught
-   * exception will stop the program when none will (issue #1032). Reset per
-   * launch attempt.
-   */
-  launchExceptionFilters?: {
-    readonly ids: readonly string[];
-    readonly beyondMode: readonly string[];
-    readonly noUncaughtStop: NoUncaughtStop | undefined;
-  };
   // Live DAP mirror endpoint, when exposed via expose_session (issue #217).
   exposure?: SessionExposure;
 }
@@ -353,6 +385,8 @@ export class SessionStore {
     const effectiveExecutablePath = policy.resolveExecutablePath(executablePath);
     
     const session: ManagedSession = {
+      // Its own until it is adopted as a child, which gives it its tree's.
+      run: {},
       id: sessionId, 
       name: sessionName, 
       language: language, 
@@ -510,6 +544,7 @@ export class SessionStore {
  * the program instead of ending it. What the proxy launch recorded decides;
  * `attachMode` stands in only for a session nothing was recorded on.
  */
-export function borrowsProgram(session: Pick<ManagedSession, 'programOwnership' | 'attachMode'>): boolean {
-  return session.programOwnership !== undefined ? session.programOwnership === 'borrowed' : session.attachMode === true;
+export function borrowsProgram(session: { run: Pick<Run, 'programOwnership' | 'attachMode'> }): boolean {
+  const { programOwnership, attachMode } = session.run;
+  return programOwnership !== undefined ? programOwnership === 'borrowed' : attachMode === true;
 }

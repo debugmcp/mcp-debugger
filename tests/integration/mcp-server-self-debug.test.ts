@@ -220,7 +220,7 @@ describe('mcp-debugger self-debugging readiness', () => {
     expect(stack.stackFrames[0].line).toBe(stopLine);
     const decision = await call(outer!, 'evaluate_expression', {
       sessionId: outerId, frameId: stack.stackFrames[0].id,
-      expression: 'JSON.stringify({requested:session.lastLaunch.adapterLaunchConfig.stopOnEntry,core:effectiveLaunchArgs.stopOnEntry,shouldAutoContinue,reason})'
+      expression: 'JSON.stringify({requested:session.run.lastLaunch.adapterLaunchConfig.stopOnEntry,core:effectiveLaunchArgs.stopOnEntry,shouldAutoContinue,reason})'
     });
     expect(decision.result).toContain('"requested":true,"core":true,"shouldAutoContinue":false');
     await call(outer!, 'step_over', { sessionId: outerId });

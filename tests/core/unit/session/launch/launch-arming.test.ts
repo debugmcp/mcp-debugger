@@ -14,13 +14,15 @@ import {
 } from '../../../../../src/session/launch/launch-arming.js';
 import type { NoUncaughtStop } from '../../../../../src/utils/error-messages.js';
 
-function session(overrides: Partial<ArmingSession> = {}): ArmingSession {
+/** A session as the arming reads it; the run's two facts are given flat and land on its run record. */
+function session(overrides: Partial<Omit<ArmingSession, 'run'>> & ArmingSession['run'] = {}): ArmingSession {
+  const { effectiveBreakOnExceptions, launchExceptionFilters, ...own } = overrides;
   return {
     breakpoints: new Map<string, Breakpoint>(),
     functionBreakpoints: new Map<string, FunctionBreakpoint>(),
     adapterCapabilities: undefined,
-    effectiveBreakOnExceptions: undefined,
-    ...overrides
+    run: { effectiveBreakOnExceptions, ...(launchExceptionFilters ? { launchExceptionFilters } : {}) },
+    ...own
   };
 }
 
@@ -213,7 +215,7 @@ describe('describeExceptionArming / recordExceptionArming', () => {
     const s = session({ effectiveBreakOnExceptions: undefined });
     const record = recordExceptionArming(s, RubyAdapterPolicy, undefined);
     expect(record.noUncaughtStop).toBe('unavailable');
-    expect(s.launchExceptionFilters).toBe(record);
+    expect(s.run.launchExceptionFilters).toBe(record);
     expect(describeLaunchArming(s, false).noUncaughtStop).toBe('unavailable');
   });
 });

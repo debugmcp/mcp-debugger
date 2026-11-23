@@ -480,10 +480,13 @@ Centralized error messages ensure consistency and provide helpful troubleshootin
 
 ```typescript
 export const ErrorMessages = {
-  dapRequestTimeout: (command: string, timeout: number) => 
+  dapRequestTimeout: (command: string, timeout: number) =>
     `Debug adapter did not respond to '${command}' request within ${timeout}s. ` +
     `This typically means the debug adapter has crashed or lost connection. ` +
-    `Try restart_debugging to relaunch the session. If the problem persists, check the debug adapter logs.`,
+    `To go on, start the program again: restart_debugging if this session was started with start_debugging, ` +
+    `attach_to_process if it was attached (restart_debugging refuses an attach session); ` +
+    `a child session comes back with its parent. ` +
+    `If the problem persists, check the debug adapter logs.`,
     
   proxyInitTimeout: (timeout: number, progress?: ProxyInitProgress) =>
     // Invariant first sentence; the rest reflects how far initialization

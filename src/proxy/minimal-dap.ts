@@ -559,6 +559,23 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
       throw new Error('Client is disconnecting or disconnected');
     }
 
+    // A disconnect that leaves the program running (a detach) releases it
+    // with nothing of the proxy's left in it (issue #1212): the adapter's
+    // disconnect closes the target's CDP socket, so this comes first.
+    if (
+      command === 'disconnect' &&
+      this.childSessionManager &&
+      (args as { terminateDebuggee?: unknown } | undefined)?.terminateDebuggee === false
+    ) {
+      await this.childSessionManager.beforeRelease();
+      if (!this.socket || this.socket.destroyed) {
+        throw new Error('Socket not connected or destroyed');
+      }
+      if (this.isDisconnectingOrDisconnected) {
+        throw new Error('Client is disconnecting or disconnected');
+      }
+    }
+
     // Remember the parent's start request so child session creation can see
     // the caller's intent: js-debug's reverse startDebugging configuration
     // only carries {type, name, __pendingTargetId} — request mode and
