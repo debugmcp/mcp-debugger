@@ -148,10 +148,12 @@ export class ProxyLauncher {
     // A verdict belongs to exactly one proxy-launch attempt. Clear the stored
     // projection before any fallible setup so an adapter-acquire, filesystem,
     // or transform failure cannot inherit an earlier MSVC classification.
-    this.ctx.updateSession(session.id, { toolchainValidation: undefined });
-    session.launchConfigNotices = [];
-    session.attachTransformNotices = undefined;
-    session.transformedLaunch = undefined;
+    session.run.toolchainValidation = undefined;
+    // Through the store on purpose: the row's `updatedAt` moves with the verdict, as it always did.
+    this.ctx.updateSession(session.id, {});
+    session.run.launchConfigNotices = [];
+    session.run.attachTransformNotices = undefined;
+    session.run.transformedLaunch = undefined;
 
     // Log entrance for Windows CI debugging
     this.ctx.logger.info(
@@ -200,7 +202,7 @@ export class ProxyLauncher {
       // program (issue #1151), read the same way from the same config: the
       // transformed one. The arguments as given are not it: an adapter with
       // no attach transform turns attach-shaped arguments into a launch.
-      session.programOwnership = launchConfigIsAttach(plan.launchConfig) ? 'borrowed' : 'owned';
+      session.run.programOwnership = launchConfigIsAttach(plan.launchConfig) ? 'borrowed' : 'owned';
 
       // Set up event handlers
       // The core must see the same entry-stop intent the worker sees (#791).
@@ -430,17 +432,21 @@ export class ProxyLauncher {
    * verdict attached to the thrown sentinel.
    */
   private commitPreparation(session: ManagedSession, record: LaunchPreparationRecord): void {
-    session.launchConfigNotices = record.launchConfigNotices;
-    session.attachTransformNotices = record.attachTransformNotices;
+    session.run.launchConfigNotices = record.launchConfigNotices;
+    session.run.attachTransformNotices = record.attachTransformNotices;
     if (record.attachKeyDiff) {
       // Both assigned whenever an attach transform ran, so a prior attach's
       // record never leaks into this one.
       const { dropped, forwardedUnknown } = record.attachKeyDiff;
-      session.attachDroppedConfigKeys = dropped.length > 0 ? dropped : undefined;
-      session.attachForwardedUnknownConfigKeys = forwardedUnknown.length > 0 ? forwardedUnknown : undefined;
+      session.run.attachDroppedConfigKeys = dropped.length > 0 ? dropped : undefined;
+      session.run.attachForwardedUnknownConfigKeys = forwardedUnknown.length > 0 ? forwardedUnknown : undefined;
     }
-    this.ctx.updateSession(session.id, { toolchainValidation: record.toolchainValidation });
-    session.transformedLaunch = record.transformedLaunch;
+    session.run.toolchainValidation = record.toolchainValidation;
+    // Through the store on purpose: it throws when the session was closed
+    // while the adapter was being prepared (a long compile), which is what
+    // stops the commit and gives the lease back.
+    this.ctx.updateSession(session.id, {});
+    session.run.transformedLaunch = record.transformedLaunch;
   }
 
   /**

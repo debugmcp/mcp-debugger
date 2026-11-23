@@ -8,10 +8,33 @@
  * (its precedence is condition → logMessage). Instead of forwarding the
  * logMessage, the JavaScript policy sends a breakpoint `condition` built
  * here: it evaluates the user's condition, renders the message, hands it to
- * the CDP binding the proxy worker installs (`Runtime.addBinding`), falling
- * back to `console.log` when the binding is absent, and returns false so V8
- * never pauses. The stored breakpoint keeps the user's logMessage and
- * condition; only the wire form changes.
+ * the CDP binding the proxy worker installs (`Runtime.addBinding`), and
+ * returns false so V8 never pauses. The stored breakpoint keeps the user's
+ * logMessage and condition; only the wire form changes.
+ *
+ * A hit while the binding is absent is kept, not printed (issue #1212): the
+ * message goes on a short queue in the process, and is delivered through
+ * the binding, in order, at the next hit or when the proxy flushes the queue
+ * right after installing the binding (`JS_LOGPOINT_FLUSH`). What the queue
+ * may leave in a program is bounded and out of its sight: at most
+ * `JS_LOGPOINT_QUEUE_LIMIT` messages and `JS_LOGPOINT_QUEUE_CHARS`
+ * characters (the rest are counted), on globals that are not enumerable (a
+ * test runner's global-leak check does not see them), deleted when the
+ * debugger lets go of a process it has a socket to (`JS_LOGPOINT_CLEAR`;
+ * one whose socket never opened keeps what it queued until it exits). The
+ * queue never throws out of the condition: js-debug reports a throwing
+ * condition through the program's `console.error`, and can be configured to
+ * pause on one, so a program that froze its global object, or shadows
+ * `globalThis` at the hit, loses the kept message and nothing else; with
+ * the binding in, the message is delivered whatever the queue did. Flush
+ * and clear run in the process's default context: a queue in another `vm`
+ * context is delivered by the next hit there. It used to fall
+ * back to `console.log`: a logpoint is the debugger's instrument, and the
+ * program's stdout is the program's. A forked child whose stdout is a pipe
+ * its parent parses had the text written into that pipe (the parent read a
+ * corrupted protocol and exited with another code), and no session showed
+ * it. The binding can be absent for the first milliseconds of a forked
+ * process, and for good where no CDP socket could be opened.
  *
  * The template is ES2019 (js-debug wraps and acorn-parses it) and a pure
  * function of its inputs, so js-debug's equivalentTo() dedupe on re-sends
@@ -20,6 +43,61 @@
 
 /** Global installed in the debuggee by the proxy worker's CDP bridge. */
 export const JS_LOGPOINT_BINDING = '__mcpDebuggerLogpoint';
+/** Global the compiled logpoint keeps undelivered messages on while the binding is absent (issue #1212). */
+export const JS_LOGPOINT_QUEUE = '__mcpDebuggerLogpointQueue';
+/** Global counting the messages that did not fit on the queue. */
+export const JS_LOGPOINT_DROPPED = '__mcpDebuggerLogpointDropped';
+/** How many undelivered messages a process keeps; the rest are counted, not kept. */
+export const JS_LOGPOINT_QUEUE_LIMIT = 1000;
+/** How many characters of undelivered messages a process keeps, all messages together. */
+export const JS_LOGPOINT_QUEUE_CHARS = 1_000_000;
+
+/**
+ * Evaluated by the proxy to take the binding's function out of the process,
+ * and answers whether it is gone. CDP's `Runtime.removeBinding` does not do
+ * that: it stops the notifications and leaves the function where it is
+ * (measured on Node 24: `typeof` stays `'function'`, a call does not throw,
+ * and it is still there for the next socket). A compiled logpoint decides
+ * by that `typeof`, so a function left behind without a listener swallows
+ * every later hit: neither delivered nor kept. `Runtime.addBinding` puts the
+ * function back. The process's default context only.
+ */
+export const JS_LOGPOINT_UNBIND = `(() => {
+  try { delete globalThis.${JS_LOGPOINT_BINDING}; } catch (e) { /* a global that cannot be changed keeps it */ }
+  return typeof ${JS_LOGPOINT_BINDING} !== 'function';
+})()`;
+
+/**
+ * Evaluated by the proxy when it lets go of a process: nothing of this stays
+ * behind, neither what was kept nor the binding's function.
+ */
+export const JS_LOGPOINT_CLEAR = `(() => {
+  try {
+    delete globalThis.${JS_LOGPOINT_QUEUE};
+    delete globalThis.${JS_LOGPOINT_DROPPED};
+    delete globalThis.${JS_LOGPOINT_BINDING};
+  } catch (e) { /* a global that cannot be changed keeps them */ }
+  return 0;
+})()`;
+
+/**
+ * Evaluated in the debuggee by the proxy right after it installed the
+ * binding: delivers what was kept while the binding was absent, in order,
+ * and answers how many messages did not fit (and forgets that count). A
+ * later hit does the same delivery itself, so nothing depends on this
+ * expression except messages no later hit would have flushed.
+ */
+export const JS_LOGPOINT_FLUSH = `(() => {
+  const g = globalThis;
+  const dropped = g.${JS_LOGPOINT_DROPPED} | 0;
+  if (dropped) g.${JS_LOGPOINT_DROPPED} = 0;
+  const q = g.${JS_LOGPOINT_QUEUE};
+  if (typeof ${JS_LOGPOINT_BINDING} === 'function' && q && q.length) {
+    q.chars = 0;
+    for (const held of q.splice(0)) ${JS_LOGPOINT_BINDING}(held);
+  }
+  return dropped;
+})()`;
 
 export type LogMessagePart =
   | { kind: 'text'; text: string }
@@ -218,7 +296,25 @@ const STRINGIFY = `const __mcpStr = (v) => {
   };
   const __mcpErr = (e) => (e && e.name ? e.name + ': ' + e.message : String(e));
   const __mcpEval = (f) => { try { return __mcpStr(f()); } catch (e) { return '<' + __mcpErr(e) + '>'; } };
-  const __mcpEmit = (m) => { if (typeof ${JS_LOGPOINT_BINDING} === 'function') ${JS_LOGPOINT_BINDING}(m); else console.log(m); };`;
+  const __mcpEmit = (v) => {
+    let m;
+    try { m = typeof v === 'string' ? v : String(v); } catch (e) { m = '<unprintable>'; }
+    const bound = typeof ${JS_LOGPOINT_BINDING} === 'function';
+    try {
+      const g = globalThis;
+      if (bound) {
+        const q = g.${JS_LOGPOINT_QUEUE};
+        if (q && q.length) { q.chars = 0; for (const held of q.splice(0)) ${JS_LOGPOINT_BINDING}(held); }
+      } else {
+        const hide = (name, value) => Object.defineProperty(g, name, { value, writable: true, configurable: true, enumerable: false });
+        let q = g.${JS_LOGPOINT_QUEUE};
+        if (!q) { q = []; q.chars = 0; hide('${JS_LOGPOINT_QUEUE}', q); }
+        if (q.length < ${JS_LOGPOINT_QUEUE_LIMIT} && q.chars + m.length <= ${JS_LOGPOINT_QUEUE_CHARS}) { q.push(m); q.chars += m.length; }
+        else hide('${JS_LOGPOINT_DROPPED}', (g.${JS_LOGPOINT_DROPPED} | 0) + 1);
+      }
+    } catch (e) { /* the queue is best effort; see the header */ }
+    if (bound) { try { ${JS_LOGPOINT_BINDING}(m); } catch (e) { /* never throw out of the condition */ } }
+  };`;
 
 /**
  * Compile a logpoint (and its optional condition) into the breakpoint

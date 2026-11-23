@@ -65,6 +65,18 @@ interface PendingCall {
   timer: NodeJS.Timeout;
 }
 
+/**
+ * A call nobody answered in its time, as opposed to one the other side
+ * answered with an error or one whose socket closed: the socket is still
+ * open, so whatever is behind it is there and not answering.
+ */
+export class CdpCallTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CdpCallTimeoutError';
+  }
+}
+
 export class CdpProxyClient extends EventEmitter {
   private readonly transportFactory: (url: string) => CdpTransport;
   private readonly connectTimeoutMs: number;
@@ -123,7 +135,7 @@ export class CdpProxyClient extends EventEmitter {
     const promise = new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`CDP call timeout after ${effectiveTimeout}ms: ${method}`));
+        reject(new CdpCallTimeoutError(`CDP call timeout after ${effectiveTimeout}ms: ${method}`));
       }, effectiveTimeout);
       this.pending.set(id, {
         method,

@@ -1,0 +1,165 @@
+/**
+ * What the proxy runs beside one js-debug target (issue #1212).
+ *
+ * js-debug hands out one raw CDP socket per target (`requestCDPProxy` on that
+ * target's DAP connection). Two things of the proxy's ride on it: the bridge
+ * (the logpoint binding and its messages, function breakpoints; issues #295,
+ * #850) and the proxy's own stepper, which listens on the same socket (issue
+ * #1130). The program's own target had both, built inside
+ * ChildSessionManager; a fork had a socket for its stepper alone, built
+ * inside ChildConnections, so a logpoint in a fork had no channel of the
+ * debugger's and printed into the fork's stdout.
+ *
+ * This is that composition, once: every target gets the same socket and the
+ * same things on it. What each caller still owns is the order in which its
+ * target's events leave (the program's target has entry stops and function
+ * breakpoints to relabel; a fork has neither).
+ */
+import type { DebugProtocol } from '@vscode/debugprotocol';
+import { JS_LOGPOINT_BINDING } from '@debugmcp/shared';
+import { CdpFunctionBreakpointBridge, type ChildDapRequestor } from './cdp-function-breakpoint-bridge.js';
+import { CdpProxyClient } from './cdp-proxy-client.js';
+import { JsStepper } from './js-stepper.js';
+
+export interface JsTargetServicesOptions {
+  /** The proxy's own stepper serves this target's steps (the policy keeps the adapter's off, issue #1130). */
+  stepper: boolean;
+  /** The adapter's function breakpoints and logpoint delivery go over CDP (issue #295). */
+  bridge: boolean;
+  /** A request on the target's own DAP connection. */
+  sendRequest: (command: string, args?: unknown, timeoutMs?: number) => Promise<unknown>;
+  /** The one `stopped` the stepper reports for a step it served. */
+  deliverStep: (event: DebugProtocol.Event) => void;
+  /** Test seam: the bridge itself. */
+  bridgeFactory?: () => CdpFunctionBreakpointBridge;
+  /** Test seam: the CDP socket the default bridge opens, which the stepper shares. */
+  cdpClientFactory?: () => CdpProxyClient;
+}
+
+export class JsTargetServices {
+  /** Present when the policy keeps the adapter's stepper off. */
+  readonly stepper: JsStepper | null;
+  /** Present when the policy delivers function breakpoints over CDP. */
+  readonly bridge: CdpFunctionBreakpointBridge | null;
+  private readonly cdpClientFactory?: () => CdpProxyClient;
+  private stepperOnlyClient: CdpProxyClient | null = null;
+  private detachCount = 0;
+
+  constructor(options: JsTargetServicesOptions) {
+    this.cdpClientFactory = options.cdpClientFactory;
+    this.stepper = options.stepper
+      ? new JsStepper({
+          target: {
+            sendRequest: (command, args, timeoutMs) => options.sendRequest(command, args, timeoutMs) as Promise<never>
+          },
+          deliver: options.deliverStep
+        })
+      : null;
+    // One CDP socket per target: the bridge opens it, the stepper listens on it too.
+    this.bridge = options.bridge
+      ? options.bridgeFactory?.() ??
+        new CdpFunctionBreakpointBridge({
+          clientFactory: () => {
+            const client = options.cdpClientFactory?.() ?? new CdpProxyClient();
+            this.stepper?.attachCdp(client);
+            return client;
+          }
+        })
+      : null;
+  }
+
+  /**
+   * Open the target's CDP socket and put the proxy's things on it. Asked on
+   * the target's own DAP connection, which answers `requestCDPProxy` only
+   * after its `configurationDone` (measured: before that the request is
+   * never answered). Never rejects: a target without the socket debugs on,
+   * its steps are the adapter's and the session is told its logpoints are
+   * not delivered.
+   */
+  async attach(target: ChildDapRequestor): Promise<void> {
+    if (this.bridge) {
+      await this.bridge.attachToChild(target);
+      if (!this.bridge.isAttached()) {
+        // No socket after all: the stepper lets go of the one it was handed.
+        this.stepper?.detachCdp();
+      }
+      return;
+    }
+    if (!this.stepper) {
+      return;
+    }
+    const detachCount = this.detachCount;
+    let cdp: CdpProxyClient | null = null;
+    try {
+      const response = (await target.sendRequest('requestCDPProxy', {}, 5000)) as {
+        body?: { host?: string; port?: number; path?: string };
+      };
+      if (detachCount !== this.detachCount) {
+        return;
+      }
+      const info = response?.body;
+      if (!info?.host || !info.port || !info.path) {
+        throw new Error(`requestCDPProxy returned no address: ${JSON.stringify(info)}`);
+      }
+      cdp = this.cdpClientFactory?.() ?? new CdpProxyClient();
+      this.stepper.attachCdp(cdp);
+      await cdp.connect(info.host, info.port, info.path);
+      if (detachCount !== this.detachCount) {
+        this.stepper.detachCdp();
+        cdp.dispose();
+        return;
+      }
+      this.stepperOnlyClient = cdp;
+      await cdp.send('JsDebug.subscribe', { events: ['Debugger.paused', 'Debugger.resumed'] });
+      await cdp.send('Debugger.enable', {});
+    } catch {
+      this.stepper.detachCdp();
+      cdp?.dispose();
+      if (this.stepperOnlyClient === cdp) {
+        this.stepperOnlyClient = null;
+      }
+    }
+  }
+
+  /**
+   * Breakpoints the owner is sending this target, in either form they
+   * travel in: with their `logMessage`, or as the wire form whose
+   * `condition` is the compiled logpoint. A target that was sent a
+   * logpoint is one that must be told when its logpoints cannot be
+   * delivered; a target that never was has nothing to be told.
+   */
+  noteBreakpoints(breakpoints: readonly unknown[] | undefined): void {
+    const carriesLogpoint = (breakpoints ?? []).some((breakpoint) => {
+      const { logMessage, condition } = (breakpoint ?? {}) as { logMessage?: unknown; condition?: unknown };
+      return (
+        typeof logMessage === 'string' ||
+        (typeof condition === 'string' && condition.includes(JS_LOGPOINT_BINDING))
+      );
+    });
+    if (carriesLogpoint) {
+      this.bridge?.noteLogpoints();
+    }
+  }
+
+  /** Resolves when what the target sent on its CDP socket so far has been handled; see the bridge's `settle`. */
+  settle(timeoutMs?: number): Promise<void> {
+    return this.bridge?.settle(timeoutMs) ?? Promise.resolve();
+  }
+
+  /**
+   * The target is about to be released to run on: take the proxy's things
+   * out of it while its socket is still up. See the bridge's `release`.
+   */
+  release(timeoutMs?: number): Promise<void> {
+    return this.bridge?.release(timeoutMs) ?? Promise.resolve();
+  }
+
+  /** The target's connection is gone, or the proxy is letting go of it: close the socket and what rides on it. */
+  detach(): void {
+    this.detachCount++;
+    this.stepper?.detachCdp();
+    this.stepperOnlyClient?.dispose();
+    this.stepperOnlyClient = null;
+    this.bridge?.detach();
+  }
+}

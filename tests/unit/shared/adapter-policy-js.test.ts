@@ -361,6 +361,42 @@ describe('JsDebugAdapterPolicy', () => {
     expect(withSpecial.variables.map(variable => variable.name)).toContain('this');
   });
 
+  it("leaves a module transform's bindings out of the locals: Vite's SSR runner under vitest (issue #1215)", () => {
+    const frames = [{ id: 1 }];
+    const scopes = {
+      1: [
+        { name: 'Local', variablesReference: 1 },
+        { name: 'Block', variablesReference: 2 },
+        { name: 'Global', variablesReference: 3 }
+      ]
+    };
+    const variables = {
+      1: [
+        { name: 'steps', value: '3' },
+        { name: '__vite_ssr_import_0__', value: 'Module {McpErrorCode: <accessor>}' },
+        { name: '__vite_ssr_import_12__', value: 'Module {fileLabel: <accessor>}' },
+        { name: '__vite_ssr_exports__', value: '{}' },
+        { name: '__vite_ssr_import_meta__', value: '{}' },
+        { name: '__vite_ssr_dynamic_import__', value: 'f' },
+        // A program's own name that merely looks alike stays.
+        { name: '__vite_config', value: '{}' }
+      ],
+      // A scope that holds nothing but the transform's bindings supplies nothing.
+      2: [{ name: '__vite_ssr_import_3__', value: 'Module {ErrorMessages: <accessor>}' }]
+    };
+
+    const locals = JsDebugAdapterPolicy.extractLocalVariables(frames as any, scopes as any, variables as any);
+
+    expect(locals.variables.map((variable) => variable.name)).toEqual(['steps', '__vite_config']);
+    // The emptied scope is not a contributing scope: its truncation would be misattributed (#438).
+    expect(locals.scopeRefs).toEqual([1]);
+
+    const withSpecial = JsDebugAdapterPolicy.extractLocalVariables(frames as any, scopes as any, variables as any, true);
+    expect(withSpecial.variables.map((variable) => variable.name)).toEqual(
+      expect.arrayContaining(['__vite_ssr_import_0__', '__vite_ssr_exports__', '__vite_ssr_import_3__'])
+    );
+  });
+
   it('does not relabel Global as locals when no Local or block scope exists (#595)', () => {
     const result = JsDebugAdapterPolicy.extractLocalVariables!(
       [{ id: 9 }] as any,

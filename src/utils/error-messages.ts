@@ -123,7 +123,16 @@ export const ErrorMessages = {
   dapRequestTimeout: (command: string, timeout: number) =>
     `Debug adapter did not respond to '${command}' request within ${timeout}s. ` +
     `This typically means the debug adapter has crashed or lost connection. ` +
-    `Try restart_debugging to relaunch the session. If the problem persists, check the debug adapter logs.`,
+    // One sentence for every kind of session (issue #1213). It used to say
+    // "Try restart_debugging" to all of them, and restart_debugging replays a
+    // launch: it refuses an attach session and a child session. The layer
+    // that words this cannot tell the kinds apart reliably (launch arguments
+    // can be attach-shaped, and a child's requests travel on its root's
+    // worker), so it names each way back and whose it is.
+    `To go on, start the program again: restart_debugging if this session was started with start_debugging, ` +
+    `attach_to_process if it was attached (restart_debugging refuses an attach session); ` +
+    `a child session comes back with its parent. ` +
+    `If the problem persists, check the debug adapter logs.`,
 
   /**
    * Hint appended to timeout failures on operations that accept a per-request
@@ -936,6 +945,18 @@ export const ErrorMessages = {
     `Use the parent's id, or close_debug_session on the child.`,
 
   /**
+   * A function breakpoint on a child session of an adapter that arms them
+   * through a channel only the session's own program has (js-debug: the CDP
+   * bridge of the launched or attached process, issue #295). The child's
+   * connection has no such channel and the adapter has no request for
+   * them, so nothing is sent and the breakpoint is reported as it is: not
+   * armed (issue #1219).
+   */
+  functionBreakpointsNotArmedInChildSession: () =>
+    `Function breakpoints are not armed in a child session: this adapter arms them only in the process the ` +
+    `session launched or attached to. Set a line breakpoint in the child's code instead.`,
+
+  /**
    * The detach answer when the adapter acknowledged the detach (issue #1148)
    * Occurs when: the adapter answered the detaching disconnect, or sent
    * `terminated` in reply to it, and reported no exit of the program
@@ -1069,7 +1090,7 @@ export const ErrorMessages = {
    * restart_debugging on a session whose attach is still in flight will not
    * become available when the attach finishes — restart replays a launch
    * configuration and an attach session has none. That pairing gets the
-   * terminal answer the post-attach `session.attachMode` check would give,
+   * terminal answer the post-attach `session.run.attachMode` check would give,
    * which `attachMode` is written too late (after the attach's first awaits)
    * to deliver on its own.
    */
