@@ -49,7 +49,7 @@ describe('SessionManager launch: the test-runner preset gate (issue #985)', () =
     expect(result.error).toContain("'pytest'");
     expect(sessionManager.getSession(session.id)!.state).toBe(SessionState.CREATED);
     expect(dependencies.proxyManagerFactory.create).not.toHaveBeenCalled();
-    expect(sessionManager.getSession(session.id)!.lastLaunch).toBeUndefined();
+    expect(sessionManager.getSession(session.id)!.run.lastLaunch).toBeUndefined();
   });
 
   it('names the runners the language does take when it declares some', async () => {
@@ -88,6 +88,6 @@ describe('SessionManager launch: the test-runner preset gate (issue #985)', () =
 
     expect(result.success).toBe(true);
     expect(dependencies.proxyManagerFactory.create).toHaveBeenCalled();
-    expect(sessionManager.getSession(session.id)!.lastLaunch?.adapterLaunchConfig).toEqual({ testRunner: 'pytest' });
+    expect(sessionManager.getSession(session.id)!.run.lastLaunch?.adapterLaunchConfig).toEqual({ testRunner: 'pytest' });
   });
 });

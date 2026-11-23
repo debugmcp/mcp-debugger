@@ -58,6 +58,7 @@ describe('set_breakpoint function gating (#271 phase 3)', () => {
     listToolsHandler = handlers.listToolsHandler;
 
     mockSessionManager.getSession.mockReturnValue({
+      run: {},
       id: 'test-session',
       sessionLifecycle: 'active'
     });
@@ -91,7 +92,7 @@ describe('set_breakpoint function gating (#271 phase 3)', () => {
 
   it('stores a function breakpoint on a TERMINATED session for the next launch (issue #806)', async () => {
     mockSessionManager.getSessionPolicy.mockReturnValue({ name: 'python', supportsFunctionBreakpoints: true });
-    mockSessionManager.getSession.mockReturnValue({ id: 'test-session', sessionLifecycle: 'terminated' });
+    mockSessionManager.getSession.mockReturnValue({ run: {}, id: 'test-session', sessionLifecycle: 'terminated' });
 
     const result = await callSetFunctionBreakpoint();
 
@@ -115,6 +116,7 @@ describe('set_breakpoint function gating (#271 phase 3)', () => {
   it('rejects on policy false even when live capabilities advertise support (policy beats live caps)', async () => {
     mockSessionManager.getSessionPolicy.mockReturnValue({ name: 'unsupported-lang', supportsFunctionBreakpoints: false });
     mockSessionManager.getSession.mockReturnValue({
+      run: {},
       id: 'test-session',
       sessionLifecycle: 'active',
       adapterCapabilities: { supportsFunctionBreakpoints: true }
@@ -144,6 +146,7 @@ describe('set_breakpoint function gating (#271 phase 3)', () => {
       functionBreakpointsVia: 'cdp'
     });
     mockSessionManager.getSession.mockReturnValue({
+      run: {},
       id: 'test-session',
       sessionLifecycle: 'active',
       language: 'javascript',
@@ -162,6 +165,7 @@ describe('set_breakpoint function gating (#271 phase 3)', () => {
       supportsFunctionBreakpoints: true
     });
     mockSessionManager.getSession.mockReturnValue({
+      run: {},
       id: 'test-session',
       sessionLifecycle: 'active',
       adapterCapabilities: { supportsFunctionBreakpoints: false }
@@ -174,6 +178,7 @@ describe('set_breakpoint function gating (#271 phase 3)', () => {
   it('rejects when live capabilities deny support and policy is silent', async () => {
     mockSessionManager.getSessionPolicy.mockReturnValue({ name: 'ruby' });
     mockSessionManager.getSession.mockReturnValue({
+      run: {},
       id: 'test-session',
       sessionLifecycle: 'active',
       adapterCapabilities: { supportsFunctionBreakpoints: false }
@@ -280,7 +285,7 @@ describe('set_breakpoint function-name normalization (issue #467)', () => {
     vi.mocked(SessionManager).mockImplementation(function() { return mockSessionManager as any; });
     createDebugServerWithFacade();
     callToolHandler = getToolHandlers(mockServer).callToolHandler;
-    mockSessionManager.getSession.mockReturnValue({ id: 'test-session', sessionLifecycle: 'active' });
+    mockSessionManager.getSession.mockReturnValue({ run: {}, id: 'test-session', sessionLifecycle: 'active' });
   });
 
   afterEach(() => {

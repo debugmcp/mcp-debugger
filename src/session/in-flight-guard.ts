@@ -21,6 +21,24 @@ import { ErrorMessages, type InFlightOperation } from '../utils/error-messages.j
 import type { DebugResult, DebugResultData } from './session-manager-core.js';
 import type { OperationsContext } from './operations-context.js';
 
+/**
+ * The refusal a launch-shaped operation answers on a child session, or
+ * undefined for a root. A child was adopted, not launched, and its run
+ * record is its tree's (`ManagedSession.run`): starting, replaying or
+ * attaching on a child would write its root's run, and detaching it would be
+ * judged by its root's ownership. The tool handlers refuse a child id before
+ * they call down (`childSessionRefusal`); this is the same answer for any
+ * caller that does not come through them.
+ */
+export function refuseChildSession(
+  session: { id: string; parentSessionId?: string },
+  requestedTool: string
+): string | undefined {
+  return session.parentSessionId
+    ? ErrorMessages.childSessionRefused(requestedTool, session.id, session.parentSessionId)
+    : undefined;
+}
+
 /** The slice of the operations context `run` needs: the session and the log. */
 export type InFlightContext = Pick<OperationsContext, 'getSession' | 'logger'>;
 
@@ -64,7 +82,8 @@ export class InFlightGuard {
    * launch-shaped method uses (`startDebugging`, `restartDebugging`,
    * `attachToProcess`, `detachFromProcess`).
    *
-   * The session is resolved BEFORE the claim, so an unknown id throws
+   * A child session is refused first (`refuseChildSession`). The session is
+   * resolved BEFORE the claim, so an unknown id throws
    * `SessionNotFoundError` without leaving a claim stranded, and so the
    * refusal envelope can report the session's real state. Nothing here
    * awaits before `tryAcquire`, and `body()` is invoked synchronously, so a
@@ -79,6 +98,11 @@ export class InFlightGuard {
     body: () => Promise<DebugResult<TData>>
   ): Promise<DebugResult<TData>> {
     const session = ctx.getSession(sessionId);
+    const child = refuseChildSession(session, requestedTool);
+    if (child) {
+      ctx.logger.warn(`[SessionManager] ${child}`);
+      return { success: false, state: session.state, error: child };
+    }
     const refusal = this.tryAcquire(sessionId, operation, requestedTool);
     if (refusal) {
       ctx.logger.warn(`[SessionManager] ${refusal}`);

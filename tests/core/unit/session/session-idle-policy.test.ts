@@ -362,9 +362,9 @@ describe('SessionManager idle policy (issue #1025, step 2)', () => {
     });
 
     /** Mark a row an attach root, the way attach_to_process does. */
-    const markAttached = (id: string): void =>
-      (sessionManager as unknown as { sessionStore: { update(id: string, patch: object): void } })
-        .sessionStore.update(id, { attachMode: true, programOwnership: 'borrowed' });
+    const markAttached = (id: string): void => {
+      Object.assign(sessionManager.getSession(id)!.run, { attachMode: true, programOwnership: 'borrowed' });
+    };
 
     it('says an attach root was released: its target keeps running', async () => {
       // A live session (the mock launch stands in for a connected target).

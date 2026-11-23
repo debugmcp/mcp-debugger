@@ -58,17 +58,17 @@ describe('SessionStore.getAll() debuggerDisabled projection (issue #749)', () =>
     const { store, id } = storeWith(SessionState.RUNNING);
     expect(store.getAll().find((s) => s.id === id)!).not.toHaveProperty('debuggerDisabled');
 
-    store.get(id)!.launchDebuggerOff = true;
+    store.get(id)!.run.launchDebuggerOff = true;
     expect(store.getAll().find((s) => s.id === id)!.debuggerDisabled).toBe(true);
 
-    store.get(id)!.launchDebuggerOff = undefined;
+    store.get(id)!.run.launchDebuggerOff = undefined;
     expect(store.getAll().find((s) => s.id === id)!).not.toHaveProperty('debuggerDisabled');
 
     // Only a live launch — initializing (the proxy is up and a breakpoint
     // set now still goes to the adapter), running or paused: over
     // (stopped/error) or never launched (created), the record describes
     // nothing running.
-    store.get(id)!.launchDebuggerOff = true;
+    store.get(id)!.run.launchDebuggerOff = true;
     for (const state of [SessionState.STOPPED, SessionState.ERROR, SessionState.CREATED]) {
       store.get(id)!.state = state;
       expect(store.getAll().find((s) => s.id === id)!, state).not.toHaveProperty('debuggerDisabled');
@@ -88,7 +88,7 @@ describe('SessionStore.getAll() debuggerDisabled projection (issue #749)', () =>
     // the flag — as strong as a stop, and it arrives before any hit.
     const { store, id } = storeWith(SessionState.RUNNING);
     const managed = store.get(id)!;
-    managed.launchDebuggerOff = true;
+    managed.run.launchDebuggerOff = true;
     const bp = { id: 'bp-1', file: 'a.py', line: 3, verified: false };
     managed.breakpoints.set(bp.id, bp as never);
     expect(store.getAll().find((s) => s.id === id)!.debuggerDisabled).toBe(true);

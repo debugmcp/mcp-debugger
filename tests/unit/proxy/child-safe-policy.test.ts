@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import { JsDebugAdapterPolicy, PythonAdapterPolicy, type AdapterPolicy } from '@debugmcp/shared';
 import { createChildSafePolicy } from '../../../src/proxy/child-safe-policy.js';
+import { connectionBehaviorOf } from '../../../src/session/connection-behavior.js';
 
 describe('createChildSafePolicy', () => {
   it('is the policy itself for an adapter that adopts nothing in-session (debugpy)', () => {
@@ -37,5 +38,10 @@ describe('createChildSafePolicy', () => {
     const d = derived as Record<string, unknown>;
     const changed = Object.keys({ ...b, ...d }).filter((key) => plain(b[key]) && plain(d[key]) && !Object.is(d[key], b[key])).sort();
     expect(changed).toEqual(['mirrorBreakpointsToChild', 'pauseAfterChildAttach', 'stackTraceRequiresChild']);
+  });
+
+  it('connectionBehaviorOf returns an empty behaviour when no policy is available', () => {
+    expect(connectionBehaviorOf({ parentSessionId: undefined }, undefined)).toEqual({});
+    expect(connectionBehaviorOf({ parentSessionId: 'root-1' }, undefined)).toEqual({});
   });
 });

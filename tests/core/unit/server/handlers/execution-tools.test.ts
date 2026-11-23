@@ -39,6 +39,7 @@ describe('execution tool handlers', () => {
   describe('handleListThreads', () => {
     it('should return threads on success', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -57,6 +58,7 @@ describe('execution tool handlers', () => {
 
     it('converts typed session errors (SessionTerminatedError etc.) into success:false results', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -71,6 +73,7 @@ describe('execution tool handlers', () => {
 
     it('should throw McpError for unknown errors', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -82,7 +85,7 @@ describe('execution tool handlers', () => {
   });
 
   describe('waitForStopTool (issue #849)', () => {
-    const liveSession = { id: 'test-session', sessionLifecycle: SessionLifecycleState.ACTIVE };
+    const liveSession = { run: {}, id: 'test-session', sessionLifecycle: SessionLifecycleState.ACTIVE };
 
     // The idle hold a wait takes is the dispatch's, as for every tool that names
     // a session (issue #1127): tool-dispatch-owner-key.test.ts and
@@ -238,6 +241,7 @@ describe('execution tool handlers', () => {
 
     it('answers for a session whose program has finished instead of refusing it as terminated', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.TERMINATED
       });
@@ -321,7 +325,7 @@ describe('execution tool handlers', () => {
       ctx.sessionManager.getSession.mockReturnValue({
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE,
-        transformedLaunch: launched
+        run: { transformedLaunch: launched }
       });
       ctx.sessionManager.getSessionPolicy.mockReturnValue(JsDebugAdapterPolicy);
       ctx.lineReader = { getLineContext: vi.fn().mockResolvedValue(null) };
@@ -382,7 +386,7 @@ describe('execution tool handlers', () => {
   });
 
   describe('landing fields on the step and wait_for_stop answers (issue #904)', () => {
-    const liveSession = { id: 'test-session', sessionLifecycle: SessionLifecycleState.ACTIVE };
+    const liveSession = { run: {}, id: 'test-session', sessionLifecycle: SessionLifecycleState.ACTIVE };
     const note = "The stop was reported on thread 20256, whose 4 frames are all internal/runtime (top: 'DbgBreakPoint'); showing thread 15896, which is in 'main'.";
     const location = { file: '/app/main.cpp', line: 21, column: 3 };
 
@@ -415,7 +419,7 @@ describe('execution tool handlers', () => {
   });
 
   describe('the tree fields on the wait_for_stop answer (issue #1081)', () => {
-    const liveSession = { id: 'test-session', sessionLifecycle: SessionLifecycleState.ACTIVE };
+    const liveSession = { run: {}, id: 'test-session', sessionLifecycle: SessionLifecycleState.ACTIVE };
     const children = [{ sessionId: 'child-1', name: 'Subprocess 4242', state: 'paused', parentSessionId: 'test-session' }];
 
     it('names the selected session, lists the children, and reads the landing on the selected session', async () => {
@@ -458,6 +462,7 @@ describe('execution tool handlers', () => {
       ['step_out', 'stepOut']
     ] as const)('%s reports the reason and state without a fabricated "Stepped" message', async (toolName, method) => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -475,6 +480,7 @@ describe('execution tool handlers', () => {
 
     it('keeps the success wording and state on a successful step', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -490,6 +496,7 @@ describe('execution tool handlers', () => {
 
     it('surfaces the controller wording and stopReason when a breakpoint, not the step, ended the step (issue #678)', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -515,6 +522,7 @@ describe('execution tool handlers', () => {
 
     it('passes the controller wording through alongside a non-interrupting stopReason (issue #678)', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -533,6 +541,7 @@ describe('execution tool handlers', () => {
 
     it('passes any controller message through: the controller owns the step wording (issue #678 review)', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -553,6 +562,7 @@ describe('execution tool handlers', () => {
   describe('continueExecutionTool envelopes (issue #638)', () => {
     it('reports the reason and state when continue fails', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -570,6 +580,7 @@ describe('execution tool handlers', () => {
 
     it('includes the observed state on success (can be "paused" when a breakpoint fired mid-continue)', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -583,6 +594,7 @@ describe('execution tool handlers', () => {
 
     it('still converts typed session errors into success:false results', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -599,6 +611,7 @@ describe('execution tool handlers', () => {
   describe('handlePause with threadId', () => {
     it('should pass threadId to session manager pause', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -613,6 +626,7 @@ describe('execution tool handlers', () => {
 
     it('should pass undefined threadId when not provided', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -627,6 +641,7 @@ describe('execution tool handlers', () => {
   describe('handlePause', () => {
     it('returns result on success', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -640,7 +655,7 @@ describe('execution tool handlers', () => {
     });
 
     it('hoists pending to the top level and keeps data whole (issue #906)', async () => {
-      ctx.sessionManager.getSession.mockReturnValue({ id: 'test-session', sessionLifecycle: SessionLifecycleState.ACTIVE });
+      ctx.sessionManager.getSession.mockReturnValue({ run: {}, id: 'test-session', sessionLifecycle: SessionLifecycleState.ACTIVE });
       ctx.sessionManager.pause = vi.fn().mockResolvedValue({
         success: true,
         state: 'running',
@@ -656,7 +671,7 @@ describe('execution tool handlers', () => {
     });
 
     it('hoists the stop reason, location, threadId and note, and reads the line context (issue #906)', async () => {
-      ctx.sessionManager.getSession.mockReturnValue({ id: 'test-session', sessionLifecycle: SessionLifecycleState.ACTIVE });
+      ctx.sessionManager.getSession.mockReturnValue({ run: {}, id: 'test-session', sessionLifecycle: SessionLifecycleState.ACTIVE });
       ctx.sessionManager.pause = vi.fn().mockResolvedValue({
         success: true,
         state: 'paused',
@@ -690,7 +705,7 @@ describe('execution tool handlers', () => {
     });
 
     it('returns a failed pause as the controller reported it', async () => {
-      ctx.sessionManager.getSession.mockReturnValue({ id: 'test-session', sessionLifecycle: SessionLifecycleState.ACTIVE });
+      ctx.sessionManager.getSession.mockReturnValue({ run: {}, id: 'test-session', sessionLifecycle: SessionLifecycleState.ACTIVE });
       ctx.sessionManager.pause = vi.fn().mockResolvedValue({ success: false, state: 'running', error: 'Cannot pause in state: running' });
 
       const payload = JSON.parse((await handlePause(ctx, { sessionId: 'test-session' })).content[0].text);
@@ -711,6 +726,7 @@ describe('execution tool handlers', () => {
 
     it('converts SessionTerminatedError into a success:false result', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -725,6 +741,7 @@ describe('execution tool handlers', () => {
 
     it('converts ProxyNotRunningError into a success:false result', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });
@@ -739,6 +756,7 @@ describe('execution tool handlers', () => {
 
     it('wraps generic errors as McpError', async () => {
       ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
         id: 'test-session',
         sessionLifecycle: SessionLifecycleState.ACTIVE
       });

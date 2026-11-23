@@ -123,7 +123,7 @@ export function foldTestRunnerPreset(
  *   the forwarded launch args, and reported via a warning.
  * - Other never-valid nested keys are stripped with a warning.
  * Fixing at intake also cures restart_debugging replay, which snapshots the
- * post-intake values into session.lastLaunch downstream.
+ * post-intake values into session.run.lastLaunch downstream.
  */
 export function normalizeStartDebuggingArgs(
   dapLaunchArgs: Partial<DebugProtocol.LaunchRequestArguments> | undefined,

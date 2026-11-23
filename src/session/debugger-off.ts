@@ -10,10 +10,16 @@ import type { DebugProtocol } from '@vscode/debugprotocol';
 import { BREAKPOINT_STOP_REASONS, SessionState } from '@debugmcp/shared';
 import { ErrorMessages } from '../utils/error-messages.js';
 
-/** The slice of a session the decision is read from. */
+/**
+ * The slice of a session the decision is read from. The record itself is a
+ * fact of the run (`Run.launchDebuggerOff`), the same for every session of a
+ * tree. Required here, on purpose: this view once named the field as an
+ * optional one of the session, and a session that no longer had it still
+ * satisfied the type and read as "on".
+ */
 export interface DebuggerOffView {
   state: SessionState;
-  launchDebuggerOff?: boolean;
+  run: { launchDebuggerOff?: boolean };
   breakpoints?: ReadonlyMap<string, { verified: boolean }>;
   functionBreakpoints?: ReadonlyMap<string, { verified: boolean }>;
 }
@@ -79,7 +85,7 @@ export function stopProvesDebuggerOn(
  */
 export function isDebuggerOff(session: DebuggerOffView): boolean {
   return (
-    session.launchDebuggerOff === true &&
+    session.run.launchDebuggerOff === true &&
     (session.state === SessionState.INITIALIZING ||
       session.state === SessionState.RUNNING ||
       session.state === SessionState.PAUSED) &&

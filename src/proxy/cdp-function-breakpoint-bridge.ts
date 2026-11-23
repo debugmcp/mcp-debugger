@@ -18,8 +18,8 @@
 import { EventEmitter } from 'events';
 import { fileURLToPath } from 'url';
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import { JS_LOGPOINT_BINDING } from '@debugmcp/shared';
-import { CdpProxyClient } from './cdp-proxy-client.js';
+import { JS_LOGPOINT_BINDING, JS_LOGPOINT_CLEAR, JS_LOGPOINT_FLUSH, JS_LOGPOINT_UNBIND } from '@debugmcp/shared';
+import { CdpCallTimeoutError, CdpProxyClient } from './cdp-proxy-client.js';
 import { createLogger } from '../utils/logger.js';
 
 // redirectable: re-pointed into the per-session proxy log at worker init (#519)
@@ -37,6 +37,13 @@ const NAME_RE = /^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*$/;
 const ADAPTER_ID_BASE = 1_000_000;
 
 /** The slice of MinimalDapClient the bridge needs from the child session. */
+/**
+ * The round trip `settle()` waits for. js-debug's CDP proxy answers the
+ * methods of its own `JsDebug` domain itself and answers one it does not have
+ * with an error at once; nothing is forwarded to the target.
+ */
+const CDP_BARRIER_METHOD = 'JsDebug.mcpDebuggerBarrier';
+
 export interface ChildDapRequestor {
   sendRequest(command: string, args?: unknown, timeoutMs?: number): Promise<unknown>;
 }
@@ -164,6 +171,14 @@ export class CdpFunctionBreakpointBridge extends EventEmitter {
   private resolveChain: Promise<void> = Promise.resolve();
   private attachInFlight: Promise<void> | null = null;
   private bindingInstalled = false;
+  /** Counts detach() calls: an attach that finds it changed was abandoned and keeps no socket. */
+  private detachCount = 0;
+  /** Why this target's logpoint channel is down, while it is. */
+  private undeliveredBecause: string | null = null;
+  /** The owner has sent this target a logpoint (`noteLogpoints`). */
+  private logpointsSent = false;
+  /** The session was told once that this target's logpoints are not delivered. */
+  private undeliveredTold = false;
 
   constructor(options?: CdpFunctionBreakpointBridgeOptions) {
     super();
@@ -244,6 +259,9 @@ export class CdpFunctionBreakpointBridge extends EventEmitter {
 
   private async doAttachToChild(child: ChildDapRequestor): Promise<void> {
     let client: CdpProxyClient | null = null;
+    let boundInThisAttach = false;
+    const detachCount = this.detachCount;
+    const abandoned = (): boolean => detachCount !== this.detachCount;
     try {
       const response = (await child.sendRequest('requestCDPProxy', {}, 5000)) as {
         body?: { host: string; port: number; path: string };
@@ -253,27 +271,51 @@ export class CdpFunctionBreakpointBridge extends EventEmitter {
         throw new Error(`requestCDPProxy returned no address: ${JSON.stringify(info)}`);
       }
 
+      if (abandoned()) {
+        return;
+      }
       client = this.clientFactory();
       this.wireClient(client);
       await client.connect(info.host, info.port, info.path);
+      if (abandoned()) {
+        // detach() ran while the socket was opening (a forked process that
+        // ended at once, issue #1212): it found no client to close.
+        throw new Error('detached while attaching');
+      }
       // Assign BEFORE subscribe/enable: the proxy replays its sticky latest
       // Debugger.paused while processing the enable request itself, and the
       // resolution kick from that replay needs a usable client.
       this.client = client;
-      await client.send('JsDebug.subscribe', {
+      // The binding goes out with the subscription, before either is
+      // answered (issue #1212): the adapter lets a forked process run about
+      // 20 ms after its configurationDone, and a binding that is on the wire
+      // before that covers the process's first statement.
+      const subscribed = client.send('JsDebug.subscribe', {
         events: ['Debugger.paused', 'Debugger.resumed', 'Debugger.scriptParsed', 'Runtime.bindingCalled']
       });
+      const bound = client.send('Runtime.addBinding', { name: JS_LOGPOINT_BINDING }).then(
+        () => null,
+        (err: unknown) => (err instanceof Error ? err.message : String(err))
+      );
+      await subscribed;
       // Logpoint delivery (issue #850): the compiled logpoint condition the
       // JS policy sends calls this global with the rendered message, so the
       // message reaches us over CDP whatever the program did to console.
       // Without an executionContextId the binding covers every context of
-      // the target, those created later included. A failure is not fatal:
-      // the compiled condition falls back to console.log.
-      try {
-        await client.send('Runtime.addBinding', { name: JS_LOGPOINT_BINDING });
+      // the target, those created later included. A failure is not fatal
+      // to the attach; the logpoints of this target are then not delivered
+      // (they are kept in the process, never printed; issue #1212) and the
+      // session is told so.
+      const bindingRefused = await bound;
+      if (bindingRefused === null) {
+        boundInThisAttach = true;
         this.bindingInstalled = true;
-      } catch (err) {
-        logger.warn(`[CdpFnBpBridge] Runtime.addBinding(${JS_LOGPOINT_BINDING}) failed; logpoints fall back to console.log: ${err instanceof Error ? err.message : String(err)}`);
+        this.undeliveredBecause = null;
+        this.undeliveredTold = false;
+        await this.flushHeldLogpoints(client);
+      } else {
+        logger.warn(`[CdpFnBpBridge] Runtime.addBinding(${JS_LOGPOINT_BINDING}) failed; logpoints of this target are not delivered: ${bindingRefused}`);
+        this.logpointChannelDown(bindingRefused);
       }
       // Re-enabling the (already enabled) Debugger domain makes the proxy
       // replay its sticky latest Debugger.paused — covers the entry pause
@@ -294,8 +336,53 @@ export class CdpFunctionBreakpointBridge extends EventEmitter {
       this.attachFailed = true;
       const message = err instanceof Error ? err.message : String(err);
       logger.warn(`[CdpFnBpBridge] CDP proxy unavailable, function breakpoints stay pending: ${message}`);
+      if (abandoned()) {
+        // detach() already cleared the state; only this attach's own socket is left.
+        client?.dispose();
+        return;
+      }
+      // A binding that went in before the failure stays in the process
+      // when this socket closes: its function is a property of the
+      // process's global object, and every later hit would call it, keep
+      // nothing, and reach nobody. So the function is taken out again,
+      // bounded, before the socket goes (`Runtime.removeBinding` alone
+      // leaves it in: see JS_LOGPOINT_UNBIND): hits are then kept in the
+      // process as they are for any target without a channel, and the
+      // session is told.
+      //
+      // One case says nothing: the process has ended. Its end is what
+      // failed the attach (measured: a fork that logs twice and exits at
+      // once fails `Debugger.enable` with "Connection is closed" after
+      // both lines were delivered), nothing more will hit there, and a
+      // warning would be about lines that arrived. The adapter answers a
+      // command for such a target with an error at once, or the socket
+      // is closed. Every other outcome is a process that is still there,
+      // whose logpoints are not delivered from now on, and it is told:
+      // an answer, whatever it says (a global that cannot be changed
+      // keeps the function), and no answer in time (a main thread
+      // blocked in a native call: the evaluation runs when it returns).
+      // `boundInThisAttach`, not `this.bindingInstalled`: when the socket
+      // itself closed, `onClosed` already ran `clearClientState()` and reset
+      // `this.bindingInstalled` before this `catch` resumed.
+      if (!boundInThisAttach) {
+        this.logpointChannelDown(message);
+      } else if (client?.isConnected()) {
+        const ended = await client
+          .send('Runtime.evaluate', { expression: JS_LOGPOINT_UNBIND, returnByValue: true }, 1000)
+          .then(() => false, (failure: unknown) => !(failure instanceof CdpCallTimeoutError));
+        if (abandoned()) {
+          client.dispose();
+          return;
+        }
+        void client.send('Runtime.removeBinding', { name: JS_LOGPOINT_BINDING }, 1000).catch(() => undefined);
+        if (!ended) {
+          this.logpointChannelDown(message);
+        }
+      }
       // Roll back any partial connection
-      this.clearClientState();
+      if (this.client === client || this.client === null) {
+        this.clearClientState();
+      }
       client?.dispose();
       for (const entry of this.desired) {
         if (entry.valid && !entry.cdpBreakpointId) {
@@ -305,14 +392,172 @@ export class CdpFunctionBreakpointBridge extends EventEmitter {
     }
   }
 
+  /**
+   * The owner sent this target a logpoint (issue #1212). The bridge does
+   * not see breakpoints, and a target without a logpoint has nothing to be
+   * told about its channel: a fork that ends before its socket is open is
+   * the common case of a channel that never came up. Once said, it stays
+   * said: the bridge is not told when the last logpoint is removed, and a
+   * warning too many is the cheaper error.
+   */
+  noteLogpoints(): void {
+    this.logpointsSent = true;
+    this.tellIfLogpointsUndelivered();
+  }
+
+  private logpointChannelDown(reason: string): void {
+    this.undeliveredBecause = reason;
+    this.tellIfLogpointsUndelivered();
+  }
+
+  /**
+   * One line on the session, once: the logpoints of this target are not
+   * delivered (issue #1212). They used to fall back to the program's own
+   * `console.log`; they are now kept out of the program's output, so the
+   * session has to be told where they went. Said when both are true, in
+   * whichever order they become so: the channel is down, and the target
+   * was sent a logpoint. Worded and shaped like every other notice in a
+   * session's output.
+   */
+  private tellIfLogpointsUndelivered(): void {
+    const reason = this.undeliveredBecause;
+    if (reason === null || !this.logpointsSent || this.undeliveredTold) {
+      return;
+    }
+    this.undeliveredTold = true;
+    this.emit('outputEvent', {
+      seq: 0,
+      type: 'event',
+      event: 'output',
+      body: {
+        category: 'console',
+        output: `[mcp-debugger] Warning: logpoints that hit in this process are not delivered: the debugger's channel into it is not available (${reason}). Their messages are kept out of the program's own output.\n`
+      }
+    } as DebugProtocol.OutputEvent);
+  }
+
+  /**
+   * Take out of a process that will live on what the proxy put into it: the
+   * binding's function and anything its logpoints kept (issue #1212). Awaited
+   * by whoever is about to send the adapter the `disconnect` that releases
+   * the target, because that disconnect takes this socket with it: measured,
+   * a `detach()` that runs afterwards finds it closed and the function stays
+   * in the process. One bounded round trip; never rejects. The bound is
+   * short on purpose: the caller's disconnect has a deadline of its own,
+   * and a process that answers at all answers in milliseconds.
+   *
+   * Not airtight: the logpoints are the adapter's breakpoints, and they stay
+   * set until the adapter has detached. One that hits in the milliseconds
+   * between this and that finds no function, is kept (within the queue's
+   * bounds), and nobody reads it.
+   */
+  async release(timeoutMs = 250): Promise<void> {
+    const client = this.client;
+    if (!client?.isConnected()) {
+      return;
+    }
+    await client
+      .send('Runtime.evaluate', { expression: JS_LOGPOINT_CLEAR, returnByValue: true }, timeoutMs)
+      .catch(() => undefined);
+  }
+
+  /** The CDP socket is open: what rides on it is live. */
+  isAttached(): boolean {
+    return this.client?.isConnected() === true;
+  }
+
+  /**
+   * Resolves once everything the target sent on the CDP socket before this
+   * call has been handled (issue #1212). A process's last logpoint messages
+   * and the adapter's `terminated` for it travel on two sockets, and the
+   * `terminated` was measured to arrive about 1 ms first: whoever forwards
+   * the end of a target waits for this, or the last lines arrive at a
+   * session that has already ended.
+   *
+   * The barrier is one round trip on the CDP socket, answered by the
+   * adapter's proxy itself (an unknown method of its own domain: the target
+   * is not asked anything). Messages on one socket keep their order, so its
+   * answer, an error included, follows every event the proxy had relayed
+   * when it took the request. That the proxy has relayed all of a target's
+   * events by the time the adapter reports the target's end is not
+   * something its protocol promises: it is what was measured (through the
+   * server, a process that hits two logpoints and exits at once delivered
+   * both in 12 of 12 runs behind this barrier, and in 0 of 12 without).
+   *
+   * Bounded by one deadline, `timeoutMs` from the call: an attach still in
+   * flight and the round trip share it. Never rejects.
+   */
+  async settle(timeoutMs = 500): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    const attaching = this.attachInFlight;
+    if (attaching) {
+      let timer: NodeJS.Timeout | undefined;
+      await Promise.race([
+        attaching.catch(() => undefined),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, timeoutMs);
+        })
+      ]);
+      clearTimeout(timer);
+    }
+    const client = this.client;
+    const left = deadline - Date.now();
+    if (!client?.isConnected() || left <= 0) {
+      return;
+    }
+    try {
+      await client.send(CDP_BARRIER_METHOD, {}, left);
+    } catch {
+      // An error is the expected answer, and a closed socket has nothing more to deliver.
+    }
+  }
+
+  /**
+   * Deliver the logpoint messages the target kept while it had no binding
+   * (issue #1212): a forked process can hit a logpoint in the milliseconds
+   * before this socket is up. The compiled logpoint queues them in the
+   * process; this drains the queue through the binding, in order. Best
+   * effort: a later hit drains it too, and a target that cannot evaluate
+   * right now loses nothing by it.
+   */
+  private async flushHeldLogpoints(client: CdpProxyClient): Promise<void> {
+    try {
+      const answer = (await client.send('Runtime.evaluate', { expression: JS_LOGPOINT_FLUSH, returnByValue: true }, 2000)) as
+        | { result?: { value?: unknown } }
+        | undefined;
+      const dropped = answer?.result?.value;
+      if (typeof dropped === 'number' && dropped > 0) {
+        this.emit('outputEvent', {
+          seq: 0,
+          type: 'event',
+          event: 'output',
+          body: {
+            category: 'console',
+            output: `[mcp-debugger] ${dropped} logpoint message(s) of this process were not kept: it hit more logpoints than fit before the debugger's channel was up.\n`
+          }
+        } as DebugProtocol.OutputEvent);
+      }
+    } catch (err) {
+      logger.debug(`[CdpFnBpBridge] flushing held logpoint messages failed (a later hit delivers them): ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   /** Drop the CDP connection but keep the desired set (re-attach re-arms). */
   detach(): void {
+    this.detachCount++;
     const client = this.client;
-    if (client?.isConnected() && this.bindingInstalled) {
+    if (client?.isConnected()) {
       // Best effort: a target that outlives the session (attach) should not
-      // keep a dangling global. The send is not awaited; the socket closes
-      // right after.
-      void client.send('Runtime.removeBinding', { name: JS_LOGPOINT_BINDING }).catch(() => undefined);
+      // keep a dangling global, nor what its logpoints kept while the
+      // binding was absent (issue #1212). The evaluation is what removes
+      // the binding's function; `Runtime.removeBinding` only ends the
+      // notifications (measured, see JS_LOGPOINT_UNBIND). The sends are
+      // not awaited, and the socket closes right after: a command sent
+      // before a close was measured to land.
+      void client.send('Runtime.evaluate', { expression: JS_LOGPOINT_CLEAR, returnByValue: true }).catch(() => undefined);
+      if (this.bindingInstalled) {
+        void client.send('Runtime.removeBinding', { name: JS_LOGPOINT_BINDING }).catch(() => undefined);
+      }
     }
     this.clearClientState();
     client?.dispose();
@@ -419,7 +664,9 @@ export class CdpFunctionBreakpointBridge extends EventEmitter {
     const onEvent = (method: string, params: unknown): void => this.onCdpEvent(method, params as Record<string, unknown>);
     const onClosed = (): void => {
       logger.warn('[CdpFnBpBridge] CDP proxy connection closed; function breakpoints disarmed until re-attach');
-      this.clearClientState();
+      if (this.client === client) {
+        this.clearClientState();
+      }
     };
     client.on('cdp-event', onEvent);
     client.on('closed', onClosed);
