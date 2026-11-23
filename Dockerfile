@@ -155,7 +155,7 @@ RUN cp -r "$(rustc --print sysroot)/lib/rustlib/etc" /rust-etc
 # Stage 2: Create runtime image with full LLDB dependencies
 # Dart SDK for the dart adapter (issue #790): the official image's self-contained SDK tree
 # (BSD-3-Clause), copied into the runtime stage below. Flutter stays host-only — it needs a
-# display or device and a multi-gigabyte checkout. Pinned to the dart:3.13 manifest list.
+# display or device and a multi-gigabyte checkout. Pinned to the dart:3.14 manifest list.
 FROM dart:3.14@sha256:36176bf7b6400bdc4aa77ba07b733b2eabf22640f71afd1b83eba679a26d5698 AS dart-sdk
 
 FROM ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c
