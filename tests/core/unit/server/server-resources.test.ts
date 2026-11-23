@@ -240,7 +240,9 @@ describe('Server Output Resources Tests', () => {
         params: { uri: 'debug://sessions/child-1/output' }
       });
 
-      expect(textOf(result.contents[0])).toContain('debug://sessions/root-1/output');
+      expect(textOf(result.contents[0])).toContain("The launch session's output: debug://sessions/root-1/output\n");
+      // Not "read that instead": what follows is this process's own (issue #1212).
+      expect(textOf(result.contents[0])).not.toContain('instead');
       expect(textOf(result.contents[0])).toContain('Warning: function breakpoint never bound.');
     });
 

@@ -5,8 +5,10 @@
  * program's connection and the server adopts it as a child debug session on a
  * connection of its own — the M1 mechanism (#1081) under js-debug's measured
  * shapes (docs/javascript/spike-notes-forks.md): the report is answered the
- * moment it is held, release is a throwaway attach, the tree's output lands
- * on the launch session only, and a child's close releases it.
+ * moment it is held, release is a throwaway attach, the tree's stdout and
+ * stderr land on the launch session only (the lines of the logpoints a fork
+ * hit are on the fork's own session, issue #1212), and a child's close
+ * releases it.
  *
  * Every case names the key explicitly for the record; it is on by default
  * since M2's second PR, which the attach and cascade suites rely on.
@@ -28,11 +30,16 @@ const childShiftedFixture = path.join(treeDir, 'child_shifted.js');
 /** The line of child_shifted.js that carries `marker`. */
 const shiftedLine = (marker: string): number =>
   fs.readFileSync(childShiftedFixture, 'utf8').split('\n').findIndex((text) => text.includes(marker)) + 1;
+const parentPipedFixture = path.join(treeDir, 'parent_piped.js');
+const childPipedFixture = path.join(treeDir, 'child_piped.js');
 /** The `// BREAKPOINT` lines of the fixtures. */
 const PARENT_BREAKPOINT_LINE = 20;
 const CHILD_BREAKPOINT_LINE = 14;
 const CHILD_GRAND_BREAKPOINT_LINE = 18;
 const GRANDCHILD_BREAKPOINT_LINE = 9;
+/** child_piped.js: its first statement, and the first statement of its tick. */
+const CHILD_PIPED_FIRST_LINE = 1;
+const CHILD_PIPED_TICK_LINE = 3;
 
 interface Row { id: string; name: string; state: string; language: string; parentSessionId?: string }
 interface ChildSummary { sessionId: string; name: string; state: string; parentSessionId: string }
@@ -48,7 +55,12 @@ interface Stop extends ToolAnswer {
   childrenReleased?: number;
 }
 interface Closed extends ToolAnswer { childrenClosed?: number; processEnded?: boolean; released?: boolean }
-interface Output extends ToolAnswer { entries: Array<{ output: string }>; outputOn?: string; note?: string }
+interface Output extends ToolAnswer {
+  entries: Array<{ output: string; category?: string }>;
+  outputOn?: string;
+  note?: string;
+  children?: ChildSummary[];
+}
 interface Stack extends ToolAnswer { stackFrames: Array<{ id: number; file?: string; line?: number }> }
 interface Listed extends ToolAnswer {
   breakpoints: Array<{ id: string; line: number; requestedLine?: number; verified: boolean; verifiedBy?: string; adapterId?: number }>;
@@ -461,7 +473,7 @@ describe('JavaScript forks as child sessions (the session tree, issue #1082)', (
     expect(await outputText(rootId)).toContain('child done 3');
   }, 120_000);
 
-  it("a logpoint set on the parent reaches the fork and prints into the launch session's output", async () => {
+  it("a logpoint set on the parent reaches the fork: its lines are on the fork's own session, in order, and not in the program's output", async () => {
     const rootId = await server.createSession('javascript', 'js-tree-logpoint');
     const logpoint = await call('set_breakpoint', { file: childFixture, line: CHILD_BREAKPOINT_LINE, logMessage: 'tick {i} total {total}' });
     expect(logpoint.success, JSON.stringify(logpoint)).toBe(true);
@@ -470,9 +482,62 @@ describe('JavaScript forks as child sessions (the session tree, issue #1082)', (
     const ended = await call<Stop>('wait_for_stop', { sessionId: rootId, timeout: 30000 });
     expect(ended.state, JSON.stringify(ended)).toBe('stopped');
     expect(ended.sessionId).toBe(rootId);
-    const output = await pollUntil(() => outputText(rootId), (text) => text.includes('parent child exit 0'), 5000);
-    expect(output).toContain('tick 0 total 0');
-    expect(output).toContain('tick 2 total 1');
-    expect(output).toContain('child done 3');
+    await pollUntil(() => outputText(rootId), (text) => text.includes('parent child exit 0'), 5000);
+
+    // The program's own output is the program's: the logpoint printed nothing into it (issue #1212).
+    const rootOutput = await outputOf(rootId);
+    const rootText = rootOutput.entries.map((e) => e.output).join('');
+    expect(rootText).toContain('child done 3');
+    expect(rootText).not.toContain('tick 0 total 0');
+    // The same answer lists the tree, so a caller that reads only this session learns of the fork's.
+    expect(rootOutput.children, JSON.stringify(rootOutput)).toEqual([
+      { sessionId: expect.any(String), name: expect.stringMatching(/child\.js \[\d+\]$/), state: 'stopped', parentSessionId: rootId }
+    ]);
+
+    // The lines are on the session of the process that hit the logpoint, every one, in order.
+    const childOutput = await outputOf(rootOutput.children![0].sessionId);
+    expect(childOutput.entries.map((e) => e.output)).toEqual(['tick 0 total 0\n', 'tick 1 total 0\n', 'tick 2 total 1\n']);
+    expect(childOutput.entries.every((e) => e.category === 'console')).toBe(true);
+    // What it prints to inherited stdio is still read on the launch session, and the note says which is which.
+    expect(childOutput.outputOn).toBe(rootId);
+    expect(childOutput.note).toMatch(/writes to inherited stdio is on its launch session's buffer/);
+    expect(childOutput.note).toMatch(/the lines of the logpoints it hit/);
+    expect(childOutput.children).toBeUndefined();
+  }, 120_000);
+
+  it("a logpoint in a fork whose stdout the parent parses leaves that pipe alone: the protocol is intact and the lines are on the fork's session", async () => {
+    // Before (issue #1212): the compiled logpoint fell back to the fork's own
+    // console.log, the text went down the pipe, the parent reported its
+    // protocol corrupted and exited 3, and no session showed the lines.
+    const rootId = await server.createSession('javascript', 'js-tree-piped-logpoint');
+    const first = await call('set_breakpoint', { file: childPipedFixture, line: CHILD_PIPED_FIRST_LINE, logMessage: 'fork first statement' });
+    expect(first.success, JSON.stringify(first)).toBe(true);
+    const tick = await call('set_breakpoint', { file: childPipedFixture, line: CHILD_PIPED_TICK_LINE, logMessage: 'fork tick n={n}' });
+    expect(tick.success, JSON.stringify(tick)).toBe(true);
+    await launch(parentPipedFixture);
+
+    const ended = await call<Stop>('wait_for_stop', { sessionId: rootId, timeout: 30000 });
+    expect(ended.state, JSON.stringify(ended)).toBe('stopped');
+    expect(ended.sessionId).toBe(rootId);
+    // The program behaved as it does without a debugger: three protocol lines, exit 0.
+    expect(ended.exitCode, JSON.stringify(ended)).toBe(0);
+    const rootOutput = await pollUntil(() => outputOf(rootId), (out) => out.entries.some((e) => e.output.includes('protocol')), 5000);
+    const rootText = rootOutput.entries.map((e) => e.output).join('');
+    expect(rootText).toContain('protocol ok 3');
+    expect(rootText).not.toContain('fork tick');
+    expect(rootText).not.toContain('fork first statement');
+
+    // Every line, the fork's first statement included, in order, on the fork's session.
+    expect(rootOutput.children, JSON.stringify(rootOutput)).toHaveLength(1);
+    const childOutput = await outputOf(rootOutput.children![0].sessionId);
+    expect(childOutput.entries.map((e) => e.output)).toEqual([
+      'fork first statement\n',
+      'fork tick n=0\n',
+      'fork tick n=1\n',
+      'fork tick n=2\n'
+    ]);
+    // This fork's stdout is a pipe: no session shows it, and the note does not claim the launch session does.
+    expect(rootText).not.toContain('{"n":1}');
+    expect(childOutput.note).toMatch(/what it writes to a pipe is read by its parent process only/);
   }, 120_000);
 });

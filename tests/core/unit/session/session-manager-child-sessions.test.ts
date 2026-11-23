@@ -1407,6 +1407,34 @@ describe('SessionManager child sessions (issue #1081)', () => {
       expect(sessionManager.outputOnFor(childId)).toBeUndefined();
     });
 
+    it("treeChildrenOf lists a session's descendants as the tree answers do, and nothing for a leaf (issue #1212)", async () => {
+      const { rootId, childId, grandchildId } = await jsTree();
+
+      expect(sessionManager.treeChildrenOf(rootId)).toEqual([
+        { sessionId: childId, name: sessionManager.getSession(childId)!.name, state: sessionManager.getSession(childId)!.state, parentSessionId: rootId },
+        {
+          sessionId: grandchildId,
+          name: sessionManager.getSession(grandchildId)!.name,
+          state: sessionManager.getSession(grandchildId)!.state,
+          parentSessionId: childId
+        }
+      ]);
+      expect(sessionManager.treeChildrenOf(childId)).toEqual([expect.objectContaining({ sessionId: grandchildId, parentSessionId: childId })]);
+      expect(sessionManager.treeChildrenOf(grandchildId)).toBeUndefined();
+      expect(sessionManager.treeChildrenOf('no-such-session')).toBeUndefined();
+    });
+
+    it("keeps a logpoint line a launch child's own connection delivers on the child's buffer, pointer or not (issue #1212)", async () => {
+      const { rootId, childId, childView } = await jsTree();
+      childView.simulateEvent('output', { category: 'console', output: 'worker n=3\n' });
+
+      // Its stdout and stderr are still read on the launch session...
+      expect(sessionManager.outputOnFor(childId)).toBe(rootId);
+      // ...and the line of the logpoint it hit is its own.
+      expect(sessionManager.getSession(childId)!.outputBuffer!.renderText()).toContain('worker n=3');
+      expect(sessionManager.getSession(rootId)!.outputBuffer!.renderText()).not.toContain('worker n=3');
+    });
+
     it('reads child and grandchild output from their own connections under an attach root', async () => {
       const { rootId, childId, grandchildId, childView } = await jsTree();
       sessionManager.getSession(rootId)!.run.attachMode = true;

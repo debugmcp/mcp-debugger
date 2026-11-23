@@ -11,7 +11,7 @@ import { ChildConnections, type ChildAdoptionDeps } from '../../src/proxy/child-
 import type { CdpProxyClient } from '../../src/proxy/cdp-proxy-client.js';
 import type { IDapClientFactory, StatusMessage } from '../../src/proxy/dap-proxy-interfaces.js';
 import { createMockDapClient } from '../test-utils/mocks/dap-client.js';
-import { JsDebugAdapterPolicy, PythonAdapterPolicy, type AdapterPolicy } from '@debugmcp/shared';
+import { JS_LOGPOINT_BINDING, JsDebugAdapterPolicy, PythonAdapterPolicy, type AdapterPolicy } from '@debugmcp/shared';
 import { ErrorMessages } from '../../src/utils/error-messages.js';
 
 const configuration = { type: 'python', name: 'Subprocess 37012', subProcessId: 37012, connect: { host: '127.0.0.1', port: 5678 } };
@@ -1174,6 +1174,8 @@ describe("ChildConnections: an adopted child's proxy stepper (issue #1130)", () 
     readonly sent: string[] = [];
     connectedTo: { host: string; port: number; path: string } | null = null;
     disposed = false;
+    /** A method answered by the test instead of at once. */
+    readonly held = new Map<string, Promise<unknown>>();
 
     async connect(host: string, port: number, path: string): Promise<void> {
       this.connectedTo = { host, port, path };
@@ -1181,11 +1183,16 @@ describe("ChildConnections: an adopted child's proxy stepper (issue #1130)", () 
 
     async send(method: string): Promise<unknown> {
       this.sent.push(method);
-      return {};
+      return this.held.get(method) ?? {};
     }
 
     isConnected(): boolean {
       return this.connectedTo !== null && !this.disposed;
+    }
+
+    /** The process hit a logpoint: the compiled condition called the binding. */
+    logpoint(payload: string): void {
+      this.emit('cdp-event', 'Runtime.bindingCalled', { name: JS_LOGPOINT_BINDING, payload, executionContextId: 1 });
     }
 
     dispose(): void {
@@ -1307,11 +1314,13 @@ describe("ChildConnections: an adopted child's proxy stepper (issue #1130)", () 
     await adoptChild();
     const cdp = await stepperOnItsSocket();
 
-    // The socket is the one js-debug hands out for this target, subscribed to V8's pauses.
+    // The socket is the one js-debug hands out for this target, and one
+    // socket carries everything the proxy runs beside it: the logpoint
+    // binding and what the process kept before it (issue #1212), V8's pauses.
     expect(childClient.sendRequest).toHaveBeenCalledWith('requestCDPProxy', {}, 5000);
     expect(cdpClients).toHaveLength(1);
     expect(cdp.connectedTo).toEqual(cdpAddress);
-    expect(cdp.sent).toEqual(['JsDebug.subscribe', 'Debugger.enable']);
+    expect(cdp.sent).toEqual(['JsDebug.subscribe', 'Runtime.addBinding', 'Runtime.evaluate', 'Debugger.enable']);
     // Running, there is nothing to step from: the request is the adapter's.
     expect(connections.stepRequest('child-1', 'next', STEP)).toBeNull();
 
@@ -1403,9 +1412,34 @@ describe("ChildConnections: an adopted child's proxy stepper (issue #1130)", () 
     await expect(connections.beforeRequest('nobody', 'continue')).resolves.toBeUndefined();
   });
 
+  it("close() sends the clear that takes the proxy's things out of a child before the disconnect that releases it (issue #1212)", async () => {
+    // js-debug cannot end a target it adopted: closing a child releases it,
+    // whatever terminateDebuggee says. The adapter's disconnect takes the
+    // child's CDP socket with it, so the clear is on the wire first.
+    const cdp = await pausedChild();
+    const manager = (connections as unknown as { options: { adoption: ChildAdoptionDeps } }).options.adoption.connectionManager as unknown as {
+      disconnect: ReturnType<typeof vi.fn>;
+    };
+    let evaluatesAtDisconnect = -1;
+    let disposedAtDisconnect: boolean | undefined;
+    manager.disconnect.mockImplementation(async () => {
+      evaluatesAtDisconnect = cdp.sent.filter((m) => m === 'Runtime.evaluate').length;
+      disposedAtDisconnect = cdp.disposed;
+    });
+    const evaluatesBefore = cdp.sent.filter((m) => m === 'Runtime.evaluate').length;
+
+    await connections.close('child-1', { terminateDebuggee: true });
+
+    // One more evaluation than the attach's flush: the clear, sent before the disconnect.
+    expect(evaluatesAtDisconnect).toBeGreaterThan(evaluatesBefore);
+    expect(disposedAtDisconnect).toBe(true);
+    expect(cdp.disposed).toBe(true);
+  });
+
   it("close() takes the stepper off the child's CDP socket and closes the socket", async () => {
     const cdp = await pausedChild();
-    expect(cdp.listenerCount('cdp-event')).toBe(1);
+    // The stepper and the logpoint channel listen on the one socket.
+    expect(cdp.listenerCount('cdp-event')).toBe(2);
 
     await connections.close('child-1', { terminateDebuggee: true });
 
@@ -1416,7 +1450,7 @@ describe("ChildConnections: an adopted child's proxy stepper (issue #1130)", () 
 
   it("a child connection that closes by itself takes its stepper and CDP socket down with it", async () => {
     const cdp = await pausedChild();
-    expect(cdp.listenerCount('cdp-event')).toBe(1);
+    expect(cdp.listenerCount('cdp-event')).toBe(2);
 
     childClient.emit('close');
 
@@ -1445,6 +1479,269 @@ describe("ChildConnections: an adopted child's proxy stepper (issue #1130)", () 
 
     expect(cdpClients[0].listenerCount('cdp-event')).toBe(0);
     expect(connections.stepRequest('child-1', 'next', STEP)).toBeNull();
+  });
+
+  describe("the child's own logpoint channel (issue #1212)", () => {
+    /** What the parent process was sent for the child, events and its closed status, in order. */
+    const childTraffic = () =>
+      sent
+        .filter((m) => m.sessionId === 'child-1' && (m.type === 'dapEvent' || m.status === 'dap_connection_closed'))
+        .map((m) => (m.type === 'dapEvent' ? m.event : m.status));
+    const outputs = () =>
+      childEvents()
+        .filter((e) => e.event === 'output')
+        .map((e) => (e.body as { output: string }).output);
+
+    it('asks for the socket as soon as configurationDone is answered, before the attach is', async () => {
+      // The adapter lets the child run right before it answers the attach.
+      build({ rootSteps: () => true });
+      const order: string[] = [];
+      const manager = (connections as unknown as { options: { adoption: ChildAdoptionDeps } }).options.adoption.connectionManager as unknown as {
+        sendAttachRequest: ReturnType<typeof vi.fn>;
+        sendConfigurationDone: ReturnType<typeof vi.fn>;
+      };
+      let answerAttach!: () => void;
+      manager.sendAttachRequest.mockImplementation(() => new Promise<void>((resolve) => { answerAttach = resolve; }));
+      manager.sendConfigurationDone.mockImplementation(async () => { order.push('configurationDone answered'); });
+      const proxy = childClient.sendRequest.getMockImplementation()!;
+      childClient.sendRequest.mockImplementation(async (command: string, ...rest: unknown[]) => {
+        if (command === 'requestCDPProxy') {
+          order.push('requestCDPProxy');
+        }
+        return proxy(command, ...rest);
+      });
+
+      root.emit('child-report', {
+        request: { seq: 7, type: 'request', command: 'startDebugging', arguments: { request: 'launch', configuration: jsConfiguration } },
+        report: jsReport
+      });
+      const reportId = sent.filter((m) => m.status === 'child_reported').at(-1)!.reportId as string;
+      let adopted = false;
+      const adopting = connections.adopt('child-1', { reportId, breakpoints: [] }).then(() => { adopted = true; });
+      await new Promise((resolve) => setImmediate(resolve));
+      childClient.emit('initialized');
+
+      // The binding is in while the attach is still unanswered.
+      await vi.waitFor(() => expect(cdpClients[0]?.sent).toContain('Runtime.addBinding'));
+      expect(adopted).toBe(false);
+      expect(order).toEqual(['configurationDone answered', 'requestCDPProxy']);
+
+      answerAttach();
+      await adopting;
+      expect(cdpClients).toHaveLength(1);
+    });
+
+    it("reports a logpoint the child hit as the child's own output", async () => {
+      build({ rootSteps: () => true });
+      await adoptChild();
+      const cdp = await stepperOnItsSocket();
+
+      cdp.logpoint('worker n=3');
+      cdp.emit('cdp-event', 'Runtime.bindingCalled', { name: 'someoneElse', payload: 'not ours', executionContextId: 1 });
+
+      expect(childEvents().filter((e) => e.event === 'output')).toEqual([
+        { event: 'output', body: { category: 'console', output: 'worker n=3\n' } }
+      ]);
+      // Under the child's id only: it is that process that hit it.
+      expect(sent.filter((m) => m.type === 'dapEvent' && m.event === 'output' && m.sessionId !== 'child-1')).toEqual([]);
+    });
+
+    it("holds the child's end behind its last lines: they leave first, then terminated, then the closed status", async () => {
+      build({ rootSteps: () => true });
+      await adoptChild();
+      const cdp = await stepperOnItsSocket();
+      let answerBarrier!: () => void;
+      cdp.held.set('JsDebug.mcpDebuggerBarrier', new Promise<void>((resolve) => { answerBarrier = resolve; }));
+      sent.length = 0;
+
+      // Measured: the adapter's `terminated` arrives about 1 ms before the
+      // process's last line does, on the other socket.
+      childClient.emit('terminated', {});
+      childClient.emit('exited', { exitCode: 0 });
+      childClient.emit('close');
+      await vi.waitFor(() => expect(cdp.sent).toContain('JsDebug.mcpDebuggerBarrier'));
+      cdp.logpoint('last line');
+
+      // Nothing of the end has left yet, and the connection still counts as live.
+      expect(childTraffic()).toEqual(['output']);
+      expect(connections.has('child-1')).toBe(true);
+      expect(cdp.disposed).toBe(false);
+
+      answerBarrier();
+      await vi.waitFor(() => expect(connections.has('child-1')).toBe(false));
+
+      expect(childTraffic()).toEqual(['output', 'terminated', 'exited', 'dap_connection_closed']);
+      expect(outputs()).toEqual(['last line\n']);
+      expect(sent.find((m) => m.status === 'dap_connection_closed')).toMatchObject({ sessionId: 'child-1', expected: true });
+      expect(cdp.disposed).toBe(true);
+    });
+
+    it('a child that ends while its socket is still opening has its end reported, not hung', async () => {
+      build({ rootSteps: () => true });
+      let answerProxy!: (value: unknown) => void;
+      childClient.sendRequest.mockImplementation(async (command: string) => {
+        if (command === 'requestCDPProxy') {
+          return new Promise((resolve) => { answerProxy = resolve; });
+        }
+        return { body: {} };
+      });
+      await adoptChild();
+      await vi.waitFor(() => expect(answerProxy).toBeDefined());
+      sent.length = 0;
+
+      childClient.emit('terminated', {});
+      childClient.emit('close');
+      // The adapter answers the request of a target that is gone with an error.
+      answerProxy({ body: {} });
+
+      await vi.waitFor(() => expect(connections.has('child-1')).toBe(false));
+      // Its end, in order; it holds no logpoint, so there is nothing to tell it about its channel.
+      expect(childTraffic()).toEqual(['terminated', 'dap_connection_closed']);
+      expect(cdpClients).toHaveLength(0);
+    });
+
+    /** A child whose `requestCDPProxy` the adapter answers with no address: its channel never comes up. */
+    async function adoptWithoutChannel(breakpoints: Array<Record<string, unknown>>): Promise<void> {
+      build({ rootSteps: () => true });
+      childClient.sendRequest.mockImplementation(async () => ({ body: {} }));
+      root.emit('child-report', {
+        request: { seq: 7, type: 'request', command: 'startDebugging', arguments: { request: 'launch', configuration: jsConfiguration } },
+        report: jsReport
+      });
+      const reportId = sent.filter((m) => m.status === 'child_reported').at(-1)!.reportId as string;
+      const adopting = connections.adopt('child-1', { reportId, breakpoints: breakpoints as never });
+      await new Promise((resolve) => setImmediate(resolve));
+      childClient.emit('initialized');
+      await adopting;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    it('a child adopted with a logpoint is told when its channel cannot be opened; one adopted without is not', async () => {
+      await adoptWithoutChannel([{ file: '/abs/child.js', line: 3 }]);
+      expect(outputs()).toEqual([]);
+
+      await adoptWithoutChannel([{ file: '/abs/child.js', line: 3 }, { file: '/abs/child.js', line: 5, logMessage: 'n={n}' }]);
+      expect(outputs()).toHaveLength(1);
+      expect(outputs()[0]).toMatch(/^\[mcp-debugger\] Warning: logpoints that hit in this process are not delivered/);
+
+      // An empty-string logMessage is still a logpoint (toWireBreakpoint compiles it).
+      await adoptWithoutChannel([{ file: '/abs/child.js', line: 5, logMessage: '' }]);
+      expect(outputs()).toHaveLength(1);
+    });
+
+    it('still opens a CDP socket for the stepper when a policy enables stepping without the CDP bridge', async () => {
+      build({
+        policy: { ...JsDebugAdapterPolicy, functionBreakpointsVia: undefined } as AdapterPolicy,
+        rootSteps: () => true
+      });
+      await adoptChild();
+      const cdp = await stepperOnItsSocket();
+      expect(cdp.sent).toEqual(['JsDebug.subscribe', 'Debugger.enable']);
+      await connections.close('child-1', { terminateDebuggee: false });
+      expect(cdp.disposed).toBe(true);
+    });
+
+    it('a logpoint set on a child later is noticed on its way to the adapter, in the form it travels in', async () => {
+      await adoptWithoutChannel([]);
+      // Other requests, and breakpoints that are not logpoints, say nothing.
+      await connections.beforeRequest('child-1', 'threads', {});
+      await connections.beforeRequest('child-1', 'setBreakpoints', { source: { path: '/abs/child.js' }, breakpoints: [{ line: 3, condition: 'n > 1' }] });
+      expect(outputs()).toEqual([]);
+
+      // The wire form: the logMessage is gone, the condition is the compiled logpoint.
+      await connections.beforeRequest('child-1', 'setBreakpoints', {
+        source: { path: '/abs/child.js' },
+        breakpoints: [{ line: 5, condition: `(() => { ${JS_LOGPOINT_BINDING}('n'); return false; })()` }]
+      });
+
+      expect(outputs()).toHaveLength(1);
+      expect(outputs()[0]).toMatch(/logpoints that hit in this process are not delivered/);
+    });
+
+    it("a held end whose message cannot be sent does not take the connection's removal with it", async () => {
+      // The last link removes the connection, and a root's worker waits for that to exit.
+      build({ rootSteps: () => true });
+      await adoptChild();
+      const cdp = await stepperOnItsSocket();
+      let answerBarrier!: () => void;
+      cdp.held.set('JsDebug.mcpDebuggerBarrier', new Promise<void>((resolve) => { answerBarrier = resolve; }));
+      const sender = (connections as unknown as { options: { messageSender: { send: (message: unknown) => void } } }).options.messageSender;
+      const deliver = sender.send;
+      sender.send = (message: unknown) => {
+        const m = message as Record<string, unknown>;
+        if (m.type === 'dapEvent' && m.event === 'terminated') {
+          throw new Error('channel closed');
+        }
+        deliver(message);
+      };
+      const empty = vi.fn();
+      connections.on('empty', empty);
+      sent.length = 0;
+
+      childClient.emit('terminated', {});
+      childClient.emit('close');
+      await vi.waitFor(() => expect(cdp.sent).toContain('JsDebug.mcpDebuggerBarrier'));
+      answerBarrier();
+
+      await vi.waitFor(() => expect(connections.has('child-1')).toBe(false));
+      expect(childTraffic()).toEqual(['dap_connection_closed']);
+      expect(empty).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('a message held behind its end failed to send: channel closed'));
+    });
+
+    it('close() by this worker does not wait for a held end', async () => {
+      build({ rootSteps: () => true });
+      await adoptChild();
+      const cdp = await stepperOnItsSocket();
+      cdp.held.set('JsDebug.mcpDebuggerBarrier', new Promise<void>(() => undefined));
+      childClient.emit('terminated', {});
+      await vi.waitFor(() => expect(cdp.sent).toContain('JsDebug.mcpDebuggerBarrier'));
+
+      await connections.close('child-1', { terminateDebuggee: false });
+
+      expect(connections.has('child-1')).toBe(false);
+      expect(cdp.disposed).toBe(true);
+    });
+
+    it('an adapter with no CDP socket per target reports the end as it comes', async () => {
+      build({ policy: PythonAdapterPolicy, rootSteps: () => true });
+      await adoptChild({ request: startDebugging(7), report });
+      sent.length = 0;
+
+      childClient.emit('terminated', {});
+      childClient.emit('close');
+
+      // In the same turn: nothing is held, nothing is asked.
+      expect(childTraffic()).toEqual(['terminated', 'dap_connection_closed']);
+      expect(cdpClients).toHaveLength(0);
+    });
+
+    it('an adoption that fails after the socket was asked for closes it', async () => {
+      build({ rootSteps: () => true });
+      const manager = (connections as unknown as { options: { adoption: ChildAdoptionDeps } }).options.adoption.connectionManager as unknown as {
+        sendAttachRequest: ReturnType<typeof vi.fn>;
+        sendConfigurationDone: ReturnType<typeof vi.fn>;
+      };
+      let failAttach!: (error: Error) => void;
+      manager.sendAttachRequest.mockImplementation(() => new Promise<void>((_, reject) => { failAttach = reject; }));
+      manager.sendConfigurationDone.mockImplementation(async () => undefined);
+      root.emit('child-report', {
+        request: { seq: 7, type: 'request', command: 'startDebugging', arguments: { request: 'launch', configuration: jsConfiguration } },
+        report: jsReport
+      });
+      const reportId = sent.filter((m) => m.status === 'child_reported').at(-1)!.reportId as string;
+      const adopting = connections.adopt('child-1', { reportId, breakpoints: [] });
+      adopting.catch(() => undefined);
+      await new Promise((resolve) => setImmediate(resolve));
+      childClient.emit('initialized');
+      const cdp = await stepperOnItsSocket();
+
+      failAttach(new Error('attach refused'));
+
+      await expect(adopting).rejects.toThrow('attach refused');
+      expect(cdp.disposed).toBe(true);
+      expect(cdp.listenerCount('cdp-event')).toBe(0);
+    });
   });
 
   it('does not open a CDP socket when the child closes while requestCDPProxy is still in flight', async () => {

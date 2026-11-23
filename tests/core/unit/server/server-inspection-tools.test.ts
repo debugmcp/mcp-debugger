@@ -775,6 +775,48 @@ describe('Server Inspection Tools Tests', () => {
       expect(mockSessionManager.outputOnFor).toHaveBeenCalledWith('child-session');
     });
 
+    it("answers a child's own lines beside the pointer, and says which is which (issue #1212)", async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        run: {},
+        id: 'child-session',
+        parentSessionId: 'root-session',
+        sessionLifecycle: 'ACTIVE',
+        outputBuffer: makeBuffer(['worker n=3\n'])
+      });
+      mockSessionManager.outputOnFor.mockReturnValue('root-session');
+
+      const content = await callGetOutput({ sessionId: 'child-session' });
+
+      expect(content.entries).toHaveLength(1);
+      expect(content.entries[0].output).toBe('worker n=3\n');
+      expect(content.outputOn).toBe('root-session');
+      // Where what it writes can be read (a pipe is its parent's alone), and what these entries are.
+      expect(content.note).toMatch(/writes to inherited stdio is on its launch session's buffer \(session root-session\)/);
+      expect(content.note).toMatch(/what it writes to a pipe is read by its parent process only/);
+      expect(content.note).toMatch(/The entries here are the debugger's own for this process: the lines of the logpoints it hit/);
+    });
+
+    it('lists the session tree the way every tree answer does, so a caller reading one buffer learns of the others (issue #1212)', async () => {
+      mockSessionManager.getSession.mockReturnValue({
+        run: {},
+        id: 'root-session',
+        sessionLifecycle: 'ACTIVE',
+        outputBuffer: makeBuffer(['parent start\n'])
+      });
+      const children = [
+        { sessionId: 'child-session', name: 'child.js [4242]', state: 'running', parentSessionId: 'root-session' },
+        { sessionId: 'grandchild-session', name: 'leaf.js [4243]', state: 'stopped', parentSessionId: 'child-session' }
+      ];
+      mockSessionManager.treeChildrenOf.mockReturnValue(children);
+
+      const content = await callGetOutput({ sessionId: 'root-session' });
+
+      expect(content.children).toEqual(children);
+      expect(mockSessionManager.treeChildrenOf).toHaveBeenCalledWith('root-session');
+      // A root reads its own buffer: no pointer.
+      expect(content.outputOn).toBeUndefined();
+    });
+
     it('carries no output pointer for a session that reads its own buffer', async () => {
       mockSessionManager.getSession.mockReturnValue({
         run: {},
@@ -786,6 +828,8 @@ describe('Server Inspection Tools Tests', () => {
       const content = await callGetOutput({ sessionId: 'test-session' });
       expect(content.outputOn).toBeUndefined();
       expect(content.note).toBeUndefined();
+      // And no tree fields for a session with no tree: the answer it always had.
+      expect('children' in content).toBe(false);
     });
 
     it('returns success:false for an unknown session', async () => {

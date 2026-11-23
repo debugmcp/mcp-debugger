@@ -2063,7 +2063,7 @@ export class DapProxyWorker {
       // stepper's (issue #1130); any other request may end a step in flight.
       const stepped = this.childConnections?.stepRequest(payload.sessionId, payload.dapCommand, payload.dapArgs);
       if (!stepped) {
-        await this.childConnections?.beforeRequest(payload.sessionId, payload.dapCommand);
+        await this.childConnections?.beforeRequest(payload.sessionId, payload.dapCommand, payload.dapArgs);
       }
       const response = stepped
         ? await stepped
