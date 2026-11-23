@@ -158,7 +158,7 @@ RUN cp -r "$(rustc --print sysroot)/lib/rustlib/etc" /rust-etc
 # display or device and a multi-gigabyte checkout. Pinned to the dart:3.13 manifest list.
 FROM dart:3.13@sha256:854f3c50b1cbd4a5a54c9fa67d4f5b6702ac49b4a26d21a80e7712a72528b215 AS dart-sdk
 
-FROM ubuntu:26.04@sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c
+FROM ubuntu:26.04@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db
 # Disabled languages: go has no attach implementation and no Delve here,
 # dotnet has no netcoredbg here. Ruby is intentionally present but attach-only
 # (adapter shipped, no Ruby runtime — attach connects directly to a remote
