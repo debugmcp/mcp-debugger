@@ -2,22 +2,35 @@
 
 const { execFileSync } = require('node:child_process');
 const path = require('path');
-const { checkFile } = require('./check-personal-paths.cjs');
-
-// File extensions to check
-const extensions = [
-  'md', 'ts', 'js', 'cjs', 'mjs', 'json', 'yml', 'yaml', 'txt', 
-  'sh', 'cmd', 'bat', 'ps1', 'py', 'tsx', 'jsx', 'env', 'config'
-];
+const {
+  GIT_MAX_BUFFER,
+  checkFile,
+  isAuditablePath,
+  resolveRepoRoot
+} = require('./check-personal-paths.cjs');
 
 // Include work in progress alongside indexed files. Git applies the same
 // nested ignore rules used by git add, including each CodeLLDB package's payload.
 function getAuditFiles() {
-  const paths = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
-    encoding: 'utf8',
-    windowsHide: true
-  });
-  return paths.split('\0').filter(file => extensions.includes(path.extname(file).slice(1)));
+  try {
+    const repoRoot = resolveRepoRoot();
+    const paths = execFileSync(
+      'git',
+      ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        windowsHide: true,
+        maxBuffer: GIT_MAX_BUFFER
+      }
+    );
+    return [...new Set(paths.split('\0'))]
+      .filter(file => isAuditablePath(file))
+      .map(relPath => ({ relPath, absPath: path.join(repoRoot, relPath) }));
+  } catch (error) {
+    console.error('Error listing repository audit files:', error.message);
+    process.exit(1);
+  }
 }
 
 // Self-test function to ensure this script doesn't match patterns
@@ -51,16 +64,16 @@ function main() {
   const allFindings = [];
   let checkedCount = 0;
 
-  allFiles.forEach(file => {
+  allFiles.forEach(({ relPath, absPath }) => {
     checkedCount++;
     if (checkedCount % 100 === 0) {
       process.stdout.write(`\rChecking file ${checkedCount}/${allFiles.length}...`);
     }
 
-    const findings = checkFile(file);
+    const findings = checkFile(absPath);
     if (findings) {
       foundPersonalInfo = true;
-      allFindings.push({ file, findings });
+      allFindings.push({ file: relPath, findings });
     }
   });
 

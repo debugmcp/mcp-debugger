@@ -2,7 +2,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execFileSync } = require('node:child_process');
+
+const GIT_MAX_BUFFER = 16 * 1024 * 1024;
 
 // Generic patterns to detect personal information without containing it
 const personalPatterns = [
@@ -48,31 +50,61 @@ const binaryExtensions = [
   'ttf', 'otf', 'woff', 'woff2', 'eot'
 ];
 
-// Get staged files
-function getStagedFiles() {
-  try {
-    const output = execSync('git diff --cached --name-only --diff-filter=ACM', { windowsHide: true, encoding: 'utf8' });
-    return output
-      .split('\n')
-      .filter(file => file && !isBinaryFile(file))
-      .filter(file => {
-        const ext = path.extname(file).slice(1);
-        return extensions.includes(ext);
-      })
-      .filter(file => {
-        const segments = file.split(path.sep);
-        return !segments.some(segment => excludeDirs.includes(segment));
-      });
-  } catch (error) {
-    console.error('Error getting staged files:', error.message);
-    process.exit(1);
-  }
+// Resolve the Git worktree root for the given directory.
+function resolveRepoRoot(cwd = process.cwd()) {
+  return execFileSync('git', ['rev-parse', '--show-toplevel'], {
+    cwd,
+    encoding: 'utf8',
+    windowsHide: true,
+    maxBuffer: GIT_MAX_BUFFER
+  }).trim();
 }
 
 // Check if file is binary based on extension
 function isBinaryFile(filename) {
   const ext = path.extname(filename).slice(1).toLowerCase();
   return binaryExtensions.includes(ext);
+}
+
+// Check whether a candidate path has an auditable text extension or .env basename
+function isAuditablePath(filePath) {
+  if (!filePath || isBinaryFile(filePath)) {
+    return false;
+  }
+  const base = path.posix.basename(filePath.replace(/\\/g, '/')).toLowerCase();
+  if (base === '.env' || base.startsWith('.env.')) {
+    return true;
+  }
+  const ext = path.extname(base).slice(1);
+  return extensions.includes(ext);
+}
+
+// Get staged files as { relPath, absPath } entries rooted at the Git worktree.
+// Uses -z so non-ASCII or special characters are never C-quoted and skipped.
+function getStagedFiles() {
+  try {
+    const repoRoot = resolveRepoRoot();
+    const output = execFileSync(
+      'git',
+      ['diff', '--cached', '-z', '--name-only', '--diff-filter=ACM'],
+      {
+        cwd: repoRoot,
+        windowsHide: true,
+        encoding: 'utf8',
+        maxBuffer: GIT_MAX_BUFFER
+      }
+    );
+    return [...new Set(output.split('\0'))]
+      .filter(file => isAuditablePath(file))
+      .filter(file => {
+        const segments = file.split(/[\\/]/);
+        return !segments.some(segment => excludeDirs.includes(segment));
+      })
+      .map(relPath => ({ relPath, absPath: path.join(repoRoot, relPath) }));
+  } catch (error) {
+    console.error('Error getting staged files:', error.message);
+    process.exit(1);
+  }
 }
 
 // Check file for personal information
@@ -136,11 +168,11 @@ function main() {
   let foundPersonalInfo = false;
   const allFindings = [];
 
-  stagedFiles.forEach(file => {
-    const findings = checkFile(file);
+  stagedFiles.forEach(({ relPath, absPath }) => {
+    const findings = checkFile(absPath);
     if (findings) {
       foundPersonalInfo = true;
-      allFindings.push({ file, findings });
+      allFindings.push({ file: relPath, findings });
     }
   });
 
@@ -176,4 +208,10 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { checkFile, personalPatterns };
+module.exports = {
+  GIT_MAX_BUFFER,
+  checkFile,
+  isAuditablePath,
+  personalPatterns,
+  resolveRepoRoot
+};
