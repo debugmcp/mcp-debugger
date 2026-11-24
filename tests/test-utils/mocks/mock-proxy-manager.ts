@@ -38,6 +38,8 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
   public proxyPid: number | null = 4242;
   /** Reported by getAdapterStderrTail() (issue #897); settable per-test. */
   public adapterStderrTail: string[] = [];
+  /** Test seam for childRelease adapter confirmation (issue #1221); true by default. */
+  public childReleaseConfirmed = true;
 
   constructor() {
     super();
@@ -188,6 +190,12 @@ export class MockProxyManager extends EventEmitter implements IProxyManager {
         return {
           success: true,
           body: { closed: true, closedClients: 0 }
+        } as T;
+
+      case 'childRelease':
+        return {
+          success: true,
+          body: { held: true, released: this.childReleaseConfirmed }
         } as T;
 
       default:

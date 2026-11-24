@@ -969,13 +969,15 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
     });
   }
 
-  private writeMessage(message: DebugProtocol.ProtocolMessage): void {
+  private writeMessage(message: DebugProtocol.ProtocolMessage): boolean {
     const payload = encodeDapMessage(message);
     this.appendTrace('out', message);
-    if (this.socket && !this.socket.destroyed) {
+    if (this.socket && !this.socket.destroyed && !this.isDisconnectingOrDisconnected) {
       this.socket.write(payload);
+      return true;
     } else {
       logger.error('[MinimalDapClient] Cannot write message, socket not connected/destroyed');
+      return false;
     }
   }
 
@@ -984,11 +986,11 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
    * has held unanswered since (issue #1081): `success: true` once the child
    * is adopted, `success: false` to release it.
    */
-  public respondToReverseRequest(request: DebugProtocol.Request, body: unknown, success: boolean, message?: string): void {
-    this.sendResponse(request, body, success, message);
+  public respondToReverseRequest(request: DebugProtocol.Request, body: unknown, success: boolean, message?: string): boolean {
+    return this.sendResponse(request, body, success, message);
   }
 
-  private sendResponse(request: DebugProtocol.Request, body: unknown = {}, success: boolean = true, errorMessage?: string): void {
+  private sendResponse(request: DebugProtocol.Request, body: unknown = {}, success: boolean = true, errorMessage?: string): boolean {
     const response: DebugProtocol.Response = {
       type: 'response',
       seq: this.nextSeq++,
@@ -997,7 +999,7 @@ export class MinimalDapClient extends EventEmitter implements IDapClient {
       success,
       ...(success ? { body } : { message: errorMessage || DEFAULT_DAP_FAILURE_MESSAGE })
     };
-    this.writeMessage(response);
+    return this.writeMessage(response);
   }
 
   public disconnect(): void {

@@ -1065,6 +1065,7 @@ export class ExecutionController {
       }
       break;
     }
+    await this.ctx.settleInFlightChildReleases?.(sessionId);
     const location = landing.location;
     const tree = () => describeTreeAnswer(session, this.ctx.descendantsOf(sessionId));
     // Every answer that carries the run's `childrenReleased` says what it means

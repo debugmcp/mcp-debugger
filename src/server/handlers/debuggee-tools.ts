@@ -4,7 +4,7 @@
  */
 import type { ToolHandler } from '../tool-context.js';
 import type { HotReloadArgs } from '@debugmcp/shared';
-import { attachRequestFromArgs, childSessionRefusal, hoistStopLanding, hoistTreeFields, successWarning } from './shared.js';
+import { attachRequestFromArgs, childSessionRefusal, hoistPausedChild, hoistStopLanding, hoistTreeFields, successWarning } from './shared.js';
 import {
   assertPlainObjectArg,
   foldTestRunnerPreset,
@@ -70,6 +70,7 @@ export const startDebuggingTool: ToolHandler = async (ctx, args) => {
     // The session tree (issue #1081): children adopted during the hold, what
     // a relaunch closed, what ran undebugged.
     hoistTreeFields(responsePayload, debugResult.data);
+    await hoistPausedChild(ctx, responsePayload, debugResult.data, 'launch child result');
     return jsonResult(responsePayload);
   } catch (error) {
     return sessionErrorResultOrThrow(error, { state: 'stopped' });
@@ -112,6 +113,7 @@ export const restartDebuggingTool: ToolHandler = async (ctx, args) => {
       // And the same landing when it stopped (issue #951).
       await hoistStopLanding(ctx, responsePayload, debugResult.data, args.sessionId, 'restart result');
       hoistTreeFields(responsePayload, debugResult.data);
+      await hoistPausedChild(ctx, responsePayload, debugResult.data, 'restart child result');
     }
     return jsonResult(responsePayload);
   } catch (error) {

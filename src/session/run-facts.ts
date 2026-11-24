@@ -77,6 +77,28 @@ export function rootOfTree<T extends TreeNode>(session: T, get: (sessionId: stri
   return current;
 }
 
+/**
+ * Detect whether a launch or attach configuration explicitly turned off
+ * child-process adoption on an adapter that otherwise supports it (issue #1150).
+ * Python attach is excluded because debugpy's subprocess tracing on attach is
+ * governed by how the target process invoked `debugpy.listen`, not reliably by
+ * the attach request alone.
+ */
+export function detectChildDebuggingOptOut(
+  language: string,
+  isAttach: boolean,
+  ...configs: Array<Readonly<Record<string, unknown>> | undefined>
+): Run['childDebuggingOptedOut'] {
+  const hasFalse = (key: string): boolean => configs.some((cfg) => cfg?.[key] === false);
+  if (language === 'python' && !isAttach && hasFalse('subProcess')) {
+    return 'subProcess: false';
+  }
+  if (language === 'javascript' && hasFalse('autoAttachChildProcesses')) {
+    return 'autoAttachChildProcesses: false';
+  }
+  return undefined;
+}
+
 /** The facts of the run `session` belongs to, read off its tree's root. */
 export function runFactsOf(session: RunFactsSource, get: (sessionId: string) => RunFactsSource | undefined): RunFacts {
   const root = rootOfTree(session, get);

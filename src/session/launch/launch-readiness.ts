@@ -25,9 +25,14 @@ import { SessionState, isSettledSessionState, isTerminalSessionState } from '@de
 import { ErrorMessages } from '../../utils/error-messages.js';
 import type { OperationsContext } from '../operations-context.js';
 import { waitForSessionState } from '../execution/session-state-wait.js';
+import { selectSettledInTree } from '../execution/tree-settle.js';
+
+/** Grace window after a descendant settles so a simultaneous root stop still wins (issue #1150). */
+const DESCENDANT_SETTLE_GRACE_MS = 50;
 
 /** The readiness waits read the session's state, subscribe to its changes, and narrate. */
-export type LaunchReadinessContext = Pick<OperationsContext, 'logger' | 'getSession' | 'onStateChange'>;
+export type LaunchReadinessContext = Pick<OperationsContext, 'logger' | 'getSession' | 'onStateChange'> &
+  Partial<Pick<OperationsContext, 'onSubtreeChange' | 'descendantsOf'>>;
 
 /**
  * How the launch stands when it is answered: paused at its first stop; over
@@ -100,7 +105,11 @@ export async function waitForLaunchReadiness(
     }
   }
 
-  await waitForSessionState(ctx, sessionId, isSettledSessionState, { timeoutMs: holdMs });
+  if (ctx.onSubtreeChange && ctx.descendantsOf) {
+    await waitForLaunchHoldWithTree(ctx, ctx.onSubtreeChange, ctx.descendantsOf, sessionId, holdMs);
+  } else {
+    await waitForSessionState(ctx, sessionId, isSettledSessionState, { timeoutMs: holdMs });
+  }
   const afterHold = settledOutcome(currentState());
   if (afterHold) {
     ctx.logger.info(`[SessionManager] Session ${sessionId} ${afterHold} within the launch hold`);
@@ -110,4 +119,87 @@ export async function waitForLaunchReadiness(
     `[SessionManager] Session ${sessionId} still running after the ${holdMs}ms launch hold; answering with pending`
   );
   return 'running';
+}
+
+function waitForLaunchHoldWithTree(
+  ctx: LaunchReadinessContext,
+  onSubtreeChange: OperationsContext['onSubtreeChange'],
+  descendantsOf: OperationsContext['descendantsOf'],
+  sessionId: string,
+  holdMs: number
+): Promise<void> {
+  if (holdMs <= 0) {
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => {
+    let finished = false;
+    let recheckQueued = false;
+    let descendantGraceTimer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = Date.now() + holdMs;
+
+    const clearDescendantGrace = () => {
+      if (descendantGraceTimer !== undefined) {
+        clearTimeout(descendantGraceTimer);
+        descendantGraceTimer = undefined;
+      }
+    };
+
+    const disposers: Array<() => void> = [];
+    const holdTimer = setTimeout(() => finish(), holdMs);
+
+    const finish = () => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      clearTimeout(holdTimer);
+      clearDescendantGrace();
+      for (const dispose of disposers) {
+        dispose();
+      }
+      resolve();
+    };
+
+    const evaluate = () => {
+      let root;
+      try {
+        root = ctx.getSession(sessionId);
+      } catch {
+        finish();
+        return;
+      }
+      if (isSettledSessionState(root.state)) {
+        finish();
+        return;
+      }
+      const settled = selectSettledInTree(root, descendantsOf(sessionId));
+      if (settled && settled !== root) {
+        if (descendantGraceTimer === undefined) {
+          const remaining = Math.max(0, deadline - Date.now());
+          descendantGraceTimer = setTimeout(() => finish(), Math.min(DESCENDANT_SETTLE_GRACE_MS, remaining));
+        }
+      } else {
+        clearDescendantGrace();
+      }
+    };
+
+    disposers.push(onSubtreeChange(sessionId, () => {
+      if (finished || recheckQueued) {
+        return;
+      }
+      recheckQueued = true;
+      queueMicrotask(() => {
+        recheckQueued = false;
+        if (!finished) {
+          evaluate();
+        }
+      });
+    }));
+
+    queueMicrotask(() => {
+      if (!finished) {
+        evaluate();
+      }
+    });
+  });
 }

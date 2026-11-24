@@ -41,6 +41,7 @@ import {
   keepHitProven,
   keepPendingAnswer,
   mirrorsBreakpointsToChild,
+  recordTreeVerifiedBreakpoint,
   setAdapterMessage,
   stampRefusalMessage
 } from './hit-verification.js';
@@ -376,6 +377,7 @@ export class BreakpointController {
 
           // Log breakpoint verification with structured logging
           if (allBpsForFile[i].verified) {
+            recordTreeVerifiedBreakpoint(session, allBpsForFile[i]);
             this.ctx.logger.info('debug:breakpoint', {
               event: 'verified',
               sessionId: sessionId,
@@ -929,6 +931,7 @@ export class BreakpointController {
             record.boundLine = undefined;
           }
           if (allFnBps[i].verified) {
+            recordTreeVerifiedBreakpoint(session, allFnBps[i]);
             this.ctx.logger.info('debug:breakpoint', {
               event: 'verified',
               sessionId,

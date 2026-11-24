@@ -237,6 +237,16 @@ describe('Python child processes as child sessions (the session tree, issue #108
       });
       expect(started.success, JSON.stringify(started)).toBe(true);
       expect(started.state, JSON.stringify(started)).toBe('running');
+      if (started.pausedChild) {
+        expect(started.message, JSON.stringify(started)).not.toContain('has not reached');
+        expect(started.pausedChild, JSON.stringify(started)).toMatchObject({
+          state: 'paused',
+          reason: 'breakpoint',
+          location: expect.objectContaining({ line: CHILD_BREAKPOINT_LINE }),
+          context: expect.objectContaining({ lineContent: expect.stringContaining('total += i') }),
+          snapshot: expect.objectContaining({ locals: expect.objectContaining({ i: '0' }) })
+        });
+      }
 
       let childId: string | undefined;
       for (let iteration = 0; iteration < 3; iteration += 1) {
@@ -378,5 +388,31 @@ describe('Python child processes as child sessions (the session tree, issue #108
     const logFilePath = path.resolve(currentDirName, '../../subprocess_tree_test_server.log');
     const log = fs.existsSync(logFilePath) ? fs.readFileSync(logFilePath, 'utf8') : '';
     expect(log).not.toContain('leaked worker');
+  }, 120000);
+
+  it('qualifies the run-to-completion summary when subProcess: false turns child debugging off (issue #1150)', async () => {
+    const created = await call('create_debug_session', { language: 'python', name: 'subprocess-tree-opt-out' });
+    expect(created.success).toBe(true);
+    const rootId = created.sessionId as string;
+    try {
+      const childBp = await call('set_breakpoint', { sessionId: rootId, file: childFixture, line: CHILD_BREAKPOINT_LINE });
+      expect(childBp.success, JSON.stringify(childBp)).toBe(true);
+      const started = await call('start_debugging', {
+        sessionId: rootId,
+        scriptPath: parentFixture,
+        breakOnExceptions: 'none',
+        dapLaunchArgs: { stopOnEntry: false, subProcess: false }
+      });
+      expect(started.success, JSON.stringify(started)).toBe(true);
+      const ended = started.state === 'stopped'
+        ? started
+        : await call('wait_for_stop', { sessionId: rootId, timeout: 30000 });
+      expect(ended.state, JSON.stringify(ended)).toBe('stopped');
+      expect(ended.message, JSON.stringify(ended)).toContain(
+        'without hitting any breakpoint in the launched process (child-process debugging was off via subProcess: false, so child processes were not debugged).'
+      );
+    } finally {
+      await call('close_debug_session', { sessionId: rootId });
+    }
   }, 120000);
 });

@@ -714,8 +714,17 @@ export const JsDebugAdapterPolicy = {
       collectedRefs.push(scope.variablesReference);
     };
 
+    const firstLocalIndex = frameScopes.findIndex(isLocalScope);
     const localScopes = frameScopes.filter(isLocalScope);
-    for (const scope of frameScopes.filter(isLocalLikeScope)) {
+    // V8 lists inner lexical Block scopes ahead of Local, and enclosing outer
+    // lexical Block scopes — such as Vite SSR's module wrapper — after Local
+    // (issue #1252). When Local exists on the frame, only Block scopes inside
+    // the function (index < firstLocalIndex) belong to the primary merge; outer
+    // Block scopes join the empty-Local fallback below alongside Closure.
+    const innerLocalLikeScopes = firstLocalIndex === -1
+      ? frameScopes.filter(isLocalLikeScope)
+      : frameScopes.filter((scope, index) => isLocalScope(scope) || (index < firstLocalIndex && isBlockScope(scope)));
+    for (const scope of innerLocalLikeScopes) {
       collect(scope);
     }
     // ESM top-level: js-debug gives a `for (let i...)` or `catch (e)` at module
@@ -754,7 +763,7 @@ export const JsDebugAdapterPolicy = {
     // the same frame; try those in usefulness order before the session layer
     // walks down to a caller.
     const fallbackGroups: Array<(scope: DebugProtocol.Scope) => boolean> = [
-      isClosureScope,
+      (scope) => isClosureScope(scope) || isBlockScope(scope),
       isModuleScope
     ];
     for (const matches of fallbackGroups) {

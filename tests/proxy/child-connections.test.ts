@@ -1763,3 +1763,165 @@ describe("ChildConnections: an adopted child's proxy stepper (issue #1130)", () 
     expect(cdpClients).toHaveLength(0);
   });
 });
+
+describe('ChildConnections: release confirmation outcomes (issue #1221)', () => {
+  it('confirms a reject-request release when the reporting client acknowledges it, and marks unconfirmed when the socket cannot write', async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const connections = new ChildConnections({
+      messageSender: { send: (m) => sent.push(m as unknown as Record<string, unknown>) },
+      logger,
+      adoption: {
+        dapClientFactory: { create: vi.fn() },
+        connectionManager: {
+          initializeSession: vi.fn(),
+          sendAttachRequest: vi.fn(),
+          setExceptionBreakpoints: vi.fn(),
+          setBreakpoints: vi.fn(),
+          sendConfigurationDone: vi.fn(),
+          disconnect: vi.fn()
+        },
+        policy: PythonAdapterPolicy,
+        host: '127.0.0.1',
+        port: 5678,
+        adapterId: 'python'
+      }
+    });
+    const rootClient = new EventEmitter() as EventEmitter & {
+      respondToReverseRequest: ReturnType<typeof vi.fn>;
+    };
+    rootClient.respondToReverseRequest = vi.fn(() => true);
+    connections.attach(rootClient as never, 'root-1');
+
+    rootClient.emit('child-report', {
+      request: { seq: 1, type: 'request', command: 'startDebugging' },
+      report: { targetId: '101', name: 'Subprocess 101', configuration: { subProcessId: 101 } }
+    });
+    const firstId = sent.find((m) => m.status === 'child_reported')!.reportId as string;
+    await expect(connections.releaseWithConfirmation(firstId, 'cap')).resolves.toEqual({ held: true, released: true });
+
+    rootClient.respondToReverseRequest.mockReturnValueOnce(false);
+    rootClient.emit('child-report', {
+      request: { seq: 2, type: 'request', command: 'startDebugging' },
+      report: { targetId: '102', name: 'Subprocess 102', configuration: { subProcessId: 102 } }
+    });
+    const secondId = sent.filter((m) => m.status === 'child_reported').at(-1)!.reportId as string;
+    await expect(connections.releaseWithConfirmation(secondId, 'cap')).resolves.toEqual({ held: true, released: false });
+  });
+
+  it('joins a failed throwaway-attach adoption outcome and reports unconfirmed when the throwaway attach fails', async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const adoptClient = new EventEmitter() as EventEmitter & {
+      connect: ReturnType<typeof vi.fn>;
+      sendRequest: ReturnType<typeof vi.fn>;
+      shutdown: ReturnType<typeof vi.fn>;
+    };
+    adoptClient.connect = vi.fn().mockRejectedValue(new Error('connect ECONNREFUSED'));
+    adoptClient.sendRequest = vi.fn();
+    adoptClient.shutdown = vi.fn();
+
+    const failReleaseClient = new EventEmitter() as EventEmitter & {
+      connect: ReturnType<typeof vi.fn>;
+      sendRequest: ReturnType<typeof vi.fn>;
+      shutdown: ReturnType<typeof vi.fn>;
+    };
+    failReleaseClient.connect = vi.fn().mockRejectedValue(new Error('connect ECONNREFUSED'));
+    failReleaseClient.sendRequest = vi.fn();
+    failReleaseClient.shutdown = vi.fn();
+
+    const connections = new ChildConnections({
+      messageSender: { send: (m) => sent.push(m as unknown as Record<string, unknown>) },
+      logger,
+      adoption: {
+        dapClientFactory: {
+          create: vi.fn().mockReturnValueOnce(adoptClient).mockReturnValueOnce(failReleaseClient)
+        },
+        connectionManager: {
+          initializeSession: vi.fn(),
+          sendAttachRequest: vi.fn(),
+          setExceptionBreakpoints: vi.fn(),
+          setBreakpoints: vi.fn(),
+          sendConfigurationDone: vi.fn(),
+          disconnect: vi.fn()
+        },
+        policy: JsDebugAdapterPolicy,
+        host: '127.0.0.1',
+        port: 9229,
+        adapterId: 'pwa-node'
+      }
+    });
+    const rootClient = new EventEmitter() as EventEmitter & {
+      respondToReverseRequest: ReturnType<typeof vi.fn>;
+    };
+    rootClient.respondToReverseRequest = vi.fn(() => true);
+    connections.attach(rootClient as never, 'root-js');
+
+    rootClient.emit('child-report', {
+      request: { seq: 7, type: 'request', command: 'startDebugging' },
+      report: { targetId: 't-1', name: 'child.js [99]', configuration: { __pendingTargetId: 't-1' } }
+    });
+    const reportId = sent.find((m) => m.status === 'child_reported')!.reportId as string;
+
+    await expect(connections.adopt('child-js', { reportId, breakpoints: [] })).rejects.toThrow('connect ECONNREFUSED');
+    await expect(connections.releaseWithConfirmation(reportId, 'adoption failed')).resolves.toEqual({
+      held: false,
+      released: false
+    });
+  });
+
+  it('marks the outcome closed: true when close() cancels an in-flight adoption', async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const adoptClient = new EventEmitter() as EventEmitter & {
+      connect: ReturnType<typeof vi.fn>;
+      sendRequest: ReturnType<typeof vi.fn>;
+      shutdown: ReturnType<typeof vi.fn>;
+    };
+    adoptClient.connect = vi.fn(() => new Promise<void>(() => {}));
+    adoptClient.sendRequest = vi.fn();
+    adoptClient.shutdown = vi.fn();
+
+    const connections = new ChildConnections({
+      messageSender: { send: (m) => sent.push(m as unknown as Record<string, unknown>) },
+      logger,
+      adoption: {
+        dapClientFactory: { create: vi.fn().mockReturnValue(adoptClient) },
+        connectionManager: {
+          initializeSession: vi.fn(),
+          sendAttachRequest: vi.fn(),
+          setExceptionBreakpoints: vi.fn(),
+          setBreakpoints: vi.fn(),
+          sendConfigurationDone: vi.fn(),
+          disconnect: vi.fn().mockResolvedValue({ answered: true })
+        },
+        policy: PythonAdapterPolicy,
+        host: '127.0.0.1',
+        port: 5678,
+        adapterId: 'python'
+      }
+    });
+    const rootClient = new EventEmitter() as EventEmitter & {
+      respondToReverseRequest: ReturnType<typeof vi.fn>;
+    };
+    rootClient.respondToReverseRequest = vi.fn(() => true);
+    connections.attach(rootClient as never, 'root-py');
+
+    rootClient.emit('child-report', {
+      request: { seq: 3, type: 'request', command: 'startDebugging' },
+      report: { targetId: '103', name: 'Subprocess 103', configuration: { subProcessId: 103 } }
+    });
+    const reportId = sent.find((m) => m.status === 'child_reported')!.reportId as string;
+
+    const adopting = connections.adopt('child-py', { reportId, breakpoints: [] });
+    const closedAdoption = expect(adopting).rejects.toThrow('child session closed during adoption');
+    await connections.close('child-py', { terminateDebuggee: true });
+    await closedAdoption;
+
+    await expect(connections.releaseWithConfirmation(reportId, 'adoption failed')).resolves.toEqual({
+      held: false,
+      released: false,
+      closed: true
+    });
+  });
+});

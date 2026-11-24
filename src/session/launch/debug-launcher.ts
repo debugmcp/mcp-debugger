@@ -30,11 +30,11 @@ import { ProtocolError } from '@modelcontextprotocol/server';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import { checkLaunchToolchain } from '../../utils/language-availability.js';
 import { setCuratedMessage } from '../breakpoints/hit-verification.js';
-import type { CustomLaunchRequestArguments, DebugResult, LaunchResultData } from '../session-manager-core.js';
+import type { CustomLaunchRequestArguments, DebugResult, LaunchResultData, PausedChildSummary } from '../session-manager-core.js';
 import type { ManagedSession, ToolchainValidationState } from '../session-store.js';
 import type { LaunchContext } from '../operations-context.js';
 import { describeStopLocation, landingFields, type StopLanding } from '../inspection/stop-location.js';
-import { describeReleasedChildren, describeTreeAnswer, withReleasedChildren } from '../execution/tree-settle.js';
+import { describeReleasedChildren, describeTreeAnswer, selectSettledInTree, withReleasedChildren } from '../execution/tree-settle.js';
 import { composeStopSnapshot } from '../inspection/stop-snapshot.js';
 import type { BreakpointController, ResyncOutcome } from '../breakpoints/breakpoint-controller.js';
 import { reresolveAnchors, type AnchorResolution } from '../breakpoints/anchor-resolution.js';
@@ -664,6 +664,10 @@ export class DebugLauncher {
         }
       });
 
+      // Ensure any child-release confirmations initiated during the launch hold
+      // have settled before reading released/unconfirmed counts or exit warnings (#1221).
+      await this.ctx.settleInFlightChildReleases?.(sessionId);
+
       // Re-fetch session to get the most up-to-date state
       const finalSession = this.ctx.getSession(sessionId);
       const finalState = finalSession.state;
@@ -831,14 +835,55 @@ export class DebugLauncher {
       // how long the launch waits; it only words this answer. The stop, if
       // one comes, is collected with wait_for_stop.
       let stillRunning: string | undefined;
+      let pausedChild: PausedChildSummary | undefined;
       if (readiness === 'running' && finalState === SessionState.RUNNING) {
-        const arming = describeLaunchArming(finalSession, effectiveLaunchArgs?.stopOnEntry);
-        stillRunning = ErrorMessages.launchStillRunning(
-          arming.armed ? arming.summary : undefined,
-          debuggerOnAnyway ? undefined : debuggerOffWhy(finalSession),
-          arming.loggingSummary,
-          arming.noUncaughtStop
-        );
+        const descendants = this.ctx.descendantsOf(sessionId);
+        const settledInTree = selectSettledInTree(finalSession, descendants);
+        if (settledInTree && settledInTree !== finalSession && settledInTree.state === SessionState.PAUSED) {
+          const childLanding = await describeStopLocation(this.ctx, settledInTree.id, 'launch');
+          const childSnapshot = await composeStopSnapshot(
+            this.ctx,
+            settledInTree.id,
+            childLanding.stackResult,
+            'launch'
+          );
+          if (
+            settledInTree.state === SessionState.PAUSED &&
+            this.ctx.descendantsOf(sessionId).includes(settledInTree)
+          ) {
+            const childReason = settledInTree.lastStop?.reason ?? 'breakpoint';
+            pausedChild = {
+              sessionId: settledInTree.id,
+              name: settledInTree.name,
+              state: SessionState.PAUSED,
+              reason: childReason,
+              ...landingFields(childLanding),
+              ...(childSnapshot ? { snapshot: childSnapshot } : {})
+            };
+            stillRunning = ErrorMessages.launchRunningWithPausedChild(
+              settledInTree.name,
+              settledInTree.id,
+              childReason,
+              childLanding.location
+            );
+          }
+        } else if (settledInTree && settledInTree !== finalSession && settledInTree.state === SessionState.ERROR) {
+          // Never populate `pausedChild` for an errored child: it is not paused.
+          stillRunning = ErrorMessages.launchRunningWithErroredChild(
+            settledInTree.name,
+            settledInTree.id,
+            settledInTree.lastProxyError
+          );
+        }
+        if (!stillRunning) {
+          const arming = describeLaunchArming(finalSession, effectiveLaunchArgs?.stopOnEntry);
+          stillRunning = ErrorMessages.launchStillRunning(
+            arming.armed ? arming.summary : undefined,
+            debuggerOnAnyway ? undefined : debuggerOffWhy(finalSession),
+            arming.loggingSummary,
+            arming.noUncaughtStop
+          );
+        }
       }
 
       return {
@@ -872,8 +917,10 @@ export class DebugLauncher {
           ...landingFields(landing),
           ...(snapshot ? { snapshot } : {}),
           // The session tree (issue #1081): the children adopted during the
-          // hold, the run's released count, and what the relaunch closed.
+          // hold, the run's released count, any already-paused child snapshot
+          // (issue #1150), and what the relaunch closed.
           ...describeTreeAnswer(finalSession, this.ctx.descendantsOf(sessionId)),
+          ...(pausedChild ? { pausedChild } : {}),
           ...(childrenClosed > 0 ? { childrenClosed } : {}),
         },
       };

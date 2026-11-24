@@ -61,6 +61,7 @@ import {
   applyHitBreakpointIds,
   keepHitProven,
   mirrorsBreakpointsToChild,
+  recordTreeVerifiedBreakpoint,
   resetBinding,
   samePath,
   setAdapterMessage,
@@ -273,6 +274,24 @@ export interface ChildSessionSummary {
 }
 
 /**
+ * When a launch or restart answers `state: 'running'` on the root while an
+ * adopted child session is already genuinely `paused`, its stop landing and
+ * bounded snapshot ride here (issue #1150) so the caller can inspect, step,
+ * or continue `sessionId` immediately without spending an extra wait_for_stop
+ * turn. Never set for a child that is running, stopped, or in error.
+ */
+export interface PausedChildSummary extends StopAnswerFields {
+  sessionId: string;
+  name: string;
+  state: SessionState.PAUSED;
+  reason: string;
+  context?: {
+    lineContent: string;
+    surrounding: Array<{ line: number; content: string }>;
+  };
+}
+
+/**
  * What an answer on a session with a tree carries
  * (docs/architecture/session-tree.md, "wait_for_stop is tree-aware").
  */
@@ -280,9 +299,10 @@ export interface TreeAnswerFields {
   /** Every descendant with its state; absent when the session has none. */
   children?: ChildSessionSummary[];
   /**
-   * Reports released to run undebugged on this session's connection during
-   * this run (beyond the cap, or an adoption that failed): a running total,
-   * never consumed, so concurrent waiters read the same number.
+   * Reports released to run undebugged in this session's subtree during
+   * this run (beyond the cap, or a failed adoption whose release the adapter
+   * confirmed): a running total, never consumed, so concurrent waiters read
+   * the same number.
    */
   childrenReleased?: number;
   /** Descendants this operation closed (a relaunch, a close) — when any. */
@@ -316,7 +336,10 @@ export type WaitForStopResultData = DebugResultData & StopAnswerFields & TreeAns
  * so the answer names the frame the program is paused in and the handler can
  * read the line and the build behind it.
  */
-export type LaunchResultData = DebugResultData & StopAnswerFields & TreeAnswerFields;
+export type LaunchResultData = DebugResultData & StopAnswerFields & TreeAnswerFields & {
+  /** Present on launch/restart running answers when an adopted child is already paused (#1150). */
+  pausedChild?: PausedChildSummary;
+};
 
 /**
  * What a detach returns on top of the common fields (the session tree, issue
@@ -876,6 +899,53 @@ export abstract class SessionManagerCore extends EventEmitter {
       current.descendantStops = (current.descendantStops ?? 0) + 1;
       current = current.parentSessionId ? this.sessionStore.get(current.parentSessionId) : undefined;
     }
+  }
+
+  /**
+   * Record a confirmed or unconfirmed child-release outcome on `parent` and
+   * every ancestor (issues #1150, #1221): a root's `childrenReleased` and
+   * unconfirmed-release disclosure speak for its whole subtree, grandchildren
+   * included, while a child session's own answer speaks for its subtree.
+   */
+  private recordChildReleaseOnLineage(
+    parent: ManagedSession,
+    cause: ChildReleaseCause,
+    cap: number | undefined,
+    confirmed: boolean
+  ): void {
+    const seen = new Set<string>();
+    let current: ManagedSession | undefined = parent;
+    while (current && !seen.has(current.id)) {
+      seen.add(current.id);
+      if (confirmed) {
+        current.releasedChildReports = (current.releasedChildReports ?? 0) + 1;
+        current.releasedChildCauses = {
+          ...current.releasedChildCauses,
+          [cause]: (current.releasedChildCauses?.[cause] ?? 0) + 1
+        };
+        if (cap !== undefined && cap > 0) {
+          current.releasedChildCap = cap;
+        }
+      } else {
+        current.unconfirmedChildReleases = (current.unconfirmedChildReleases ?? 0) + 1;
+      }
+      current = current.parentSessionId ? this.sessionStore.get(current.parentSessionId) : undefined;
+    }
+  }
+
+  /** Wait for any in-flight CHILD_RELEASE_COMMAND round-trips on `sessionId`'s run (issue #1221). */
+  protected async settleInFlightChildReleases(sessionId: string): Promise<void> {
+    let session: ManagedSession | undefined;
+    try {
+      session = this.sessionStore.get(sessionId);
+    } catch {
+      return;
+    }
+    const inFlight = session?.run.inFlightChildReleases;
+    if (!inFlight || inFlight.size === 0) {
+      return;
+    }
+    await Promise.all([...inFlight]);
   }
 
   /** Tell the subtree listeners of a session and of each of its ancestors. */
@@ -1493,30 +1563,38 @@ export abstract class SessionManagerCore extends EventEmitter {
     parentProxy: IProxyManager,
     reported: ChildReportedEvent
   ): Promise<void> {
-    const release = (reason: string, cause: ChildReleaseCause | undefined): void => {
-      if (cause) {
-        // The run's count of children that run undebugged (issue #1081): the
-        // parent's next answers carry it as `childrenReleased`, with the cause
-        // beside it so they can say what the number means (issue #1137). A
-        // release with no cause is one nobody is told about: the tree was
-        // being closed anyway.
-        parent.releasedChildReports = (parent.releasedChildReports ?? 0) + 1;
-        parent.releasedChildCauses = {
-          ...parent.releasedChildCauses,
-          [cause]: (parent.releasedChildCauses?.[cause] ?? 0) + 1
-        };
-      }
-      parentProxy
-        .sendDapRequest(CHILD_RELEASE_COMMAND, { reportId: reported.reportId, reason }, { timeoutMs: 5000 })
+    let releaseCap: number | undefined;
+    const release = (reason: string, cause: ChildReleaseCause | undefined): Promise<void> => {
+      const inFlightSet = (parent.run.inFlightChildReleases ??= new Set());
+      const op = parentProxy
+        .sendDapRequest<DebugProtocol.Response & { body?: { released?: boolean; closed?: boolean } }>(
+          CHILD_RELEASE_COMMAND,
+          { reportId: reported.reportId, reason },
+          { timeoutMs: 5000 }
+        )
+        .then((resp) => {
+          if (!cause || resp?.body?.closed === true || this.isSubtreeClosing(parent)) {
+            return;
+          }
+          const confirmed = resp?.body?.released !== false;
+          this.recordChildReleaseOnLineage(parent, cause, releaseCap, confirmed);
+        })
         .catch((err) => {
           this.logger.warn(
             `[SessionManager] Releasing reported child ${reported.name} of session ${parent.id} failed: ${err instanceof Error ? err.message : String(err)}`
           );
+          if (cause && !this.isSubtreeClosing(parent)) {
+            this.recordChildReleaseOnLineage(parent, cause, releaseCap, false);
+          }
         });
+      inFlightSet.add(op);
+      return op.finally(() => {
+        inFlightSet.delete(op);
+      });
     };
 
     if (this.sessionStore.get(parent.id) !== parent || parent.proxyManager !== parentProxy || this.isSubtreeClosing(parent)) {
-      release('the parent session is closing or its connection has ended', undefined);
+      await release('the parent session is closing or its connection has ended', undefined);
       return;
     }
 
@@ -1529,13 +1607,13 @@ export abstract class SessionManagerCore extends EventEmitter {
         : `the tree of session ${root.id} is at its child-session cap (${cap})`;
       this.logger.info(`[SessionManager] Releasing reported child ${reported.name} of session ${parent.id}: ${reason}`);
       if (cap > 0) {
-        parent.releasedChildCap = cap;
+        releaseCap = cap;
       }
-      release(reason, cap === 0 ? 'adoption-off' : 'cap');
+      await release(reason, cap === 0 ? 'adoption-off' : 'cap');
       return;
     }
     if (!parentProxy.createChildView) {
-      release('this session cannot host child sessions', 'unsupported');
+      await release('this session cannot host child sessions', 'unsupported');
       return;
     }
 
@@ -1606,13 +1684,15 @@ export abstract class SessionManagerCore extends EventEmitter {
       this.logger.warn(
         `[SessionManager] Adopting child ${reported.name} of session ${parent.id} failed: ${message}`
       );
-      release(`adoption failed: ${message}`, this.isSubtreeClosing(parent) ? undefined : 'adoption-failed');
+      const closing = this.isSubtreeClosing(parent) || (child ? this.isSubtreeClosing(child) : false);
+      const releasePromise = release(`adoption failed: ${message}`, closing ? undefined : 'adoption-failed');
       if (child && this.sessionStore.get(child.id) === child && !this.isSubtreeClosing(child)) {
         // Use the normal subtree teardown: a grandchild may already have
         // been reported, and removing the last child must reap a root whose
         // worker stop was deferred while this adoption was pending.
         await this.closeSession(child.id);
       }
+      await releasePromise;
     }
   }
 
@@ -1771,6 +1851,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     session.liveUpdateState = undefined;
     session.programEndExplanation = undefined;
     session.releasedChildReports = undefined;
+    session.unconfirmedChildReleases = undefined;
     session.releasedChildCauses = undefined;
     session.releasedChildCap = undefined;
     session.descendantStops = undefined;
@@ -2266,6 +2347,7 @@ export abstract class SessionManagerCore extends EventEmitter {
           }
           fnTarget.verified = eventBp.verified;
           fnTarget.verifiedBy = fnTarget.verified ? 'adapter' : undefined;
+          recordTreeVerifiedBreakpoint(session, fnTarget);
           if (fnTarget.verified) {
             if (typeof eventBp.line === 'number') {
               fnTarget.boundLine = eventBp.line;
@@ -2363,6 +2445,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       }
       target.verified = eventBp.verified;
       target.verifiedBy = target.verified ? 'adapter' : undefined;
+      recordTreeVerifiedBreakpoint(session, target);
       // Where it bound: the request stays the request; a different file is
       // reported as boundFile/boundLine, a same-file move lands in `line`.
       applyBoundLocation(target, eventBp.source?.path, eventBp.line);
@@ -2599,6 +2682,7 @@ export abstract class SessionManagerCore extends EventEmitter {
         }
         target.verified = result.verified;
         target.verifiedBy = target.verified ? 'adapter' : undefined;
+        recordTreeVerifiedBreakpoint(session, target);
         if (typeof result.id === 'number') {
           target.adapterId = result.id;
         }
@@ -2650,11 +2734,14 @@ export abstract class SessionManagerCore extends EventEmitter {
         }
         if (mirrorsToChild) {
           target.verified = target.verified || result.verified;
+          recordTreeVerifiedBreakpoint(session, target);
           settleStoredMessage(target);
           continue;
         }
         target.verified = result.verified;
         target.verifiedBy = target.verified ? 'adapter' : undefined;
+        recordTreeVerifiedBreakpoint(session, target);
+        recordTreeVerifiedBreakpoint(session, target);
         if (typeof result.adapterId === 'number') {
           target.adapterId = result.adapterId;
         }

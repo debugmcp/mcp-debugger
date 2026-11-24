@@ -131,6 +131,59 @@ describe('debuggee lifecycle tool handlers', () => {
         expect(payload).not.toHaveProperty('children');
         expect(payload).not.toHaveProperty('childrenClosed');
         expect(payload).not.toHaveProperty('childrenReleased');
+        expect(payload).not.toHaveProperty('pausedChild');
+      });
+
+      it(`${tool} hoists pausedChild with context and stale-build note while stripping duplicate snapshot from data.pausedChild (issue #1150)`, async () => {
+        ctx.buildStaleness = { check: vi.fn().mockResolvedValue(evidence) };
+        const snapshot = { frames: [{ name: 'Main', file: '/app/Program.cs', line: 8 }], locals: { a: '1' } };
+        const pausedChild = {
+          sessionId: 'child-1',
+          name: 'Subprocess 4242',
+          state: 'paused' as const,
+          reason: 'breakpoint',
+          location,
+          note: 'anchored',
+          snapshot
+        };
+
+        const payload = JSON.parse(
+          (await answer({ message: 'child paused', pending: true, children, pausedChild }, 'running')).content[0].text
+        );
+
+        expect(payload.pausedChild).toMatchObject({
+          sessionId: 'child-1',
+          name: 'Subprocess 4242',
+          state: 'paused',
+          reason: 'breakpoint',
+          location,
+          context,
+          snapshot
+        });
+        expect(payload.pausedChild.note).toMatch(/^anchored The compiled file .* may be stale/);
+        expect(payload.data.pausedChild).not.toHaveProperty('snapshot');
+        expect(payload.data.pausedChild).toMatchObject({ sessionId: 'child-1', state: 'paused', reason: 'breakpoint' });
+        // Original session-layer pausedChild object is not mutated.
+        expect(pausedChild.snapshot).toEqual(snapshot);
+      });
+
+      it(`${tool} skips context and staleness reads when pausedChild location is unresolvedSource`, async () => {
+        const pausedChild = {
+          sessionId: 'child-1',
+          name: 'Subprocess 4242',
+          state: 'paused' as const,
+          reason: 'breakpoint',
+          location: { ...location, unresolvedSource: true }
+        };
+
+        const payload = JSON.parse(
+          (await answer({ message: 'child paused', pending: true, children, pausedChild }, 'running')).content[0].text
+        );
+
+        expect(payload.pausedChild).toMatchObject({ sessionId: 'child-1', state: 'paused' });
+        expect(payload.pausedChild).not.toHaveProperty('context');
+        expect(ctx.lineReader.getLineContext).not.toHaveBeenCalled();
+        expect(ctx.buildStaleness.check).not.toHaveBeenCalled();
       });
     }
   });

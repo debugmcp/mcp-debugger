@@ -47,12 +47,22 @@ interface Stop extends ToolAnswer {
   sessionId?: string;
   pending?: boolean;
   exitCode?: number;
-  unhitBreakpoints?: unknown[];
+  unhitBreakpoints?: Array<{ file: string; line: number; verified: boolean }>;
+  data?: { unhitBreakpoints?: Array<{ file: string; line: number; verified: boolean }> };
   location?: { file: string; line: number };
   lastStop?: { line?: number };
   children?: ChildSummary[];
   childrenClosed?: number;
   childrenReleased?: number;
+  pausedChild?: {
+    sessionId: string;
+    name: string;
+    state: string;
+    reason: string;
+    location?: { file: string; line: number };
+    context?: { lineContent: string };
+    snapshot?: { locals?: Record<string, string> };
+  };
 }
 interface Closed extends ToolAnswer { childrenClosed?: number; processEnded?: boolean; released?: boolean }
 interface Output extends ToolAnswer {
@@ -138,6 +148,16 @@ describe('JavaScript forks as child sessions (the session tree, issue #1082)', (
     expect(childBp.success, JSON.stringify(childBp)).toBe(true);
     const started = await launch(parentFixture);
     expect(started.state, JSON.stringify(started)).toBe('running');
+    if (started.pausedChild) {
+      expect(started.message, JSON.stringify(started)).not.toContain('has not reached');
+      expect(started.pausedChild, JSON.stringify(started)).toMatchObject({
+        state: 'paused',
+        reason: 'breakpoint',
+        location: expect.objectContaining({ line: CHILD_BREAKPOINT_LINE }),
+        context: expect.objectContaining({ lineContent: expect.stringContaining('total += i') }),
+        snapshot: expect.objectContaining({ locals: expect.objectContaining({ i: '0' }) })
+      });
+    }
 
     let childId: string | undefined;
     for (let iteration = 0; iteration < 3; iteration += 1) {
@@ -539,5 +559,49 @@ describe('JavaScript forks as child sessions (the session tree, issue #1082)', (
     // This fork's stdout is a pipe: no session shows it, and the note does not claim the launch session does.
     expect(rootText).not.toContain('{"n":1}');
     expect(childOutput.note).toMatch(/what it writes to a pipe is read by its parent process only/);
+  }, 120_000);
+
+  it('marks a fork-bound unhit breakpoint verified: true with no false unbound warning when the fork never executes that branch (issue #1150)', async () => {
+    const rootId = await server.createSession('javascript', 'js-tree-fork-verified-unhit');
+    // Conditional false so the breakpoint binds in child.js (never loaded by parent.js) without pausing.
+    const bp = await call('set_breakpoint', {
+      file: childFixture,
+      line: CHILD_BREAKPOINT_LINE,
+      condition: 'i === 999'
+    });
+    expect(bp.success, JSON.stringify(bp)).toBe(true);
+    const started = await launch(parentFixture);
+    const ended = started.state === 'stopped'
+      ? started
+      : await call<Stop>('wait_for_stop', { sessionId: rootId, timeout: 30000 });
+    expect(ended.state, JSON.stringify(ended)).toBe('stopped');
+    expect(ended.warning, JSON.stringify(ended)).toBeUndefined();
+    const unhit = ended.unhitBreakpoints ?? ended.data?.unhitBreakpoints;
+    expect(unhit, JSON.stringify(ended)).toEqual([
+      expect.objectContaining({ line: CHILD_BREAKPOINT_LINE, verified: true })
+    ]);
+    expect(ended.message, JSON.stringify(ended)).toContain(`Verified but never hit: child.js:${CHILD_BREAKPOINT_LINE}.`);
+  }, 120_000);
+
+  it('qualifies the end summary and unbound warning when autoAttachChildProcesses: false turns fork debugging off (issue #1150)', async () => {
+    const rootId = await server.createSession('javascript', 'js-tree-opt-out');
+    const bp = await call('set_breakpoint', { file: childFixture, line: CHILD_BREAKPOINT_LINE });
+    expect(bp.success, JSON.stringify(bp)).toBe(true);
+    const started = await call<Stop>('start_debugging', {
+      scriptPath: parentFixture,
+      breakOnExceptions: 'none',
+      dapLaunchArgs: { stopOnEntry: false, autoAttachChildProcesses: false }
+    });
+    expect(started.success, JSON.stringify(started)).toBe(true);
+    const ended = started.state === 'stopped'
+      ? started
+      : await call<Stop>('wait_for_stop', { sessionId: rootId, timeout: 30000 });
+    expect(ended.state, JSON.stringify(ended)).toBe('stopped');
+    expect(ended.message, JSON.stringify(ended)).toContain(
+      'without hitting any breakpoint in the launched process (child-process debugging was off via autoAttachChildProcesses: false, so child processes were not debugged).'
+    );
+    if (ended.warning) {
+      expect(ended.warning).toContain('autoAttachChildProcesses: false');
+    }
   }, 120_000);
 });

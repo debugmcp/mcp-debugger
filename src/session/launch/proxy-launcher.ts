@@ -40,6 +40,7 @@ import { ErrorMessages } from '../../utils/error-messages.js';
 import type { CustomLaunchRequestArguments } from '../session-manager-core.js';
 import type { ManagedSession, ToolchainValidationState, TransformedLaunch } from '../session-store.js';
 import type { ProxyLaunchContext } from '../operations-context.js';
+import { detectChildDebuggingOptOut } from '../run-facts.js';
 import { callerLaunchInputs, collectLaunchConfigNotices, type CallerLaunchInput, collectAttachTransformNotices } from './launch-config-diagnostics.js';
 
 
@@ -154,6 +155,9 @@ export class ProxyLauncher {
     session.run.launchConfigNotices = [];
     session.run.attachTransformNotices = undefined;
     session.run.transformedLaunch = undefined;
+    session.run.treeVerifiedBreakpointIds = undefined;
+    session.run.childDebuggingOptedOut = undefined;
+    session.run.inFlightChildReleases = undefined;
 
     // Log entrance for Windows CI debugging
     this.ctx.logger.info(
@@ -202,7 +206,14 @@ export class ProxyLauncher {
       // program (issue #1151), read the same way from the same config: the
       // transformed one. The arguments as given are not it: an adapter with
       // no attach transform turns attach-shaped arguments into a launch.
-      session.run.programOwnership = launchConfigIsAttach(plan.launchConfig) ? 'borrowed' : 'owned';
+      const isBorrowed = launchConfigIsAttach(plan.launchConfig);
+      session.run.programOwnership = isBorrowed ? 'borrowed' : 'owned';
+      session.run.childDebuggingOptedOut = detectChildDebuggingOptOut(
+        session.language,
+        isBorrowed,
+        plan.launchConfig as Record<string, unknown>,
+        inputs.genericLaunchConfig
+      );
 
       // Set up event handlers
       // The core must see the same entry-stop intent the worker sees (#791).

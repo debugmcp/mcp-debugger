@@ -139,6 +139,8 @@ export interface OperationsContext {
   closeSessionReporting(sessionId: string, options?: { terminateDebuggee?: boolean }): Promise<CloseSessionOutcome>;
   /** Block new child adoptions during a complete teardown; returns the release function. */
   beginSubtreeClose(sessionId: string): () => void;
+  /** Wait for any in-flight CHILD_RELEASE_COMMAND round-trips on this session's run (issue #1221). */
+  settleInFlightChildReleases(sessionId: string): Promise<void>;
   /** The detach cascade (issue #1081): release every descendant, deepest first; resolves with how many. */
   releaseDescendants(session: ManagedSession): Promise<number>;
   getStackTrace(
@@ -207,10 +209,12 @@ export type LaunchContext = Pick<
   | 'updateSession'
   | 'updateState'
   | 'onStateChange'
+  | 'onSubtreeChange'
   | 'selectPolicy'
   | 'getStackTraceDetailed'
   | 'stopProxyPreservingSession'
   | 'descendantsOf'
+  | 'settleInFlightChildReleases'
   | 'extractLocalsFromResolved'
   | 'redactionEnabled'
   | 'snapshotEnabled'
@@ -268,6 +272,7 @@ export type ExecutionContext = Pick<
   | 'onStateChange'
   | 'onSubtreeChange'
   | 'descendantsOf'
+  | 'settleInFlightChildReleases'
   | 'getStackTraceDetailed'
   | 'selectPolicy'
   | 'tunables'
