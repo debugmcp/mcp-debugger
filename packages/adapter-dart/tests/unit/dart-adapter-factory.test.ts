@@ -10,12 +10,14 @@ import { DartDebugAdapter } from '../../src/dart-debug-adapter.js';
 const DART_EXE = 'C:\\tools\\dart-sdk\\bin\\dart.exe';
 const FLUTTER_ROOT = 'C:\\src\\flutter';
 
-function hooks(overrides: Partial<DartFactoryHooks> = {}): DartFactoryHooks {
+function hooks(overrides: DartFactoryHooks = {}): Required<DartFactoryHooks> {
   return {
     platform: 'win32',
     locate: () => ({ dartExe: DART_EXE, dartSdkRoot: 'C:\\tools\\dart-sdk', dartSource: 'env:DART_SDK', flutterRoot: FLUTTER_ROOT, flutterExe: `${FLUTTER_ROOT}\\bin\\flutter.bat`, flutterSource: 'env:FLUTTER_ROOT', warnings: [] }),
     probeDartVersion: async () => '3.13.4',
     probeFlutterVersion: async () => ({ frameworkVersion: '3.47.7', channel: 'stable', dartSdkVersion: '3.13.5' }),
+    probeFlutterDevices: async () => [],
+    probeFlutterEmulators: async () => [],
     ...overrides,
   };
 }
