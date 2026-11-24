@@ -186,17 +186,12 @@ export class AttachController {
       attachLocality = attachLocalityOf(addressing);
     }
 
-    if (session.proxyManager || session.pendingProxyStop || session.deferredWorkerStop) {
-      if (session.proxyManager) {
-        this.ctx.logger.warn(
-          `[SessionManager] Session ${sessionId} already has an active proxy. Terminating before attaching.`
-        );
-      }
-      // Session-preserving teardown (same landmine as startDebugging, #238);
-      // a stop() still in flight from a terminal event handler is awaited
-      // too, so the new worker never races the old one's exit (#502).
-      await this.ctx.stopProxyPreservingSession(session);
+    if (session.proxyManager) {
+      this.ctx.logger.warn(
+        `[SessionManager] Session ${sessionId} already has an active proxy. Terminating before attaching.`
+      );
     }
+    await this.ctx.stopProxyPreservingSession(session);
 
     // Update to INITIALIZING state and set lifecycle to ACTIVE
     this.ctx.updateState(session, SessionState.INITIALIZING);

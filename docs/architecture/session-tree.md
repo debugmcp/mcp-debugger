@@ -264,10 +264,11 @@ Two measured effects the answers name:
   children's connections live in the parent's worker, so they cannot outlive the detach; the
   parent-side order with several children is the one step here the spikes did not measure, and the
   M1 suite does.
-- `restart_debugging` on a parent ends the previous run's children with that run: they are closed
-  and removed (a relaunch is a new program, and children belong to a run), and the restart answer
-  says `childrenClosed: n`. Neither detach nor restart ever classifies children as `error`; that row
-  of the cascade table is for a worker that dies unexpectedly.
+- When a launch or attach replaces a run on the same root, it removes the previous run's child
+  rows before starting the next one. This includes rows left for inspection after a worker crash.
+  The old run determines what happens to live child processes. Replacing an attached run releases
+  its children with `disconnect(terminateDebuggee: false)`. Replacing a launched run follows each
+  adapter's child-close semantics. A relaunch reports the number of rows it removed in `childrenClosed`.
 
 ### On by default, opt-out per launch
 
