@@ -1,89 +1,35 @@
 #!/usr/bin/env node
 
-const fs = require('fs');
+const { execFileSync } = require('node:child_process');
 const path = require('path');
-const { personalPatterns } = require('./check-personal-paths.cjs');
+const {
+  GIT_MAX_BUFFER,
+  checkFile,
+  isAuditablePath,
+  resolveRepoRoot
+} = require('./check-personal-paths.cjs');
 
-// File extensions to check
-const extensions = [
-  'md', 'ts', 'js', 'cjs', 'mjs', 'json', 'yml', 'yaml', 'txt', 
-  'sh', 'cmd', 'bat', 'ps1', 'py', 'tsx', 'jsx', 'env', 'config'
-];
-
-// Directories to exclude
-// `.dart_tool` is `dart pub get` output (gitignored); its package_config.json holds absolute file: URIs.
-const excludeDirs = ['node_modules', 'dist', 'coverage', '.git', 'build', '.husky', 'logs', 'sessions', 'vendor', '.dart_tool'];
-
-// Binary file extensions to skip
-const binaryExtensions = [
-  'jpg', 'jpeg', 'png', 'gif', 'bmp', 'ico', 'svg',
-  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
-  'zip', 'tar', 'gz', 'rar', '7z',
-  'exe', 'dll', 'so', 'dylib',
-  'mp3', 'mp4', 'avi', 'mov', 'wav',
-  'ttf', 'otf', 'woff', 'woff2', 'eot'
-];
-
-// Check if file is binary based on extension
-function isBinaryFile(filename) {
-  const ext = path.extname(filename).slice(1).toLowerCase();
-  return binaryExtensions.includes(ext);
-}
-
-// Recursively get all files in a directory
-function getAllFiles(dirPath, arrayOfFiles = []) {
+// Include work in progress alongside indexed files. Git applies the same
+// nested ignore rules used by git add, including each CodeLLDB package's payload.
+function getAuditFiles() {
   try {
-    const files = fs.readdirSync(dirPath);
-
-    files.forEach(file => {
-      const filePath = path.join(dirPath, file);
-      
-      // Skip excluded directories
-      if (excludeDirs.includes(file)) {
-        return;
+    const repoRoot = resolveRepoRoot();
+    const paths = execFileSync(
+      'git',
+      ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        windowsHide: true,
+        maxBuffer: GIT_MAX_BUFFER
       }
-
-      if (fs.statSync(filePath).isDirectory()) {
-        arrayOfFiles = getAllFiles(filePath, arrayOfFiles);
-      } else {
-        // Check if file has a valid extension and is not binary
-        const ext = path.extname(file).slice(1);
-        if (extensions.includes(ext) && !isBinaryFile(file)) {
-          arrayOfFiles.push(filePath);
-        }
-      }
-    });
+    );
+    return [...new Set(paths.split('\0'))]
+      .filter(file => isAuditablePath(file))
+      .map(relPath => ({ relPath, absPath: path.join(repoRoot, relPath) }));
   } catch (error) {
-    console.error(`Error reading directory ${dirPath}:`, error.message);
-  }
-
-  return arrayOfFiles;
-}
-
-// Check file for personal information
-function checkFile(filePath) {
-  if (!fs.existsSync(filePath)) {
-    return null;
-  }
-
-  try {
-    const content = fs.readFileSync(filePath, 'utf8');
-    const findings = [];
-
-    personalPatterns.forEach(pattern => {
-      const matches = content.match(pattern);
-      if (matches) {
-        findings.push({
-          pattern: pattern.source,
-          matches: [...new Set(matches)]
-        });
-      }
-    });
-
-    return findings.length > 0 ? findings : null;
-  } catch (error) {
-    // Skip files that can't be read as UTF-8
-    return null;
+    console.error('Error listing repository audit files:', error.message);
+    process.exit(1);
   }
 }
 
@@ -110,7 +56,7 @@ function main() {
   console.log('🔍 Running full audit for personal information in all files...\n');
   
   const startTime = Date.now();
-  const allFiles = getAllFiles('.');
+  const allFiles = getAuditFiles();
   
   console.log(`Found ${allFiles.length} file(s) to check...\n`);
 
@@ -118,16 +64,16 @@ function main() {
   const allFindings = [];
   let checkedCount = 0;
 
-  allFiles.forEach(file => {
+  allFiles.forEach(({ relPath, absPath }) => {
     checkedCount++;
     if (checkedCount % 100 === 0) {
       process.stdout.write(`\rChecking file ${checkedCount}/${allFiles.length}...`);
     }
 
-    const findings = checkFile(file);
+    const findings = checkFile(absPath);
     if (findings) {
       foundPersonalInfo = true;
-      allFindings.push({ file, findings });
+      allFindings.push({ file: relPath, findings });
     }
   });
 
