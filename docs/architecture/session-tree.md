@@ -331,7 +331,11 @@ Two bounds keep that sane:
   will not hit. When a failed adoption's fallback release is **not** confirmed by the debug adapter
   (issue #1221), it is not counted in `childrenReleased` and not called "released to run
   undebugged"; `describeReleasedChildren` discloses that the child could not be adopted and whether
-  it continued running is not known.
+  it continued running is not known. Before a launch or `wait_for_stop` answer is built, releases
+  still in flight are waited for at most 1,500 ms, never past the caller's remaining deadline, and
+  not at all once the request is cancelled. A `wait_for_stop` that reaches its own timeout therefore
+  does not wait: its `childrenReleased` counts the releases confirmed so far, and any release that
+  confirms afterwards is reflected in a later answer.
 - Ended children stay listed until closed, as above, and leave with their parent.
 
 ## Every adapter, surveyed

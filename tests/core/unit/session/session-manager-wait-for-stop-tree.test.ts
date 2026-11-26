@@ -583,5 +583,85 @@ describe('SessionManager - the tree-aware waitForStop (issue #1081)', () => {
       await vi.advanceTimersByTimeAsync(200);
       expect(settled2).toMatchObject({ success: true, state: SessionState.RUNNING });
     });
+
+    it('returns at once when the remaining settle budget is 0 even with a release in flight', async () => {
+      setupWithCapZero();
+      const rootId = await startRoot();
+      deferChildRelease();
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r-zero', 5003));
+      dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+
+      // 5 ms timeout is exhausted during the 10 ms landing read, so waitForStop
+      // calls settleInFlightChildReleases with timeoutMs: 0 and returns at once.
+      const wait = track(sessionManager.waitForStop(rootId, 5));
+      await vi.advanceTimersByTimeAsync(15);
+      expect(wait.result()).toMatchObject({
+        success: true,
+        state: SessionState.PAUSED,
+        data: { sessionId: rootId }
+      });
+    });
+
+    it('ignores a worker closed: true release outcome without counting released or unconfirmed (M13)', async () => {
+      setupWithCapZero();
+      const rootId = await startRoot();
+      const origSend = dependencies.mockProxyManager.sendDapRequest.bind(dependencies.mockProxyManager);
+      vi.spyOn(dependencies.mockProxyManager, 'sendDapRequest').mockImplementation((command, args, options) => {
+        if (command === CHILD_RELEASE_COMMAND) {
+          return Promise.resolve({ success: true, body: { held: false, released: false, closed: true } } as never);
+        }
+        return origSend(command, args, options);
+      });
+
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r-closed', 5004));
+      await vi.advanceTimersByTimeAsync(0);
+
+      const root = sessionManager.getSession(rootId)!;
+      expect(root.releasedChildReports).toBeUndefined();
+      expect(root.unconfirmedChildReleases).toBeUndefined();
+    });
+
+    it('does not count a release that answers after its subtree begins closing (M14)', async () => {
+      setupWithCapZero();
+      const rootId = await startRoot();
+      const release = deferChildRelease();
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r-closing', 5005));
+
+      let finishStop!: () => void;
+      vi.spyOn(dependencies.mockProxyManager, 'stop').mockImplementation(
+        () => new Promise<void>((resolve) => { finishStop = resolve; })
+      );
+      const root = sessionManager.getSession(rootId)!;
+      const closing = sessionManager.closeSession(rootId);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Resolve the release while closeSession holds the subtree-closing flag.
+      release.resolveRelease(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(root.releasedChildReports).toBeUndefined();
+      expect(root.unconfirmedChildReleases).toBeUndefined();
+
+      finishStop();
+      await closing;
+    });
+
+    it('records an unconfirmed release when the CHILD_RELEASE_COMMAND request rejects or times out (M16)', async () => {
+      setupWithCapZero();
+      const rootId = await startRoot();
+      const origSend = dependencies.mockProxyManager.sendDapRequest.bind(dependencies.mockProxyManager);
+      vi.spyOn(dependencies.mockProxyManager, 'sendDapRequest').mockImplementation((command, args, options) => {
+        if (command === CHILD_RELEASE_COMMAND) {
+          return Promise.reject(new Error('DAP request timed out'));
+        }
+        return origSend(command, args, options);
+      });
+
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r-timeout', 5006));
+      await vi.advanceTimersByTimeAsync(0);
+
+      const root = sessionManager.getSession(rootId)!;
+      expect(root.releasedChildReports).toBeUndefined();
+      expect(root.unconfirmedChildReleases).toBe(1);
+    });
   });
 });

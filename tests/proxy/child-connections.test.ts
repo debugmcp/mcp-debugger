@@ -2051,4 +2051,98 @@ describe('ChildConnections: release confirmation outcomes (issue #1221)', () => 
       released: false
     });
   });
+
+  it('answers { held: false, released: false } for a report that is neither held nor recorded', async () => {
+    const connections = new ChildConnections({
+      messageSender: { send: vi.fn() },
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }
+    });
+    await expect(connections.releaseWithConfirmation('never-reported', 'cap')).resolves.toEqual({
+      held: false,
+      released: false
+    });
+  });
+
+  it('evicts the oldest recorded release outcome once MAX_RECORDED_RELEASE_OUTCOMES (256) is reached', async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    const connections = new ChildConnections({
+      messageSender: { send: (m) => sent.push(m as unknown as Record<string, unknown>) },
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }
+    });
+    const rootClient = createMockDapClient();
+    rootClient.respondToReverseRequest.mockReturnValue(true);
+    connections.attach(rootClient as never, 'root-1');
+
+    const reportIds: string[] = [];
+    for (let i = 0; i < 257; i += 1) {
+      rootClient.emit('child-report', {
+        request: { seq: i + 1, type: 'request', command: 'startDebugging' },
+        report: { targetId: String(i), name: `Subprocess ${i}`, configuration: { subProcessId: i } }
+      });
+      const id = sent.at(-1)!.reportId as string;
+      reportIds.push(id);
+      await expect(connections.releaseWithConfirmation(id, 'cap')).resolves.toEqual({ held: true, released: true });
+    }
+
+    // The 1st entry was evicted when the 257th was recorded; the 2nd and 257th remain.
+    await expect(connections.releaseWithConfirmation(reportIds[0], 'retry')).resolves.toEqual({ held: false, released: false });
+    await expect(connections.releaseWithConfirmation(reportIds[1], 'retry')).resolves.toEqual({ held: false, released: true });
+    await expect(connections.releaseWithConfirmation(reportIds[256], 'retry')).resolves.toEqual({ held: false, released: true });
+  });
+
+  it('marks a reject-request release unconfirmed when the client lacks respondToReverseRequest or throws', async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    const connections = new ChildConnections({
+      messageSender: { send: (m) => sent.push(m as unknown as Record<string, unknown>) },
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }
+    });
+
+    // Client without respondToReverseRequest
+    const bareClient = new EventEmitter();
+    connections.attach(bareClient as never, 'root-bare');
+    bareClient.emit('child-report', {
+      request: { seq: 1, type: 'request', command: 'startDebugging' },
+      report: { targetId: '201', name: 'Subprocess 201', configuration: { subProcessId: 201 } }
+    });
+    const bareId = sent.at(-1)!.reportId as string;
+    await expect(connections.releaseWithConfirmation(bareId, 'cap')).resolves.toEqual({ held: true, released: false });
+
+    // Client whose respondToReverseRequest throws
+    const throwingClient = createMockDapClient();
+    throwingClient.respondToReverseRequest.mockImplementationOnce(() => {
+      throw new Error('socket destroyed');
+    });
+    connections.attach(throwingClient as never, 'root-throw');
+    throwingClient.emit('child-report', {
+      request: { seq: 2, type: 'request', command: 'startDebugging' },
+      report: { targetId: '202', name: 'Subprocess 202', configuration: { subProcessId: 202 } }
+    });
+    const throwId = sent.at(-1)!.reportId as string;
+    await expect(connections.releaseWithConfirmation(throwId, 'cap')).resolves.toEqual({ held: true, released: false });
+  });
+
+  it('returns false from releaseByThrowaway when the worker has no adoption dependencies', async () => {
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const connections = new ChildConnections({
+      messageSender: { send: vi.fn() },
+      logger
+    });
+    const releaseByThrowaway = (connections as unknown as {
+      releaseByThrowaway(held: unknown, reason: string): Promise<boolean>;
+    }).releaseByThrowaway.bind(connections);
+
+    await expect(
+      releaseByThrowaway(
+        {
+          request: { seq: 1, type: 'request', command: 'startDebugging' },
+          report: { targetId: 't-no-deps', name: 'child.js [1]', configuration: {} },
+          client: createMockDapClient(),
+          connectionSessionId: 'root-js',
+          timer: setTimeout(() => {}, 0)
+        },
+        'cap'
+      )
+    ).resolves.toBe(false);
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('cannot be released: this worker opens no connections; it stays parked'));
+  });
 });

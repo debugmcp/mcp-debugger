@@ -237,18 +237,30 @@ describe('Python child processes as child sessions (the session tree, issue #108
       });
       expect(started.success, JSON.stringify(started)).toBe(true);
       expect(started.state, JSON.stringify(started)).toBe('running');
-      // child.py executes line 12 immediately with no delay (~110 ms under debugpy,
-      // well inside the 1,000 ms launch hold), so pausedChild is guaranteed here.
-      expect(started.pausedChild, JSON.stringify(started)).toBeDefined();
-      expect(started.message, JSON.stringify(started)).not.toContain('has not reached');
-      expect(started.message, JSON.stringify(started)).toContain('(pausedChild carries its stop snapshot)');
-      expect(started.pausedChild, JSON.stringify(started)).toMatchObject({
-        state: 'paused',
-        reason: 'breakpoint',
-        location: expect.objectContaining({ line: CHILD_BREAKPOINT_LINE }),
-        context: expect.objectContaining({ lineContent: expect.stringContaining('total += i') }),
-        snapshot: expect.objectContaining({ locals: expect.objectContaining({ i: '0' }) })
-      });
+      // Measured on an idle machine: debugpy adopts child.py 424–441 ms after
+      // the root starts running and pauses 535–552 ms into the 1,000 ms launch
+      // hold (~110 ms is adoption-to-pause, not hold-start-to-pause). That
+      // leaves ~450 ms of slack on an idle box, which a loaded Windows CI
+      // runner can exceed. Assert both branches strictly so neither outcome
+      // goes unchecked.
+      if (started.pausedChild) {
+        expect(started.pending, JSON.stringify(started)).toBe(true);
+        expect(started.message, JSON.stringify(started)).not.toContain('has not reached');
+        expect(started.message, JSON.stringify(started)).toContain('(pausedChild carries its stop snapshot)');
+        expect(started.pausedChild, JSON.stringify(started)).toMatchObject({
+          state: 'paused',
+          reason: 'breakpoint',
+          location: expect.objectContaining({ line: CHILD_BREAKPOINT_LINE }),
+          context: expect.objectContaining({ lineContent: expect.stringContaining('total += i') }),
+          snapshot: expect.objectContaining({ locals: expect.objectContaining({ i: '0' }) })
+        });
+      } else {
+        expect(started.pending, JSON.stringify(started)).toBe(true);
+        expect(started.message, JSON.stringify(started)).toContain(
+          'The program is running and has not reached 1 breakpoint(s) yet.'
+        );
+        expect(started.message, JSON.stringify(started)).toContain('call wait_for_stop to block until then');
+      }
 
       let childId: string | undefined;
       for (let iteration = 0; iteration < 3; iteration += 1) {

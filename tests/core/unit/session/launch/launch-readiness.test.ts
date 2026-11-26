@@ -322,5 +322,36 @@ describe('waitForLaunchReadiness', () => {
       expect(removed.outcome()).toBe('ended');
       expect(removed.subtreeListenerCount()).toBe(0);
     });
+
+    it('is idempotent when finish() is triggered twice in the same tick', async () => {
+      const root = { id: 'root', state: SessionState.RUNNING };
+      const dispose = vi.fn();
+      let evalCalls = 0;
+      const ctx = {
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+        getSession: () => {
+          evalCalls += 1;
+          // On the tree hold's initial evaluate(), advance timers so holdTimer
+          // calls finish() first, then return PAUSED so evaluate() calls finish()
+          // a second time in the same tick.
+          if (evalCalls === 3) {
+            vi.advanceTimersByTime(1_000);
+            root.state = SessionState.PAUSED;
+          }
+          return root;
+        },
+        onStateChange: () => () => {},
+        onSubtreeChange: () => dispose,
+        descendantsOf: () => []
+      };
+
+      const outcome = await waitForLaunchReadiness(ctx as never, {
+        sessionId: 'root',
+        launchedCeilingMs: 30_000,
+        holdMs: 1_000
+      });
+      expect(outcome).toBe('stopped');
+      expect(dispose).toHaveBeenCalledTimes(1);
+    });
   });
 });
