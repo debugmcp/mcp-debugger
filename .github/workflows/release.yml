@@ -9,7 +9,7 @@ on:
       ref:
         description: 'Git ref (tag or branch) to release from'
         required: true
-        default: 'refs/tags/v0.26.0'
+        default: 'refs/tags/v0.27.0-beta.1'
 
 permissions: {}
 
