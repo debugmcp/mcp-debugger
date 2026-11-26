@@ -516,6 +516,107 @@ jobs:
         path: artifacts/dart/
         if-no-files-found: warn
 
+  java-host:
+    name: Java Host (JDK 21)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Setup pnpm
+      uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+    - name: Setup Node.js
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: '22.x'
+        cache: 'pnpm'
+    - name: Setup Java 21
+      uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+      with:
+        distribution: 'temurin'
+        java-version: '21'
+    - name: Record Java versions
+      run: |
+        mkdir -p artifacts/java
+        java -version 2>&1 | tee artifacts/java/java-version.txt
+        javac -version 2>&1 | tee artifacts/java/javac-version.txt
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Build project
+      run: pnpm build
+    - name: Run all eight Java host smokes
+      run: |
+        pnpm exec vitest run --project e2e tests/e2e/mcp-server-smoke-java-attach.test.ts tests/e2e/mcp-server-smoke-java-evaluate.test.ts tests/e2e/mcp-server-smoke-java-event-race.test.ts tests/e2e/mcp-server-smoke-java-function-bp.test.ts tests/e2e/mcp-server-smoke-java-inner-class.test.ts tests/e2e/mcp-server-smoke-java-pause.test.ts tests/e2e/mcp-server-smoke-java-redefine.test.ts tests/e2e/mcp-server-smoke-java.test.ts --reporter=default --reporter=json --outputFile=artifacts/java/host-tests.json
+        node scripts/check-host-e2e-report.mjs artifacts/java/host-tests.json java
+    - name: Upload Java validation evidence
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: java-host-21
+        path: artifacts/java/
+        if-no-files-found: warn
+
+  dotnet-host:
+    name: .NET Host (SDK 8 + netcoredbg)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    env:
+      NETCOREDBG_VERSION: '3.2.0-1092'
+      # GitHub release asset 457716187 digest (Samsung/netcoredbg, Linux amd64).
+      # https://github.com/Samsung/netcoredbg/releases/tag/3.2.0-1092
+      # To update: take the new release's asset digest and check it against a download.
+      NETCOREDBG_SHA256: '080eb3b2d2152465f599d3b33d1ee6e747794e11cc0a3773ec689f5e5f2c5afa'
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Setup pnpm
+      uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+    - name: Setup Node.js
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: '22.x'
+        cache: 'pnpm'
+    - name: Setup .NET SDK 8
+      uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+      with:
+        dotnet-version: '8.0.x'
+    - name: Install verified netcoredbg
+      run: |
+        mkdir -p artifacts/dotnet "$RUNNER_TEMP/netcoredbg"
+        curl --fail --location --retry 3 "https://github.com/Samsung/netcoredbg/releases/download/${NETCOREDBG_VERSION}/netcoredbg-linux-amd64.tar.gz" -o "$RUNNER_TEMP/netcoredbg.tar.gz"
+        echo "$NETCOREDBG_SHA256  $RUNNER_TEMP/netcoredbg.tar.gz" | sha256sum --check | tee artifacts/dotnet/netcoredbg-checksum.txt
+        tar -xzf "$RUNNER_TEMP/netcoredbg.tar.gz" -C "$RUNNER_TEMP/netcoredbg"
+        echo "NETCOREDBG_PATH=$RUNNER_TEMP/netcoredbg/netcoredbg/netcoredbg" >> "$GITHUB_ENV"
+    - name: Record .NET toolchain versions
+      run: |
+        dotnet --info 2>&1 | tee artifacts/dotnet/dotnet-info.txt
+        "$NETCOREDBG_PATH" --version 2>&1 | tee artifacts/dotnet/netcoredbg-version.txt
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Build project
+      run: pnpm build
+    - name: Run .NET host launch and attach smokes
+      run: |
+        pnpm exec vitest run --project e2e tests/e2e/mcp-server-smoke-dotnet.test.ts tests/e2e/mcp-server-smoke-dotnet-attach.test.ts --reporter=default --reporter=json --outputFile=artifacts/dotnet/host-tests.json
+        node scripts/check-host-e2e-report.mjs artifacts/dotnet/host-tests.json dotnet
+    - name: Upload .NET validation evidence
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: dotnet-host-8
+        path: artifacts/dotnet/
+        if-no-files-found: warn
+
   flutter-host:
     # The Flutter SDK's own debug adapter (`flutter debug-adapter --test`) behind the stdio
     # bridge (issue #790, M2): the widget-test cases of the Flutter smoke. The desktop cases
@@ -679,7 +780,7 @@ jobs:
 
   test-summary:
     name: Test Summary
-    needs: [build-and-test, windows-python-integration, lint, container-tests, cobol-host, dart-host, flutter-host, go-current, mcp-conformance, mcp-conformance-2026]
+    needs: [build-and-test, windows-python-integration, lint, container-tests, cobol-host, dart-host, java-host, dotnet-host, flutter-host, go-current, mcp-conformance, mcp-conformance-2026]
     runs-on: ubuntu-latest
     if: always()
 
@@ -692,6 +793,8 @@ jobs:
         echo "container-tests: ${{ needs.container-tests.result }}"
         echo "cobol-host: ${{ needs.cobol-host.result }}"
         echo "dart-host: ${{ needs.dart-host.result }}"
+        echo "java-host: ${{ needs.java-host.result }}"
+        echo "dotnet-host: ${{ needs.dotnet-host.result }}"
         echo "flutter-host: ${{ needs.flutter-host.result }}"
         echo "go-current: ${{ needs.go-current.result }}"
         echo "mcp-conformance: ${{ needs.mcp-conformance.result }}"
@@ -702,6 +805,8 @@ jobs:
           || [ "${{ needs.container-tests.result }}" != "success" ] \
           || [ "${{ needs.cobol-host.result }}" != "success" ] \
           || [ "${{ needs.dart-host.result }}" != "success" ] \
+          || [ "${{ needs.java-host.result }}" != "success" ] \
+          || [ "${{ needs.dotnet-host.result }}" != "success" ] \
           || [ "${{ needs.flutter-host.result }}" != "success" ] \
           || [ "${{ needs.go-current.result }}" != "success" ] \
           || [ "${{ needs.mcp-conformance.result }}" != "success" ] \
