@@ -85,7 +85,12 @@ import type { PauseCoordinator } from './pause-coordinator.js';
 import { waitForSubtreeSettle } from './session-state-wait.js';
 import { describeReleasedChildren, describeTreeAnswer, withReleasedChildren } from './tree-settle.js';
 import { resolveDapTimeoutOverride } from '../dap-request-helpers.js';
-import { buildRunToCompletionSummary, describeProgramEnd } from '../breakpoints/launch-warnings.js';
+import {
+  buildRunToCompletionSummary,
+  describeProgramEnd,
+  exitOutputTail,
+  withOutputTailClause
+} from '../breakpoints/launch-warnings.js';
 import { describeLaunchArming } from '../launch/launch-arming.js';
 
 /** What distinguishes the three step flavours: everything else is shared. */
@@ -435,7 +440,7 @@ export class ExecutionController {
       const success = (
         message: string,
         landing?: StopLanding,
-        extra?: Pick<StepResultData, 'stopReason' | 'rawStopReason' | 'exitCode'>
+        extra?: Pick<StepResultData, 'stopReason' | 'rawStopReason' | 'exitCode' | 'outputTail'>
       ) => {
         this.ctx.logger.info(`[SM ${options.logTag} ${sessionId}] ${message} Current state: ${session.state}`);
         const data: StepResultData = { message, ...extra, ...(landing ? landingFields(landing) : {}) };
@@ -446,15 +451,20 @@ export class ExecutionController {
         });
       };
 
+      const endedFields = (): Pick<StepResultData, 'exitCode' | 'outputTail'> => {
+        const outputTail = exitOutputTail(session);
+        return {
+          ...(typeof session.exitCode === 'number' ? { exitCode: session.exitCode } : {}),
+          ...(outputTail ? { outputTail } : {})
+        };
+      };
+
       const settleEnded = (overrideMessage?: string) => {
+        const extra = endedFields();
         const message = stopSeen
           ? endedDuringReadMessage
           : overrideMessage ?? ErrorMessages.stepSessionEnded(session.exitCode);
-        success(
-          message,
-          undefined,
-          typeof session.exitCode === 'number' ? { exitCode: session.exitCode } : undefined
-        );
+        success(withOutputTailClause(message, extra.outputTail), undefined, extra);
       };
 
       /** Rule 2: has the session reached a terminal state by settle time? */
@@ -473,11 +483,8 @@ export class ExecutionController {
         // settled with its own wording; this covers the endings that did not
         // (handlers torn down by the core, an exit mapped straight to ERROR).
         if (sessionEnded()) {
-          success(
-            endedDuringReadMessage,
-            undefined,
-            typeof session.exitCode === 'number' ? { exitCode: session.exitCode } : undefined
-          );
+          const extra = endedFields();
+          success(withOutputTailClause(endedDuringReadMessage, extra.outputTail), undefined, extra);
           return;
         }
         // A stop recorded for THIS step whose reason is not the step: name it,
@@ -1149,6 +1156,7 @@ export class ExecutionController {
       // adapter's reading of the end (issue #877). A program resumed past a
       // stop keeps the plain message: its breakpoints were not all missed.
       const ranPast = target.lastStop ? undefined : buildRunToCompletionSummary(target);
+      const outputTail = ranPast ? ranPast.data.outputTail : exitOutputTail(target);
       return {
         success: true,
         state,
@@ -1156,8 +1164,9 @@ export class ExecutionController {
           sessionId: target.id,
           message: explained(ranPast
             ? ranPast.summary
-            : `${describeProgramEnd(target.exitCode)}.${target.programEndExplanation?.note ? ` ${target.programEndExplanation.note}` : ''}`),
+            : `${withOutputTailClause(`${describeProgramEnd(target.exitCode)}.`, outputTail)}${target.programEndExplanation?.note ? ` ${target.programEndExplanation.note}` : ''}`),
           ...(typeof target.exitCode === 'number' ? { exitCode: target.exitCode } : {}),
+          ...(outputTail ? { outputTail } : {}),
           ...(ranPast?.data ?? {}),
           ...(target.programEndExplanation ? { programEnd: target.programEndExplanation } : {}),
           ...stopDuringWait,

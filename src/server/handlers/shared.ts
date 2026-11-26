@@ -21,7 +21,7 @@ import type { ToolContext } from '../tool-context.js';
 import type { ToolArguments } from '../tool-arguments.js';
 import { validateBreakOnExceptions } from '../tool-validation.js';
 import { debuggerOffWhy } from '../../session/debugger-off.js';
-import type { DebugResult, LaunchResultData, StopAnswerFields, TreeAnswerFields } from '../../session/session-manager-core.js';
+import type { DebugResult, DebugResultData, LaunchResultData, StopAnswerFields, TreeAnswerFields } from '../../session/session-manager-core.js';
 import type { AttachRequest } from '../../session/attach/attach-controller.js';
 import { runFactsOf, type RunFacts } from '../../session/run-facts.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
@@ -237,6 +237,39 @@ export function hoistTreeFields(response: Record<string, unknown>, data: TreeAns
   }
   if (typeof data.childrenReleased === 'number') {
     response.childrenReleased = data.childrenReleased;
+  }
+}
+
+export type ProgramEndAnswerFields = Pick<DebugResultData, 'exitCode' | 'unhitBreakpoints' | 'outputTail'>;
+
+/**
+ * Hoist the program-end fields (`exitCode`, non-empty `unhitBreakpoints`, and
+ * non-empty `outputTail`) to the top level of a tool answer (issues #701,
+ * #1033, #1177, #1254). Shared by `start_debugging`, `restart_debugging`,
+ * `wait_for_stop` and the step tools; an empty `unhitBreakpoints` list stays in
+ * `data` where present and is omitted from the top level, while `outputTail` is
+ * stripped from `response.data` like `snapshot` so the lines never ship twice.
+ */
+export function hoistProgramEnd(
+  response: Record<string, unknown>,
+  data: ProgramEndAnswerFields | undefined
+): void {
+  if (!data) {
+    return;
+  }
+  if (typeof data.exitCode === 'number') {
+    response.exitCode = data.exitCode;
+  }
+  if (Array.isArray(data.unhitBreakpoints) && data.unhitBreakpoints.length > 0) {
+    response.unhitBreakpoints = data.unhitBreakpoints;
+  }
+  if (Array.isArray(data.outputTail) && data.outputTail.length > 0) {
+    response.outputTail = data.outputTail;
+    const embedded = response.data;
+    if (embedded && typeof embedded === 'object' && 'outputTail' in embedded) {
+      const { outputTail: _omitted, ...rest } = embedded as Record<string, unknown>;
+      response.data = rest;
+    }
   }
 }
 

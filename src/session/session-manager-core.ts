@@ -112,6 +112,8 @@ export interface DebugResultData extends ProxyFailureDiagnostics {
    */
   exitCode?: number;
   unhitBreakpoints?: UnhitBreakpointSummary[];
+  /** Last non-empty output lines captured on this session for a non-zero exit (issues #1254, #1136). */
+  outputTail?: string[];
   /** Restart result fields. */
   breakpointsReapplied?: number;
   outputReset?: boolean;

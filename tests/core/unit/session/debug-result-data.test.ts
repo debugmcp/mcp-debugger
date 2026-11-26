@@ -18,6 +18,7 @@ describe('DebugResultData type contract (issue #590)', () => {
       | 'toolchainValidation'
       | 'exitCode'
       | 'unhitBreakpoints'
+      | 'outputTail'
       | 'breakpointsReapplied'
       | 'outputReset'
       | 'hotRestart'

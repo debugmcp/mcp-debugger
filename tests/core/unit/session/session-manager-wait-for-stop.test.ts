@@ -391,6 +391,73 @@ describe('SessionManager - waitForStop (issue #849)', () => {
     await expect(sessionManager.waitForStop('no-such-session')).rejects.toBeInstanceOf(SessionNotFoundError);
   });
 
+  it('carries outputTail when a launch prints "No module named pytest" on stderr and ends with code 1 during wait_for_stop (issues #1136, #1254)', async () => {
+    const sessionId = await runningSession();
+    const wait = track(sessionManager.waitForStop(sessionId, 10_000));
+
+    dependencies.mockProxyManager.emit('output', {
+      category: 'stderr',
+      output: '/usr/bin/python: No module named pytest\n'
+    });
+    dependencies.mockProxyManager.simulateExited(1);
+    await vi.advanceTimersByTimeAsync(0);
+
+    const settled = wait.result();
+    expect(settled).toMatchObject({ success: true, state: SessionState.STOPPED });
+    expect(settled?.data?.exitCode).toBe(1);
+    expect(settled?.data?.outputTail).toEqual(['/usr/bin/python: No module named pytest']);
+    expect(settled?.data?.message).toContain('The program exited with code 1.');
+    expect(settled?.data?.message).toContain('get_output');
+    expect(settled?.data?.message).not.toContain('No module named pytest');
+  });
+
+  it('carries outputTail on wait_for_stop when a program resumed past a stop exits non-zero (issue #1254)', async () => {
+    const sessionId = await runningSession();
+    dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+    await sessionManager.continue(sessionId);
+    const wait = track(sessionManager.waitForStop(sessionId, 10_000));
+
+    dependencies.mockProxyManager.emit('output', {
+      category: 'stderr',
+      output: 'assertion failed after continue\n'
+    });
+    dependencies.mockProxyManager.simulateExited(1);
+    await afterStop();
+
+    const settled = wait.result();
+    expect(settled).toMatchObject({ success: true, state: SessionState.STOPPED });
+    expect(settled?.data?.exitCode).toBe(1);
+    expect(settled?.data?.outputTail).toEqual(['assertion failed after continue']);
+    expect(settled?.data?.message).toContain('get_output');
+    expect(settled?.data?.message).not.toContain('assertion failed after continue');
+  });
+
+  it('reads only the named child session buffer for outputTail, never walking up to the root buffer (issue #1254)', async () => {
+    const rootId = await runningSession();
+    dependencies.mockProxyManager.emit('output', { category: 'stderr', output: 'root stderr line\n' });
+
+    const rootSession = sessionManager.getSession(rootId)!;
+    const childSession = await sessionManager.createSession({ language: DebugLanguage.MOCK, name: 'Subprocess 99' });
+    const childManaged = sessionManager.getSession(childSession.id)!;
+    childManaged.parentSessionId = rootId;
+    childManaged.run = rootSession.run;
+    childManaged.state = SessionState.STOPPED;
+    childManaged.exitCode = 2;
+
+    // Child's own buffer is empty even though root's buffer has output: do not walk the tree.
+    const emptyChild = await sessionManager.waitForStop(childSession.id, 1_000);
+    expect(emptyChild.state).toBe(SessionState.STOPPED);
+    expect(emptyChild.data?.exitCode).toBe(2);
+    expect(emptyChild.data?.outputTail).toBeUndefined();
+
+    // When the child's own buffer holds output, outputTail reads that and nothing from root.
+    const { OutputRingBuffer } = await import('../../../../src/session/output-buffer.js');
+    childManaged.outputBuffer = new OutputRingBuffer();
+    childManaged.outputBuffer.push('stderr', 'child stderr line\n');
+    const withChildOutput = await sessionManager.waitForStop(childSession.id, 1_000);
+    expect(withChildOutput.data?.outputTail).toEqual(['child stderr line']);
+  });
+
   it('serves several waiters on one session', async () => {
     const sessionId = await runningSession();
     const first = track(sessionManager.waitForStop(sessionId, 10_000));

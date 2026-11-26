@@ -7,7 +7,7 @@ import { isTerminalSessionState } from '@debugmcp/shared';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import type { DebugResult, StepResultData } from '../../session/session-manager-core.js';
 import { requireSessionId } from '../tool-validation.js';
-import { hoistStopLanding, hoistTreeFields } from './shared.js';
+import { hoistProgramEnd, hoistStopLanding, hoistTreeFields } from './shared.js';
 import {
   failureResult,
   jsonResult,
@@ -77,11 +77,9 @@ export const stepTool: ToolHandler = async (ctx, args, toolName) => {
         response.rawStopReason = resultData.rawStopReason;
       }
     }
-    if (typeof resultData?.exitCode === 'number') {
-      // A step whose debuggee exited before pausing carries the recorded exit
-      // code (issue #1177), hoisted to the top level just like wait_for_stop.
-      response.exitCode = resultData.exitCode;
-    }
+    // A step whose debuggee exited before pausing carries the recorded exit
+    // code (issue #1177) and, on a non-zero exit, outputTail (issue #1254).
+    hoistProgramEnd(response, resultData);
 
     // Where the step landed (issues #904, #938): the shape every stop answer has.
     await hoistStopLanding(ctx, response, resultData, args.sessionId, 'step result');
@@ -161,14 +159,7 @@ export const waitForStopTool: ToolHandler = async (ctx, args, _toolName, extra) 
     if (data?.lastStop) {
       response.lastStop = data.lastStop;
     }
-    if (typeof data?.exitCode === 'number') {
-      response.exitCode = data.exitCode;
-    }
-    // The breakpoints a finished program ran past (issues #701, #1033), as the
-    // launch answer lists them; an empty list says nothing a flat answer needs.
-    if (Array.isArray(data?.unhitBreakpoints) && data.unhitBreakpoints.length > 0) {
-      response.unhitBreakpoints = data.unhitBreakpoints;
-    }
+    hoistProgramEnd(response, data);
     // The landing (issues #904, #938), as for pause_execution and the step
     // tools — read for the selected session, whose stop this is.
     await hoistStopLanding(ctx, response, data, data?.sessionId ?? args.sessionId, 'wait_for_stop result');
