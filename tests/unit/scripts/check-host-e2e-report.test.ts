@@ -37,10 +37,10 @@ describe('Java and .NET host validation report', () => {
     incomplete.testResults[0].assertionResults[0].status = status;
     expect(() => checkHostE2eReport(incomplete, 'java')).toThrow(`case 1: ${status}`);
   });
-  it('rejects a skipped file even when its cases say passed', () => {
+  it('rejects a skipped file reported as passed with every case skipped', () => {
     const skipped = report();
-    skipped.testResults[0].status = 'pending';
-    expect(() => checkHostE2eReport(skipped, 'java')).toThrow('suite=pending');
+    for (const test of skipped.testResults[0].assertionResults) test.status = 'skipped';
+    expect(() => checkHostE2eReport(skipped, 'java')).toThrow('case 1: skipped');
   });
   it('rejects a missing file', () => {
     const missing = report();
@@ -59,6 +59,10 @@ describe('Java and .NET host validation report', () => {
   });
   it('rejects an unsuccessful run even when every case passed', () => {
     expect(() => checkHostE2eReport({ ...report(), success: false }, 'java')).toThrow('Vitest reported an unsuccessful run');
+  });
+  it('rejects a report without a success field even when every case passed', () => {
+    const { testResults } = report();
+    expect(() => checkHostE2eReport({ testResults }, 'java')).toThrow('Vitest reported an unsuccessful run');
   });
   it('rejects an unknown lane name', () => {
     expect(() => checkHostE2eReport(report(), 'python')).toThrow('Unknown host lane: python');

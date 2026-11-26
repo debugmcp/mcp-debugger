@@ -539,6 +539,8 @@ jobs:
         distribution: 'temurin'
         java-version: '21'
     - name: Record Java versions
+      # Many Java cases return early as passed without a JDK; the checker cannot detect that.
+      # These commands must fail under pipefail to prove both java and javac are available.
       run: |
         mkdir -p artifacts/java
         java -version 2>&1 | tee artifacts/java/java-version.txt
@@ -605,6 +607,11 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     - name: Build project
       run: pnpm build
+    - name: Build .NET smoke fixtures
+      # Keep cold restore and compilation outside the smoke tests' timeout budgets.
+      run: |
+        dotnet build examples/dotnet -c Debug
+        dotnet build examples/dotnet/pause_test -c Debug
     - name: Run .NET host launch and attach smokes
       run: |
         pnpm exec vitest run --project e2e tests/e2e/mcp-server-smoke-dotnet.test.ts tests/e2e/mcp-server-smoke-dotnet-attach.test.ts --reporter=default --reporter=json --outputFile=artifacts/dotnet/host-tests.json
