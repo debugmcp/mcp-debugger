@@ -1,1 +1,1 @@
-JavaScript stop snapshots and `get_local_variables` no longer merge outer lexical `Block` scopes listed after a function's `Local` scope when the function has locals of its own, preventing Vite/Vitest module-wrapper declarations from crowding out method locals (#1252).
+**JavaScript stop snapshots and `get_local_variables` no longer merge outer lexical `Block` scopes** listed after a function's `Local` scope when the function has locals of its own, preventing Vite/Vitest module-wrapper declarations from crowding out method locals (#1252).
