@@ -52,7 +52,7 @@ See [`docs/python/README.md`](../docs/python/README.md) for the full Python guid
 
 ### python_simple_swap
 
-[`python_simple_swap/`](python_simple_swap/) holds `swap_vars.py`, a two-line variable swap with an intentional bug (the classic missing temporary), plus `debug_swap_demo.py`, a script that drives the server over HTTP to debug it. It is the smallest end-to-end "find the bug by inspecting locals" target in the repo.
+[`python_simple_swap/`](python_simple_swap/) holds `swap_vars.py`, a two-line variable swap with an intentional bug (the classic missing temporary). It is a small "find the bug by inspecting locals" debugging target. To connect an MCP client over HTTP, see the [Streamable HTTP setup](../README.md#over-the-network-streamable-http).
 
 ## Other Languages
 
@@ -73,8 +73,9 @@ Each of these directories mirrors the Python flow — create a session with the 
 
 ## Ad-hoc Scripts
 
+To connect an MCP client over HTTP, see the [Streamable HTTP setup](../README.md#over-the-network-streamable-http).
+
 - [`debugging/`](debugging/) — throwaway reproduction scripts kept from past investigations
   (transport repros, JS/Python driver scripts). Not a curated tutorial; read the file header
   before running one.
-- `agent_demo.py` — a minimal "LLM agent loop" that drives the server over HTTP.
 - `test_evaluate_expression.py` — a small `evaluate_expression` exercise target.

@@ -35,8 +35,13 @@ close_debug_session   {"sessionId": "<id>"}
   (`.../com/example/Main.java` -> `Main`), which is wrong for a packaged class; to target
   `com.example.Main`, pass the FQCN as the program itself:
   `adapterLaunchConfig: {"program": "com.example.Main"}`. `classpath` defaults to `"."` but is
-  almost always needed. `cwd` and `env` are accepted and forwarded but have **no effect** on the
-  launched JVM (issue #642), and neither does `sourcePath`. What the bridge does apply: `args`
+  almost always needed. The bridge applies `cwd` as the launched JVM's working directory;
+  a non-directory fails the launch with `cwd is not a directory: <path>`. `env` is merged into
+  the JVM's inherited environment; a JSON `null` value removes the variable (#642, fixed by #651).
+  `adapterLaunchConfig.sourcePath` is a path list split on the platform's separator; the adapter
+  turns it into source roots that the bridge uses to locate a stop's source file. Relative entries
+  resolve against the launch `cwd` (which defaults to the script's directory); use absolute paths
+  or set `cwd` to the project root for project-relative entries. The bridge also applies `args`
   (program arguments) and `vmArgs` (e.g. `-Xmx512m`), plus `javaPath` to pick the interpreter.
   `stopOnEntry` is effectively `false` through `start_debugging` (the session layer merges
   `stopOnEntry: false` under your `dapLaunchArgs`) — pass it `true` explicitly if you want to pause
