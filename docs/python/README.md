@@ -63,7 +63,7 @@ set_breakpoint { "sessionId": "...", "file": "/abs/path/script.py", "line": 15, 
 set_breakpoint { "sessionId": "...", "file": "/abs/path/script.py", "line": 15, "logMessage": "x={x} y={y}" }
 ```
 
-A logpoint never pauses: it interpolates the `{expressions}` and writes the line to `get_output` while the program runs at full speed.
+A logpoint never pauses: it interpolates the `{expressions}` and writes the line to `get_output` while the program keeps running. Each hit does cost time, however — measured at 24.7 µs per hit on Python 3.13 + debugpy (`sys.monitoring`, 2.5% of a core at 1,000 hits/s), and placing a logpoint anywhere in a function slows that whole function by 58× — so keep logpoints off tight loops. When hits outrun debugpy's delivery rate (measured at 3,200–4,400 lines/s during a run and about 6,000 lines/s draining afterward), lines still queued when the program exits are lost and the session's end answer does not report the loss (issue #1265). See [Logpoints](../tool-reference.md#logpoints) for measurement conditions and what was not measured.
 
 ### 3. Start Debugging
 
@@ -264,6 +264,10 @@ For the Kubernetes port-forward pattern and per-language presets, see the [Kuber
 Variable values, captured output, and evaluate results are scanned for credentials before they reach the transcript: values with a recognizable secret shape, and variables whose *name* exactly matches a known sensitive name (`password`, `api_key`, ...), come back masked and flagged `redacted: true`. Only the display is masked — program state is untouched. Start the server with `DEBUG_MCP_NO_REDACT=1` to disable it (for example when debugging credential-handling code itself). Full rules and limitations: [Secret redaction](../tool-reference.md#secret-redaction).
 
 ## Known Limitations
+
+### Logpoint lines lost at program exit
+
+When a Python logpoint fires faster than debugpy delivers messages (measured at 3,200–4,400 lines/s during a run and about 6,000 lines/s while draining after a loop), lines still queued in the debuggee when the program exits are dropped. The session's end answer reports a normal exit with no indication that lines were lost (issue #1265). See [Logpoints](../tool-reference.md#logpoints) for the full measurement.
 
 ### Steps lost during exception unwinding (Python 3.12+)
 

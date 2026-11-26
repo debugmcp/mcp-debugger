@@ -222,8 +222,12 @@ the MCP endpoint, and the containerized server attaches to python, ruby
   diagnosing.
 - Target **staging, canaries, or quarantined pods** — a paused pod stops
   serving for the duration of the pause. For non-breaking inspection use
-  logpoints (`set_breakpoint` with `logMessage`): the pod keeps running at full
-  speed while values stream to `get_output`.
+  logpoints (`set_breakpoint` with `logMessage`): the pod keeps running without
+  pausing while values stream to `get_output`. Each hit costs time depending on
+  the engine (and in Python, JavaScript, and to a lesser degree Dart, slows the
+  whole function), so keep logpoints off tight loops — see
+  [Logpoints](tool-reference.md#logpoints) for measured costs (launch mode;
+  attach mode is unmeasured).
 - An abandoned attach no longer leaves an orphaned tracer (#337): teardown
   kills the adapter's process group, and the sidecar's idle policy — on because
   the recipe sets `MCP_DEBUG_SESSION_IDLE_MS` — closes a crashed client's debug

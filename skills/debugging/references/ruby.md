@@ -77,6 +77,7 @@ For containers/pods, use the **debuggee's** filesystem paths in `set_breakpoint`
 - **Scope name is `Local variables`** (not "Locals"); `get_local_variables` handles this for you. Locals are only reported while stopped.
 - **Windows `.bat` shim bypass is automatic** — if spawn fails anyway, set `RDBG_PATH` to the rdbg script inside your Ruby installation's `bin` directory.
 - **Ruby startup can take a few seconds** on launch; don't declare a timeout after one slow start.
+- Logpoints are NOT supported by rdbg: `set_breakpoint` with `logMessage` fails fast with a clear error.
 
 ## Troubleshooting
 

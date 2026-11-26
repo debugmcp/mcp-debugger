@@ -129,7 +129,7 @@ and then blamed native code and suggested re-pausing, which lands idle again.
 
 | Feature | Dart / Flutter |
 |---|---|
-| Line breakpoints, conditions, logpoints | yes (a logpoint's `condition` is ignored by the SDK adapter) |
+| Line breakpoints, conditions, logpoints | yes (a logpoint's `condition` is ignored by the SDK adapter; each logpoint hit costs about 4.9 ms / 4,926 µs — ~200 hits/s max — and slows the containing function by 1.70×; see [Logpoints](../tool-reference.md#logpoints)) |
 | Function breakpoints, hit-count conditions | no (the SDK adapter does not implement them) |
 | Exception filters | `uncaught` / `all` |
 | Stepping | yes; the SDK adapter's `next` stops once per token position, so `step_over` repeats it until the line changes (at most eight times, the answer says how many; a breakpoint or exception on the line ends it at once, #879); stepping across `await` lands on the next line |

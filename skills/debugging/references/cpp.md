@@ -41,7 +41,7 @@ attach_to_process {"sessionId": "<id>", "processId": 4242}
 - **Exceptions:** launch default `"uncaught"` sets no filter — on Linux/macOS an uncaught `throw` reaches `std::terminate` → SIGABRT and the session pauses at the crash anyway; on Windows `abort()` ends the process with exit code 3 and nothing pauses (the launch's "still running" answer says so; pass `"all"` to stop at the throw). `breakOnExceptions: "all"` arms `cpp_throw` (pauses at every throw, caught included). `exceptionInfo` is populated for C++ exception stops.
 - **Output** is captured like Rust's (#223 tier): POSIX via CodeLLDB DAP output events, Windows via adapter-stdio forwarding — `get_output` works either way.
 - **Expression evaluation** is real LLDB: `ptr->field`, `obj.method()`, casts, and full Python via CodeLLDB's `/py` prefix when `expressions` allows.
-- Logpoints work: `set_breakpoint` with `logMessage: "x={x}"`.
+- Logpoints work: `set_breakpoint` with `logMessage: "x={x}"` (logs without pausing). Each hit costs about 639 µs (~1,600 hits/s ceiling, no measurable effect outside the logpoint line) — keep logpoints off tight loops ([docs/tool-reference.md#logpoints](https://github.com/debugmcp/mcp-debugger/blob/main/docs/tool-reference.md#logpoints)).
 - Data breakpoints (hardware watchpoints: 1/2/4/8 bytes, max 4 on x86_64) and disassembly are engine-supported.
 
 ## Troubleshooting

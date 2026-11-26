@@ -56,7 +56,7 @@ Key rules:
 - If a variable entry has a variablesReference, call get_variables with it to expand children.
 - Breakpoints may report unverified until the module/class loads — that is normal.
 - list_breakpoints shows every breakpoint with its verified state; remove_breakpoint (by id or file+line) and clear_breakpoints take effect immediately, even mid-run — use them to move a bisection window without restarting.${statementRule}${expectedContentRule}
-- Logpoints: set_breakpoint with logMessage ("order={orderId}") logs the interpolated message to get_output WITHOUT pausing — the prod-safe way to watch values on a hot path (Python/JS/Go/Rust; not Java/.NET).
+- Logpoints: set_breakpoint with logMessage ("order={orderId}") logs interpolated values to get_output WITHOUT pausing, but each hit costs time (engine-dependent: suits hundreds to low thousands of hits/s, not tight loops; slows the whole function in Python/JS/Dart). Supported: Python, JS/TS, Go, Rust, C/C++, COBOL, Dart/Flutter; refused: Java, .NET, Ruby.
 - restart_debugging {sessionId} relaunches with the same config in one call — breakpoints re-apply automatically, output buffer resets (read get_output from since=0). Works after the program exits; not for attach sessions.
 - get_output returns buffered debuggee stdout/stderr with a cursor; pass the returned nextSince back as since to read only new output.
 - attach_to_process connects to running/remote targets (debugpy --listen, rdbg --open, JVM JDWP), including pods via port-forward. Breakpoint paths resolve on the TARGET's filesystem: use debuggee-side paths, function breakpoints, or a mapping (python: adapterConfig.pathMappings; ruby: localfsMap). Kubernetes recipe + per-language attach presets: docs/kubernetes.md in the repo.
@@ -95,7 +95,7 @@ ${setBreakpointStep}
 ## Root-cause discipline
 - State a hypothesis before setting breakpoints.
 - Set two breakpoints: last-known-good and first-known-bad; run, inspect, halve the interval (bisection beats line-by-line stepping). Use remove_breakpoint / clear_breakpoints to move the window mid-session, and list_breakpoints to see what is set.
-- When pausing is too disruptive (hot loops, live/attached processes), use a logpoint instead: set_breakpoint with logMessage "x={x}" streams interpolated values into get_output at full speed (Python/JS/Go/Rust).
+- When you want to watch values without pausing, use a logpoint (set_breakpoint with logMessage "x={x}" -> get_output). Each hit costs time depending on the engine — suits hundreds to low thousands of hits/s, not tight loops (slows the whole function in Python/JS/Dart); Python, JS/TS, Go, Rust, C/C++, COBOL, Dart/Flutter (refused by Java/.NET/Ruby).
 - At each pause record what you learned, not just where you are.
 - When you find the diverging line, inspect every operand before concluding.
 - After fixing, restart_debugging re-runs the same recipe in one call (same config, breakpoints re-applied) to confirm the state changed as predicted.

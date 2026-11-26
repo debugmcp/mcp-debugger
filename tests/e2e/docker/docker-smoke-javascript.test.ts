@@ -308,7 +308,7 @@ describe.skipIf(SKIP_DOCKER)('Docker: JavaScript Debugging Smoke Tests', () => {
     expect(createResponse.sessionId).toBeDefined();
     sessionId = createResponse.sessionId as string;
 
-    // Logpoint on the swap line: fires at full speed, no pause.
+    // Logpoint on the swap line: logs without pausing.
     const bpResponse = parseSdkToolResult(await mcpClient!.callTool({
       name: 'set_breakpoint',
       arguments: { sessionId, file: scriptPath, line: 14, logMessage: 'LOGPOINT a={a}' }

@@ -53,7 +53,7 @@ Not supported. The Go adapter implements launch mode only — `attach_to_process
 - Exception breakpoints `unrecovered-panic` and `runtime-fatal-throw` are enabled by default — panics stop the debugger without any setup (`get_stack_trace` reports `stopReason`).
 - Delve's variable rendering auto-dereferences pointers, shows slices with len/cap, and maps as key-value pairs.
 - Use absolute paths for `file` and `scriptPath`; breakpoints must be on executable statements.
-- Logpoints work: `set_breakpoint` with `logMessage: "x={x}"` logs interpolated values to `get_output` without pausing (Delve).
+- Logpoints work: `set_breakpoint` with `logMessage: "x={x}"` logs interpolated values to `get_output` without pausing (Delve). Each hit costs about 615 µs (~1,600 hits/s ceiling, no measurable effect outside the logpoint line) — keep logpoints off tight loops ([docs/tool-reference.md#logpoints](https://github.com/debugmcp/mcp-debugger/blob/main/docs/tool-reference.md#logpoints)).
 
 ## Troubleshooting
 
