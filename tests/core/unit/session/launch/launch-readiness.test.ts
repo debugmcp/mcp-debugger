@@ -195,4 +195,163 @@ describe('waitForLaunchReadiness', () => {
       expect(h.logger.warn).toHaveBeenCalledWith(expect.stringContaining('resync refused'));
     });
   });
+
+  describe('the tree-aware launch hold (I2, issue #1150)', () => {
+    function treeHarness(opts: {
+      state?: SessionState;
+      holdMs?: number;
+      launchedCeilingMs?: number;
+    } = {}) {
+      const root = { id: 'root', state: opts.state ?? SessionState.RUNNING };
+      const children: Array<{ id: string; state: SessionState }> = [];
+      let present = true;
+      const stateListeners = new Set<() => void>();
+      const subtreeListeners = new Set<() => void>();
+      const notifyState = () => { for (const l of [...stateListeners]) l(); };
+      const notifySubtree = () => { for (const l of [...subtreeListeners]) l(); };
+      const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+      const ctx = {
+        logger,
+        getSession: (sessionId: string) => {
+          if (!present && sessionId === 'root') throw new Error(`Managed session not found: ${sessionId}`);
+          if (sessionId === 'root') return root;
+          const child = children.find((c) => c.id === sessionId);
+          if (!child) throw new Error(`Managed session not found: ${sessionId}`);
+          return child;
+        },
+        onStateChange: (_sessionId: string, listener: () => void) => {
+          stateListeners.add(listener);
+          return () => { stateListeners.delete(listener); };
+        },
+        onSubtreeChange: (_sessionId: string, listener: () => void) => {
+          subtreeListeners.add(listener);
+          return () => { subtreeListeners.delete(listener); };
+        },
+        descendantsOf: () => [...children]
+      };
+      let outcome: LaunchReadinessOutcome | undefined;
+      void waitForLaunchReadiness(ctx as never, {
+        sessionId: 'root',
+        launchedCeilingMs: opts.launchedCeilingMs ?? 30_000,
+        holdMs: opts.holdMs ?? 1_000
+      }).then((settled) => { outcome = settled; });
+      return {
+        outcome: () => outcome,
+        setRootState: (state: SessionState) => { root.state = state; notifyState(); notifySubtree(); },
+        addChild: (id: string, state: SessionState) => {
+          const child = { id, state };
+          children.push(child);
+          notifySubtree();
+          return child;
+        },
+        setChildState: (id: string, state: SessionState) => {
+          const child = children.find((c) => c.id === id);
+          if (child) child.state = state;
+          notifySubtree();
+        },
+        removeRoot: () => { present = false; notifyState(); notifySubtree(); },
+        subtreeListenerCount: () => subtreeListeners.size
+      };
+    }
+
+    it('ends the hold after the 50 ms grace when a child pauses 100 ms into a 1,000 ms hold', async () => {
+      const h = treeHarness({ holdMs: 1_000 });
+      await vi.advanceTimersByTimeAsync(100);
+      expect(h.outcome()).toBeUndefined();
+
+      h.addChild('c1', SessionState.PAUSED);
+      await vi.advanceTimersByTimeAsync(49);
+      expect(h.outcome()).toBeUndefined();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(h.outcome()).toBe('running');
+      expect(h.subtreeListenerCount()).toBe(0);
+    });
+
+    it('clears the grace and keeps the hold going when a paused child resumes inside the 50 ms grace', async () => {
+      const h = treeHarness({ holdMs: 1_000 });
+      await vi.advanceTimersByTimeAsync(100);
+      h.addChild('c1', SessionState.PAUSED);
+      await vi.advanceTimersByTimeAsync(20);
+      expect(h.outcome()).toBeUndefined();
+
+      // Child resumes inside the 50 ms grace: the grace timer must be cleared.
+      h.setChildState('c1', SessionState.RUNNING);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(h.outcome()).toBeUndefined();
+
+      // Still waiting until the full 1,000 ms hold elapses.
+      await vi.advanceTimersByTimeAsync(779);
+      expect(h.outcome()).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(h.outcome()).toBe('running');
+      expect(h.subtreeListenerCount()).toBe(0);
+    });
+
+    it('lets a root that stops inside the descendant grace win immediately with "stopped"', async () => {
+      const h = treeHarness({ holdMs: 1_000 });
+      await vi.advanceTimersByTimeAsync(100);
+      h.addChild('c1', SessionState.PAUSED);
+      await vi.advanceTimersByTimeAsync(20);
+      expect(h.outcome()).toBeUndefined();
+
+      h.setRootState(SessionState.PAUSED);
+      await settleMicrotasks();
+      expect(h.outcome()).toBe('stopped');
+      expect(h.subtreeListenerCount()).toBe(0);
+    });
+
+    it('ends immediately when the root stops first before any child pauses', async () => {
+      const h = treeHarness({ holdMs: 1_000 });
+      await vi.advanceTimersByTimeAsync(80);
+      h.addChild('c1', SessionState.RUNNING);
+      h.setRootState(SessionState.PAUSED);
+      await settleMicrotasks();
+      expect(h.outcome()).toBe('stopped');
+    });
+
+    it('handles zero holdMs and root removal during the tree hold cleanly', async () => {
+      const zero = treeHarness({ holdMs: 0 });
+      await settleMicrotasks();
+      expect(zero.outcome()).toBe('running');
+
+      const removed = treeHarness({ holdMs: 1_000 });
+      await vi.advanceTimersByTimeAsync(50);
+      removed.removeRoot();
+      await settleMicrotasks();
+      expect(removed.outcome()).toBe('ended');
+      expect(removed.subtreeListenerCount()).toBe(0);
+    });
+
+    it('is idempotent when finish() is triggered twice in the same tick', async () => {
+      const root = { id: 'root', state: SessionState.RUNNING };
+      const dispose = vi.fn();
+      let evalCalls = 0;
+      const ctx = {
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+        getSession: () => {
+          evalCalls += 1;
+          // On the tree hold's initial evaluate(), advance timers so holdTimer
+          // calls finish() first, then return PAUSED so evaluate() calls finish()
+          // a second time in the same tick.
+          if (evalCalls === 3) {
+            vi.advanceTimersByTime(1_000);
+            root.state = SessionState.PAUSED;
+          }
+          return root;
+        },
+        onStateChange: () => () => {},
+        onSubtreeChange: () => dispose,
+        descendantsOf: () => []
+      };
+
+      const outcome = await waitForLaunchReadiness(ctx as never, {
+        sessionId: 'root',
+        launchedCeilingMs: 30_000,
+        holdMs: 1_000
+      });
+      expect(outcome).toBe('stopped');
+      expect(dispose).toHaveBeenCalledTimes(1);
+    });
+  });
 });

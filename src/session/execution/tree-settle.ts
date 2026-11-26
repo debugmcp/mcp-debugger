@@ -76,27 +76,42 @@ function describeReleaseCause(cause: ChildReleaseCause, cap: number | undefined)
  * setting by name when one decided it — and what follows for the caller: a
  * breakpoint only such a child reaches will not hit, whatever a pending
  * answer says is armed. Built from the same record as the number, so the two
- * cannot disagree. Undefined when the run released none.
+ * cannot disagree.
+ *
+ * When a failed adoption's fallback release was not confirmed by the debug
+ * adapter (issue #1221), `unconfirmedChildReleases` is disclosed separately
+ * without counting in `childrenReleased` or claiming the child continues
+ * running. Undefined when neither occurred.
  */
 export function describeReleasedChildren(
-  session: Pick<ManagedSession, 'releasedChildReports' | 'releasedChildCauses' | 'releasedChildCap'>
+  session: Pick<ManagedSession, 'releasedChildReports' | 'releasedChildCauses' | 'releasedChildCap'> &
+    Partial<Pick<ManagedSession, 'unconfirmedChildReleases'>>
 ): string | undefined {
+  const sentences: string[] = [];
   const count = session.releasedChildReports ?? 0;
-  if (count <= 0) {
-    return undefined;
+  if (count > 0) {
+    const causes = RELEASE_CAUSES.filter((cause) => (session.releasedChildCauses?.[cause] ?? 0) > 0);
+    const why = causes
+      .map((cause) => {
+        const text = describeReleaseCause(cause, session.releasedChildCap);
+        return causes.length > 1 ? `${session.releasedChildCauses![cause]}: ${text}` : text;
+      })
+      .join('; ');
+    const one = count === 1;
+    sentences.push(
+      `${count} child process${one ? ' was' : 'es were'} released to run undebugged${why ? ` (${why})` : ''}: ` +
+      `a breakpoint only ${one ? 'it reaches' : 'they reach'} will not hit.`
+    );
   }
-  const causes = RELEASE_CAUSES.filter((cause) => (session.releasedChildCauses?.[cause] ?? 0) > 0);
-  const why = causes
-    .map((cause) => {
-      const text = describeReleaseCause(cause, session.releasedChildCap);
-      return causes.length > 1 ? `${session.releasedChildCauses![cause]}: ${text}` : text;
-    })
-    .join('; ');
-  const one = count === 1;
-  return (
-    `${count} child process${one ? ' was' : 'es were'} released to run undebugged${why ? ` (${why})` : ''}: ` +
-    `a breakpoint only ${one ? 'it reaches' : 'they reach'} will not hit.`
-  );
+  const unconfirmed = session.unconfirmedChildReleases ?? 0;
+  if (unconfirmed > 0) {
+    const one = unconfirmed === 1;
+    sentences.push(
+      `${unconfirmed} child process${one ? ' could' : 'es could'} not be adopted, and the debug adapter did not confirm ` +
+      `releasing ${one ? 'it' : 'them'}; whether ${one ? 'it' : 'they'} continued running is not known.`
+    );
+  }
+  return sentences.length > 0 ? sentences.join(' ') : undefined;
 }
 
 /** `message` with the released-children sentence after it, when there is one. */

@@ -158,7 +158,62 @@ describe('DapProxyWorker child sessions (issue #1081)', () => {
       'over the child cap'
     );
     const response = send.mock.calls.map(([m]) => m).find((m): m is DapResponseMessage => m.type === 'dapResponse' && m.requestId === 'r1');
-    expect(response).toMatchObject({ success: true, sessionId: 'py-root', body: { released: true } });
+    expect(response).toMatchObject({ success: true, sessionId: 'py-root', body: { held: true, released: true } });
+  });
+
+  it('childRelease returns the confirmation outcome body for unconfirmed and close-cancelled releases (I4, issue #1221)', async () => {
+    await connectUnder(PythonAdapterPolicy);
+
+    // 1. Socket write returns false -> held: true, released: false
+    rootClient.respondToReverseRequest.mockReturnValueOnce(false);
+    rootClient.emit('child-report', { request: startDebugging, report });
+    const unconfirmedId = statuses('child_reported')[0].reportId as string;
+    await worker.handleCommand({
+      cmd: 'dap',
+      sessionId: 'py-root',
+      requestId: 'r-unconfirmed',
+      dapCommand: CHILD_RELEASE_COMMAND,
+      dapArgs: { reportId: unconfirmedId, reason: 'over the child cap' }
+    });
+    expect(responseTo('r-unconfirmed')).toMatchObject({
+      success: true,
+      sessionId: 'py-root',
+      body: { held: true, released: false }
+    });
+
+    // 2. Adoption cancelled by childClose -> held: false, released: false, closed: true
+    rootClient.respondToReverseRequest.mockReturnValue(true);
+    childClient.connect.mockImplementationOnce(() => new Promise<void>(() => {}));
+    rootClient.emit('child-report', { request: startDebugging, report });
+    const closedId = statuses('child_reported')[1].reportId as string;
+    const adopting = worker.handleCommand({
+      cmd: 'dap',
+      sessionId: 'child-cancelled',
+      requestId: 'adopt-cancelled',
+      dapCommand: CHILD_ADOPT_COMMAND,
+      dapArgs: { reportId: closedId }
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    await worker.handleCommand({
+      cmd: 'dap',
+      sessionId: 'child-cancelled',
+      requestId: 'close-cancelled',
+      dapCommand: CHILD_CLOSE_COMMAND,
+      dapArgs: { terminateDebuggee: true }
+    });
+    await adopting;
+    await worker.handleCommand({
+      cmd: 'dap',
+      sessionId: 'py-root',
+      requestId: 'r-closed',
+      dapCommand: CHILD_RELEASE_COMMAND,
+      dapArgs: { reportId: closedId, reason: 'adoption failed' }
+    });
+    expect(responseTo('r-closed')).toMatchObject({
+      success: true,
+      sessionId: 'py-root',
+      body: { held: false, released: false, closed: true }
+    });
   });
 
   it('holds the reports of a js-debug root too: every target after the program is a child of the tree (issue #1082)', async () => {

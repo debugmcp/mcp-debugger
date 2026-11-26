@@ -234,6 +234,24 @@ export interface Run {
   // the transform (undefined when there are none), consumed by
   // attachToProcess for the response warning.
   attachTransformNotices?: string[];
+  /**
+   * Breakpoint IDs confirmed bound or hit-proven in at least one session of
+   * this run's tree (issue #1150). Shared across root and adopted children via
+   * `session.run`, surviving after short-lived child sessions close.
+   */
+  treeVerifiedBreakpointIds?: Set<string>;
+  /**
+   * Set when child-process adoption was turned off for this run on an adapter
+   * that supports it (issue #1150): either explicitly by the caller
+   * (`subProcess: false` / `autoAttachChildProcesses: false`) or by the
+   * adapter's own default (unverified JavaScript attach, `'adapter-default'`).
+   */
+  childDebuggingOptedOut?: 'subProcess: false' | 'autoAttachChildProcesses: false' | 'adapter-default';
+  /**
+   * In-flight CHILD_RELEASE_COMMAND round-trips awaiting adapter confirmation
+   * (issue #1221), settled before launch/end/wait answers finalize.
+   */
+  inFlightChildReleases?: Set<Promise<void>>;
 }
 
 export interface ManagedSession extends DebugSessionInfo {
@@ -331,6 +349,12 @@ export interface ManagedSession extends DebugSessionInfo {
    * `childrenReleased`; reset per launch.
    */
   releasedChildReports?: number;
+  /**
+   * Child reports whose adoption or release failed without adapter confirmation
+   * that the child process continues running (issue #1221); lineage-scoped and
+   * never counted in `childrenReleased`.
+   */
+  unconfirmedChildReleases?: number;
   /**
    * Why those children were released, by cause, counted in the same call as
    * `releasedChildReports` (issue #1137): what lets an answer that carries

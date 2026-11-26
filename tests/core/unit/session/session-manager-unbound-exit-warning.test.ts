@@ -6,16 +6,21 @@
  */
 import { describe, it, expect } from 'vitest';
 import { buildUnboundBreakpointExitWarning } from '../../../../src/session/breakpoints/launch-warnings.js';
-import type { ManagedSession } from '../../../../src/session/session-store.js';
 
 type BuilderSession = {
-  breakpoints: Map<string, { file: string; line: number; verified: boolean; message?: string }>;
+  breakpoints: Map<string, { id?: string; file: string; line: number; verified: boolean; message?: string }>;
+  releasedChildReports?: number;
+  unconfirmedChildReleases?: number;
+  run?: {
+    childDebuggingOptedOut?: 'subProcess: false' | 'autoAttachChildProcesses: false' | 'adapter-default';
+    treeVerifiedBreakpointIds?: Set<string>;
+  };
 };
 
 function build(session: BuilderSession): string | undefined {
-  // The builder is a free function over the breakpoint store alone.
+  // The builder is a free function over the breakpoint store and tree/run fields.
   return buildUnboundBreakpointExitWarning(
-    session as unknown as Pick<ManagedSession, 'breakpoints'>
+    session as unknown as Parameters<typeof buildUnboundBreakpointExitWarning>[0]
   );
 }
 
@@ -63,5 +68,31 @@ describe('buildUnboundBreakpointExitWarning', () => {
     expect(warning).toMatch(/x\.rs:3/);
     expect(warning).toMatch(/y\.rs:9/);
     expect(warning).not.toMatch(/z\.rs/);
+  });
+
+  it('explains when released child processes ran undebugged (I3, singular and plural)', () => {
+    const bp = new Map([['a', { id: 'a', file: '/w/child.py', line: 12, verified: false }]]);
+    const single = build({ breakpoints: bp, releasedChildReports: 1 });
+    expect(single).toContain('1 breakpoint(s) never bound in the debugged process during this run: child.py:12.');
+    expect(single).toContain('1 child process ran undebugged, so breakpoints in code only it loads could not bind');
+
+    const plural = build({ breakpoints: bp, releasedChildReports: 2 });
+    expect(plural).toContain('2 child processes ran undebugged, so breakpoints in code only they load could not bind');
+  });
+
+  it('explains when child processes could not be adopted (I3, unconfirmed tail, singular and plural)', () => {
+    const bp = new Map([['a', { id: 'a', file: '/w/child.js', line: 14, verified: false }]]);
+    const single = build({ breakpoints: bp, unconfirmedChildReleases: 1 });
+    expect(single).toContain('1 child process could not be adopted, so breakpoints in code only it loads could not bind');
+
+    const plural = build({ breakpoints: bp, unconfirmedChildReleases: 3 });
+    expect(plural).toContain('3 child processes could not be adopted, so breakpoints in code only they load could not bind');
+  });
+
+  it('does not blame the caller when the JavaScript adapter itself left child debugging off on attach (m5)', () => {
+    const bp = new Map([['a', { id: 'a', file: '/w/child.js', line: 14, verified: false }]]);
+    const warning = build({ breakpoints: bp, run: { childDebuggingOptedOut: 'adapter-default' } });
+    expect(warning).toContain('child-process debugging was left off by the adapter for this attach, so breakpoints in code only a child process loads could not bind');
+    expect(warning).not.toContain('autoAttachChildProcesses: false');
   });
 });

@@ -93,6 +93,20 @@ export function resetBinding(record: Breakpoint | FunctionBreakpoint): void {
 }
 
 /**
+ * Record on the tree's shared `Run` that a breakpoint bound in at least one
+ * session of this run (issue #1150), so a root's end summary and unbound-exit
+ * warning reflect bindings in adopted child sessions even after they close.
+ */
+export function recordTreeVerifiedBreakpoint(
+  session: Partial<Pick<ManagedSession, 'run'>> | undefined,
+  record: Pick<Breakpoint | FunctionBreakpoint, 'id' | 'verified'>
+): void {
+  if (record.verified && session?.run) {
+    (session.run.treeVerifiedBreakpointIds ??= new Set()).add(record.id);
+  }
+}
+
+/**
  * The hit-proven rule (issue #673): a stop already proved this record bound,
  * so an adapter answer of "unbound" for it is not evidence it stopped firing
  * — js-debug answers that on every replace-all for a location it cannot map
@@ -252,7 +266,7 @@ export interface HitUpgrade {
  * which of the records).
  */
 export function applyHitBreakpointIds(
-  session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints'>,
+  session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints'> & Partial<Pick<ManagedSession, 'run'>>,
   hitBreakpointIds: readonly unknown[]
 ): HitUpgrade[] {
   const upgraded: HitUpgrade[] = [];
@@ -274,14 +288,18 @@ export function applyHitBreakpointIds(
         settleStoredMessage(line);
         upgraded.push({ kind: 'line', breakpoint: line, adapterId: id });
       }
+      recordTreeVerifiedBreakpoint(session, line);
       continue;
     }
     const fn = soleHolderOf(functionBreakpoints, id);
-    if (fn && !fn.verified) {
-      fn.verified = true;
-      fn.verifiedBy = 'hit';
-      settleStoredMessage(fn);
-      upgraded.push({ kind: 'function', breakpoint: fn, adapterId: id });
+    if (fn) {
+      if (!fn.verified) {
+        fn.verified = true;
+        fn.verifiedBy = 'hit';
+        settleStoredMessage(fn);
+        upgraded.push({ kind: 'function', breakpoint: fn, adapterId: id });
+      }
+      recordTreeVerifiedBreakpoint(session, fn);
     }
   }
   return upgraded;

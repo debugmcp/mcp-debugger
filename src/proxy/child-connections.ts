@@ -121,12 +121,19 @@ interface ChildConnection {
 /** Forwarded as-is under the child's session id; `terminated` and `close` have their own handling. */
 const FORWARDED_CHILD_EVENTS = ['output', 'stopped', 'continued', 'thread', 'exited', 'breakpoint'] as const;
 
+/** Whether the adapter acknowledged letting a non-adopted child continue running (issue #1221). */
+export type ChildReleaseOutcome = 'confirmed' | 'unconfirmed' | 'closed';
+
+const MAX_RECORDED_RELEASE_OUTCOMES = 256;
+
 export class ChildConnections extends EventEmitter {
   private readonly held = new Map<string, HeldReport>();
   /** Adopted child connections by their session id. */
   private readonly clients = new Map<string, ChildConnection>();
   /** Releases own sockets too; shutdown must wait until they have detached. */
   private readonly releases = new Set<Promise<void>>();
+  /** Bounded per-reportId release confirmation outcomes so CHILD_RELEASE_COMMAND can await adopt-failure fallbacks (#1221). */
+  private readonly releaseOutcomes = new Map<string, Promise<ChildReleaseOutcome>>();
   private readonly releaseTimeoutMs: number;
   private closing = false;
   /** The policy the connections opened here run (child-safe for an in-session adopter, issue #1082). */
@@ -179,8 +186,35 @@ export class ChildConnections extends EventEmitter {
       return false;
     }
     this.options.logger.info(`[ChildConnections] Releasing child ${held.report.targetId} (${held.report.name}): ${reason}`);
-    this.giveUp(held, reason);
+    void this.giveUp(held, reason, reportId);
     return true;
+  }
+
+  /**
+   * Release a held report — or join the fallback release started by a failed
+   * `adopt()` — and report whether the debug adapter confirmed letting the
+   * child process continue running (issue #1221).
+   */
+  async releaseWithConfirmation(
+    reportId: string,
+    reason: string
+  ): Promise<{ held: boolean; released: boolean; closed?: true }> {
+    const existing = this.releaseOutcomes.get(reportId);
+    if (existing) {
+      const outcome = await existing;
+      return {
+        held: false,
+        released: outcome === 'confirmed',
+        ...(outcome === 'closed' ? { closed: true } : {})
+      };
+    }
+    const held = this.takeHeld(reportId);
+    if (!held) {
+      return { held: false, released: false };
+    }
+    this.options.logger.info(`[ChildConnections] Releasing child ${held.report.targetId} (${held.report.name}): ${reason}`);
+    const outcome = await this.giveUp(held, reason, reportId);
+    return { held: true, released: outcome === 'confirmed' };
   }
 
   /** Release held reports and wait for every throwaway socket before the adapter can be stopped. */
@@ -330,11 +364,17 @@ export class ChildConnections extends EventEmitter {
         // run on. It is best effort: a target the adapter had not started
         // yet is not resumed by it, and when nothing acknowledges it the
         // throwaway attach follows, for a target that is still pending.
-        this.letGoOnItsConnection(deps, client, held, message);
+        void this.letGoOnItsConnection(deps, client, held, message, args.reportId);
       } else {
         // The report is no longer held, so the server's release command that
-        // follows finds nothing: let the child go here, by the policy's lever.
-        this.giveUp(held, `adoption failed: ${message}`);
+        // follows joins this outcome via `releaseOutcomes`: let the child go
+        // here, by the policy's lever (including when close() cancelled the
+        // handshake before the target was bound).
+        const giveUpOutcome = this.giveUp(held, `adoption failed: ${message}`);
+        this.recordReleaseOutcome(
+          args.reportId,
+          cancelledByClose ? giveUpOutcome.then((): ChildReleaseOutcome => 'closed') : giveUpOutcome
+        );
         if (!cancelledByClose) {
           // When close() cancelled the handshake it is still awaiting its own
           // disconnect on connection.client: shutting the client down or
@@ -410,6 +450,7 @@ export class ChildConnections extends EventEmitter {
       await this.close(sessionId, { terminateDebuggee: false });
     }
     await this.releaseAllHeld(reason);
+    this.releaseOutcomes.clear();
   }
 
   // ----- internals -----
@@ -463,21 +504,48 @@ export class ChildConnections extends EventEmitter {
     held.client.respondToReverseRequest?.(held.request, {}, success, message);
   }
 
+  private recordReleaseOutcome(reportId: string, outcome: Promise<ChildReleaseOutcome>): Promise<ChildReleaseOutcome> {
+    if (!this.releaseOutcomes.has(reportId) && this.releaseOutcomes.size >= MAX_RECORDED_RELEASE_OUTCOMES) {
+      const oldest = this.releaseOutcomes.keys().next().value;
+      if (oldest !== undefined) {
+        this.releaseOutcomes.delete(oldest);
+      }
+    }
+    this.releaseOutcomes.set(reportId, outcome);
+    return outcome;
+  }
+
   /** Let a taken report's child run undebugged, by the policy's lever: refuse the request, or attach and detach. */
-  private giveUp(held: HeldReport, reason: string): void {
+  private giveUp(held: HeldReport, reason: string, reportId?: string): Promise<ChildReleaseOutcome> {
+    let outcomePromise: Promise<ChildReleaseOutcome>;
     if (this.lever() === 'throwaway-attach') {
-      const releasing = this.releaseByThrowaway(held, reason)
-        .catch((error: unknown) => {
+      outcomePromise = this.releaseByThrowaway(held, reason)
+        .then((released): ChildReleaseOutcome => (released ? 'confirmed' : 'unconfirmed'))
+        .catch((error: unknown): ChildReleaseOutcome => {
           this.options.logger.error(`[ChildConnections] Failed to release child ${held.report.targetId}: ${error instanceof Error ? error.message : String(error)}`);
-        })
+          return 'unconfirmed';
+        });
+      const releasing = outcomePromise
+        .then(() => undefined)
         .finally(() => {
           this.releases.delete(releasing);
           this.emitEmptyIfSo();
         });
       this.releases.add(releasing);
     } else {
-      held.client.respondToReverseRequest?.(held.request, {}, false, reason);
+      try {
+        const responder = held.client.respondToReverseRequest;
+        if (typeof responder !== 'function') {
+          outcomePromise = Promise.resolve('unconfirmed');
+        } else {
+          const sent = responder.call(held.client, held.request, {}, false, reason);
+          outcomePromise = Promise.resolve(sent === false ? 'unconfirmed' : 'confirmed');
+        }
+      } catch {
+        outcomePromise = Promise.resolve('unconfirmed');
+      }
     }
+    return reportId !== undefined ? this.recordReleaseOutcome(reportId, outcomePromise) : outcomePromise;
   }
 
   /**
@@ -548,12 +616,18 @@ export class ChildConnections extends EventEmitter {
    * this path releases whatever the old one could. Counted with the
    * releases, so the worker does not stop the adapter underneath it.
    */
-  private letGoOnItsConnection(deps: ChildAdoptionDeps, client: IDapClient, held: HeldReport, reason: string): void {
+  private letGoOnItsConnection(
+    deps: ChildAdoptionDeps,
+    client: IDapClient,
+    held: HeldReport,
+    reason: string,
+    reportId?: string
+  ): Promise<ChildReleaseOutcome> {
     const { logger } = this.options;
     const child = `${held.report.targetId} (${held.report.name})`;
-    const releasing = deps.connectionManager
+    const outcomePromise = deps.connectionManager
       .disconnect(client, false)
-      .then(async (outcome) => {
+      .then(async (outcome): Promise<ChildReleaseOutcome> => {
         try {
           client.shutdown(`child adoption failed: ${reason}`);
         } catch {
@@ -563,21 +637,26 @@ export class ChildConnections extends EventEmitter {
           logger.warn(
             `[ChildConnections] Child ${child}: the adapter did not acknowledge the disconnect after a failed adoption (${outcome.error ?? 'no answer'}); trying the throwaway attach in case the target is still pending`
           );
-          await this.releaseByThrowaway(held, `adoption failed: ${reason}`);
-          return;
+          const released = await this.releaseByThrowaway(held, `adoption failed: ${reason}`);
+          return released ? 'confirmed' : 'unconfirmed';
         }
         logger.warn(
           `[ChildConnections] Child ${child} let go on its own connection (adoption failed: ${reason}) — breakpoints will not bind in that process`
         );
+        return 'confirmed';
       })
-      .catch((error: unknown) => {
+      .catch((error: unknown): ChildReleaseOutcome => {
         logger.error(`[ChildConnections] Failed to release child ${child}: ${error instanceof Error ? error.message : String(error)}`);
-      })
+        return 'unconfirmed';
+      });
+    const releasing = outcomePromise
+      .then(() => undefined)
       .finally(() => {
         this.releases.delete(releasing);
         this.emitEmptyIfSo();
       });
     this.releases.add(releasing);
+    return reportId !== undefined ? this.recordReleaseOutcome(reportId, outcomePromise) : outcomePromise;
   }
 
   /**
@@ -646,13 +725,13 @@ export class ChildConnections extends EventEmitter {
    * kept. A process the released child reports in that window is held like
    * any other, stamped with the session the released child was reported on.
    */
-  private async releaseByThrowaway(held: HeldReport, reason: string): Promise<void> {
+  private async releaseByThrowaway(held: HeldReport, reason: string): Promise<boolean> {
     const deps = this.options.adoption;
     const contract = deps?.policy.childAdoption;
     const { logger } = this.options;
     if (!deps || !contract) {
       logger.warn(`[ChildConnections] Child ${held.report.targetId} (${held.report.name}) cannot be released: this worker opens no connections; it stays parked`);
-      return;
+      return false;
     }
     const label = held.report.targetId.slice(0, 8);
     const attachArguments = contract.buildChildAttachArguments(held.report, deps.launchConfig as Readonly<Record<string, unknown>> | undefined);
@@ -670,6 +749,7 @@ export class ChildConnections extends EventEmitter {
         `[ChildConnections] Child ${held.report.targetId} (${held.report.name}) released to run UNDEBUGGED (${reason}) — breakpoints will not bind in that process`
       );
     }
+    return released;
   }
 
   private takeHeld(reportId: string): HeldReport | undefined {

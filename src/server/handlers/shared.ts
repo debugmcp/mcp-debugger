@@ -21,7 +21,7 @@ import type { ToolContext } from '../tool-context.js';
 import type { ToolArguments } from '../tool-arguments.js';
 import { validateBreakOnExceptions } from '../tool-validation.js';
 import { debuggerOffWhy } from '../../session/debugger-off.js';
-import type { DebugResult, StopAnswerFields, TreeAnswerFields } from '../../session/session-manager-core.js';
+import type { DebugResult, LaunchResultData, StopAnswerFields, TreeAnswerFields } from '../../session/session-manager-core.js';
 import type { AttachRequest } from '../../session/attach/attach-controller.js';
 import { runFactsOf, type RunFacts } from '../../session/run-facts.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
@@ -237,6 +237,48 @@ export function hoistTreeFields(response: Record<string, unknown>, data: TreeAns
   }
   if (typeof data.childrenReleased === 'number') {
     response.childrenReleased = data.childrenReleased;
+  }
+}
+
+/**
+ * Hoist and enrich `pausedChild` on `start_debugging` / `restart_debugging`
+ * when an adopted child session is already paused while the launched root is
+ * running (issue #1150). Adds source `context` and stale-build `note` for the
+ * child's location, and strips the duplicate `snapshot` from `response.data`
+ * just like `hoistStopLanding` does for a root stop.
+ */
+export async function hoistPausedChild(
+  ctx: ToolContext,
+  response: Record<string, unknown>,
+  data: Pick<LaunchResultData, 'pausedChild'> | undefined,
+  logLabel: string
+): Promise<void> {
+  if (!data?.pausedChild) {
+    return;
+  }
+  const pausedChild: Record<string, unknown> = { ...data.pausedChild };
+  const location = data.pausedChild.location;
+  if (location && !location.unresolvedSource && hasOpenableSourcePath(location.file)) {
+    const [context, staleBuild] = await Promise.all([
+      readLineContext(ctx, location.file, location.line, logLabel),
+      describeStaleBuild(ctx, data.pausedChild.sessionId, location.file, logLabel)
+    ]);
+    if (context) {
+      pausedChild.context = context;
+    }
+    appendNote(pausedChild, staleBuild);
+  }
+  response.pausedChild = pausedChild;
+  if (data.pausedChild.snapshot) {
+    const embedded = response.data;
+    if (embedded && typeof embedded === 'object' && 'pausedChild' in embedded) {
+      const embeddedRecord = embedded as Record<string, unknown>;
+      const inner = embeddedRecord.pausedChild;
+      if (inner && typeof inner === 'object' && 'snapshot' in inner) {
+        const { snapshot: _omitted, ...restChild } = inner as Record<string, unknown>;
+        response.data = { ...embeddedRecord, pausedChild: restChild };
+      }
+    }
   }
 }
 

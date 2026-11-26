@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import path from 'node:path';
 import type { ManagedSession } from '../../../../src/session/session-store.js';
-import { rootOfTree, runFactsOf } from '../../../../src/session/run-facts.js';
+import { detectChildDebuggingOptOut, rootOfTree, runFactsOf } from '../../../../src/session/run-facts.js';
 
 /** A session's row: its own empty run record unless the test gives it one (a child is given its root's). */
 const session = (fields: Record<string, unknown>): ManagedSession => ({ run: {}, ...fields }) as unknown as ManagedSession;
@@ -101,5 +101,29 @@ describe('runFactsOf', () => {
     expect(runFactsOf(fresh, tree(fresh))).toEqual({
       rootSessionId: 'fresh', attached: false, targetLocality: undefined, launch: undefined, request: undefined, proxyLogPath: undefined
     });
+  });
+});
+
+describe('detectChildDebuggingOptOut (m5)', () => {
+  it('detects explicit Python launch opt-out and ignores Python attach', () => {
+    expect(detectChildDebuggingOptOut('python', false, { subProcess: false }, { subProcess: false })).toBe('subProcess: false');
+    expect(detectChildDebuggingOptOut('python', true, { subProcess: false }, { subProcess: false })).toBeUndefined();
+    expect(detectChildDebuggingOptOut('python', false, { subProcess: true }, {})).toBeUndefined();
+  });
+
+  it('distinguishes caller JavaScript opt-out from adapter default-off on unverified attach', () => {
+    expect(
+      detectChildDebuggingOptOut('javascript', false, { autoAttachChildProcesses: false }, { autoAttachChildProcesses: false })
+    ).toBe('autoAttachChildProcesses: false');
+    expect(
+      detectChildDebuggingOptOut('javascript', true, { autoAttachChildProcesses: false }, { autoAttachChildProcesses: false })
+    ).toBe('autoAttachChildProcesses: false');
+    // Caller did not specify autoAttachChildProcesses; the JS attach adapter defaulted it off.
+    expect(
+      detectChildDebuggingOptOut('javascript', true, { autoAttachChildProcesses: false }, {})
+    ).toBe('adapter-default');
+    expect(
+      detectChildDebuggingOptOut('javascript', true, { autoAttachChildProcesses: true }, {})
+    ).toBeUndefined();
   });
 });

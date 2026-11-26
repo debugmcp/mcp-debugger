@@ -129,8 +129,14 @@ exists). The agent then uses `sessionId` for inspection, stepping and continuing
   ([#849](https://github.com/debugmcp/mcp-debugger/issues/849)) is unchanged.
 - Every answer on a session that has children carries `children: [{ sessionId, name, state, parentSessionId }]`,
   the paused and the `pending: true` answers included, so a caller always sees what else is live or
-  paused and what to wait on next. The `start_debugging` answer carries the same list when a child
-  was adopted during the launch hold.
+  paused and what to wait on next. The `start_debugging` and `restart_debugging` answers carry the
+  same list when a child was adopted during the launch hold — and when an adopted child is already
+  genuinely `paused` while the launched root is `running`, they end the hold after a short settle
+  grace, name that paused child directly in `message` instead of claiming no breakpoint was reached
+  yet, and include `pausedChild: { sessionId, name, state: "paused", reason, location?, threadId?,
+  context?, note?, snapshot? }` so the agent can inspect, step, or continue the child immediately
+  without spending an extra `wait_for_stop` turn (issue #1150; `pausedChild` is never set when a
+  child is in `error` or `stopped`).
 - A `wait_for_stop` on a child answers for that child and its own descendants only.
 
 This was decided over the per-session alternative (each wait answers only its own stops): that
@@ -313,14 +319,23 @@ Two bounds keep that sane:
 - A per-tree cap on live child sessions (`DEBUG_MCP_MAX_CHILD_SESSIONS`, default 32; `0` disables
   child-session adoption). It excludes js-debug's mandatory first target, which implements the
   root session and must still be adopted for launch to complete. Beyond the cap the release lever
-  runs (the child runs undebugged) and the parent's next answer says so (`childrenReleased: n`).
-  The count is never left unexplained (issue #1137): the cause of each release is recorded with it
-  (`releasedChildCauses`: child sessions off, the cap, a proxy that cannot host children, a failed
-  adoption), and every launch, restart and wait answer that carries the number ends its message
-  with one sentence built from the same record (`describeReleasedChildren`,
+  runs (the child runs undebugged) and the parent's and every ancestor's next answer says so
+  (`childrenReleased: n`, subtree-scoped so grandchild releases count on the root as well as on the
+  child, issue #1150). The count is never left unexplained (issue #1137): the cause of each
+  confirmed release is recorded with it (`releasedChildCauses`: child sessions off, the cap, a
+  proxy that cannot host children, a failed adoption whose fallback release the adapter confirmed),
+  and every launch, restart and wait answer that carries the number ends its message with one
+  sentence built from the same record (`describeReleasedChildren`,
   `src/session/execution/tree-settle.ts`): how many, that they run undebugged, why — naming
   `DEBUG_MCP_MAX_CHILD_SESSIONS` when it decided — and that a breakpoint only such a child reaches
-  will not hit.
+  will not hit. When a failed adoption's fallback release is **not** confirmed by the debug adapter
+  (issue #1221), it is not counted in `childrenReleased` and not called "released to run
+  undebugged"; `describeReleasedChildren` discloses that the child could not be adopted and whether
+  it continued running is not known. Before a launch or `wait_for_stop` answer is built, releases
+  still in flight are waited for at most 1,500 ms, never past the caller's remaining deadline, and
+  not at all once the request is cancelled. A `wait_for_stop` that reaches its own timeout therefore
+  does not wait: its `childrenReleased` counts the releases confirmed so far, and any release that
+  confirms afterwards is reflected in a later answer.
 - Ended children stay listed until closed, as above, and leave with their parent.
 
 ## Every adapter, surveyed
@@ -487,7 +502,15 @@ A child is a session of its own, and what is read about it is read where it is t
   debugger on clears the run's decision; a child reads that decision as its root does (while
   the proof by a verified breakpoint stays each session's own, so for a moment the two can
   answer differently); and a child's exception arming is the live one, where it was a copy
-  taken at adoption. One thing does not follow: the notes of the root's launch are seeded into
+  taken at adoption. In addition (issue #1150), `Run` records `treeVerifiedBreakpointIds` whenever
+  any session in the tree verifies or hits a breakpoint (so the root's end summary marks child-bound
+  breakpoints `verified: true` in `unhitBreakpoints` and never warns that they "never bound during
+  this run"), and `childDebuggingOptedOut` when child adoption was turned off
+  (`subProcess: false` on Python launch, `autoAttachChildProcesses: false` on JavaScript
+  launch/attach, or `'adapter-default'` when the JavaScript adapter itself left it off on an
+  unverified attach) so end summaries and unbound warnings qualify that any child processes would
+  not be debugged.
+  One thing does not follow: the notes of the root's launch are seeded into
   the root's output only. The record is mutated in place and not replaced per run, so a child
   row that outlives its run reads what its root reads; the readers that are new to children
   are gated on a live state.
