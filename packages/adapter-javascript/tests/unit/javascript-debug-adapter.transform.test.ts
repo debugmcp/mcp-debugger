@@ -39,7 +39,6 @@ import { detectBinary } from '../../src/utils/typescript-detector.js';
 import { JavascriptDebugAdapter } from '../../src/index.js';
 import { canAutoAttachChildren } from '../../src/utils/child-attach-locality.js';
 import { scrubInheritedExitCodeShim } from '../../src/javascript-debug-adapter.js';
-import { collectLaunchConfigNotices } from '../../../../src/session/launch/launch-config-diagnostics.js';
 
 // Minimal AdapterDependencies stub for constructor
 const deps = {
@@ -91,10 +90,43 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     const transformed = await adapter.transformLaunchConfig(config);
 
     expect(transformed.cwd).toBe(explicit ? config.cwd : defaulted ? root : path.dirname(program));
-    const notices = collectLaunchConfigNotices(adapter, explicit ? { cwd: { source: 'dapLaunchArgs', value: config.cwd } } : {}, transformed, config);
-    expect(notices.filter(notice => notice.includes('dapLaunchArgs.cwd'))).toEqual(defaulted ? [
-      `Working directory defaulted to ${root}, the folder containing the outermost node_modules directory. Set dapLaunchArgs.cwd to use a different working directory.`
+    const diagnostics = adapter.consumeLaunchConfigDiagnostics();
+    expect(diagnostics.filter(diagnostic => diagnostic.key === 'cwd')).toEqual(defaulted ? [
+      {
+        key: 'cwd',
+        scope: 'launch',
+        message: `Working directory defaulted to ${root}, the folder containing the outermost node_modules directory. Set dapLaunchArgs.cwd to use a different working directory.`
+      }
     ] : []);
+  });
+
+  it.each([
+    ['node_modules', 'vitest', 'vitest.mjs'],
+    ['node_modules', '.pnpm', 'vitest@1', 'node_modules', 'vitest', 'vitest.mjs']
+  ])('replaces only a launcher-derived cwd for an installed runner: %j', async (...segments) => {
+    const root = path.resolve('/project');
+    const program = path.join(root, ...segments);
+    const config = { program, cwd: path.dirname(program) };
+    const transformed = await adapter.transformLaunchConfig(config, { cwdProvided: false });
+    expect(transformed.cwd).toBe(root);
+    expect(adapter.consumeLaunchConfigDiagnostics().filter(d => d.key === 'cwd')).toEqual([
+      {
+        key: 'cwd',
+        scope: 'launch',
+        message: `Working directory defaulted to ${root}, the folder containing the outermost node_modules directory. Set dapLaunchArgs.cwd to use a different working directory.`
+      }
+    ]);
+
+    const explicit = await adapter.transformLaunchConfig(config, { cwdProvided: true });
+    expect(explicit.cwd).toBe(config.cwd);
+    expect(adapter.consumeLaunchConfigDiagnostics().filter(d => d.key === 'cwd')).toEqual([]);
+  });
+
+  it('keeps the launcher cwd when an ordinary program has no different default', async () => {
+    const config = { program: path.resolve('/project/src/app.js'), cwd: path.resolve('/project') };
+    const transformed = await adapter.transformLaunchConfig(config, { cwdProvided: false });
+    expect(transformed.cwd).toBe(config.cwd);
+    expect(adapter.consumeLaunchConfigDiagnostics().filter(d => d.key === 'cwd')).toEqual([]);
   });
 
   it('should transform JS config with defaults', async () => {

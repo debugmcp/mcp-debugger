@@ -21,6 +21,7 @@ import {
   type AdapterCommand,
   type AdapterConfig,
   type GenericLaunchConfig,
+  type LaunchTransformContext,
   type LaunchConfigDiagnostic,
   type LanguageSpecificLaunchConfig,
   type GenericAttachConfig,
@@ -64,6 +65,12 @@ function defaultAttachCwd(): string {
     return process.env.MCP_WORKSPACE_ROOT || '/workspace';
   }
   return process.cwd();
+}
+
+/** The launch-scoped notice when an installed runner defaults to its project root (#1253). */
+function jsRunnerDefaultCwd(cwd: string): string {
+  return `Working directory defaulted to ${cwd}, the folder containing the outermost node_modules directory. ` +
+    'Set dapLaunchArgs.cwd to use a different working directory.';
 }
 
 /**
@@ -542,7 +549,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
 
   // ===== Debug Configuration =====
 
-  async transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig> {
+  async transformLaunchConfig(config: GenericLaunchConfig, context?: LaunchTransformContext): Promise<LanguageSpecificLaunchConfig> {
     // Base fields and defaults - paths already resolved by server
     this.launchConfigDiagnostics = [];
     const u = normalizeJsLaunchInputs((config || {}) as Record<string, unknown>, this.launchConfigDiagnostics);
@@ -551,14 +558,20 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     }
     const program = typeof u.program === 'string' ? u.program : '';
     
-    // Use cwd as provided (already resolved by server) or derive from program
+    // The launcher may already have derived a cwd. Only this transform decides
+    // whether an installed runner needs a different default; a supplied cwd wins.
+    const hasCwd = typeof u.cwd === 'string' && u.cwd.length > 0;
+    const runnerRoot = !hasCwd || context?.cwdProvided === false ? jsRunnerProjectRoot(program) : undefined;
     let cwd: string;
-    if (typeof u.cwd === 'string' && u.cwd) {
+    if (runnerRoot !== undefined) {
+      cwd = runnerRoot;
+      this.launchConfigDiagnostics.push({ key: 'cwd', scope: 'launch', message: jsRunnerDefaultCwd(cwd) });
+    } else if (hasCwd) {
       cwd = u.cwd as string;
     } else {
       // In container mode, use MCP_WORKSPACE_ROOT as the working directory
       if (program) {
-        cwd = jsRunnerProjectRoot(program) ?? path.dirname(program);
+        cwd = path.dirname(program);
       } else {
         // Fallback: use MCP_WORKSPACE_ROOT in container mode, otherwise process.cwd()
         if (process.env.MCP_CONTAINER === 'true') {

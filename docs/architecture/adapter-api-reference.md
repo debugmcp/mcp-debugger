@@ -64,7 +64,7 @@ Attach support (optional)
 - `usesDirectConnectForAttach?(): boolean` — when true, attach connects directly to an already-listening DAP server (e.g. rdbg started with `--open`) instead of spawning an adapter process; `ProxyManager` skips `buildAdapterCommand` and the adapter policy returns a `'connect'` spawn config from the attach host/port
 
 Debug configuration
-- `transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig>` (async to permit build/compilation steps before launch). The launch defaults the host applies (`stopOnEntry: false`, `justMyCode: true`) are merged by the session layer before the transform; an adapter declares no launch defaults of its own (its policy's `getInitializationBehavior().defaultStopOnEntry` may still decide `stopOnEntry` when the caller gave none)
+- `transformLaunchConfig(config: GenericLaunchConfig, context?: LaunchTransformContext): Promise<LanguageSpecificLaunchConfig>` (async to permit build/compilation steps before launch). The launch defaults the host applies (`stopOnEntry: false`, `justMyCode: true`) are merged by the session layer before the transform; an adapter declares no launch defaults of its own (its policy's `getInitializationBehavior().defaultStopOnEntry` may still decide `stopOnEntry` when the caller gave none). The optional context's `cwdProvided` distinguishes a caller/configured working directory from the launcher's derived default, so an adapter can choose its own default without replacing an explicit directory. The context is a separate argument and never enters the DAP configuration; adapters that ignore it keep their existing behavior.
  
 ### AdapterLaunchBarrier helper
 

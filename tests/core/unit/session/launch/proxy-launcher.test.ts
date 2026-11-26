@@ -115,37 +115,6 @@ describe('ProxyLauncher.prepareLaunchInputs', () => {
     h = makeHarness();
   });
 
-  it.each([
-    ['node_modules', 'vitest', 'vitest.mjs'],
-    ['node_modules', '.pnpm', 'vitest@1', 'node_modules', 'vitest', 'vitest.mjs']
-  ])('leaves JavaScript runner cwd for the adapter to derive: %j', async (...segments) => {
-    const program = path.resolve('/project', ...segments);
-    const session = makeSession({ language: DebugLanguage.JAVASCRIPT });
-    const inputs = await h.launcher.prepareLaunchInputs(session, { scriptPath: program });
-    expect(inputs.genericLaunchConfig).not.toHaveProperty('cwd');
-
-    const explicit = await h.launcher.prepareLaunchInputs(session, {
-      scriptPath: program,
-      dapLaunchArgs: launchArgs({ cwd: '/custom' })
-    });
-    expect(explicit.genericLaunchConfig.cwd).toBe('/custom');
-
-    const overridden = await h.launcher.prepareLaunchInputs(session, {
-      scriptPath: SCRIPT,
-      adapterLaunchConfig: { program }
-    });
-    expect(overridden.genericLaunchConfig).not.toHaveProperty('cwd');
-
-    const adapterCwd = await h.launcher.prepareLaunchInputs(session, {
-      scriptPath: program,
-      adapterLaunchConfig: { cwd: '/adapter-cwd' }
-    });
-    expect(adapterCwd.genericLaunchConfig.cwd).toBe('/adapter-cwd');
-
-    const otherLanguage = await h.launcher.prepareLaunchInputs(makeSession(), { scriptPath: program });
-    expect(otherLanguage.genericLaunchConfig.cwd).toBe(path.dirname(program));
-  });
-
   it('lays out a launch: run log dir, adapter port, program/args/cwd, breakpoint snapshots, adapter config', async () => {
     const session = makeSession({
       breakpoints: new Map<string, Breakpoint>([
@@ -499,6 +468,36 @@ describe('ProxyLauncher.buildAdapterLaunchPlan', () => {
 
 describe('ProxyLauncher.prepareAdapter', () => {
   const VERDICT = { compatible: false, toolchain: 'msvc', behavior: 'error', message: 'MSVC PDB detected' };
+
+  it('passes cwd provenance outside the config and preserves the default for an adapter with no opinion', async () => {
+    const adapter = new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE });
+    const h = makeHarness({ adapter });
+    const session = makeSession();
+    const suppliedCwd = path.resolve('/custom');
+    const configuredCwd = path.resolve('/configured');
+    const cases: { request: ProxyLaunchRequest; cwdProvided: boolean; cwd: string; configured?: string }[] = [
+      { request: { scriptPath: SCRIPT }, cwdProvided: false, cwd: path.dirname(SCRIPT) },
+      { request: { scriptPath: SCRIPT, dapLaunchArgs: launchArgs({ cwd: suppliedCwd }) }, cwdProvided: true, cwd: suppliedCwd },
+      { request: { scriptPath: SCRIPT, adapterLaunchConfig: { cwd: suppliedCwd } }, cwdProvided: true, cwd: suppliedCwd },
+      { request: { scriptPath: SCRIPT }, cwdProvided: true, cwd: configuredCwd, configured: configuredCwd }
+    ];
+    for (const { request, cwdProvided, cwd, configured } of cases) {
+      Object.assign(h.ctx.defaultDapLaunchArgs, launchArgs({ cwd: configured }));
+      const inputs = await h.launcher.prepareLaunchInputs(session, request);
+      const outcome = await h.launcher.prepareAdapter(session, inputs, request);
+      expect(adapter.transformLaunchConfig).toHaveBeenLastCalledWith(inputs.genericLaunchConfig, { cwdProvided });
+      expect(outcome.ok).toBe(true);
+      if (!outcome.ok) throw outcome.error;
+      try {
+        expect(outcome.plan.launchConfig.cwd).toBe(cwd);
+        expect(outcome.plan.launchConfig).toEqual(inputs.genericLaunchConfig);
+        expect(outcome.plan.launchConfig).not.toHaveProperty('cwdProvided');
+        expect(inputs.adapterConfig.launchConfig).not.toHaveProperty('cwdProvided');
+      } finally {
+        await outcome.lease.release();
+      }
+    }
+  });
 
   it('prepares the adapter side without writing to the session, and hands back the lease still held (#812)', async () => {
     const adapter = Object.assign(new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE }), {

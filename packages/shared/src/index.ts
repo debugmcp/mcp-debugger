@@ -28,6 +28,7 @@ export type {
   
   // Launch configurations
   GenericLaunchConfig,
+  LaunchTransformContext,
   LaunchConfigDiagnostic,
   LanguageSpecificLaunchConfig,
 

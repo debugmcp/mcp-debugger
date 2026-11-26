@@ -429,11 +429,6 @@ export const ErrorMessages = {
     `(the program may be blocked in native code or a syscall). The pause is still in effect: ` +
     `the session will report 'paused' once the stop lands. Call wait_for_stop to block until then.`,
 
-  /** The launch notice when an installed JavaScript runner defaults to its project root (#1253). */
-  jsRunnerDefaultCwd: (cwd: string) =>
-    `Working directory defaulted to ${cwd}, the folder containing the outermost node_modules directory. ` +
-    'Set dapLaunchArgs.cwd to use a different working directory.',
-
   /**
    * The compiled file a location binds through — the generated `.js` a
    * source map names, or the class file, DLL or binary the launch runs — is

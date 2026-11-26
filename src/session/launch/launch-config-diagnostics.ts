@@ -1,6 +1,5 @@
-import { DebugLanguage, jsRunnerProjectRoot, type IDebugAdapter, type LanguageSpecificLaunchConfig } from '@debugmcp/shared';
+import type { IDebugAdapter, LanguageSpecificLaunchConfig } from '@debugmcp/shared';
 import { didYouMean } from '../../utils/did-you-mean.js';
-import { ErrorMessages } from '../../utils/error-messages.js';
 
 export interface CallerLaunchInput {
   source: 'dapLaunchArgs' | 'adapterLaunchConfig';
@@ -22,8 +21,7 @@ export function callerLaunchInputs(
 export function collectLaunchConfigNotices(
   adapter: IDebugAdapter,
   inputs: Record<string, CallerLaunchInput>,
-  transformed: LanguageSpecificLaunchConfig | undefined,
-  original?: Record<string, unknown>
+  transformed: LanguageSpecificLaunchConfig | undefined
 ): string[] {
   const diagnostics = adapter.consumeLaunchConfigDiagnostics?.() ?? [];
   const supported = adapter.supportedLaunchKeys;
@@ -55,13 +53,6 @@ export function collectLaunchConfigNotices(
   // Launch-scoped notices are about the launch as a whole, not a caller key (#796).
   for (const diagnostic of diagnostics) {
     if (diagnostic.scope === 'launch') notices.push(diagnostic.message);
-  }
-  if (adapter.language === DebugLanguage.JAVASCRIPT && original && transformed &&
-      !(typeof original.cwd === 'string' && original.cwd.length > 0)) {
-    const root = jsRunnerProjectRoot(original.program);
-    if (root !== undefined && transformed.cwd === root) {
-      notices.push(ErrorMessages.jsRunnerDefaultCwd(root));
-    }
   }
   return [...new Set(notices)];
 }
