@@ -117,10 +117,11 @@ export interface IDebugAdapter extends EventEmitter {
   /**
    * Transform generic launch config to language-specific format
    *
+   * @param context Optional launcher provenance; separate from the configuration sent to DAP
    * @returns Promise resolving to language-specific launch configuration
    * @since 2.1.0 - Made async to support build operations (e.g., Rust compilation)
    */
-  transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig>;
+  transformLaunchConfig(config: GenericLaunchConfig, context?: LaunchTransformContext): Promise<LanguageSpecificLaunchConfig>;
 
   /**
    * Check if this adapter supports attaching to running processes
@@ -384,6 +385,12 @@ export interface GenericLaunchConfig {
   cwd?: string;
   args?: string[];
   // Common debug configuration options
+}
+
+/** Launcher provenance, passed separately from the DAP configuration and never sent on the wire. */
+export interface LaunchTransformContext {
+  /** A non-empty cwd was supplied by the caller or configured defaults, rather than derived by the launcher. */
+  cwdProvided: boolean;
 }
 
 /** An adapter's explanation of how it handled one launch or attach input. */

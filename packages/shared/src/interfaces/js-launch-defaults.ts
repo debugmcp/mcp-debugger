@@ -74,6 +74,24 @@ const TS_PROGRAM = /\.([mc])?tsx?$/i;
 
 const nonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 
+/**
+ * A runner installed under node_modules runs sources in memory (the stale-build
+ * check) and defaults to the project containing the outermost node_modules
+ * (launch cwd). Walk with the host's ordinary path handling, without resolving
+ * symlinks or interpreting paths for a different OS.
+ */
+export function jsRunnerProjectRoot(program: unknown): string | undefined {
+  if (!nonEmptyString(program)) return undefined;
+  let root: string | undefined;
+  let dir = path.dirname(program);
+  for (;;) {
+    const parent = path.dirname(dir);
+    if (path.basename(dir) === 'node_modules') root = parent;
+    if (parent === dir) return root;
+    dir = parent;
+  }
+}
+
 /** Whether a launch program is TypeScript (`.ts`/`.tsx`/`.mts`/`.cts`), i.e. run through a transpiler. */
 export function isJsTranspiledProgram(program: unknown): boolean {
   return nonEmptyString(program) && TS_PROGRAM.test(program);

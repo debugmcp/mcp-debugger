@@ -21,6 +21,7 @@ import {
   type AdapterCommand,
   type AdapterConfig,
   type GenericLaunchConfig,
+  type LaunchTransformContext,
   type LaunchConfigDiagnostic,
   type LanguageSpecificLaunchConfig,
   type GenericAttachConfig,
@@ -34,7 +35,8 @@ import {
   resolveJsLaunchSmartStep,
   resolveJsLaunchWorkspaceFolder,
   resolveJsPauseForSourceMap,
-  isJsTranspiledProgram
+  isJsTranspiledProgram,
+  jsRunnerProjectRoot
 } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
 import type { AdapterDependencies } from '@debugmcp/shared';
@@ -63,6 +65,13 @@ function defaultAttachCwd(): string {
     return process.env.MCP_WORKSPACE_ROOT || '/workspace';
   }
   return process.cwd();
+}
+
+/** The launch-scoped notice when an installed runner defaults to its project root (#1253). */
+function jsRunnerDefaultCwd(cwd: string): string {
+  return `Working directory defaulted to ${cwd}, the folder containing the outermost node_modules directory. ` +
+    'Set dapLaunchArgs.cwd to use a different working directory; if adapterLaunchConfig.cwd is present, ' +
+    'change or remove it because it takes precedence.';
 }
 
 /**
@@ -541,18 +550,30 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
 
   // ===== Debug Configuration =====
 
-  async transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig> {
+  async transformLaunchConfig(config: GenericLaunchConfig, context?: LaunchTransformContext): Promise<LanguageSpecificLaunchConfig> {
     // Base fields and defaults - paths already resolved by server
     this.launchConfigDiagnostics = [];
     const u = normalizeJsLaunchInputs((config || {}) as Record<string, unknown>, this.launchConfigDiagnostics);
     for (const { key, message } of this.launchConfigDiagnostics) {
       this.dependencies.logger?.warn?.(`[JavascriptDebugAdapter] launch ${key}: ${message}`);
     }
-    const program = typeof u.program === 'string' ? u.program : '';
+    let program = typeof u.program === 'string' ? u.program : '';
     
-    // Use cwd as provided (already resolved by server) or derive from program
+    // The launcher may already have derived a cwd. Only this transform decides
+    // whether an installed runner needs a different default; a supplied cwd wins.
+    const hasCwd = typeof u.cwd === 'string' && u.cwd.length > 0;
+    const runnerProgram = program && !path.isAbsolute(program)
+      ? path.resolve(hasCwd ? u.cwd as string : defaultAttachCwd(), program)
+      : program;
+    const runnerRoot = !hasCwd || context?.cwdProvided === false ? jsRunnerProjectRoot(runnerProgram) : undefined;
     let cwd: string;
-    if (typeof u.cwd === 'string' && u.cwd) {
+    if (runnerRoot !== undefined) {
+      cwd = runnerRoot;
+      // Keep a relative target anchored to its original directory when cwd
+      // changes, both on the wire and in the recorded transformed launch.
+      program = runnerProgram;
+      this.launchConfigDiagnostics.push({ key: 'runner-cwd', scope: 'launch', message: jsRunnerDefaultCwd(cwd) });
+    } else if (hasCwd) {
       cwd = u.cwd as string;
     } else {
       // In container mode, use MCP_WORKSPACE_ROOT as the working directory

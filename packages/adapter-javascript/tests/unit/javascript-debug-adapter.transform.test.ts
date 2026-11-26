@@ -76,6 +76,84 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
     vi.restoreAllMocks();
   });
 
+  it.each([
+    ['plain runner', ['node_modules', 'vitest', 'vitest.mjs'], undefined, true],
+    ['pnpm runner', ['node_modules', '.pnpm', 'vitest@1', 'node_modules', 'vitest', 'vitest.mjs'], undefined, true],
+    ['explicit cwd', ['node_modules', 'jest', 'bin', 'jest.js'], 'custom', false],
+    ['explicit project cwd', ['node_modules', 'mocha', 'bin', 'mocha.js'], '.', false],
+    ['ordinary program', ['src', 'app.js'], undefined, false],
+    ['segment lookalike', ['node_modules_helper', 'app.js'], undefined, false]
+  ] as const)('uses the expected cwd and notice for %s', async (_name, segments, explicit, defaulted) => {
+    const root = path.resolve('/project');
+    const program = path.join(root, ...segments);
+    const config = { program, ...(explicit ? { cwd: path.join(root, explicit) } : {}) };
+    const transformed = await adapter.transformLaunchConfig(config);
+
+    expect(transformed.cwd).toBe(explicit ? config.cwd : defaulted ? root : path.dirname(program));
+    const diagnostics = adapter.consumeLaunchConfigDiagnostics();
+    expect(diagnostics.filter(diagnostic => diagnostic.key === 'runner-cwd')).toEqual(defaulted ? [
+      {
+        key: 'runner-cwd',
+        scope: 'launch',
+        message: `Working directory defaulted to ${root}, the folder containing the outermost node_modules directory. Set dapLaunchArgs.cwd to use a different working directory; if adapterLaunchConfig.cwd is present, change or remove it because it takes precedence.`
+      }
+    ] : []);
+  });
+
+  it.each([
+    ['node_modules', 'vitest', 'vitest.mjs'],
+    ['node_modules', '.pnpm', 'vitest@1', 'node_modules', 'vitest', 'vitest.mjs']
+  ])('replaces only a launcher-derived cwd for an installed runner: %j', async (...segments) => {
+    const root = path.resolve('/project');
+    const program = path.join(root, ...segments);
+    const config = { program, cwd: path.dirname(program) };
+    const transformed = await adapter.transformLaunchConfig(config, { cwdProvided: false });
+    expect(transformed.cwd).toBe(root);
+    expect(adapter.consumeLaunchConfigDiagnostics().filter(d => d.key === 'runner-cwd')).toEqual([
+      {
+        key: 'runner-cwd',
+        scope: 'launch',
+        message: `Working directory defaulted to ${root}, the folder containing the outermost node_modules directory. Set dapLaunchArgs.cwd to use a different working directory; if adapterLaunchConfig.cwd is present, change or remove it because it takes precedence.`
+      }
+    ]);
+
+    const explicit = await adapter.transformLaunchConfig(config, { cwdProvided: true });
+    expect(explicit.cwd).toBe(config.cwd);
+    expect(adapter.consumeLaunchConfigDiagnostics().filter(d => d.key === 'runner-cwd')).toEqual([]);
+  });
+
+  it('keeps the launcher cwd when an ordinary program has no different default', async () => {
+    const config = { program: path.resolve('/project/src/app.js'), cwd: path.resolve('/project') };
+    const transformed = await adapter.transformLaunchConfig(config, { cwdProvided: false });
+    expect(transformed.cwd).toBe(config.cwd);
+    expect(adapter.consumeLaunchConfigDiagnostics().filter(d => d.key === 'runner-cwd')).toEqual([]);
+  });
+
+  it.each([
+    ['node_modules', 'pkg', 'run.js'],
+    ['..', 'node_modules', 'pkg', 'run.js']
+  ])('anchors a relative runner before changing the launcher cwd: %j', async (...segments) => {
+    const cwd = path.resolve('/project/scripts');
+    const program = path.join(...segments);
+    const absoluteProgram = path.resolve(cwd, program);
+    const expectedRoot = segments[0] === '..' ? path.dirname(cwd) : cwd;
+    const transformed = await adapter.transformLaunchConfig({ program, cwd }, { cwdProvided: false });
+    expect(transformed.cwd).toBe(expectedRoot);
+    expect(path.isAbsolute(transformed.cwd as string)).toBe(true);
+    expect(transformed.program).toBe(absoluteProgram);
+    const notices = adapter.consumeLaunchConfigDiagnostics().filter(d => d.scope === 'launch' && d.message.includes('Working directory defaulted'));
+    expect(notices).toHaveLength(1);
+    expect(notices[0].message).toContain(`defaulted to ${expectedRoot},`);
+  });
+
+  it('defaults an empty cwd without a transform context and records one launch notice', async () => {
+    const root = path.resolve('/project');
+    const transformed = await adapter.transformLaunchConfig({ program: path.join(root, 'node_modules', 'pkg', 'run.js'), cwd: '' });
+    expect(transformed.cwd).toBe(root);
+    const notices = adapter.consumeLaunchConfigDiagnostics().filter(d => d.scope === 'launch' && d.message.includes('Working directory defaulted'));
+    expect(notices).toHaveLength(1);
+  });
+
   it('should transform JS config with defaults', async () => {
     const program = path.resolve('/proj/app.js');
     const cfg = await adapter.transformLaunchConfig({

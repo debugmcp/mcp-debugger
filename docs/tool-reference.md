@@ -555,6 +555,14 @@ options remain forwarded, with a warning and a spelling suggestion when availabl
 appear once in `get_output` after launch setup, are returned by `dryRunSpawn`, and are retained in
 `data.warning` when preparation fails. A subsequent launch starts with fresh notices.
 
+For JavaScript, a program under `node_modules` defaults `cwd` to the folder containing its
+outermost `node_modules`, including nested pnpm paths. The launch's `warning` names that directory
+and the `dapLaunchArgs.cwd` override; change or remove `adapterLaunchConfig.cwd` if present,
+because it takes precedence. Relative runner programs resolve against the launcher's working
+directory before selecting this default. Other programs default to the directory containing
+`scriptPath`, even when `dapLaunchArgs.program` differs. An explicit `cwd` is preserved and
+produces no default-directory notice.
+
 For JavaScript, `envFile` resolves relative to the effective `cwd` (absolute paths work too).
 Its dotenv values override the inherited environment; explicit `env` entries override the file,
 and `null` removes a variable. This also applies to `NODE_ENV` and `NODE_OPTIONS`; without a file
