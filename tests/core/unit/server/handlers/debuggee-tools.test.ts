@@ -368,7 +368,7 @@ describe('debuggee lifecycle tool handlers', () => {
     const outputTail = ['Unhandled fatal configuration error', 'exiting with code 1'];
 
     for (const [tool, answer] of answers) {
-      it(`${tool} hoists exitCode, unhitBreakpoints and outputTail to the top level while keeping data intact`, async () => {
+      it(`${tool} hoists exitCode, unhitBreakpoints and outputTail to the top level and strips duplicate outputTail from data`, async () => {
         const data = {
           message: 'Debugging started for /app/Program.cs. Current state: stopped. The program exited with code 1.',
           exitCode: 1,
@@ -385,8 +385,16 @@ describe('debuggee lifecycle tool handlers', () => {
           exitCode: 1,
           unhitBreakpoints,
           outputTail,
-          data
+          data: {
+            message: data.message,
+            exitCode: 1,
+            unhitBreakpoints,
+            stopOnEntrySuccessful: false
+          }
         });
+        expect(payload.data).not.toHaveProperty('outputTail');
+        // Session-layer data object is not mutated.
+        expect(data.outputTail).toEqual(outputTail);
       });
 
       it(`${tool} hoists exitCode 0 and omits an empty unhitBreakpoints list at the top level while keeping data.unhitBreakpoints`, async () => {

@@ -247,7 +247,8 @@ export type ProgramEndAnswerFields = Pick<DebugResultData, 'exitCode' | 'unhitBr
  * non-empty `outputTail`) to the top level of a tool answer (issues #701,
  * #1033, #1177, #1254). Shared by `start_debugging`, `restart_debugging`,
  * `wait_for_stop` and the step tools; an empty `unhitBreakpoints` list stays in
- * `data` where present and is omitted from the top level.
+ * `data` where present and is omitted from the top level, while `outputTail` is
+ * stripped from `response.data` like `snapshot` so the lines never ship twice.
  */
 export function hoistProgramEnd(
   response: Record<string, unknown>,
@@ -264,6 +265,11 @@ export function hoistProgramEnd(
   }
   if (Array.isArray(data.outputTail) && data.outputTail.length > 0) {
     response.outputTail = data.outputTail;
+    const embedded = response.data;
+    if (embedded && typeof embedded === 'object' && 'outputTail' in embedded) {
+      const { outputTail: _omitted, ...rest } = embedded as Record<string, unknown>;
+      response.data = rest;
+    }
   }
 }
 

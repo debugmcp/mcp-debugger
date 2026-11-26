@@ -376,6 +376,38 @@ describe('SessionManager - the tree-aware waitForStop (issue #1081)', () => {
     expect(sessionManager.getSession(rootId)?.state).toBe(SessionState.RUNNING);
   });
 
+  it('reads outputTail from the selected child rather than the waited-on root when the child ends non-zero during its landing read (T06)', async () => {
+    const rootId = await startRoot();
+    dependencies.mockProxyManager.emit('output', { category: 'stderr', output: 'root stderr line\n' });
+    // Even if root carried a prior/nonzero exitCode field in memory, waitForStop(rootId)
+    // answering for `child` must read `child`'s buffer and never `root`'s.
+    sessionManager.getSession(rootId)!.exitCode = 9;
+
+    const child = await adopt(dependencies.mockProxyManager, rootId, 4242);
+    const wait = track(sessionManager.waitForStop(rootId, 10_000));
+    child.view.simulateStopped(1, 'exception', { reason: 'exception', threadId: 1, allThreadsStopped: true });
+    await vi.advanceTimersByTimeAsync(0);
+
+    child.view.emit('output', { category: 'stderr', output: 'child fatal stderr\n' });
+    child.view.simulateExited(2);
+    await afterStop();
+
+    const settled = wait.result();
+    expect(settled).toMatchObject({
+      success: true,
+      state: SessionState.STOPPED,
+      data: {
+        sessionId: child.id,
+        exitCode: 2,
+        outputTail: ['child fatal stderr'],
+        lastStop: { reason: 'exception' }
+      }
+    });
+    expect(settled?.data?.message).toContain('The program exited with code 2.');
+    expect(settled?.data?.message).toContain('See outputTail (get_output has the full output).');
+    expect(settled?.data?.outputTail).not.toContain('root stderr line');
+  });
+
   it('the pending answer carries the children and names the session asked for', async () => {
     const rootId = await startRoot();
     const child = await adopt(dependencies.mockProxyManager, rootId, 4242);

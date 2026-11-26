@@ -86,7 +86,7 @@ describe.skipIf(!hasDebugpy())('Python non-zero exit carries outputTail (issues 
     expect(ended.message, JSON.stringify(ended)).not.toContain('runner error: no test files found');
     if (!started.pending) {
       expect(started.data?.exitCode).toBe(3);
-      expect(started.data?.outputTail).toEqual(ended.outputTail);
+      expect(started.data).not.toHaveProperty('outputTail');
     }
   }, 60_000);
 });

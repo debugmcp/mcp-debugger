@@ -2472,6 +2472,44 @@ describe('SessionManager - DAP Operations', () => {
         expect(result.data?.message).not.toContain('panic on step');
       });
 
+      it('carries outputTail and the get_output clause when a step observes stopped and the session ends non-zero during the stack read (T08)', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        let reads = 0;
+        let releaseStack: ((response: unknown) => void) | undefined;
+        dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation((command: string) => {
+          if (command === 'next') {
+            process.nextTick(() => dependencies.mockProxyManager.simulateStopped(1, 'step'));
+          }
+          if (command === 'stackTrace' && ++reads > 1) {
+            return new Promise((resolve) => { releaseStack = resolve; });
+          }
+          return Promise.resolve({ success: true, body: { stackFrames: [] } });
+        });
+
+        const pending = sessionManager.stepOver(session.id);
+        await vi.advanceTimersByTimeAsync(30);
+        expect(releaseStack).toBeDefined();
+
+        // Exercise onStopped's own `if (sessionEnded())` branch directly (when core
+        // already transitioned the session to terminal state with no event left for
+        // executeStep's exited listener).
+        const managed = sessionManager.getSession(session.id)!;
+        managed.outputBuffer!.push('stderr', 'died during stack read\n');
+        managed.exitCode = 7;
+        managed.state = SessionState.STOPPED;
+        releaseStack!({ success: true, body: { stackFrames: [] } });
+        await vi.runAllTimersAsync();
+
+        const result = await pending;
+        expect(result.success).toBe(true);
+        expect(result.state).toBe(SessionState.STOPPED);
+        expect(result.data?.exitCode).toBe(7);
+        expect(result.data?.outputTail).toEqual(['died during stack read']);
+        expect(result.data?.message).toBe(
+          'Stepped over; the session ended before the stack could be read. See outputTail (get_output has the full output).'
+        );
+      });
+
       it('surfaces meaningful adapter step descriptions (COBOL PERFORM) and origin-comparison notes on every adapter (issues #1180, #1182)', async () => {
         const session = await createPausedSession(sessionManager, dependencies);
         let stackReads = 0;

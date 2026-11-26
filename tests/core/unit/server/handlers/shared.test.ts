@@ -319,20 +319,24 @@ describe('a child session reads the run of its tree (issue #1214)', () => {
 });
 
 describe('hoistProgramEnd (issue #1254)', () => {
-  it('hoists exitCode (0 included), non-empty unhitBreakpoints, and non-empty outputTail', () => {
+  it('hoists exitCode (0 included), non-empty unhitBreakpoints, and non-empty outputTail, stripping outputTail from embedded data without mutating input', () => {
     const unhitBreakpoints = [{ file: '/app/main.py', line: 9, verified: true }];
     const outputTail = ['No module named pytest'];
-    const response: Record<string, unknown> = { success: true, state: 'stopped' };
+    const data = { exitCode: 1, unhitBreakpoints, outputTail, stopOnEntrySuccessful: false };
+    const response: Record<string, unknown> = { success: true, state: 'stopped', data };
 
-    hoistProgramEnd(response, { exitCode: 1, unhitBreakpoints, outputTail });
+    hoistProgramEnd(response, data);
 
     expect(response).toEqual({
       success: true,
       state: 'stopped',
       exitCode: 1,
       unhitBreakpoints,
-      outputTail
+      outputTail,
+      data: { exitCode: 1, unhitBreakpoints, stopOnEntrySuccessful: false }
     });
+    // Session-layer data object is never mutated.
+    expect(data.outputTail).toEqual(outputTail);
 
     const cleanExit: Record<string, unknown> = { success: true, state: 'stopped' };
     hoistProgramEnd(cleanExit, { exitCode: 0, unhitBreakpoints: [], outputTail: [] });

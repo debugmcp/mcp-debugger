@@ -275,5 +275,23 @@ describe('buildRunToCompletionSummary', () => {
       expect(tail?.[6]).toBe('entry without newline');
       expect(tail?.[7]).toBe(`${'x'.repeat(300)}…`);
     });
+
+    it('keeps the outputTail pointer clause in the summary when a stop and a non-zero exit land together (T05)', () => {
+      const outputBuffer = bufferOf({ output: 'fatal right after breakpoint\n' });
+      const result = build({
+        exitCode: 1,
+        lastStop: { reason: 'breakpoint' },
+        breakpoints: new Map([['a', { file: '/work/src/app.ts', line: 91, verified: true }]]),
+        outputBuffer
+      });
+
+      expect(result.data).toEqual({
+        exitCode: 1,
+        outputTail: ['fatal right after breakpoint']
+      });
+      expect(result.summary).toBe(
+        'The program exited with code 1 after a stop the launch could not report (last stop: breakpoint). See outputTail (get_output has the full output).'
+      );
+    });
   });
 });
