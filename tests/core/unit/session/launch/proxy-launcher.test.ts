@@ -9,6 +9,7 @@
  */
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import path from 'path';
+import { JavascriptDebugAdapter } from '@debugmcp/adapter-javascript';
 import {
   ProxyLauncher,
   type LaunchInputs,
@@ -34,7 +35,8 @@ import { FakeDebugAdapter } from '../../../../test-utils/fakes/fake-debug-adapte
 import { MockProxyManager } from '../../../../test-utils/mocks/mock-proxy-manager.js';
 import {
   createMockFileSystem,
-  createMockLogger
+  createMockLogger,
+  createMockEnvironment
 } from '../../../../test-utils/helpers/test-dependencies.js';
 import { createMockAdapterRegistry } from '../../../../test-utils/mocks/mock-adapter-registry.js';
 
@@ -477,6 +479,8 @@ describe('ProxyLauncher.prepareAdapter', () => {
     const configuredCwd = path.resolve('/configured');
     const cases: { request: ProxyLaunchRequest; cwdProvided: boolean; cwd: string; configured?: string }[] = [
       { request: { scriptPath: SCRIPT }, cwdProvided: false, cwd: path.dirname(SCRIPT) },
+      { request: { scriptPath: SCRIPT, dapLaunchArgs: launchArgs({ cwd: '' }) }, cwdProvided: false, cwd: path.dirname(SCRIPT) },
+      { request: { scriptPath: SCRIPT, dapLaunchArgs: launchArgs({ cwd: null }) }, cwdProvided: false, cwd: path.dirname(SCRIPT) },
       { request: { scriptPath: SCRIPT, dapLaunchArgs: launchArgs({ cwd: suppliedCwd }) }, cwdProvided: true, cwd: suppliedCwd },
       { request: { scriptPath: SCRIPT, adapterLaunchConfig: { cwd: suppliedCwd } }, cwdProvided: true, cwd: suppliedCwd },
       { request: { scriptPath: SCRIPT }, cwdProvided: true, cwd: configuredCwd, configured: configuredCwd }
@@ -496,6 +500,69 @@ describe('ProxyLauncher.prepareAdapter', () => {
       } finally {
         await outcome.lease.release();
       }
+    }
+  });
+
+  it.each([
+    ['omitted', 'dapLaunchArgs', undefined],
+    ['empty', 'dapLaunchArgs', ''],
+    ['null', 'dapLaunchArgs', null],
+    ['number', 'dapLaunchArgs', 42],
+    ['empty', 'adapterLaunchConfig', ''],
+    ['null', 'adapterLaunchConfig', null],
+    ['number', 'adapterLaunchConfig', 42]
+  ] as const)('the real JavaScript transform produces one runner notice for %s %s.cwd', async (_name, source, cwd) => {
+    const fileSystem = createMockFileSystem();
+    vi.mocked(fileSystem.existsSync).mockReturnValue(true);
+    const adapter = new JavascriptDebugAdapter({ fileSystem, logger: createMockLogger(), environment: createMockEnvironment() });
+    const h = makeHarness({ adapter });
+    const root = path.resolve('/project');
+    const program = path.join(root, 'node_modules', 'pkg', 'run.js');
+    const request: ProxyLaunchRequest = {
+      scriptPath: path.join(root, 'root.js'),
+      [source]: { program, ...(cwd === undefined ? {} : { cwd }) }
+    };
+    const session = makeSession({ language: DebugLanguage.JAVASCRIPT });
+    const inputs = await h.launcher.prepareLaunchInputs(session, request);
+    const outcome = await h.launcher.prepareAdapter(session, inputs, request);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) throw outcome.error;
+    try {
+      expect(outcome.plan.launchConfig.cwd).toBe(root);
+      const notices = outcome.record.launchConfigNotices.filter(n => n.includes('Working directory defaulted'));
+      expect(notices).toHaveLength(1);
+      const keyNotices = outcome.record.launchConfigNotices.filter(n => !n.includes('Working directory defaulted'));
+      expect(keyNotices).toEqual(source === 'adapterLaunchConfig' && (cwd === null || typeof cwd === 'number')
+        ? [`${source}.cwd: expected a string; using the default`]
+        : []);
+      expect(notices[0]).toContain(`Working directory defaulted to ${root},`);
+      expect(notices[0]).toContain('adapterLaunchConfig.cwd');
+      expect(notices[0]).toContain('dapLaunchArgs.cwd');
+    } finally {
+      await outcome.lease.release();
+    }
+  });
+
+  it.each(['node_modules/pkg/run.js', '../node_modules/pkg/run.js'])('records the original target of a relative JavaScript runner: %s', async program => {
+    const fileSystem = createMockFileSystem();
+    vi.mocked(fileSystem.existsSync).mockReturnValue(true);
+    const adapter = new JavascriptDebugAdapter({ fileSystem, logger: createMockLogger(), environment: createMockEnvironment() });
+    const h = makeHarness({ adapter });
+    const scriptDir = path.resolve('/project/scripts');
+    const session = makeSession({ language: DebugLanguage.JAVASCRIPT });
+    const request: ProxyLaunchRequest = { scriptPath: path.join(scriptDir, 'root.js'), dapLaunchArgs: launchArgs({ program }) };
+    const inputs = await h.launcher.prepareLaunchInputs(session, request);
+    const outcome = await h.launcher.prepareAdapter(session, inputs, request);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) throw outcome.error;
+    try {
+      const absoluteProgram = path.resolve(scriptDir, program);
+      expect(outcome.plan.launchConfig.program).toBe(absoluteProgram);
+      expect(outcome.record.transformedLaunch?.program).toBe(absoluteProgram);
+      expect(outcome.record.transformedLaunch?.launchConfig.program).toBe(absoluteProgram);
+      expect(path.isAbsolute(outcome.plan.launchConfig.cwd as string)).toBe(true);
+    } finally {
+      await outcome.lease.release();
     }
   });
 

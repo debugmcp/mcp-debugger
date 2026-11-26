@@ -70,7 +70,8 @@ function defaultAttachCwd(): string {
 /** The launch-scoped notice when an installed runner defaults to its project root (#1253). */
 function jsRunnerDefaultCwd(cwd: string): string {
   return `Working directory defaulted to ${cwd}, the folder containing the outermost node_modules directory. ` +
-    'Set dapLaunchArgs.cwd to use a different working directory.';
+    'Set dapLaunchArgs.cwd to use a different working directory; if adapterLaunchConfig.cwd is present, ' +
+    'change or remove it because it takes precedence.';
 }
 
 /**
@@ -556,16 +557,22 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     for (const { key, message } of this.launchConfigDiagnostics) {
       this.dependencies.logger?.warn?.(`[JavascriptDebugAdapter] launch ${key}: ${message}`);
     }
-    const program = typeof u.program === 'string' ? u.program : '';
+    let program = typeof u.program === 'string' ? u.program : '';
     
     // The launcher may already have derived a cwd. Only this transform decides
     // whether an installed runner needs a different default; a supplied cwd wins.
     const hasCwd = typeof u.cwd === 'string' && u.cwd.length > 0;
-    const runnerRoot = !hasCwd || context?.cwdProvided === false ? jsRunnerProjectRoot(program) : undefined;
+    const runnerProgram = program && !path.isAbsolute(program)
+      ? path.resolve(hasCwd ? u.cwd as string : defaultAttachCwd(), program)
+      : program;
+    const runnerRoot = !hasCwd || context?.cwdProvided === false ? jsRunnerProjectRoot(runnerProgram) : undefined;
     let cwd: string;
     if (runnerRoot !== undefined) {
       cwd = runnerRoot;
-      this.launchConfigDiagnostics.push({ key: 'cwd', scope: 'launch', message: jsRunnerDefaultCwd(cwd) });
+      // Keep a relative target anchored to its original directory when cwd
+      // changes, both on the wire and in the recorded transformed launch.
+      program = runnerProgram;
+      this.launchConfigDiagnostics.push({ key: 'runner-cwd', scope: 'launch', message: jsRunnerDefaultCwd(cwd) });
     } else if (hasCwd) {
       cwd = u.cwd as string;
     } else {

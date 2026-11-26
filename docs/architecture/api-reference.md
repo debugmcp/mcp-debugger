@@ -150,10 +150,12 @@ Command to install the debug adapter.
 
 ### Debug Configuration Methods
 
-#### `transformLaunchConfig(config: GenericLaunchConfig): Promise<LanguageSpecificLaunchConfig>`
+#### `transformLaunchConfig(config: GenericLaunchConfig, context?: LaunchTransformContext): Promise<LanguageSpecificLaunchConfig>`
 Converts generic config to language-specific format (async to permit build/compilation steps before launch).
 
-**Parameters**: Generic launch configuration
+**Parameters**: Generic launch configuration and optional launcher provenance. `context.cwdProvided`
+distinguishes a caller/configured working directory from the launcher's derived default. The
+context is a separate argument and never enters the DAP configuration; adapters may ignore it.
 **Returns**: Promise resolving to language-specific configuration with additional fields
 
 ### Attach Support Methods (Optional)
