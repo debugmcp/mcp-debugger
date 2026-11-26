@@ -1,0 +1,1 @@
+Failed child-session adoptions now count in `childrenReleased` and state that the child runs undebugged only when the debug adapter confirms the fallback release; unconfirmed releases are disclosed separately without claiming the child continues running (#1221).

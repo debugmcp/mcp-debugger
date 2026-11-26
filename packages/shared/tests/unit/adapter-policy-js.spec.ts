@@ -338,6 +338,50 @@ describe('JsDebugAdapterPolicy', () => {
       expect(result.scopeRefs).toEqual([100, 200]);
     });
 
+    it('leaves outer Block scopes listed after Local out of the merge when Local has variables (issue #1252)', () => {
+      // Vite/Vitest SSR wraps module-level imports and constants in an outer
+      // lexical Block scope listed after the method's Local scope.
+      const scopes: Record<number, DebugProtocol.Scope[]> = {
+        1: [
+          { name: 'Block', variablesReference: 100, expensive: false },
+          { name: 'Local', variablesReference: 200, expensive: false },
+          { name: 'Block', variablesReference: 250, expensive: false },
+          { name: 'Global', variablesReference: 400, expensive: true },
+        ],
+      };
+      const vars: Record<number, Variable[]> = {
+        100: [v('innerVar', '1')],
+        200: [v('sessionId', "'abc'"), v('childrenClosed', '0')],
+        250: [v('UNSET_BREAKPOINT_WARNING_LIMIT', '10'), v('ProxyConfig', 'class ProxyConfig')],
+        400: [v('globalThis', '{}')],
+      };
+
+      const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
+
+      expect(result.variables.map(variable => variable.name)).toEqual(['innerVar', 'sessionId', 'childrenClosed']);
+      expect(result.scopeRefs).toEqual([100, 200]);
+    });
+
+    it('falls back to an outer Block scope listed after Local when Local and inner blocks are empty (issue #1252)', () => {
+      const scopes: Record<number, DebugProtocol.Scope[]> = {
+        1: [
+          { name: 'Local', variablesReference: 100, expensive: false },
+          { name: 'Block', variablesReference: 250, expensive: false },
+          { name: 'Global', variablesReference: 400, expensive: true },
+        ],
+      };
+      const vars: Record<number, Variable[]> = {
+        100: [],
+        250: [v('loopItem', "'x'")],
+        400: [v('globalThis', '{}')],
+      };
+
+      const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
+
+      expect(result.variables.map(variable => variable.name)).toEqual(['loopItem']);
+      expect(result.scopeRefs).toEqual([250]);
+    });
+
     it("merges a catch (e) binding from a 'Catch Block' scope (issue #558)", () => {
       const scopes: Record<number, DebugProtocol.Scope[]> = {
         1: [
@@ -477,6 +521,50 @@ describe('JsDebugAdapterPolicy', () => {
 
       expect(result.variables.map(variable => variable.name)).toEqual(['i', 'total']);
       expect(result.scopeRefs).toEqual([100, 200]);
+    });
+
+    it('leaves outer Block scopes listed after Local out of the merge when Local has variables (issue #1252)', () => {
+      // Vite/Vitest SSR wraps module-level imports and constants in an outer
+      // lexical Block scope listed after the method's Local scope.
+      const scopes: Record<number, DebugProtocol.Scope[]> = {
+        1: [
+          { name: 'Block', variablesReference: 100, expensive: false },
+          { name: 'Local', variablesReference: 200, expensive: false },
+          { name: 'Block', variablesReference: 250, expensive: false },
+          { name: 'Global', variablesReference: 400, expensive: true },
+        ],
+      };
+      const vars: Record<number, Variable[]> = {
+        100: [v('innerVar', '1')],
+        200: [v('sessionId', "'abc'"), v('childrenClosed', '0')],
+        250: [v('UNSET_BREAKPOINT_WARNING_LIMIT', '10'), v('ProxyConfig', 'class ProxyConfig')],
+        400: [v('globalThis', '{}')],
+      };
+
+      const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
+
+      expect(result.variables.map(variable => variable.name)).toEqual(['innerVar', 'sessionId', 'childrenClosed']);
+      expect(result.scopeRefs).toEqual([100, 200]);
+    });
+
+    it('falls back to an outer Block scope listed after Local when Local and inner blocks are empty (issue #1252)', () => {
+      const scopes: Record<number, DebugProtocol.Scope[]> = {
+        1: [
+          { name: 'Local', variablesReference: 100, expensive: false },
+          { name: 'Block', variablesReference: 250, expensive: false },
+          { name: 'Global', variablesReference: 400, expensive: true },
+        ],
+      };
+      const vars: Record<number, Variable[]> = {
+        100: [],
+        250: [v('loopItem', "'x'")],
+        400: [v('globalThis', '{}')],
+      };
+
+      const result = JsDebugAdapterPolicy.extractLocalVariables!([frame], scopes, vars);
+
+      expect(result.variables.map(variable => variable.name)).toEqual(['loopItem']);
+      expect(result.scopeRefs).toEqual([250]);
     });
 
     it('returns a populated Block-only frame without reaching Global (issue #558)', () => {

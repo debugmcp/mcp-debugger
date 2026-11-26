@@ -1040,6 +1040,15 @@ export class ExecutionController {
         this.ctx, target.id, landing.stackResult, 'waitForStop', { omitException: true }
       );
 
+      // Settle any in-flight child releases (bounded to min(1.5 s, remaining
+      // deadline) and cancelled on abort) BEFORE the loop's final re-check so
+      // a child that resumed or closed during the wait never returns a stale
+      // landing (issue #1221).
+      await this.ctx.settleInFlightChildReleases(sessionId, {
+        timeoutMs: Math.max(0, deadline - Date.now()),
+        signal
+      });
+
       try {
         this.ctx.getSession(sessionId);
       } catch {

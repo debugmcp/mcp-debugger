@@ -268,7 +268,7 @@ export interface IDapClient {
    * holds unanswered (the session tree, issue #1081). Optional: only
    * MinimalDapClient implements it.
    */
-  respondToReverseRequest?(request: DebugProtocol.Request, body: unknown, success: boolean, message?: string): void;
+  respondToReverseRequest?(request: DebugProtocol.Request, body: unknown, success: boolean, message?: string): boolean | void;
   /**
    * Record the session's break-on-exception mode so DAP child sessions can
    * apply the same exception filters (issue #220). Optional: only

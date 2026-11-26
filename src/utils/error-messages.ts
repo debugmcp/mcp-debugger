@@ -655,6 +655,39 @@ export const ErrorMessages = {
       `either, read get_output, or set breakpoints — they take effect on the running program.`;
   },
 
+  /**
+   * A launch answered while the launched root is still running AND an adopted
+   * child session is already paused (issue #1150): never say "has not reached
+   * N breakpoint(s) yet", name the paused child session directly, and point at
+   * `pausedChild` so the caller saves a `wait_for_stop` turn.
+   */
+  launchRunningWithPausedChild: (
+    childName: string,
+    childSessionId: string,
+    reason: string,
+    location?: { file: string; line: number },
+    hasSnapshot = false
+  ) => {
+    const where = location ? ` at ${location.file}:${location.line}` : '';
+    const snapshotHint = hasSnapshot ? ' (pausedChild carries its stop snapshot)' : '';
+    return (
+      `The launched process is running, and child session '${childName}' (${childSessionId}) is already paused (${reason})${where}. ` +
+      `Inspect, step, or continue session ${childSessionId} directly${snapshotHint}.`
+    );
+  },
+
+  /**
+   * A launch answered while the launched root is still running AND an adopted
+   * child session has already ended in an error state (issue #1150).
+   */
+  launchRunningWithErroredChild: (
+    childName: string,
+    childSessionId: string,
+    detail?: string
+  ) =>
+    `The launched process is running, while child session '${childName}' (${childSessionId}) ended in an error state${detail ? `: ${detail}` : ''}. ` +
+    `Close session ${childSessionId} with close_debug_session to wait past it on the root.`,
+
 
   /**
    * The why a session whose current launch runs with the debugger off appends

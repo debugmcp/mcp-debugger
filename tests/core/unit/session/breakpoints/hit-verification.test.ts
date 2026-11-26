@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { Breakpoint, FunctionBreakpoint } from '@debugmcp/shared';
-import { applyHitBreakpointIds, soleHolderOf } from '../../../../../src/session/breakpoints/hit-verification.js';
+import { applyHitBreakpointIds, recordTreeVerifiedBreakpoint, soleHolderOf } from '../../../../../src/session/breakpoints/hit-verification.js';
 
 const line = (id: string, lineNumber: number, adapterId: number | undefined, verified: boolean): Breakpoint =>
   ({ id, file: '/w/app.js', line: lineNumber, verified, ...(adapterId !== undefined ? { adapterId } : {}) }) as Breakpoint;
@@ -58,5 +58,17 @@ describe('applyHitBreakpointIds', () => {
     expect(upgraded).toEqual([]);
     expect(first.verified).toBe(false);
     expect(second.verified).toBe(false);
+  });
+});
+
+describe('recordTreeVerifiedBreakpoint (I5, issue #1150)', () => {
+  it('records verified breakpoints on the shared run and ignores unverified ones', () => {
+    const run: { treeVerifiedBreakpointIds?: Set<string> } = {};
+    recordTreeVerifiedBreakpoint({ run }, line('unverified', 5, 1, false));
+    expect(run.treeVerifiedBreakpointIds?.has('unverified')).toBeFalsy();
+
+    recordTreeVerifiedBreakpoint({ run }, line('verified', 8, 2, true));
+    expect(run.treeVerifiedBreakpointIds?.has('verified')).toBe(true);
+    expect(run.treeVerifiedBreakpointIds?.has('unverified')).toBe(false);
   });
 });

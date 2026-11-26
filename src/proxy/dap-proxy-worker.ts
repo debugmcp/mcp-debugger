@@ -2019,8 +2019,11 @@ export class DapProxyWorker {
     switch (payload.dapCommand) {
       case CHILD_RELEASE_COMMAND: {
         const args = (payload.dapArgs ?? {}) as ChildReleaseArgs;
-        const released = this.childConnections.release(args.reportId, args.reason ?? 'released by the server');
-        this.sendDapResponse(payload.requestId, true, { body: { released } }, undefined, payload.sessionId);
+        const outcome = await this.childConnections.releaseWithConfirmation(
+          args.reportId,
+          args.reason ?? 'released by the server'
+        );
+        this.sendDapResponse(payload.requestId, true, { body: outcome }, undefined, payload.sessionId);
         return;
       }
       case CHILD_ADOPT_COMMAND: {

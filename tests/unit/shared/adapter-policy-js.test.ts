@@ -365,8 +365,8 @@ describe('JsDebugAdapterPolicy', () => {
     const frames = [{ id: 1 }];
     const scopes = {
       1: [
-        { name: 'Local', variablesReference: 1 },
         { name: 'Block', variablesReference: 2 },
+        { name: 'Local', variablesReference: 1 },
         { name: 'Global', variablesReference: 3 }
       ]
     };
@@ -381,7 +381,7 @@ describe('JsDebugAdapterPolicy', () => {
         // A program's own name that merely looks alike stays.
         { name: '__vite_config', value: '{}' }
       ],
-      // A scope that holds nothing but the transform's bindings supplies nothing.
+      // An inner block scope that holds nothing but the transform's bindings supplies nothing.
       2: [{ name: '__vite_ssr_import_3__', value: 'Module {ErrorMessages: <accessor>}' }]
     };
 
@@ -395,6 +395,38 @@ describe('JsDebugAdapterPolicy', () => {
     expect(withSpecial.variables.map((variable) => variable.name)).toEqual(
       expect.arrayContaining(['__vite_ssr_import_0__', '__vite_ssr_exports__', '__vite_ssr_import_3__'])
     );
+  });
+
+  it('omits outer Block scopes listed after Local when Local has bindings, while falling back when Local is empty (issue #1252)', () => {
+    const frames = [{ id: 1 }];
+    const scopes = {
+      1: [
+        { name: 'Local', variablesReference: 1 },
+        { name: 'Block', variablesReference: 2 },
+        { name: 'Global', variablesReference: 3 }
+      ]
+    };
+    const nonEmptyLocal = JsDebugAdapterPolicy.extractLocalVariables(
+      frames as any,
+      scopes as any,
+      {
+        1: [{ name: 'sessionId', value: "'s1'" }],
+        2: [{ name: 'DEFAULT_HOLD_MS', value: '2000' }, { name: 'DebugLauncher', value: 'class DebugLauncher' }]
+      } as any
+    );
+    expect(nonEmptyLocal.variables.map((variable) => variable.name)).toEqual(['sessionId']);
+    expect(nonEmptyLocal.scopeRefs).toEqual([1]);
+
+    const emptyLocal = JsDebugAdapterPolicy.extractLocalVariables(
+      frames as any,
+      scopes as any,
+      {
+        1: [{ name: 'this', value: 'undefined' }],
+        2: [{ name: 'capturedConfig', value: '{ port: 3000 }' }]
+      } as any
+    );
+    expect(emptyLocal.variables.map((variable) => variable.name)).toEqual(['capturedConfig']);
+    expect(emptyLocal.scopeRefs).toEqual([2]);
   });
 
   it('does not relabel Global as locals when no Local or block scope exists (#595)', () => {

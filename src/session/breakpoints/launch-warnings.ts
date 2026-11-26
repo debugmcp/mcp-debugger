@@ -32,17 +32,36 @@ export interface UnhitBreakpointSummary {
 }
 
 /**
+ * Whether a breakpoint bound anywhere in this run's session tree (issue #1150):
+ * either on `session` itself, or recorded in `session.run.treeVerifiedBreakpointIds`
+ * when an adopted child verified or hit its copy.
+ */
+function isVerifiedInTree(
+  session: Partial<Pick<ManagedSession, 'run'>>,
+  bp: { id: string; verified: boolean }
+): boolean {
+  return bp.verified || session.run?.treeVerifiedBreakpointIds?.has(bp.id) === true;
+}
+
+/**
  * Ran-to-completion unbound-breakpoint warning (issue #467). Built only
  * when the launch ends in STOPPED: at that point an unverified breakpoint
  * never bound and never will, for bind-late adapters too — so this is a
  * zero-false-positive moment to surface the per-breakpoint diagnostics the
  * store already holds (e.g. the path-remap suggestion CodeLLDB puts in
  * `message`).
+ *
+ * Tree-aware (issue #1150): breakpoints verified in an adopted child session
+ * bound during this run and are never reported as unbound; when child
+ * processes ran undebugged (released, unconfirmed, or opted out), the tail
+ * explains that child-only code could not bind instead of blaming only the
+ * file path and line.
  */
 export function buildUnboundBreakpointExitWarning(
-  session: Pick<ManagedSession, 'breakpoints'>
+  session: Pick<ManagedSession, 'breakpoints'> &
+    Partial<Pick<ManagedSession, 'run' | 'releasedChildReports' | 'unconfirmedChildReleases'>>
 ): string | undefined {
-  const unbound = Array.from(session.breakpoints.values()).filter(bp => !bp.verified);
+  const unbound = Array.from(session.breakpoints.values()).filter(bp => !isVerifiedInTree(session, bp));
   if (unbound.length === 0) {
     return undefined;
   }
@@ -52,6 +71,23 @@ export function buildUnboundBreakpointExitWarning(
     const message = normalizeBreakpointMessage(bp.message, bp.verified);
     return `${fileLabel(bp.file)}:${bp.line}${message ? ` (${message})` : ''}`;
   });
+  const optedOut = session.run?.childDebuggingOptedOut;
+  const released = session.releasedChildReports ?? 0;
+  const unconfirmed = session.unconfirmedChildReleases ?? 0;
+  if (optedOut !== undefined || released > 0 || unconfirmed > 0) {
+    const childClause = optedOut !== undefined
+      ? optedOut === 'adapter-default'
+        ? 'child-process debugging was left off by the adapter for this attach, so breakpoints in code only a child process loads could not bind'
+        : `child-process debugging was off (${optedOut}), so breakpoints in code only a child process loads could not bind`
+      : released > 0
+        ? `${released} child process${released === 1 ? ' ran' : 'es ran'} undebugged, so breakpoints in code only ${released === 1 ? 'it loads' : 'they load'} could not bind`
+        : `${unconfirmed} child process${unconfirmed === 1 ? ' could' : 'es could'} not be adopted, so breakpoints in code only ${unconfirmed === 1 ? 'it loads' : 'they load'} could not bind`;
+    return (
+      `${unbound.length} breakpoint(s) never bound in the debugged process during this run: ${parts.join('; ')}. ` +
+      `The program ran to completion without stopping there — ${childClause}; ` +
+      `otherwise check the file path and line, or list_breakpoints for the full per-breakpoint state`
+    );
+  }
   return (
     `${unbound.length} breakpoint(s) never bound during this run: ${parts.join('; ')}. ` +
     `The program ran to completion without stopping there — check the file path and line, ` +
@@ -198,7 +234,8 @@ export function describeProgramEnd(exitCode: number | undefined): string {
  * did pause, so it counts.
  */
 export function buildRunToCompletionSummary(
-  session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'exitCode' | 'lastStop' | 'descendantStops' | 'adapterCapabilities' | 'programEndExplanation'>
+  session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'exitCode' | 'lastStop' | 'descendantStops' | 'adapterCapabilities' | 'programEndExplanation'> &
+    Partial<Pick<ManagedSession, 'run'>>
 ): RunToCompletionSummary {
   const base = summarizeProgramEnd(session);
   // What the adapter read into the end (issue #877: the devices a Flutter launch found when
@@ -215,7 +252,8 @@ export function buildRunToCompletionSummary(
 }
 
 function summarizeProgramEnd(
-  session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'exitCode' | 'lastStop' | 'descendantStops' | 'adapterCapabilities'>
+  session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'exitCode' | 'lastStop' | 'descendantStops' | 'adapterCapabilities'> &
+    Partial<Pick<ManagedSession, 'run'>>
 ): RunToCompletionSummary {
   const exitCode = session.exitCode;
   const ended = describeProgramEnd(exitCode);
@@ -250,7 +288,7 @@ function summarizeProgramEnd(
       file: bp.file,
       line: bp.line,
       ...(typeof bp.requestedLine === 'number' && bp.requestedLine !== bp.line ? { requestedLine: bp.requestedLine } : {}),
-      verified: bp.verified
+      verified: isVerifiedInTree(session, bp)
     });
   }
   const unhitFunctions = Array.from(session.functionBreakpoints?.values() ?? []);
@@ -261,12 +299,20 @@ function summarizeProgramEnd(
   }
   const verifiedNames = [
     ...unhitBreakpoints.filter(bp => bp.verified).map(bp => `${fileLabel(bp.file)}:${bp.line}`),
-    ...unhitFunctions.filter(bp => bp.verified).map(bp => `function '${bp.functionName}'`)
+    ...unhitFunctions.filter(bp => isVerifiedInTree(session, bp)).map(bp => `function '${bp.functionName}'`)
   ];
-  const verifiedClause = verifiedNames.length > 0
-    ? ` Verified but never hit: ${verifiedNames.join(', ')}.`
+  const optedOut = session.run?.childDebuggingOptedOut;
+  const processScope = session.run?.attachMode ? 'the attached process' : 'the launched process';
+  const offWhy = optedOut === 'adapter-default'
+    ? 'left off by the adapter for this attach'
+    : `off via ${optedOut}`;
+  const optOutClause = optedOut !== undefined
+    ? ` in ${processScope} (child-process debugging was ${offWhy}, so any child processes would not be debugged)`
     : '';
-  return { summary: `${ended} without hitting any breakpoint.${verifiedClause}`, data };
+  const verifiedClause = verifiedNames.length > 0
+    ? ` Verified${optedOut !== undefined ? ` in ${processScope}` : ''} but never hit: ${verifiedNames.join(', ')}.`
+    : '';
+  return { summary: `${ended} without hitting any breakpoint${optOutClause}.${verifiedClause}`, data };
 }
 
 /**
