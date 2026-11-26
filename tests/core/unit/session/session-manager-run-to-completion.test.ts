@@ -138,4 +138,29 @@ describe('SessionManager.startDebugging - run to completion (issue #701)', () =>
     expect(result.data).not.toHaveProperty('unhitBreakpoints');
     expect(result.data?.message).toBe('Debugging started for /work/dist/app.js. Current state: paused');
   });
+
+  it('carries outputTail and points at get_output when the program exits non-zero inside the launch hold with captured stderr (issue #1254)', async () => {
+    const session = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+    dependencies.mockProxyManager.start = vi.fn().mockImplementation(async (startConfig) => {
+      setMockProxyRunning(dependencies.mockProxyManager, true);
+      dependencies.mockProxyManager.startCalls.push(startConfig);
+      process.nextTick(() => {
+        dependencies.mockProxyManager.emit('output', {
+          category: 'stderr',
+          output: 'No test files found, exiting with code 1\n'
+        });
+        dependencies.mockProxyManager.emit('exited', 1);
+      });
+    }) as any;
+
+    const result = await launch(session.id);
+
+    expect(result.success).toBe(true);
+    expect(result.state).toBe(SessionState.STOPPED);
+    expect(result.data?.exitCode).toBe(1);
+    expect(result.data?.outputTail).toEqual(['No test files found, exiting with code 1']);
+    expect(result.data?.message).toContain('The program exited with code 1.');
+    expect(result.data?.message).toContain('get_output');
+    expect(result.data?.message).not.toContain('No test files found');
+  });
 });

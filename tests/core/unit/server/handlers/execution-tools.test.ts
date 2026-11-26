@@ -152,7 +152,30 @@ describe('execution tool handlers', () => {
       });
     });
 
-    it('reports a program that ended, with its exit code', async () => {
+    it('reports a program that ended, with its exit code and outputTail when present (issue #1254)', async () => {
+      ctx.sessionManager.getSession.mockReturnValue(liveSession);
+      ctx.sessionManager.waitForStop.mockResolvedValue({
+        success: true,
+        state: 'stopped',
+        data: {
+          message: 'The program exited with code 3. See outputTail (get_output has the full output).',
+          exitCode: 3,
+          outputTail: ['No module named pytest']
+        }
+      });
+
+      const result = await waitForStopTool(ctx, { sessionId: 'test-session' }, 'wait_for_stop');
+
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        success: true,
+        state: 'stopped',
+        message: 'The program exited with code 3. See outputTail (get_output has the full output).',
+        exitCode: 3,
+        outputTail: ['No module named pytest']
+      });
+    });
+
+    it('reports a program that ended with no captured output, carrying exitCode without outputTail', async () => {
       ctx.sessionManager.getSession.mockReturnValue(liveSession);
       ctx.sessionManager.waitForStop.mockResolvedValue({
         success: true,
@@ -556,6 +579,34 @@ describe('execution tool handlers', () => {
 
       expect(payload.message).toBe('Stepped into');
       expect(payload.location).toEqual({ file: '/app/main.py', line: 3, column: 1 });
+    });
+
+    it('hoists exitCode and outputTail when a step ends with a non-zero exit (issue #1254)', async () => {
+      ctx.sessionManager.getSession.mockReturnValue({
+        run: {},
+        id: 'test-session',
+        sessionLifecycle: SessionLifecycleState.ACTIVE
+      });
+      ctx.sessionManager.stepOver.mockResolvedValue({
+        success: true,
+        state: 'stopped',
+        data: {
+          message: 'The step did not pause. The program exited with code 2. See outputTail (get_output has the full output).',
+          exitCode: 2,
+          outputTail: ['fatal error on step']
+        }
+      });
+
+      const result = await stepTool(ctx, { sessionId: 'test-session' }, 'step_over');
+      const payload = JSON.parse(result.content[0].text);
+
+      expect(payload).toEqual({
+        success: true,
+        state: 'stopped',
+        message: 'The step did not pause. The program exited with code 2. See outputTail (get_output has the full output).',
+        exitCode: 2,
+        outputTail: ['fatal error on step']
+      });
     });
   });
 

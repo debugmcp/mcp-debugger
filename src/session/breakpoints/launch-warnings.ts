@@ -9,7 +9,53 @@
  */
 import type { AdapterPolicy, ExceptionBreakMode } from '@debugmcp/shared';
 import { normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
+import { OUTPUT_BUFFER_CAP, type OutputRingBuffer } from '../output-buffer.js';
 import type { ManagedSession } from '../session-store.js';
+
+export const OUTPUT_TAIL_LINES = 8;
+export const OUTPUT_TAIL_LINE_CHARS = 300;
+
+/**
+ * The last non-empty lines captured on `buffer`, with the bounds shared by a
+ * failed launch's output quote and a non-zero exit's `outputTail` (issues
+ * #1036, #1254): split per entry on `\n` so entries without a trailing newline
+ * never run into the next one, trimmed, up to 8 lines of 300 characters each.
+ * Undefined when nothing was captured.
+ */
+export function readOutputTailLines(
+  buffer: Pick<OutputRingBuffer, 'read'> | undefined
+): string[] | undefined {
+  const lines = (buffer?.read(0, OUTPUT_BUFFER_CAP).entries ?? [])
+    .flatMap(entry => entry.output.split('\n'))
+    .map(line => line.trim())
+    .filter(line => line.length > 0)
+    .slice(-OUTPUT_TAIL_LINES)
+    .map(line => (line.length > OUTPUT_TAIL_LINE_CHARS ? `${line.slice(0, OUTPUT_TAIL_LINE_CHARS)}…` : line));
+  return lines.length > 0 ? lines : undefined;
+}
+
+/**
+ * The `outputTail` an end answer carries for `session`, or undefined (issues
+ * #1254, #1136): present only when the run reported a non-zero exit code and
+ * `session`'s own output buffer captured at least one non-empty line. Reads
+ * what `get_output` on `session` reads — never walks the session tree.
+ */
+export function exitOutputTail(
+  session: Pick<ManagedSession, 'exitCode'> & Partial<Pick<ManagedSession, 'outputBuffer'>>
+): string[] | undefined {
+  if (typeof session.exitCode !== 'number' || session.exitCode === 0) {
+    return undefined;
+  }
+  return readOutputTailLines(session.outputBuffer);
+}
+
+/** Appends a short `get_output` pointer clause when an end answer carries `outputTail` (issue #1254). */
+export function withOutputTailClause(message: string, outputTail: readonly string[] | undefined): string {
+  if (!outputTail || outputTail.length === 0) {
+    return message;
+  }
+  return `${message}${/[.!?]$/.test(message) ? '' : '.'} See outputTail (get_output has the full output).`;
+}
 
 /**
  * The file's last path segment, whichever separator the record's path uses —
@@ -199,6 +245,7 @@ export interface RunToCompletionSummary {
   data: {
     exitCode?: number;
     unhitBreakpoints?: UnhitBreakpointSummary[];
+    outputTail?: string[];
   };
 }
 
@@ -235,7 +282,7 @@ export function describeProgramEnd(exitCode: number | undefined): string {
  */
 export function buildRunToCompletionSummary(
   session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'exitCode' | 'lastStop' | 'descendantStops' | 'adapterCapabilities' | 'programEndExplanation'> &
-    Partial<Pick<ManagedSession, 'run'>>
+    Partial<Pick<ManagedSession, 'run' | 'outputBuffer'>>
 ): RunToCompletionSummary {
   const base = summarizeProgramEnd(session);
   // What the adapter read into the end (issue #877: the devices a Flutter launch found when
@@ -253,15 +300,22 @@ export function buildRunToCompletionSummary(
 
 function summarizeProgramEnd(
   session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'exitCode' | 'lastStop' | 'descendantStops' | 'adapterCapabilities'> &
-    Partial<Pick<ManagedSession, 'run'>>
+    Partial<Pick<ManagedSession, 'run' | 'outputBuffer'>>
 ): RunToCompletionSummary {
   const exitCode = session.exitCode;
   const ended = describeProgramEnd(exitCode);
-  const data: RunToCompletionSummary['data'] = typeof exitCode === 'number' ? { exitCode } : {};
+  const outputTail = exitOutputTail(session);
+  const data: RunToCompletionSummary['data'] = {
+    ...(typeof exitCode === 'number' ? { exitCode } : {}),
+    ...(outputTail ? { outputTail } : {})
+  };
 
   if (session.lastStop) {
     return {
-      summary: `${ended} after a stop the launch could not report (last stop: ${session.lastStop.reason}).`,
+      summary: withOutputTailClause(
+        `${ended} after a stop the launch could not report (last stop: ${session.lastStop.reason}).`,
+        outputTail
+      ),
       data
     };
   }
@@ -273,7 +327,10 @@ function summarizeProgramEnd(
   const treeStops = session.descendantStops ?? 0;
   if (treeStops > 0) {
     return {
-      summary: `${ended}. Its child sessions stopped ${treeStops} time${treeStops === 1 ? '' : 's'} during this run.`,
+      summary: withOutputTailClause(
+        `${ended}. Its child sessions stopped ${treeStops} time${treeStops === 1 ? '' : 's'} during this run.`,
+        outputTail
+      ),
       data
     };
   }
@@ -295,7 +352,7 @@ function summarizeProgramEnd(
   data.unhitBreakpoints = unhitBreakpoints;
 
   if (unhitBreakpoints.length === 0 && unhitFunctions.length === 0) {
-    return { summary: `${ended}.`, data };
+    return { summary: withOutputTailClause(`${ended}.`, outputTail), data };
   }
   const verifiedNames = [
     ...unhitBreakpoints.filter(bp => bp.verified).map(bp => `${fileLabel(bp.file)}:${bp.line}`),
@@ -312,7 +369,10 @@ function summarizeProgramEnd(
   const verifiedClause = verifiedNames.length > 0
     ? ` Verified${optedOut !== undefined ? ` in ${processScope}` : ''} but never hit: ${verifiedNames.join(', ')}.`
     : '';
-  return { summary: `${ended} without hitting any breakpoint${optOutClause}.${verifiedClause}`, data };
+  return {
+    summary: withOutputTailClause(`${ended} without hitting any breakpoint${optOutClause}.${verifiedClause}`, outputTail),
+    data
+  };
 }
 
 /**

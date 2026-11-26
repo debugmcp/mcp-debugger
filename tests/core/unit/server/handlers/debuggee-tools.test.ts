@@ -362,5 +362,48 @@ describe('debuggee lifecycle tool handlers', () => {
       expect(ctx.lineReader.getLineContext).toHaveBeenCalledWith('/app/Program.cs', 8, { contextLines: 2 });
     });
   });
+
+  describe('program-end fields hoisted on start_debugging and restart_debugging (issue #1254)', () => {
+    const unhitBreakpoints = [{ file: '/app/Program.cs', line: 12, verified: true }];
+    const outputTail = ['Unhandled fatal configuration error', 'exiting with code 1'];
+
+    for (const [tool, answer] of answers) {
+      it(`${tool} hoists exitCode, unhitBreakpoints and outputTail to the top level while keeping data intact`, async () => {
+        const data = {
+          message: 'Debugging started for /app/Program.cs. Current state: stopped. The program exited with code 1.',
+          exitCode: 1,
+          unhitBreakpoints,
+          outputTail,
+          stopOnEntrySuccessful: false
+        };
+
+        const payload = JSON.parse((await answer(data, 'stopped')).content[0].text);
+
+        expect(payload).toMatchObject({
+          success: true,
+          state: 'stopped',
+          exitCode: 1,
+          unhitBreakpoints,
+          outputTail,
+          data
+        });
+      });
+
+      it(`${tool} hoists exitCode 0 and omits an empty unhitBreakpoints list at the top level while keeping data.unhitBreakpoints`, async () => {
+        const data = {
+          message: 'Debugging started for /app/Program.cs. Current state: stopped. The program ran to completion (exit code 0).',
+          exitCode: 0,
+          unhitBreakpoints: []
+        };
+
+        const payload = JSON.parse((await answer(data, 'stopped')).content[0].text);
+
+        expect(payload.exitCode).toBe(0);
+        expect(payload).not.toHaveProperty('unhitBreakpoints');
+        expect(payload).not.toHaveProperty('outputTail');
+        expect(payload.data.unhitBreakpoints).toEqual([]);
+      });
+    }
+  });
 });
 

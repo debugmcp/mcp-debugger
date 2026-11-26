@@ -43,7 +43,8 @@ import {
   buildNoDebugFailureNote,
   buildNoDebugLaunchWarning,
   buildUnboundBreakpointExitWarning,
-  buildRunToCompletionSummary
+  buildRunToCompletionSummary,
+  readOutputTailLines
 } from '../breakpoints/launch-warnings.js';
 import {
   failProxySetup,
@@ -96,29 +97,19 @@ function launchWarnings(session: ManagedSession, ...notes: (string | undefined)[
   return joinWarnings(...notes, ...(session.run.launchConfigNotices ?? []), ...(session.adapterNotices ?? []));
 }
 
-const OUTPUT_BEFORE_FAILURE_LINES = 8;
-const OUTPUT_BEFORE_FAILURE_LINE_CHARS = 300;
-
 /**
  * The output the adapter produced before a launch failed (issue #1036):
  * Delve's "Build error: Check the debug console for details." names exactly
  * this — the build's own lines, already captured as DAP output events, which
  * the agent otherwise needs a second call to read. The last few lines,
- * bounded; the buffer keeps the rest for get_output. Undefined when nothing
- * was captured. The caller hands over this attempt's buffer only: a failure
- * before the proxy started leaves the previous launch's on the session.
+ * bounded (shared with `outputTail`, issue #1254); the buffer keeps the rest
+ * for get_output. Undefined when nothing was captured. The caller hands over
+ * this attempt's buffer only: a failure before the proxy started leaves the
+ * previous launch's on the session.
  */
 function outputBeforeFailure(buffer: ManagedSession['outputBuffer'] | undefined): string | undefined {
-  // Per entry, then per line: an entry without a trailing newline (Delve's
-  // "Building <dir>") must not run into the next one the way the raw
-  // transcript would.
-  const lines = (buffer?.read(0, 1000).entries ?? [])
-    .flatMap(entry => entry.output.split('\n'))
-    .map(line => line.trim())
-    .filter(line => line.length > 0)
-    .slice(-OUTPUT_BEFORE_FAILURE_LINES)
-    .map(line => (line.length > OUTPUT_BEFORE_FAILURE_LINE_CHARS ? `${line.slice(0, OUTPUT_BEFORE_FAILURE_LINE_CHARS)}…` : line));
-  if (lines.length === 0) {
+  const lines = readOutputTailLines(buffer);
+  if (!lines) {
     return undefined;
   }
   return `The adapter's output before the failure (last ${lines.length} line${lines.length === 1 ? '' : 's'}; ` +

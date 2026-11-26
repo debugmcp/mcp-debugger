@@ -6,6 +6,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { buildRunToCompletionSummary } from '../../../../../src/session/breakpoints/launch-warnings.js';
+import { OutputRingBuffer } from '../../../../../src/session/output-buffer.js';
 import type { ManagedSession } from '../../../../../src/session/session-store.js';
 
 type LineBp = { file: string; line: number; requestedLine?: number; verified: boolean; message?: string; logMessage?: string };
@@ -18,6 +19,7 @@ type BuilderSession = {
   descendantStops?: number;
   adapterCapabilities?: { supportsLogPoints?: boolean };
   programEndExplanation?: { note?: string; data?: Record<string, unknown> };
+  outputBuffer?: OutputRingBuffer;
   run?: {
     attachMode?: boolean;
     childDebuggingOptedOut?: 'subProcess: false' | 'autoAttachChildProcesses: false' | 'adapter-default';
@@ -27,7 +29,8 @@ type BuilderSession = {
 
 function build(session: BuilderSession) {
   return buildRunToCompletionSummary(
-    session as unknown as Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'exitCode' | 'lastStop' | 'descendantStops' | 'adapterCapabilities' | 'programEndExplanation'>
+    session as unknown as Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'exitCode' | 'lastStop' | 'descendantStops' | 'adapterCapabilities' | 'programEndExplanation'> &
+      Partial<Pick<ManagedSession, 'run' | 'outputBuffer'>>
   );
 }
 
@@ -208,5 +211,69 @@ describe('buildRunToCompletionSummary', () => {
     });
     expect(verifiedAttach.summary).toContain('in the attached process (child-process debugging was left off by the adapter for this attach');
     expect(verifiedAttach.summary).toContain('Verified in the attached process but never hit: app.js:14.');
+  });
+
+  describe('outputTail on non-zero exit (issues #1254, #1136)', () => {
+    function bufferOf(...entries: Array<{ category?: string; output: string }>): OutputRingBuffer {
+      const buf = new OutputRingBuffer();
+      for (const entry of entries) {
+        buf.push(entry.category ?? 'stderr', entry.output);
+      }
+      return buf;
+    }
+
+    it('carries outputTail and points the summary at get_output without repeating the lines when exitCode is non-zero', () => {
+      const outputBuffer = bufferOf(
+        { output: 'No test files found, exiting with code 1\n' },
+        { output: 'filter: unknown\n' }
+      );
+      const result = build({ exitCode: 1, breakpoints: new Map(), outputBuffer });
+
+      expect((result.data as { outputTail?: string[] }).outputTail).toEqual([
+        'No test files found, exiting with code 1',
+        'filter: unknown'
+      ]);
+      expect(result.summary).toContain('The program exited with code 1.');
+      expect(result.summary).toContain('get_output');
+      expect(result.summary).not.toContain('No test files found');
+      expect(result.summary).not.toContain('filter: unknown');
+    });
+
+    it('omits outputTail and the get_output clause for exitCode 0, for an unreported exitCode, and for an empty buffer', () => {
+      const populated = bufferOf({ output: 'all good\n' });
+      const zero = build({ exitCode: 0, breakpoints: new Map(), outputBuffer: populated });
+      expect(zero.data).not.toHaveProperty('outputTail');
+      expect(zero.summary).toBe('The program ran to completion (exit code 0).');
+
+      const unreported = build({ breakpoints: new Map(), outputBuffer: populated });
+      expect(unreported.data).not.toHaveProperty('outputTail');
+      expect(unreported.summary).toBe('The program ended without reporting an exit code.');
+
+      const empty = build({ exitCode: 1, breakpoints: new Map(), outputBuffer: new OutputRingBuffer() });
+      expect(empty.data).not.toHaveProperty('outputTail');
+      expect(empty.summary).toBe('The program exited with code 1.');
+
+      const whitespaceOnly = build({ exitCode: 1, breakpoints: new Map(), outputBuffer: bufferOf({ output: '  \n\r\n ' }) });
+      expect(whitespaceOnly.data).not.toHaveProperty('outputTail');
+      expect(whitespaceOnly.summary).toBe('The program exited with code 1.');
+    });
+
+    it('bounds outputTail to the last 8 non-empty lines and 300 characters per line, splitting per entry', () => {
+      const longLine = 'x'.repeat(340);
+      const outputBuffer = bufferOf(
+        ...Array.from({ length: 10 }, (_, idx) => ({ output: `line ${idx + 1}\n` })),
+        // No trailing newline: must not run into the following entry.
+        { output: 'entry without newline' },
+        { output: `${longLine}\n` }
+      );
+      const result = build({ exitCode: 1, breakpoints: new Map(), outputBuffer });
+      const tail = (result.data as { outputTail?: string[] }).outputTail;
+
+      expect(tail).toHaveLength(8);
+      expect(tail?.[0]).toBe('line 5');
+      expect(tail?.[5]).toBe('line 10');
+      expect(tail?.[6]).toBe('entry without newline');
+      expect(tail?.[7]).toBe(`${'x'.repeat(300)}…`);
+    });
   });
 });

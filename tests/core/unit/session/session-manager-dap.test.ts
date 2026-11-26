@@ -2447,6 +2447,31 @@ describe('SessionManager - DAP Operations', () => {
         expect(result.data?.message).toBe('The step did not pause. The program ran to completion (exit code 0).');
       });
 
+      it('carries outputTail and points at get_output when the debuggee exits non-zero during a step (issue #1254)', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+          if (command === 'next') {
+            process.nextTick(() => {
+              dependencies.mockProxyManager.emit('output', { category: 'stderr', output: 'panic on step\n' });
+              dependencies.mockProxyManager.simulateExited(2);
+            });
+          }
+          return { success: true, body: { stackFrames: [] } };
+        });
+
+        const stepPromise = sessionManager.stepOver(session.id);
+        await vi.runAllTimersAsync();
+        const result = await stepPromise;
+
+        expect(result.success).toBe(true);
+        expect(result.state).toBe(SessionState.STOPPED);
+        expect(result.data?.exitCode).toBe(2);
+        expect(result.data?.outputTail).toEqual(['panic on step']);
+        expect(result.data?.message).toContain('The step did not pause. The program exited with code 2.');
+        expect(result.data?.message).toContain('get_output');
+        expect(result.data?.message).not.toContain('panic on step');
+      });
+
       it('surfaces meaningful adapter step descriptions (COBOL PERFORM) and origin-comparison notes on every adapter (issues #1180, #1182)', async () => {
         const session = await createPausedSession(sessionManager, dependencies);
         let stackReads = 0;

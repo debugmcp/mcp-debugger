@@ -7,6 +7,7 @@ import {
   appendNote,
   attachRequestFromArgs,
   describeStaleBuild,
+  hoistProgramEnd,
   readLineContext,
   redactionSummary,
   variablePayloadExtras,
@@ -314,5 +315,34 @@ describe('a child session reads the run of its tree (issue #1214)', () => {
     await describeStaleBuild(ctx, 'child', '/app/src/a.ts', 'stop');
 
     expect(ctx.buildStaleness.check).toHaveBeenCalledWith('/app/src/a.ts', JsDebugAdapterPolicy, undefined);
+  });
+});
+
+describe('hoistProgramEnd (issue #1254)', () => {
+  it('hoists exitCode (0 included), non-empty unhitBreakpoints, and non-empty outputTail', () => {
+    const unhitBreakpoints = [{ file: '/app/main.py', line: 9, verified: true }];
+    const outputTail = ['No module named pytest'];
+    const response: Record<string, unknown> = { success: true, state: 'stopped' };
+
+    hoistProgramEnd(response, { exitCode: 1, unhitBreakpoints, outputTail });
+
+    expect(response).toEqual({
+      success: true,
+      state: 'stopped',
+      exitCode: 1,
+      unhitBreakpoints,
+      outputTail
+    });
+
+    const cleanExit: Record<string, unknown> = { success: true, state: 'stopped' };
+    hoistProgramEnd(cleanExit, { exitCode: 0, unhitBreakpoints: [], outputTail: [] });
+    expect(cleanExit).toEqual({ success: true, state: 'stopped', exitCode: 0 });
+  });
+
+  it('leaves the response untouched when data is absent or carries no end fields', () => {
+    const response: Record<string, unknown> = { success: true, state: 'running' };
+    hoistProgramEnd(response, undefined);
+    hoistProgramEnd(response, {});
+    expect(response).toEqual({ success: true, state: 'running' });
   });
 });
