@@ -263,6 +263,21 @@ For the Kubernetes port-forward pattern and per-language presets, see the [Kuber
 
 Variable values, captured output, and evaluate results are scanned for credentials before they reach the transcript: values with a recognizable secret shape, and variables whose *name* exactly matches a known sensitive name (`password`, `api_key`, ...), come back masked and flagged `redacted: true`. Only the display is masked — program state is untouched. Start the server with `DEBUG_MCP_NO_REDACT=1` to disable it (for example when debugging credential-handling code itself). Full rules and limitations: [Secret redaction](../tool-reference.md#secret-redaction).
 
+## Known Limitations
+
+### Steps lost during exception unwinding (Python 3.12+)
+
+With debugpy 1.8.22 on Python 3.12, 3.13 and 3.14, a `step_over` or `step_out` taken where an exception leaves the function never stops: the program runs on. This happens at a `raise`, on a line that raises out of its function, and from a `finally` block while the exception unwinds. `step_into` from the same place does stop. Since #1217 the step answer says the step was lost. This is [debugpy #2100](https://github.com/microsoft/debugpy/issues/2100), reported upstream on 2026-11-26 (our issue #1194).
+
+To keep these steps, opt in by setting the variable in the debuggee's launch environment:
+
+```text
+start_debugging { "sessionId": "your-session-id", "scriptPath": "/abs/path/script.py",
+                  "dapLaunchArgs": { "env": { "PYDEVD_USE_SYS_MONITORING": "0" } } }
+```
+
+The launch passes `dapLaunchArgs.env` through the Python adapter to debugpy. mcp-debugger does not set this variable by default: it costs 6 to 7 times on call-heavy code (10 million calls to a small function on Python 3.13: 2.26 s versus 0.38 s by default and 0.37 s without a debugger), and 1.6 to 1.8 times on a loop with no calls.
+
 ## Debugging Tips
 
 1. `"verified": false` at set time is expected — debugpy binds breakpoints when it loads the module, not when you set them

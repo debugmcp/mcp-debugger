@@ -181,6 +181,14 @@ The Go adapter supports exception breakpoints with two built-in filters: `unreco
 
 Delve 1.27 and later send a DAP `exited` event with the code. Older Delve — the only kind a Go older than 1.25 can run — never does; it prints `Process N has exited with status S` to the console instead — under `noDebug` before `terminated`, and in debug mode only in reply to the `disconnect` request. mcp-debugger reads that line back (issue #753). Either way `exitCode` appears in `list_debug_sessions` and in the `start_debugging` run-to-completion summary exactly as for every other language. The line itself is visible in `get_output` (with Delve's `Detaching`) under `noDebug`, and in debug mode on Delve older than 1.27; Delve 1.27+ in debug mode prints it only as the session is torn down, after output capture has ended. A session closed while the program is still running reports no code — Delve prints `Detaching and terminating target process` instead, and nothing is guessed.
 
+## Known Limitations
+
+### Steps past `runtime.Goexit` miss deferred calls
+
+With Delve 1.26.3 and 1.27.2, `step_over` (Delve's `next`) or `step_out` on a goroutine that `runtime.Goexit` ends never stops in that goroutine's deferred calls; the program runs to the next breakpoint or its end. `t.Fatal`, `t.FailNow` and `t.SkipNow` call `runtime.Goexit`, so a `step_over` across a failing `t.Fatal(...)` in a test with a `defer` runs the test binary to its end. This is [Delve #4472](https://github.com/go-delve/delve/issues/4472), reported upstream on 2026-11-26 (our issue #1199).
+
+Set a breakpoint inside the deferred function: it does stop there.
+
 ## Debugging Tips
 
 1. **Always build with debug flags**: Use `-gcflags="all=-N -l"` to disable optimizations

@@ -46,6 +46,7 @@ Not supported. The Go adapter implements launch mode only — `attach_to_process
 
 ## Quirks
 
+- **Steps past `runtime.Goexit` miss deferred calls.** With Delve 1.26.3 and 1.27.2, `step_over` (Delve's `next`) or `step_out` on a goroutine that `runtime.Goexit` ends never stops in that goroutine's deferred calls; the program runs to the next breakpoint or its end. `t.Fatal`, `t.FailNow` and `t.SkipNow` call `runtime.Goexit`, so `step_over` across a failing `t.Fatal(...)` in a test with a `defer` runs the test binary to its end. Set a breakpoint inside the deferred function: it does stop. Upstream: [Delve #4472](https://github.com/go-delve/delve/issues/4472), reported 2026-11-26 (our issue #1199).
 - **Debuggee output is captured:** the adapter launches with Delve's `outputMode: 'remote'`, so the program's stdout/stderr arrives as `get_output` entries (categories `stdout`/`stderr`).
 - **`stopOnEntry` is forced to `false`** by the Go adapter policy (unless you explicitly set it) to dodge Delve's "unknown goroutine 1" quirk. If you force `stopOnEntry: true` and see that error, it is harmless — execution continues. Set a breakpoint on the first line of `main` if you need an entry stop.
 - Goroutine-aware, with limits: stack traces show the current goroutine's frames; Go runtime and testing frames (paths with `/runtime/` or `/testing/`) are filtered out by default — pass `includeInternals: true` to `get_stack_trace` to see them. There are no MCP tools to list or switch goroutines.
