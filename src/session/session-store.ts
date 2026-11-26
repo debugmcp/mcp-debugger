@@ -241,10 +241,12 @@ export interface Run {
    */
   treeVerifiedBreakpointIds?: Set<string>;
   /**
-   * Set when the launch or attach configuration explicitly disabled
-   * child-process adoption on an adapter that supports it (issue #1150).
+   * Set when child-process adoption was turned off for this run on an adapter
+   * that supports it (issue #1150): either explicitly by the caller
+   * (`subProcess: false` / `autoAttachChildProcesses: false`) or by the
+   * adapter's own default (unverified JavaScript attach, `'adapter-default'`).
    */
-  childDebuggingOptedOut?: 'subProcess: false' | 'autoAttachChildProcesses: false';
+  childDebuggingOptedOut?: 'subProcess: false' | 'autoAttachChildProcesses: false' | 'adapter-default';
   /**
    * In-flight CHILD_RELEASE_COMMAND round-trips awaiting adapter confirmation
    * (issue #1221), settled before launch/end/wait answers finalize.

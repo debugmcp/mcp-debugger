@@ -18,6 +18,11 @@ type BuilderSession = {
   descendantStops?: number;
   adapterCapabilities?: { supportsLogPoints?: boolean };
   programEndExplanation?: { note?: string; data?: Record<string, unknown> };
+  run?: {
+    attachMode?: boolean;
+    childDebuggingOptedOut?: 'subProcess: false' | 'autoAttachChildProcesses: false' | 'adapter-default';
+    treeVerifiedBreakpointIds?: Set<string>;
+  };
 };
 
 function build(session: BuilderSession) {
@@ -165,5 +170,25 @@ describe('buildRunToCompletionSummary', () => {
     expect(summary.endsWith(' the device list.')).toBe(true);
     expect(data.exitCode).toBe(1);
     expect((data as Record<string, unknown>).availableDevices).toEqual([{ id: 'windows' }]);
+  });
+
+  it('does not claim child processes existed when child debugging was opted out, and does not blame the caller when the adapter turned it off (m5)', () => {
+    const bp = new Map<string, LineBp>([['a', { file: '/work/child.js', line: 14, verified: false }]]);
+
+    const callerOptOut = build({
+      exitCode: 0,
+      breakpoints: bp,
+      run: { childDebuggingOptedOut: 'autoAttachChildProcesses: false' }
+    });
+    expect(callerOptOut.summary).not.toContain('so child processes were not debugged');
+    expect(callerOptOut.summary).toContain('child-process debugging was off via autoAttachChildProcesses: false, so any child processes would not be debugged');
+
+    const adapterDefaultOff = build({
+      breakpoints: bp,
+      run: { attachMode: true, childDebuggingOptedOut: 'adapter-default' }
+    });
+    expect(adapterDefaultOff.summary).not.toContain('autoAttachChildProcesses: false');
+    expect(adapterDefaultOff.summary).not.toContain('so child processes were not debugged');
+    expect(adapterDefaultOff.summary).toContain('left off by the adapter for this attach, so any child processes would not be debugged');
   });
 });

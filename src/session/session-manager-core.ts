@@ -933,19 +933,53 @@ export abstract class SessionManagerCore extends EventEmitter {
     }
   }
 
-  /** Wait for any in-flight CHILD_RELEASE_COMMAND round-trips on `sessionId`'s run (issue #1221). */
-  protected async settleInFlightChildReleases(sessionId: string): Promise<void> {
-    let session: ManagedSession | undefined;
-    try {
-      session = this.sessionStore.get(sessionId);
-    } catch {
-      return;
-    }
+  /**
+   * Wait for any in-flight CHILD_RELEASE_COMMAND round-trips on `sessionId`'s
+   * run (issue #1221), bounded to at most 1,500 ms, never past the caller's
+   * remaining deadline, and cancelled immediately when `options.signal` aborts.
+   */
+  protected async settleInFlightChildReleases(
+    sessionId: string,
+    options?: { timeoutMs?: number; signal?: AbortSignal }
+  ): Promise<void> {
+    const CHILD_RELEASE_SETTLE_MAX_MS = 1_500;
+    const session = this.sessionStore.get(sessionId);
     const inFlight = session?.run.inFlightChildReleases;
-    if (!inFlight || inFlight.size === 0) {
+    if (!inFlight || inFlight.size === 0 || options?.signal?.aborted) {
       return;
     }
-    await Promise.all([...inFlight]);
+    const budgetMs = options?.timeoutMs !== undefined
+      ? Math.min(CHILD_RELEASE_SETTLE_MAX_MS, Math.max(0, options.timeoutMs))
+      : CHILD_RELEASE_SETTLE_MAX_MS;
+    if (budgetMs <= 0) {
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const signal = options?.signal;
+    let onAbort: (() => void) | undefined;
+    try {
+      await Promise.race([
+        Promise.allSettled([...inFlight]),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, budgetMs);
+          if (signal) {
+            if (signal.aborted) {
+              resolve();
+              return;
+            }
+            onAbort = () => resolve();
+            signal.addEventListener('abort', onAbort, { once: true });
+          }
+        })
+      ]);
+    } finally {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+      if (signal && onAbort) {
+        signal.removeEventListener('abort', onAbort);
+      }
+    }
   }
 
   /** Tell the subtree listeners of a session and of each of its ancestors. */
@@ -2740,7 +2774,6 @@ export abstract class SessionManagerCore extends EventEmitter {
         }
         target.verified = result.verified;
         target.verifiedBy = target.verified ? 'adapter' : undefined;
-        recordTreeVerifiedBreakpoint(session, target);
         recordTreeVerifiedBreakpoint(session, target);
         if (typeof result.adapterId === 'number') {
           target.adapterId = result.adapterId;

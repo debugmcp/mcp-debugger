@@ -237,16 +237,18 @@ describe('Python child processes as child sessions (the session tree, issue #108
       });
       expect(started.success, JSON.stringify(started)).toBe(true);
       expect(started.state, JSON.stringify(started)).toBe('running');
-      if (started.pausedChild) {
-        expect(started.message, JSON.stringify(started)).not.toContain('has not reached');
-        expect(started.pausedChild, JSON.stringify(started)).toMatchObject({
-          state: 'paused',
-          reason: 'breakpoint',
-          location: expect.objectContaining({ line: CHILD_BREAKPOINT_LINE }),
-          context: expect.objectContaining({ lineContent: expect.stringContaining('total += i') }),
-          snapshot: expect.objectContaining({ locals: expect.objectContaining({ i: '0' }) })
-        });
-      }
+      // child.py executes line 12 immediately with no delay (~110 ms under debugpy,
+      // well inside the 1,000 ms launch hold), so pausedChild is guaranteed here.
+      expect(started.pausedChild, JSON.stringify(started)).toBeDefined();
+      expect(started.message, JSON.stringify(started)).not.toContain('has not reached');
+      expect(started.message, JSON.stringify(started)).toContain('(pausedChild carries its stop snapshot)');
+      expect(started.pausedChild, JSON.stringify(started)).toMatchObject({
+        state: 'paused',
+        reason: 'breakpoint',
+        location: expect.objectContaining({ line: CHILD_BREAKPOINT_LINE }),
+        context: expect.objectContaining({ lineContent: expect.stringContaining('total += i') }),
+        snapshot: expect.objectContaining({ locals: expect.objectContaining({ i: '0' }) })
+      });
 
       let childId: string | undefined;
       for (let iteration = 0; iteration < 3; iteration += 1) {
@@ -409,7 +411,7 @@ describe('Python child processes as child sessions (the session tree, issue #108
         : await call('wait_for_stop', { sessionId: rootId, timeout: 30000 });
       expect(ended.state, JSON.stringify(ended)).toBe('stopped');
       expect(ended.message, JSON.stringify(ended)).toContain(
-        'without hitting any breakpoint in the launched process (child-process debugging was off via subProcess: false, so child processes were not debugged).'
+        'without hitting any breakpoint in the launched process (child-process debugging was off via subProcess: false, so any child processes would not be debugged).'
       );
     } finally {
       await call('close_debug_session', { sessionId: rootId });

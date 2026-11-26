@@ -2040,6 +2040,7 @@ describe('session-tree truthfulness, turn reduction & release confirmation (issu
     expect(started.data?.pending).toBe(true);
     expect(started.data?.message).not.toContain('has not reached');
     expect(started.data?.message).toContain(`child session 'Subprocess 5151' (${child.id}) is already paused (breakpoint) at /w/child.py:12`);
+    expect(started.data?.message).toContain('(pausedChild carries its stop snapshot)');
     expect(started.data?.children).toEqual([
       { sessionId: child.id, name: 'Subprocess 5151', state: SessionState.PAUSED, parentSessionId: root.id }
     ]);
@@ -2185,5 +2186,111 @@ describe('session-tree truthfulness, turn reduction & release confirmation (issu
     expect(started.data?.message).toContain(
       '1 child process could not be adopted, and the debug adapter did not confirm releasing it; whether it continued running is not known.'
     );
+  });
+
+  it('omits the snapshot hint in launchRunningWithPausedChild when no snapshot was built (m1)', async () => {
+    setup({ DEBUG_MCP_NO_SNAPSHOT: '1' });
+    const root = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+    await sessionManager.setBreakpoint(root.id, { file: '/w/child.py', line: 12 });
+
+    const starting = sessionManager.startDebugging(root.id, '/w/parent.py');
+    await vi.advanceTimersByTimeAsync(20);
+    dependencies.mockProxyManager.simulateEvent('child-reported', report('r-nosnap', 5252));
+    await vi.advanceTimersByTimeAsync(10);
+
+    const child = childOf(root.id)!;
+    const view = dependencies.mockProxyManager.childViews.get(child.id)!;
+    view.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1 });
+    await vi.runAllTimersAsync();
+
+    const started = await starting;
+    expect(started.data?.pausedChild).toBeDefined();
+    expect(started.data?.pausedChild?.snapshot).toBeUndefined();
+    expect(started.data?.message).not.toContain('pausedChild carries its stop snapshot');
+  });
+
+  it("uses 'unknown' rather than fabricating 'breakpoint' when a paused child has no lastStop record (m2)", async () => {
+    const root = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+    await sessionManager.setBreakpoint(root.id, { file: '/w/child.py', line: 12 });
+
+    const starting = sessionManager.startDebugging(root.id, '/w/parent.py');
+    await vi.advanceTimersByTimeAsync(20);
+    dependencies.mockProxyManager.simulateEvent('child-reported', report('r-unknown', 5353));
+    await vi.advanceTimersByTimeAsync(10);
+
+    const child = childOf(root.id)!;
+    const view = dependencies.mockProxyManager.childViews.get(child.id)!;
+    view.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1 });
+    // Clear lastStop on the live ManagedSession before the launch answer is assembled to exercise the fallback.
+    sessionManager.getSession(child.id)!.lastStop = undefined;
+    await vi.runAllTimersAsync();
+
+    const started = await starting;
+    expect(started.data?.pausedChild?.reason).toBe('unknown');
+    expect(started.data?.message).toContain('(unknown)');
+    expect(started.data?.message).not.toContain('(breakpoint)');
+  });
+
+  it('resets treeVerifiedBreakpointIds on restart so a breakpoint verified in run 1 warns again when unbound in run 2 (I5)', async () => {
+    const root = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+    const { breakpoint } = await sessionManager.setBreakpoint(root.id, { file: '/w/fork_only.js', line: 14 });
+
+    // Run 1: adopted child verifies the breakpoint, then run 1 completes cleanly.
+    const run1Promise = sessionManager.startDebugging(root.id, '/w/parent.js');
+    await vi.advanceTimersByTimeAsync(20);
+    dependencies.mockProxyManager.simulateEvent('child-reported', report('r-run1', 7201));
+    await vi.advanceTimersByTimeAsync(10);
+    const child1 = childOf(root.id)!;
+    const view1 = dependencies.mockProxyManager.childViews.get(child1.id)!;
+    view1.simulateEvent('breakpoints-synced', [
+      { id: breakpoint.id, file: '/w/fork_only.js', line: 14, verified: true, adapterId: 3 }
+    ]);
+    view1.simulateEvent('terminated');
+    dependencies.mockProxyManager.simulateEvent('exited', 0);
+    await vi.runAllTimersAsync();
+    const run1 = await run1Promise;
+    expect(run1.state).toBe(SessionState.STOPPED);
+    expect(run1.data?.warning).toBeUndefined();
+
+    // Run 2 (restart): no child verifies the breakpoint; root exits with bp unbound.
+    vi.spyOn(dependencies.mockProxyManager, 'stop').mockResolvedValue();
+    const run2Promise = sessionManager.restartDebugging(root.id);
+    await vi.advanceTimersByTimeAsync(20);
+    dependencies.mockProxyManager.simulateEvent('exited', 0);
+    await vi.runAllTimersAsync();
+    const run2 = await run2Promise;
+    expect(run2.state).toBe(SessionState.STOPPED);
+    expect(run2.data?.warning).toContain('1 breakpoint(s) never bound');
+    expect(run2.data?.warning).toContain('fork_only.js:14');
+    expect(run2.data?.unhitBreakpoints).toEqual([
+      { file: '/w/fork_only.js', line: 14, verified: false }
+    ]);
+  });
+
+  it("does not count a child's unverified breakpoints-synced echo as tree-verified (I5)", async () => {
+    const root = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+    const { breakpoint } = await sessionManager.setBreakpoint(root.id, { file: '/w/fork_only.js', line: 14 });
+
+    const starting = sessionManager.startDebugging(root.id, '/w/parent.js');
+    await vi.advanceTimersByTimeAsync(20);
+    dependencies.mockProxyManager.simulateEvent('child-reported', report('r-unverified', 7202));
+    await vi.advanceTimersByTimeAsync(10);
+    const child = childOf(root.id)!;
+    const view = dependencies.mockProxyManager.childViews.get(child.id)!;
+    // Child echoes the breakpoint with verified: false — must NOT mark it tree-verified.
+    view.simulateEvent('breakpoints-synced', [
+      { id: breakpoint.id, file: '/w/fork_only.js', line: 14, verified: false, adapterId: 4 }
+    ]);
+    view.simulateEvent('terminated');
+    dependencies.mockProxyManager.simulateEvent('exited', 0);
+    await vi.runAllTimersAsync();
+
+    const started = await starting;
+    expect(started.state).toBe(SessionState.STOPPED);
+    expect(started.data?.warning).toContain('1 breakpoint(s) never bound');
+    expect(started.data?.warning).toContain('fork_only.js:14');
+    expect(started.data?.unhitBreakpoints).toEqual([
+      { file: '/w/fork_only.js', line: 14, verified: false }
+    ]);
   });
 });

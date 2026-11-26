@@ -1924,4 +1924,131 @@ describe('ChildConnections: release confirmation outcomes (issue #1221)', () => 
       closed: true
     });
   });
+
+  it('joins a failed throwaway-attach adoption outcome and reports confirmed when the fallback throwaway attach succeeds (I4)', async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const adoptClient = createMockDapClient();
+    adoptClient.connect.mockRejectedValueOnce(new Error('connect ECONNREFUSED'));
+    const okReleaseClient = createMockDapClient();
+    okReleaseClient.sendRequest.mockImplementation(async (command: string) => {
+      if (command === 'attach') {
+        setImmediate(() => okReleaseClient.emit('event', { event: 'thread', body: { reason: 'started', threadId: 1 } }));
+      }
+      return { body: {} };
+    });
+
+    const connections = new ChildConnections({
+      messageSender: { send: (m) => sent.push(m as unknown as Record<string, unknown>) },
+      logger,
+      adoption: {
+        dapClientFactory: {
+          create: vi.fn().mockReturnValueOnce(adoptClient).mockReturnValueOnce(okReleaseClient)
+        },
+        connectionManager: {
+          initializeSession: vi.fn(),
+          sendAttachRequest: vi.fn(),
+          setExceptionBreakpoints: vi.fn(),
+          setBreakpoints: vi.fn(),
+          sendConfigurationDone: vi.fn(),
+          disconnect: vi.fn()
+        },
+        policy: JsDebugAdapterPolicy,
+        host: '127.0.0.1',
+        port: 9229,
+        adapterId: 'pwa-node'
+      }
+    });
+    const rootClient = createMockDapClient();
+    connections.attach(rootClient as never, 'root-js');
+
+    rootClient.emit('child-report', {
+      request: { seq: 7, type: 'request', command: 'startDebugging' },
+      report: { targetId: 't-ok', name: 'child.js [101]', configuration: { __pendingTargetId: 't-ok' } }
+    });
+    const reportId = sent.find((m) => m.status === 'child_reported')!.reportId as string;
+
+    await expect(connections.adopt('child-js', { reportId, breakpoints: [] })).rejects.toThrow('connect ECONNREFUSED');
+    // Unlike an unknown report ({ held: false, released: false }), joining a
+    // confirmed fallback release proves releaseWithConfirmation joined the outcome.
+    await expect(connections.releaseWithConfirmation(reportId, 'adoption failed')).resolves.toEqual({
+      held: false,
+      released: true
+    });
+  });
+
+  it('records and joins the letGoOnItsConnection outcome when adoption fails after configurationDone (I4)', async () => {
+    const runLetGoCase = async (
+      disconnectImpl: () => Promise<{ answered: boolean; error?: string }>,
+      throwawaySucceeds = false
+    ) => {
+      const sent: Array<Record<string, unknown>> = [];
+      const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+      const adoptClient = createMockDapClient();
+      const fallbackClient = createMockDapClient();
+      if (throwawaySucceeds) {
+        fallbackClient.sendRequest.mockImplementation(async (command: string) => {
+          if (command === 'attach') {
+            setImmediate(() => fallbackClient.emit('event', { event: 'thread', body: { reason: 'started', threadId: 1 } }));
+          }
+          return { body: {} };
+        });
+      } else {
+        fallbackClient.connect.mockRejectedValue(new Error('throwaway failed'));
+      }
+
+      let rejectAttach!: (error: Error) => void;
+      const sendConfigurationDone = vi.fn(async () => {});
+      const connections = new ChildConnections({
+        messageSender: { send: (m) => sent.push(m as unknown as Record<string, unknown>) },
+        logger,
+        adoption: {
+          dapClientFactory: {
+            create: vi.fn().mockReturnValueOnce(adoptClient).mockReturnValueOnce(fallbackClient)
+          },
+          connectionManager: {
+            initializeSession: vi.fn().mockResolvedValue({}),
+            sendAttachRequest: vi.fn(() => new Promise<void>((_, reject) => { rejectAttach = reject; })),
+            setExceptionBreakpoints: vi.fn().mockResolvedValue({ body: {} }),
+            setBreakpoints: vi.fn().mockResolvedValue({ body: { breakpoints: [] } }),
+            sendConfigurationDone,
+            disconnect: vi.fn().mockImplementation(disconnectImpl)
+          },
+          policy: JsDebugAdapterPolicy,
+          host: '127.0.0.1',
+          port: 9229,
+          adapterId: 'pwa-node'
+        }
+      });
+      const rootClient = createMockDapClient();
+      connections.attach(rootClient as never, 'root-js');
+
+      rootClient.emit('child-report', {
+        request: { seq: 8, type: 'request', command: 'startDebugging' },
+        report: { targetId: 't-letgo', name: 'child.js [102]', configuration: { __pendingTargetId: 't-letgo' } }
+      });
+      const reportId = sent.find((m) => m.status === 'child_reported')!.reportId as string;
+
+      const adopting = connections.adopt('child-letgo', { reportId, breakpoints: [] });
+      const failed = expect(adopting).rejects.toThrow('attach failed late');
+      await new Promise((resolve) => setImmediate(resolve));
+      adoptClient.emit('initialized');
+      await vi.waitFor(() => expect(sendConfigurationDone).toHaveBeenCalled());
+      rejectAttach(new Error('attach failed late'));
+      await failed;
+
+      return connections.releaseWithConfirmation(reportId, 'adoption failed');
+    };
+
+    // Disconnect acknowledged -> confirmed
+    await expect(runLetGoCase(() => Promise.resolve({ answered: true }))).resolves.toEqual({
+      held: false,
+      released: true
+    });
+    // Disconnect unacknowledged and throwaway fallback fails -> unconfirmed
+    await expect(runLetGoCase(() => Promise.resolve({ answered: false, error: 'socket closed' }), false)).resolves.toEqual({
+      held: false,
+      released: false
+    });
+  });
 });

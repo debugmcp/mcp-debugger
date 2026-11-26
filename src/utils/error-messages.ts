@@ -665,12 +665,14 @@ export const ErrorMessages = {
     childName: string,
     childSessionId: string,
     reason: string,
-    location?: { file: string; line: number }
+    location?: { file: string; line: number },
+    hasSnapshot = false
   ) => {
     const where = location ? ` at ${location.file}:${location.line}` : '';
+    const snapshotHint = hasSnapshot ? ' (pausedChild carries its stop snapshot)' : '';
     return (
       `The launched process is running, and child session '${childName}' (${childSessionId}) is already paused (${reason})${where}. ` +
-      `Inspect, step, or continue session ${childSessionId} directly (pausedChild carries its stop snapshot).`
+      `Inspect, step, or continue session ${childSessionId} directly${snapshotHint}.`
     );
   },
 

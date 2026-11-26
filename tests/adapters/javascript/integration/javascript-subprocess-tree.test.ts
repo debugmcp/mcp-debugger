@@ -148,8 +148,13 @@ describe('JavaScript forks as child sessions (the session tree, issue #1082)', (
     expect(childBp.success, JSON.stringify(childBp)).toBe(true);
     const started = await launch(parentFixture);
     expect(started.state, JSON.stringify(started)).toBe('running');
+    // child.js hits its first breakpoint on a 200 ms setInterval tick after
+    // Node fork startup + js-debug bootloader + child attach handshake, which
+    // can exceed the fixed 1,000 ms launch hold on a loaded runner. Assert
+    // both branches strictly so neither outcome goes unchecked.
     if (started.pausedChild) {
       expect(started.message, JSON.stringify(started)).not.toContain('has not reached');
+      expect(started.message, JSON.stringify(started)).toContain('(pausedChild carries its stop snapshot)');
       expect(started.pausedChild, JSON.stringify(started)).toMatchObject({
         state: 'paused',
         reason: 'breakpoint',
@@ -157,6 +162,9 @@ describe('JavaScript forks as child sessions (the session tree, issue #1082)', (
         context: expect.objectContaining({ lineContent: expect.stringContaining('total += i') }),
         snapshot: expect.objectContaining({ locals: expect.objectContaining({ i: '0' }) })
       });
+    } else {
+      expect(started.pending, JSON.stringify(started)).toBe(true);
+      expect(started.message, JSON.stringify(started)).toContain('has not reached');
     }
 
     let childId: string | undefined;
@@ -598,7 +606,7 @@ describe('JavaScript forks as child sessions (the session tree, issue #1082)', (
       : await call<Stop>('wait_for_stop', { sessionId: rootId, timeout: 30000 });
     expect(ended.state, JSON.stringify(ended)).toBe('stopped');
     expect(ended.message, JSON.stringify(ended)).toContain(
-      'without hitting any breakpoint in the launched process (child-process debugging was off via autoAttachChildProcesses: false, so child processes were not debugged).'
+      'without hitting any breakpoint in the launched process (child-process debugging was off via autoAttachChildProcesses: false, so any child processes would not be debugged).'
     );
     if (ended.warning) {
       expect(ended.warning).toContain('autoAttachChildProcesses: false');

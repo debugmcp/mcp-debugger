@@ -76,7 +76,9 @@ export function buildUnboundBreakpointExitWarning(
   const unconfirmed = session.unconfirmedChildReleases ?? 0;
   if (optedOut !== undefined || released > 0 || unconfirmed > 0) {
     const childClause = optedOut !== undefined
-      ? `child-process debugging was off (${optedOut}), so breakpoints in code only a child process loads could not bind`
+      ? optedOut === 'adapter-default'
+        ? 'child-process debugging was left off by the adapter for this attach, so breakpoints in code only a child process loads could not bind'
+        : `child-process debugging was off (${optedOut}), so breakpoints in code only a child process loads could not bind`
       : released > 0
         ? `${released} child process${released === 1 ? ' ran' : 'es ran'} undebugged, so breakpoints in code only ${released === 1 ? 'it loads' : 'they load'} could not bind`
         : `${unconfirmed} child process${unconfirmed === 1 ? ' could' : 'es could'} not be adopted, so breakpoints in code only ${unconfirmed === 1 ? 'it loads' : 'they load'} could not bind`;
@@ -300,11 +302,15 @@ function summarizeProgramEnd(
     ...unhitFunctions.filter(bp => isVerifiedInTree(session, bp)).map(bp => `function '${bp.functionName}'`)
   ];
   const optedOut = session.run?.childDebuggingOptedOut;
+  const processScope = session.run?.attachMode ? 'the attached process' : 'the launched process';
+  const offWhy = optedOut === 'adapter-default'
+    ? 'left off by the adapter for this attach'
+    : `off via ${optedOut}`;
   const optOutClause = optedOut !== undefined
-    ? ` in the launched process (child-process debugging was off via ${optedOut}, so child processes were not debugged)`
+    ? ` in ${processScope} (child-process debugging was ${offWhy}, so any child processes would not be debugged)`
     : '';
   const verifiedClause = verifiedNames.length > 0
-    ? ` Verified${optedOut !== undefined ? ' in the launched process' : ''} but never hit: ${verifiedNames.join(', ')}.`
+    ? ` Verified${optedOut !== undefined ? ` in ${processScope}` : ''} but never hit: ${verifiedNames.join(', ')}.`
     : '';
   return { summary: `${ended} without hitting any breakpoint${optOutClause}.${verifiedClause}`, data };
 }

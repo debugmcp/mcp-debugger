@@ -140,7 +140,10 @@ export interface OperationsContext {
   /** Block new child adoptions during a complete teardown; returns the release function. */
   beginSubtreeClose(sessionId: string): () => void;
   /** Wait for any in-flight CHILD_RELEASE_COMMAND round-trips on this session's run (issue #1221). */
-  settleInFlightChildReleases(sessionId: string): Promise<void>;
+  settleInFlightChildReleases(
+    sessionId: string,
+    options?: { timeoutMs?: number; signal?: AbortSignal }
+  ): Promise<void>;
   /** The detach cascade (issue #1081): release every descendant, deepest first; resolves with how many. */
   releaseDescendants(session: ManagedSession): Promise<number>;
   getStackTrace(

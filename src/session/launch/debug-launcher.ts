@@ -666,7 +666,7 @@ export class DebugLauncher {
 
       // Ensure any child-release confirmations initiated during the launch hold
       // have settled before reading released/unconfirmed counts or exit warnings (#1221).
-      await this.ctx.settleInFlightChildReleases?.(sessionId);
+      await this.ctx.settleInFlightChildReleases(sessionId);
 
       // Re-fetch session to get the most up-to-date state
       const finalSession = this.ctx.getSession(sessionId);
@@ -851,7 +851,7 @@ export class DebugLauncher {
             settledInTree.state === SessionState.PAUSED &&
             this.ctx.descendantsOf(sessionId).includes(settledInTree)
           ) {
-            const childReason = settledInTree.lastStop?.reason ?? 'breakpoint';
+            const childReason = settledInTree.lastStop?.reason ?? 'unknown';
             pausedChild = {
               sessionId: settledInTree.id,
               name: settledInTree.name,
@@ -864,7 +864,8 @@ export class DebugLauncher {
               settledInTree.name,
               settledInTree.id,
               childReason,
-              childLanding.location
+              childLanding.location,
+              childSnapshot !== undefined
             );
           }
         } else if (settledInTree && settledInTree !== finalSession && settledInTree.state === SessionState.ERROR) {

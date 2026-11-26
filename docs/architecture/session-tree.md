@@ -501,9 +501,11 @@ A child is a session of its own, and what is read about it is read where it is t
   taken at adoption. In addition (issue #1150), `Run` records `treeVerifiedBreakpointIds` whenever
   any session in the tree verifies or hits a breakpoint (so the root's end summary marks child-bound
   breakpoints `verified: true` in `unhitBreakpoints` and never warns that they "never bound during
-  this run"), and `childDebuggingOptedOut` when the launch/attach explicitly turned child adoption
-  off (`subProcess: false` on Python launch, `autoAttachChildProcesses: false` on JavaScript
-  launch/attach) so end summaries and unbound warnings qualify that child processes ran undebugged.
+  this run"), and `childDebuggingOptedOut` when child adoption was turned off
+  (`subProcess: false` on Python launch, `autoAttachChildProcesses: false` on JavaScript
+  launch/attach, or `'adapter-default'` when the JavaScript adapter itself left it off on an
+  unverified attach) so end summaries and unbound warnings qualify that any child processes would
+  not be debugged.
   One thing does not follow: the notes of the root's launch are seeded into
   the root's output only. The record is mutated in place and not replaced per run, so a child
   row that outlives its run reads what its root reads; the readers that are new to children

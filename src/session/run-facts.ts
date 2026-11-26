@@ -78,23 +78,32 @@ export function rootOfTree<T extends TreeNode>(session: T, get: (sessionId: stri
 }
 
 /**
- * Detect whether a launch or attach configuration explicitly turned off
- * child-process adoption on an adapter that otherwise supports it (issue #1150).
- * Python attach is excluded because debugpy's subprocess tracing on attach is
- * governed by how the target process invoked `debugpy.listen`, not reliably by
- * the attach request alone.
+ * Detect whether child-process adoption was turned off on an adapter that
+ * otherwise supports it (issue #1150): either explicitly by the caller
+ * (`subProcess: false` on Python launch, `autoAttachChildProcesses: false` on
+ * JavaScript launch/attach) or by the JavaScript adapter's own default-off on
+ * an unverified attach (`'adapter-default'`). Python attach is excluded because
+ * debugpy's subprocess tracing on attach is governed by how the target process
+ * invoked `debugpy.listen`, not reliably by the attach request alone.
  */
 export function detectChildDebuggingOptOut(
   language: string,
   isAttach: boolean,
-  ...configs: Array<Readonly<Record<string, unknown>> | undefined>
+  transformedConfig: Readonly<Record<string, unknown>> | undefined,
+  callerConfig?: Readonly<Record<string, unknown>>
 ): Run['childDebuggingOptedOut'] {
-  const hasFalse = (key: string): boolean => configs.some((cfg) => cfg?.[key] === false);
-  if (language === 'python' && !isAttach && hasFalse('subProcess')) {
-    return 'subProcess: false';
+  if (language === 'python' && !isAttach) {
+    if (callerConfig?.subProcess === false || transformedConfig?.subProcess === false) {
+      return 'subProcess: false';
+    }
   }
-  if (language === 'javascript' && hasFalse('autoAttachChildProcesses')) {
-    return 'autoAttachChildProcesses: false';
+  if (language === 'javascript') {
+    if (callerConfig?.autoAttachChildProcesses === false) {
+      return 'autoAttachChildProcesses: false';
+    }
+    if (transformedConfig?.autoAttachChildProcesses === false) {
+      return isAttach ? 'adapter-default' : 'autoAttachChildProcesses: false';
+    }
   }
   return undefined;
 }

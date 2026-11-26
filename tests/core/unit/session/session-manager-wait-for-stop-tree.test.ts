@@ -10,7 +10,8 @@ import { setTimeout as realDelay } from 'node:timers/promises';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import type { DebugResult, WaitForStopResultData } from '../../../../src/session/session-manager-core.js';
 import { DebugLanguage, SessionState } from '@debugmcp/shared';
-import { createMockDependencies } from './session-manager-test-utils.js';
+import { CHILD_RELEASE_COMMAND } from '../../../../src/proxy/dap-proxy-interfaces.js';
+import { createMockDependencies, createMockEnvironment } from './session-manager-test-utils.js';
 import type { MockChildProxyView } from '../../../test-utils/mocks/mock-proxy-manager.js';
 
 const report = (reportId: string, pid = 4242) => ({
@@ -414,5 +415,173 @@ describe('SessionManager - the tree-aware waitForStop (issue #1081)', () => {
 
     expect(wait.result()?.success).toBe(false);
     expect(wait.result()?.error).toMatch(/closed while waiting/);
+  });
+
+  describe('in-flight child release settling (I1, issue #1221)', () => {
+    function setupWithCapZero() {
+      dependencies = createMockDependencies();
+      dependencies.environment = createMockEnvironment({ DEBUG_MCP_MAX_CHILD_SESSIONS: '0' });
+      sessionManager = new SessionManager(config, dependencies);
+    }
+
+    function deferChildRelease(): { resolveRelease: (confirmed?: boolean) => void } {
+      let resolveRelease!: (confirmed?: boolean) => void;
+      const origSend = dependencies.mockProxyManager.sendDapRequest.bind(dependencies.mockProxyManager);
+      vi.spyOn(dependencies.mockProxyManager, 'sendDapRequest').mockImplementation((command, args, options) => {
+        if (command === CHILD_RELEASE_COMMAND) {
+          return new Promise((resolve) => {
+            resolveRelease = (confirmed = true) =>
+              resolve({ success: true, body: { held: true, released: confirmed } } as never);
+          });
+        }
+        return origSend(command, args, options);
+      });
+      return { resolveRelease: (confirmed?: boolean) => resolveRelease(confirmed) };
+    }
+
+    it('waits for an in-flight child release that confirms within 1,500 ms and reports childrenReleased', async () => {
+      setupWithCapZero();
+      const rootId = await startRoot();
+      const release = deferChildRelease();
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r-inflight', 4242));
+      dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+
+      const wait = track(sessionManager.waitForStop(rootId, 10_000));
+      await vi.advanceTimersByTimeAsync(100);
+      expect(wait.result()).toBeUndefined();
+
+      release.resolveRelease(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(wait.result()).toMatchObject({
+        success: true,
+        state: SessionState.PAUSED,
+        data: { sessionId: rootId, childrenReleased: 1 }
+      });
+    });
+
+    it('bounds waiting on a hung child release to 1,500 ms even when the caller timeout is longer', async () => {
+      setupWithCapZero();
+      const rootId = await startRoot();
+      deferChildRelease();
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r-hung', 4242));
+      dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+
+      const wait = track(sessionManager.waitForStop(rootId, 10_000));
+      // Landing read takes ~10 ms; settle wait must not exceed 1,500 ms after that.
+      await vi.advanceTimersByTimeAsync(1_499);
+      expect(wait.result()).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(50);
+      expect(wait.result()).toMatchObject({
+        success: true,
+        state: SessionState.PAUSED,
+        data: { sessionId: rootId }
+      });
+    });
+
+    it("bounds waiting on an in-flight child release to the caller's remaining deadline", async () => {
+      setupWithCapZero();
+      const rootId = await startRoot();
+      deferChildRelease();
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r-deadline', 4242));
+
+      const wait = track(sessionManager.waitForStop(rootId, 200));
+      await vi.advanceTimersByTimeAsync(20);
+      dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+
+      await vi.advanceTimersByTimeAsync(179);
+      expect(wait.result()).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(wait.result()).toMatchObject({
+        success: true,
+        state: SessionState.PAUSED,
+        data: { sessionId: rootId }
+      });
+    });
+
+    it('stops waiting on an in-flight child release immediately when the caller aborts', async () => {
+      setupWithCapZero();
+      const rootId = await startRoot();
+      deferChildRelease();
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r-abort', 4242));
+      dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+
+      const controller = new AbortController();
+      const wait = track(sessionManager.waitForStop(rootId, 10_000, controller.signal));
+      await vi.advanceTimersByTimeAsync(50);
+      expect(wait.result()).toBeUndefined();
+
+      controller.abort();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(wait.result()).toMatchObject({
+        success: true,
+        state: SessionState.PAUSED,
+        data: { sessionId: rootId }
+      });
+    });
+
+    it('re-checks the selected child after settling an in-flight release so a child resumed during the wait never returns a stale landing', async () => {
+      dependencies = createMockDependencies();
+      dependencies.environment = createMockEnvironment({ DEBUG_MCP_MAX_CHILD_SESSIONS: '1' });
+      sessionManager = new SessionManager(config, dependencies);
+
+      const rootId = await startRoot();
+      const child = await adopt(dependencies.mockProxyManager, rootId, 4242);
+      const release = deferChildRelease();
+      // Second child exceeds cap=1 so its release is in flight.
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r-cap', 4343));
+      child.view.simulateStopped(1, 'breakpoint', { reason: 'breakpoint', threadId: 1, allThreadsStopped: true });
+
+      const wait = track(sessionManager.waitForStop(rootId, 10_000));
+      // Let landing + snapshot finish and enter settleInFlightChildReleases.
+      await vi.advanceTimersByTimeAsync(50);
+      expect(wait.result()).toBeUndefined();
+
+      // Resume the selected child while the settle wait is still blocked.
+      await sessionManager.continue(child.id);
+      release.resolveRelease(true);
+      await vi.advanceTimersByTimeAsync(50);
+
+      // Must NOT have returned a stale PAUSED answer for the resumed child.
+      expect(wait.result()).toBeUndefined();
+
+      // Root now stops and waitForStop answers truthfully for the root with childrenReleased: 1.
+      dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+      await afterStop();
+      expect(wait.result()).toMatchObject({
+        success: true,
+        state: SessionState.PAUSED,
+        data: { sessionId: rootId, childrenReleased: 1 }
+      });
+    });
+
+    it('startDebugging settles an in-flight child release within 1,500 ms and caps a hung release at 1,500 ms', async () => {
+      setupWithCapZero();
+      const session = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      const release = deferChildRelease();
+      const starting = sessionManager.startDebugging(session.id, 'test.py');
+      // Let the launch become RUNNING and enter the 1,000 ms hold.
+      await vi.advanceTimersByTimeAsync(50);
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r-launch-ok', 5001));
+      // Hold ends at ~1,000 ms; release confirms 100 ms later.
+      await vi.advanceTimersByTimeAsync(1_050);
+      release.resolveRelease(true);
+      const started = await starting;
+      expect(started.success).toBe(true);
+      expect(started.data?.childrenReleased).toBe(1);
+
+      // Now test a hung release during a second launch: must resolve by 1,500 ms after the hold.
+      setupWithCapZero();
+      const session2 = await sessionManager.createSession({ language: DebugLanguage.MOCK });
+      deferChildRelease();
+      let settled2: unknown;
+      void sessionManager.startDebugging(session2.id, 'test.py').then((r) => { settled2 = r; });
+      await vi.advanceTimersByTimeAsync(50);
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r-launch-hung', 5002));
+      // Hold is 1,000 ms, settle bound is 1,500 ms -> done by 2,600 ms (well under 5,000 ms).
+      await vi.advanceTimersByTimeAsync(2_400);
+      expect(settled2).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(200);
+      expect(settled2).toMatchObject({ success: true, state: SessionState.RUNNING });
+    });
   });
 });
