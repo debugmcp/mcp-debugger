@@ -234,6 +234,16 @@ Both `dapLaunchArgs` and `adapterLaunchConfig` accept launch settings. When the 
 in both, `adapterLaunchConfig` wins, including `stopOnEntry`. Setting it to `true` keeps the target
 paused at entry; `restart_debugging` replays that intent. An honoured `noDebug` disables the entry pause.
 
+Without an explicit `cwd`, a program under `node_modules` runs from the folder containing its
+outermost `node_modules`. Both `/project/node_modules/vitest/vitest.mjs` and
+`/project/node_modules/.pnpm/vitest@1/node_modules/vitest/vitest.mjs` therefore run from `/project`,
+so Vitest, Jest and Mocha can find the project's tests. The launch response's `warning` names the
+directory used and explains the `dapLaunchArgs.cwd` override. If `adapterLaunchConfig.cwd` is
+present, change or remove it because it takes precedence. Relative runner programs are resolved
+against the launcher's working directory before selecting this default. Other programs default
+to the directory containing `scriptPath`, even when `dapLaunchArgs.program` names a different
+file; an explicit `cwd` always wins and produces no default-directory notice.
+
 **Where the entry stop lands** (issue #858): js-debug implements `stopOnEntry` with a breakpoint at line 1,
 column 1 of the program, and V8 resolves that to the first breakable position in *source* order. For a file
 whose first declaration is a function that the program calls later, that position is inside the function —

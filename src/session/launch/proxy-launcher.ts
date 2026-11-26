@@ -531,7 +531,12 @@ export class ProxyLauncher {
         return transformedAttachConfig;
       }
       // Call transformLaunchConfig for launch operations
-      return await adapter.transformLaunchConfig(genericLaunchConfig as GenericLaunchConfig);
+      const providedCwd = inputs.callerLaunchInputs.cwd
+        ? inputs.callerLaunchInputs.cwd.value
+        : (this.ctx.defaultDapLaunchArgs as Record<string, unknown>).cwd;
+      return await adapter.transformLaunchConfig(genericLaunchConfig as GenericLaunchConfig, {
+        cwdProvided: typeof providedCwd === 'string' && providedCwd.length > 0
+      });
     } catch (error) {
       this.ctx.logger.warn(
         `[SessionManager] transform${isAttachMode ? 'Attach' : 'Launch'}Config failed for ${session.language}: ${
