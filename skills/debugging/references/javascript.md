@@ -38,6 +38,11 @@ start_debugging {
 
 Conditional breakpoints are supported: `set_breakpoint { ..., "condition": "count > 5" }`.
 
+Launching a runner by its file under `node_modules` (Vitest, Jest, Mocha) defaults `cwd` to the
+folder containing the outermost `node_modules`, including nested pnpm paths. The launch's
+`warning` names that directory; set `dapLaunchArgs.cwd` to override it. Other programs default
+to their own directory. An explicit `cwd` is preserved and produces no default-directory notice.
+
 `adapterLaunchConfig` accepts the same launch settings and wins over `dapLaunchArgs` for a shared
 key, including `stopOnEntry`. Read the launch response's `warning`: it names ignored, malformed
 or unrecognized keys and suggests likely spellings. Unknown keys are still forwarded. Notices

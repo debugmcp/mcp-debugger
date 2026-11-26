@@ -34,7 +34,8 @@ import {
   resolveJsLaunchSmartStep,
   resolveJsLaunchWorkspaceFolder,
   resolveJsPauseForSourceMap,
-  isJsTranspiledProgram
+  isJsTranspiledProgram,
+  jsRunnerProjectRoot
 } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
 import type { AdapterDependencies } from '@debugmcp/shared';
@@ -557,7 +558,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     } else {
       // In container mode, use MCP_WORKSPACE_ROOT as the working directory
       if (program) {
-        cwd = path.dirname(program);
+        cwd = jsRunnerProjectRoot(program) ?? path.dirname(program);
       } else {
         // Fallback: use MCP_WORKSPACE_ROOT in container mode, otherwise process.cwd()
         if (process.env.MCP_CONTAINER === 'true') {

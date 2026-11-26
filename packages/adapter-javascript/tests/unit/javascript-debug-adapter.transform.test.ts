@@ -39,6 +39,7 @@ import { detectBinary } from '../../src/utils/typescript-detector.js';
 import { JavascriptDebugAdapter } from '../../src/index.js';
 import { canAutoAttachChildren } from '../../src/utils/child-attach-locality.js';
 import { scrubInheritedExitCodeShim } from '../../src/javascript-debug-adapter.js';
+import { collectLaunchConfigNotices } from '../../../../src/session/launch/launch-config-diagnostics.js';
 
 // Minimal AdapterDependencies stub for constructor
 const deps = {
@@ -74,6 +75,26 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
       (process.env as Record<string, string | undefined>)[k] = v;
     }
     vi.restoreAllMocks();
+  });
+
+  it.each([
+    ['plain runner', ['node_modules', 'vitest', 'vitest.mjs'], undefined, true],
+    ['pnpm runner', ['node_modules', '.pnpm', 'vitest@1', 'node_modules', 'vitest', 'vitest.mjs'], undefined, true],
+    ['explicit cwd', ['node_modules', 'jest', 'bin', 'jest.js'], 'custom', false],
+    ['explicit project cwd', ['node_modules', 'mocha', 'bin', 'mocha.js'], '.', false],
+    ['ordinary program', ['src', 'app.js'], undefined, false],
+    ['segment lookalike', ['node_modules_helper', 'app.js'], undefined, false]
+  ] as const)('uses the expected cwd and notice for %s', async (_name, segments, explicit, defaulted) => {
+    const root = path.resolve('/project');
+    const program = path.join(root, ...segments);
+    const config = { program, ...(explicit ? { cwd: path.join(root, explicit) } : {}) };
+    const transformed = await adapter.transformLaunchConfig(config);
+
+    expect(transformed.cwd).toBe(explicit ? config.cwd : defaulted ? root : path.dirname(program));
+    const notices = collectLaunchConfigNotices(adapter, explicit ? { cwd: { source: 'dapLaunchArgs', value: config.cwd } } : {}, transformed, config);
+    expect(notices.filter(notice => notice.includes('dapLaunchArgs.cwd'))).toEqual(defaulted ? [
+      `Working directory defaulted to ${root}, the folder containing the outermost node_modules directory. Set dapLaunchArgs.cwd to use a different working directory.`
+    ] : []);
   });
 
   it('should transform JS config with defaults', async () => {

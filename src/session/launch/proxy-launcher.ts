@@ -28,6 +28,8 @@ import {
   type LanguageSpecificLaunchConfig,
   launchTargetKeysOf,
   namesLaunchTarget,
+  DebugLanguage,
+  jsRunnerProjectRoot,
   redactSecretsInString
 } from '@debugmcp/shared';
 import { TEST_RUNNER_KEY } from './test-runner-gate.js';
@@ -338,7 +340,11 @@ export class ProxyLauncher {
         TEST_RUNNER_KEY
       ];
       const namesTarget = namesLaunchTarget({ ...genericLaunchConfig, ...adapterExtras }, nonProgramTargetKeys);
-      if (!namesTarget && (typeof genericLaunchConfig.cwd !== 'string' || genericLaunchConfig.cwd.length === 0)) {
+      // Installed JavaScript runners derive cwd in the adapter, which must
+      // still be able to distinguish a default from an explicit caller cwd.
+      const jsRunner = session.language === DebugLanguage.JAVASCRIPT &&
+        jsRunnerProjectRoot(adapterExtras.program ?? genericLaunchConfig.program) !== undefined;
+      if (!namesTarget && !jsRunner && (typeof genericLaunchConfig.cwd !== 'string' || genericLaunchConfig.cwd.length === 0)) {
         // The script's directory — which, for a directory target (a Go package
         // directory, issue #1036), is the target itself: its parent would run
         // `go build` under the parent's own go.mod. A path that cannot be read
@@ -473,7 +479,7 @@ export class ProxyLauncher {
         // buffer they are seeded into does (#237): a launch that fails before
         // the proxy starts returns them straight from the record, and one
         // redacted text lets the launch warning dedupe against its seeded copy.
-        const notices = collectLaunchConfigNotices(adapter, inputs.callerLaunchInputs, transformedLaunchConfig);
+        const notices = collectLaunchConfigNotices(adapter, inputs.callerLaunchInputs, transformedLaunchConfig, inputs.genericLaunchConfig);
         record.launchConfigNotices = this.ctx.redactionEnabled()
           ? notices.map(notice => redactSecretsInString(notice).value)
           : notices;

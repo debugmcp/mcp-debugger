@@ -227,7 +227,8 @@ export {
   resolveJsLaunchSmartStep,
   resolveJsLaunchWorkspaceFolder,
   resolveJsPauseForSourceMap,
-  isJsTranspiledProgram
+  isJsTranspiledProgram,
+  jsRunnerProjectRoot
 } from './interfaces/js-launch-defaults.js';
 export type { JsLaunchSkipInputs, JsLaunchSourceMapInputs, JsLaunchWorkspaceOptions } from './interfaces/js-launch-defaults.js';
 export { PythonAdapterPolicy } from './interfaces/adapter-policy-python.js';

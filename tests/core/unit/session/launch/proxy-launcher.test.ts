@@ -115,6 +115,37 @@ describe('ProxyLauncher.prepareLaunchInputs', () => {
     h = makeHarness();
   });
 
+  it.each([
+    ['node_modules', 'vitest', 'vitest.mjs'],
+    ['node_modules', '.pnpm', 'vitest@1', 'node_modules', 'vitest', 'vitest.mjs']
+  ])('leaves JavaScript runner cwd for the adapter to derive: %j', async (...segments) => {
+    const program = path.resolve('/project', ...segments);
+    const session = makeSession({ language: DebugLanguage.JAVASCRIPT });
+    const inputs = await h.launcher.prepareLaunchInputs(session, { scriptPath: program });
+    expect(inputs.genericLaunchConfig).not.toHaveProperty('cwd');
+
+    const explicit = await h.launcher.prepareLaunchInputs(session, {
+      scriptPath: program,
+      dapLaunchArgs: launchArgs({ cwd: '/custom' })
+    });
+    expect(explicit.genericLaunchConfig.cwd).toBe('/custom');
+
+    const overridden = await h.launcher.prepareLaunchInputs(session, {
+      scriptPath: SCRIPT,
+      adapterLaunchConfig: { program }
+    });
+    expect(overridden.genericLaunchConfig).not.toHaveProperty('cwd');
+
+    const adapterCwd = await h.launcher.prepareLaunchInputs(session, {
+      scriptPath: program,
+      adapterLaunchConfig: { cwd: '/adapter-cwd' }
+    });
+    expect(adapterCwd.genericLaunchConfig.cwd).toBe('/adapter-cwd');
+
+    const otherLanguage = await h.launcher.prepareLaunchInputs(makeSession(), { scriptPath: program });
+    expect(otherLanguage.genericLaunchConfig.cwd).toBe(path.dirname(program));
+  });
+
   it('lays out a launch: run log dir, adapter port, program/args/cwd, breakpoint snapshots, adapter config', async () => {
     const session = makeSession({
       breakpoints: new Map<string, Breakpoint>([

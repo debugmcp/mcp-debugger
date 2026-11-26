@@ -13,7 +13,8 @@ import {
   jsLaunchSkipsNodeInternals,
   resolveJsLaunchSmartStep,
   resolveJsLaunchWorkspaceFolder,
-  resolveJsPauseForSourceMap
+  resolveJsPauseForSourceMap,
+  jsRunnerProjectRoot
 } from './js-launch-defaults.js';
 import { emptyLocalVariableExtraction, extractionFromScope, resolveExceptionFilters } from './adapter-policy.js';
 import type { StackFrame, Variable } from '../models/index.js';
@@ -552,7 +553,7 @@ export const JsDebugAdapterPolicy = {
     const program = info.program;
     if (
       program !== undefined &&
-      (TS_GENERATED_EXTENSION[path.extname(program).toLowerCase()] !== undefined || NODE_MODULES_SEGMENT.test(program))
+      (TS_GENERATED_EXTENSION[path.extname(program).toLowerCase()] !== undefined || jsRunnerProjectRoot(program) !== undefined)
     ) {
       return undefined;
     }
