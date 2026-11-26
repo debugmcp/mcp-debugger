@@ -353,15 +353,19 @@ set_breakpoint {"sessionId": "...", "file": "/abs/app.py", "line": 51,
   the text appears on several lines the error lists every match; add `nearLine` to pick
   one. Pass `statement` **or** `line`, not both.
 - **`function`** sets a DAP function breakpoint on entry to a symbol -- no file, no line.
-  Supported by the Python, Go, Rust, C/C++, .NET, Java, and JavaScript adapters. It
+  Supported by the Python, Go, Rust, C/C++, .NET, Java, JavaScript, and COBOL adapters. It
   composes with `condition` only.
 - **`expectedContent`** is an assertion, not addressing: if the target line does not
   contain the text, the breakpoint is **not** set and the error shows what is actually on
   that line and its neighbors -- the cheapest way to catch a stale line number.
-- **`logMessage`** turns a breakpoint into a logpoint: it never pauses, and
-  `{curly brace}` expressions are interpolated into `get_output` while the program runs at
-  full speed. Supported by the Python, JavaScript, Go, Rust, C/C++, and mock adapters;
-  **not** by Java, .NET, Ruby, or COBOL.
+- **`logMessage`** turns a breakpoint into a logpoint: it logs interpolated
+  `{curly brace}` expressions into `get_output` without pausing. Each hit costs the
+  program time depending on the engine (suitable for lines hit up to hundreds or
+  thousands of times a second, not tight loops; in Python, JavaScript, and to a lesser
+  degree Dart, a logpoint anywhere in a function also slows that whole function) -- see
+  [Logpoints](tool-reference.md#logpoints) for measured per-engine costs. Supported by
+  the Python, JavaScript/TypeScript, Go, Rust, C/C++, COBOL, Dart/Flutter, and mock
+  adapters; **not** by Java, .NET, or Ruby.
 
 Three tools manage breakpoints after they are set. All take effect immediately while the
 program is running or paused:

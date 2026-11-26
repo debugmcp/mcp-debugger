@@ -41,7 +41,10 @@ which also carries the per-platform SHA-256 digests the vendoring script verifie
    `panic!` stops at the panic site with the backtrace live (issue #244). Pass
    `breakOnExceptions: "none"` to run panicking programs to termination.
 4. **Logpoints:** `set_breakpoint` with `logMessage` logs interpolated values to
-   `get_output` without pausing.
+   `get_output` without pausing. Each hit costs about 635 µs (up to about 1,600 hits/s doing
+   nothing else, with no measurable effect on the rest of the function), so keep logpoints off
+   tight loops; see [Logpoints](./tool-reference.md#logpoints) for measurement conditions and
+   what was not measured.
 
 ### Current Limitations
 1. **Launch-time system stop is not auto-continued.** Auto-continue on `stopOnEntry: false`
