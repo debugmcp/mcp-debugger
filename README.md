@@ -34,7 +34,7 @@ Microsoft's [DebugMCP](https://github.com/microsoft/DebugMCP) exposes VS Code's 
 | Java hot-swap and Flutter hot reload (`hot_reload`) | ✅ | ❌ |
 | Debuggee output as subscribable MCP resource | ✅ | ❌ |
 | In-IDE debugging UX alongside the agent | ✅ read-only IDE mirror ([`expose_session`](docs/tool-reference.md#expose_session)) — the IDE joins the *agent's* live session | ✅ native |
-| Logpoints without pausing (prod-safe value watching) | ✅ [`logMessage` breakpoints](docs/tool-reference.md#set_breakpoint) | ✅ via VS Code |
+| Logpoints without pausing (value watching on a live process) | ✅ [`logMessage` breakpoints](docs/tool-reference.md#logpoints) | ✅ via VS Code |
 | Content/function-addressed breakpoints (`statement:`, `function:`, `expectedContent`) | ✅ agent-native addressing that survives edits | — |
 | Secret redaction on by default | ✅ variable/evaluate/output masking + least-privilege mode | — |
 | Kubernetes ephemeral debug sidecar (native attach-by-PID) | ✅ [`kubectl debug` flow](docs/kubernetes.md) | ❌ |
@@ -64,7 +64,7 @@ If your agent runs in a terminal, a pipeline, or a cloud sandbox — or needs to
 - 🧪 **Mock adapter for testing** – Test without external dependencies
 - 🛰️ **Out-of-IDE & remote attach** – Attach over host/port to a process on another machine or inside a container (Python via debugpy, Ruby via rdbg, JavaScript via the V8 inspector, Java via JDWP, Dart/Flutter via the VM-service URI) with source-path mapping, or by PID for native code (C/C++, COBOL) and for a local Node.js process, whose inspector mcp-debugger opens for you (JavaScript). Python and Ruby attach *direct-connect* — the debug engine already runs inside the target, so no local Python or Ruby is needed; JavaScript, Java, .NET, C/C++, COBOL and Dart/Flutter spawn a local adapter instead; of those, only Java (a JDK), .NET (netcoredbg) and Dart/Flutter (the Dart or Flutter SDK, whose own debug adapter does the work) need a toolchain you install, since the JavaScript, C/C++ and COBOL debug engines ship with the package. `list_supported_languages` reports per-mode availability with reasons
 - 🎯 **Breakpoints that survive edits** – Address by content (`statement: "total = sum(prices)"`), by symbol (`function: "main"`), or assert line content with `expectedContent`; anchors re-resolve across `restart_debugging` and weak matches warn loudly
-- 🪵 **Logpoints** – `set_breakpoint` with `logMessage: "x={x}"` streams interpolated values into `get_output` without pausing — prod-safe value watching on hot paths
+- 🪵 **Logpoints** – `set_breakpoint` with `logMessage: "x={x}"` streams interpolated values into `get_output` without pausing the program; each hit costs it time, from about 25 µs in Python to about 5 ms in Dart ([measured costs](docs/tool-reference.md#logpoints))
 - 🧰 **Full breakpoint lifecycle** – `list_breakpoints` / `remove_breakpoint` / `clear_breakpoints` work live mid-run; `restart_debugging` relaunches with the same config and re-applies everything in one call
 - 📡 **Buffered program output** – `get_output` returns debuggee stdout/stderr with a cursor, and each session exposes its transcript as a subscribable MCP resource
 - 💥 **Crash-state debugging by default** – Launch sessions pause on uncaught exceptions with stack and locals live (`breakOnExceptions`; exception class/message surfaced via `lastStop`)
