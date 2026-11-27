@@ -82,7 +82,7 @@ export function rootOfTree<T extends TreeNode>(session: T, get: (sessionId: stri
  * otherwise supports it (issue #1150): either explicitly by the caller
  * (`subProcess: false` on Python launch, `autoAttachChildProcesses: false` on
  * JavaScript launch/attach) or by the JavaScript adapter's own default-off on
- * an unverified attach (`'adapter-default'`). Python attach is excluded because
+ * an attach (`'adapter-default'`). Python attach is excluded because
  * debugpy's subprocess tracing on attach is governed by how the target process
  * invoked `debugpy.listen`, not reliably by the attach request alone.
  */

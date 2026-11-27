@@ -47,7 +47,6 @@ import { JsDebugLaunchBarrier } from './utils/js-debug-launch-barrier.js';
 import { jsDebugCandidatePaths } from './utils/js-debug-resolver.js';
 import { JS_LAUNCH_CONSUMED_KEYS, JS_SUPPORTED_LAUNCH_KEYS, normalizeJsLaunchInputs } from './utils/launch-config.js';
 import { resolveLaunchEnvironment } from './utils/launch-environment.js';
-import { canAutoAttachChildren } from './utils/child-attach-locality.js';
 import {
   activateInspector,
   type InspectorActivationOptions,
@@ -1007,23 +1006,9 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       );
     }
 
-    const adapterPath = jsDebugCandidatePaths(path.dirname(fileURLToPath(import.meta.url)))
-      .find(candidate => this.dependencies.fileSystem?.existsSync(candidate));
     const autoAttachChildProcesses = typeof rest.autoAttachChildProcesses === 'boolean'
       ? rest.autoAttachChildProcesses
-      : await canAutoAttachChildren({
-        host: attachHost,
-        port: attachPort,
-        websocketAddress: typeof rest.websocketAddress === 'string' ? rest.websocketAddress : undefined,
-        adapterDirectory: adapterPath ? path.dirname(adapterPath) : undefined
-      });
-    if (typeof rest.autoAttachChildProcesses !== 'boolean' && !autoAttachChildProcesses) {
-      this.launchConfigDiagnostics.push({
-        key: 'autoAttachChildProcesses',
-        message: 'Child-process debugging is off for this attach because the target could not be confirmed to share the debugger host\'s temporary filesystem and bootloader files (for example, a port-forwarded container or an unavailable inspector). This avoids injecting a local bootloader path that can prevent children from starting. Set adapterConfig.autoAttachChildProcesses: true only when the target can load the debugger host\'s bootloader and reach its local debugger endpoint.',
-        scope: 'launch'
-      });
-    }
+      : false;
 
     // Advanced passthrough (localRoot/remoteRoot, sourceMaps, skipFiles, …)
     // with the normalized pwa-node attach shape on top (issues #450/#466).
@@ -1036,8 +1021,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       name: 'Attach to Node.js process',
       host: attachHost,
       port: attachPort,
-      // Default on only after proving this is local: a loopback endpoint
-      // alone can be a tunnel to a filesystem without js-debug's bootloader.
+      // An attach borrows the target: child debugging requires an explicit opt-in.
       // An explicit caller boolean always wins.
       autoAttachChildProcesses,
       // js-debug's smart-stepper turns a user pause that lands on a

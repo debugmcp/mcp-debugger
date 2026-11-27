@@ -1070,10 +1070,9 @@ export const JsDebugAdapterPolicy = {
       if (typeof stopOnEntryValue === 'boolean') {
         attachArgs.stopOnEntry = stopOnEntryValue;
       }
-      // The adapter transform enables children after proving the attach is
-      // local. An embedder bypassing that transform has no locality proof:
-      // stay off rather than injecting a host-only bootloader into a remote
-      // target. A transformed or caller-supplied boolean is respected.
+      // Attach leaves the target's children untouched unless explicitly enabled.
+      // Match the adapter transform, including for embedders that bypass it;
+      // a transformed or caller-supplied boolean is respected.
       if (typeof attachArgs.autoAttachChildProcesses !== 'boolean') {
         attachArgs.autoAttachChildProcesses =
           typeof a.autoAttachChildProcesses === 'boolean'

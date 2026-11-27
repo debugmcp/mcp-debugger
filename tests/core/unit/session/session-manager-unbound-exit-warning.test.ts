@@ -92,7 +92,7 @@ describe('buildUnboundBreakpointExitWarning', () => {
   it('does not blame the caller when the JavaScript adapter itself left child debugging off on attach (m5)', () => {
     const bp = new Map([['a', { id: 'a', file: '/w/child.js', line: 14, verified: false }]]);
     const warning = build({ breakpoints: bp, run: { childDebuggingOptedOut: 'adapter-default' } });
-    expect(warning).toContain('child-process debugging was left off by the adapter for this attach, so breakpoints in code only a child process loads could not bind');
+    expect(warning).toContain('child-process debugging was left off by default for this attach; pass adapterConfig: { autoAttachChildProcesses: true } on attach_to_process to debug the processes the target starts');
     expect(warning).not.toContain('autoAttachChildProcesses: false');
   });
 });

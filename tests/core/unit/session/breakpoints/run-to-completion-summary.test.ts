@@ -193,7 +193,7 @@ describe('buildRunToCompletionSummary', () => {
     expect(adapterDefaultOff.summary).not.toContain('autoAttachChildProcesses: false');
     expect(adapterDefaultOff.summary).not.toContain('so child processes were not debugged');
     expect(adapterDefaultOff.summary).toContain(
-      'without hitting any breakpoint in the attached process (child-process debugging was left off by the adapter for this attach, so any child processes would not be debugged).'
+      'without hitting any breakpoint in the attached process (child-process debugging was left off by default for this attach, so any child processes would not be debugged; pass adapterConfig: { autoAttachChildProcesses: true } on attach_to_process to debug the processes the target starts).'
     );
   });
 
@@ -209,7 +209,8 @@ describe('buildRunToCompletionSummary', () => {
       breakpoints: new Map<string, LineBp>([['a', { file: '/work/app.js', line: 14, verified: true }]]),
       run: { attachMode: true, childDebuggingOptedOut: 'adapter-default' }
     });
-    expect(verifiedAttach.summary).toContain('in the attached process (child-process debugging was left off by the adapter for this attach');
+    expect(verifiedAttach.summary).toContain('in the attached process (child-process debugging was left off by default for this attach');
+    expect(verifiedAttach.summary).toContain('pass adapterConfig: { autoAttachChildProcesses: true } on attach_to_process to debug the processes the target starts');
     expect(verifiedAttach.summary).toContain('Verified in the attached process but never hit: app.js:14.');
   });
 

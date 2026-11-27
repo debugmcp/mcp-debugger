@@ -111,7 +111,7 @@ describe('detectChildDebuggingOptOut (m5)', () => {
     expect(detectChildDebuggingOptOut('python', false, { subProcess: true }, {})).toBeUndefined();
   });
 
-  it('distinguishes caller JavaScript opt-out from adapter default-off on unverified attach', () => {
+  it('distinguishes caller JavaScript opt-out from adapter default-off on attach', () => {
     expect(
       detectChildDebuggingOptOut('javascript', false, { autoAttachChildProcesses: false }, { autoAttachChildProcesses: false })
     ).toBe('autoAttachChildProcesses: false');

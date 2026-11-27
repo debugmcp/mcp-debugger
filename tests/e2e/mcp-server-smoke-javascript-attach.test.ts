@@ -18,11 +18,10 @@
  * must leave it alive.
  *
  * Tests 5/6 — forking targets (issues #501, #1082): attaching must not wedge
- * child processes the target fork()s. By default the auto-attach bootloader
- * is on and every fork js-debug reports becomes a child debug session (the
- * session tree) that runs on under the debugger; with
- * autoAttachChildProcesses:false the bootloader stays out and forks run
- * untouched. Either way the fork's IPC handshake must complete.
+ * child processes the target fork()s. With explicit autoAttachChildProcesses:true,
+ * every fork js-debug reports becomes a child debug session (the session
+ * tree) that runs on under the debugger; by default or with explicit false
+ * the bootloader stays out and forks run untouched. Either way the fork's IPC handshake must complete.
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
@@ -702,11 +701,11 @@ describe('MCP Server JavaScript Attach-Mode Smoke Tests', () => {
     const target = await spawnTarget(FORK_TARGET_SCRIPT);
     targetProcess = target.proc;
 
-    const attachResponse = await createSessionAndAttach(target.port, { stopOnEntry: false });
+    const attachResponse = await createSessionAndAttach(target.port, { stopOnEntry: false, adapterConfig: { autoAttachChildProcesses: true } });
     expect(attachResponse.success, `attach failed: ${JSON.stringify(attachResponse)}`).toBe(true);
 
     // Forks started AFTER the attach are reported by js-debug's bootloader
-    // (on by default since the session tree, issue #1082) and adopted as
+    // (explicitly enabled for this attach, issue #1286) and adopted as
     // child sessions of this one; each still completes its fork→IPC→ack
     // round trip under the debugger. Pre-#501 the single-child adoption
     // dropped every report and each fork wedged until the fixture's 5s
@@ -741,17 +740,17 @@ describe('MCP Server JavaScript Attach-Mode Smoke Tests', () => {
     expect(targetProcess!.exitCode, 'detach must leave the target process alive').toBeNull();
   }, 120000);
 
-  it('leaves forks untouched when autoAttachChildProcesses is opted out (issues #501, #1082)', async () => {
+  it.each([undefined, false])('leaves forks untouched with autoAttachChildProcesses %s (issue #1286)', async (autoAttachChildProcesses) => {
     const target = await spawnTarget(FORK_TARGET_SCRIPT);
     targetProcess = target.proc;
 
     const attachResponse = await createSessionAndAttach(target.port, {
       stopOnEntry: false,
-      adapterConfig: { autoAttachChildProcesses: false }
+      ...(autoAttachChildProcesses === undefined ? {} : { adapterConfig: { autoAttachChildProcesses } })
     });
     expect(attachResponse.success, `attach failed: ${JSON.stringify(attachResponse)}`).toBe(true);
 
-    // The key is declared in supportedAttachKeys — opting out must not trip
+    // The default and supported explicit false must not trip
     // the unrecognized-adapterConfig-key warning (issue #466 mechanism)
     const warning = String(attachResponse.warning ?? '');
     expect(
@@ -766,13 +765,13 @@ describe('MCP Server JavaScript Attach-Mode Smoke Tests', () => {
     expect(
       progressed,
       `no fork completed its IPC handshake within 45s of attach with ` +
-      `autoAttachChildProcesses:false (issue #501); target stdout:\n${target.stdout()}`
+      `child debugging off (issue #1286); target stdout:\n${target.stdout()}`
     ).toBe(true);
-    expect(target.stdout(), 'a fork wedged with the bootloader opted out (issue #501)').not.toContain('child-wedged');
+    expect(target.stdout(), 'a fork wedged with child debugging off (issue #1286)').not.toContain('child-wedged');
     const listing = await callToolSafely(mcpClient!, 'list_debug_sessions', {});
     const childRows = ((listing.sessions as Array<{ parentSessionId?: string }> | undefined) ?? [])
       .filter(row => row.parentSessionId === sessionId);
-    expect(childRows, 'an opted-out attach must adopt no fork').toHaveLength(0);
+    expect(childRows, 'a default or explicitly disabled attach must adopt no fork').toHaveLength(0);
 
     // Debugging the parent must remain intact with forks running untouched
     const threadsResult = await callToolSafely(mcpClient!, 'list_threads', { sessionId: sessionId! });
