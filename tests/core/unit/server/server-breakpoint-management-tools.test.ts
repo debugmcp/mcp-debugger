@@ -75,6 +75,22 @@ describe('Server Breakpoint Management Tools', () => {
   });
 
   describe('list_breakpoints', () => {
+    it.each([
+      { attachMode: true, childDebuggingOptedOut: 'adapter-default', warns: true },
+      { attachMode: true, childDebuggingOptedOut: undefined, warns: false },
+      { attachMode: false, childDebuggingOptedOut: 'adapter-default', warns: false }
+    ])('explains verification scope only for an opted-out attach: %j (#1288)', async ({ warns, ...run }) => {
+      mockSessionManager.getSession.mockReturnValue({ id: 'test-session', run });
+      mockSessionManager.listBreakpoints.mockReturnValue([{ id: 'bp', file: '/parent.js', line: 21, verified: true }]);
+      mockSessionManager.listFunctionBreakpoints.mockReturnValue([]);
+      const result = await callToolHandler({ method: 'tools/call', params: {
+        name: 'list_breakpoints', arguments: { sessionId: 'test-session' }
+      } });
+      const payload = JSON.parse(result.content[0].text);
+      if (warns) expect(payload.warning).toBe('verified says the breakpoint is bound in the attached process, not that a process the target starts will stop on it; see adapterConfig.autoAttachChildProcesses in the attach_to_process description.');
+      else expect(payload.warning).toBeUndefined();
+      expect(payload.breakpoints[0].verified).toBe(true);
+    });
     it('returns the session breakpoints with a count', async () => {
       mockSessionManager.listBreakpoints.mockReturnValue([
         { id: 'bp-1', file: '/a.py', line: 10, verified: true, adapterId: 3 },

@@ -466,8 +466,9 @@ describe('Server Inspection Tools Tests', () => {
       expect(content.note).toContain('includeInternals: true');
     });
 
-    it.each([false, true])('forwards noProgramFrame with existing breakpoint=%s (#1288)', async hasBreakpoints => {
-      mockSessionManager.getSession.mockReturnValue({ run: {}, breakpoints: new Map(hasBreakpoints ? [['bp', {}]] : []), proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) } });
+    it.each(['none', 'line', 'function', 'logpoint', 'downgraded'])('forwards noProgramFrame with %s (#1288)', async kind => {
+      const hasBreakpoints = kind === 'line' || kind === 'function' || kind === 'downgraded';
+      mockSessionManager.getSession.mockReturnValue({ run: {}, breakpoints: new Map(kind === 'line' ? [['bp', {}]] : kind === 'logpoint' || kind === 'downgraded' ? [['log', { logMessage: 'log' }]] : []), functionBreakpoints: new Map(kind === 'function' ? [['fn', {}]] : []), adapterCapabilities: { supportsLogPoints: kind !== 'downgraded' }, proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) } });
       mockSessionManager.getStackTraceDetailed.mockResolvedValue({
         frames: [{ id: 0, name: '<anonymous>', file: '<unknown_source>', line: 1, column: 1 }],
         totalFrameCount: 1, hiddenFrameCount: 0, allFramesInternal: false, noProgramFrame: true

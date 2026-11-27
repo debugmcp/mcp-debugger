@@ -474,7 +474,7 @@ export const ErrorMessages = {
    * @param frameCount - How many frames the thread reported
    * @param top - The frame shown
    * @param opts.framesUnseen - The thread has frames this answer did not show
-   * @param opts.hasBreakpoints - A line or function breakpoint is already set
+   * @param opts.hasBreakpoints - A pausing line/logpoint or function breakpoint is set
    * @param opts.sourceless - Some frame is not internal by the policy's rules; it has no source
    */
   stopWithoutProgramFrame: (
@@ -535,6 +535,7 @@ export const ErrorMessages = {
    * @param seconds - The wait that ran out, in seconds
    * @param state - The live state the session is still in
    * @param why.armedSummary - What is armed ("2 breakpoint(s)"); absent when nothing is
+   * @param why.attachBreakpointClause - Conditional child-process scope advice from the run facts
    * @param why.debuggerOffWhy - The debugger-off sentence, when it applies
    */
   waitForStopPending: (
@@ -542,6 +543,7 @@ export const ErrorMessages = {
     state: 'running' | 'initializing',
     why: {
       armedSummary?: string;
+      attachBreakpointClause?: string;
       debuggerOffWhy?: string;
       loggingSummary?: string;
       noUncaughtStop?: NoUncaughtStop;
@@ -569,7 +571,8 @@ export const ErrorMessages = {
         : `when the program gets there`;
       return `The program is still running after ${seconds}s without reaching ${why.armedSummary}${logging}${stepClause}. ` +
         `Nothing was cancelled: what is armed stays armed, and the session becomes 'paused' ${pauseCondition}. ` +
-        `Call wait_for_stop again to keep waiting, or pause_execution to interrupt it.`;
+        `Call wait_for_stop again to keep waiting, or pause_execution to interrupt it.` +
+        (why.attachBreakpointClause ? ` ${why.attachBreakpointClause}` : '');
     }
     const stepFallback = why.inFlightStep
       ? `unless that ${why.inFlightStep.kind} (or a pause) lands — some debug engines can drop a step (see docs/KNOWN_ISSUES.md) —`

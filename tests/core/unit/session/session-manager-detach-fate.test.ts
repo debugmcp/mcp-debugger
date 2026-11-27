@@ -14,9 +14,10 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
-import { DebugLanguage, SessionState, JsDebugAdapterPolicy } from '@debugmcp/shared';
+import { DebugLanguage, SessionState, JsDebugAdapterPolicy, MockAdapterPolicy } from '@debugmcp/shared';
 import { createMockDependencies } from './session-manager-test-utils.js';
 import { ErrorMessages } from '../../../../src/utils/error-messages.js';
+import { FakeDebugAdapter } from '../../../test-utils/fakes/fake-debug-adapter.js';
 import { launchConfigIsAttach } from '../../../../src/proxy/proxy-config.js';
 
 describe('SessionManager - the fate of a borrowed program (issue #1148)', () => {
@@ -95,22 +96,59 @@ describe('SessionManager - the fate of a borrowed program (issue #1148)', () => 
   });
 
   describe('detach_from_process', () => {
-    it.each([undefined, false, true])('carries the policy note only for a persistent opt-in (%s)', async enabled => {
+    it.each([
+      { locality: 'pid', attached: true, off: false, expected: true },
+      { locality: 'loopback', attached: true, off: false, expected: true },
+      { locality: 'remote', attached: true, off: false, expected: false },
+      { locality: undefined, attached: true, off: false, expected: false },
+      { locality: 'loopback', attached: false, off: false, expected: false },
+      { locality: 'loopback', attached: true, off: true, expected: false }
+    ] as const)('gates persistent target wording on run facts: %j', async ({ locality, attached, off, expected }) => {
       const sessionId = await borrowedSession();
-      const note = JsDebugAdapterPolicy.getAttachDetachNote?.({ autoAttachChildProcesses: enabled });
-      sessionManager.getSession(sessionId)!.run.attachDetachNote = note;
+      const session = sessionManager.getSession(sessionId)!;
+      session.language = DebugLanguage.JAVASCRIPT;
+      session.run.attachMode = attached;
+      session.run.attachLocality = locality;
+      session.run.childDebuggingOptedOut = off ? 'adapter-default' : undefined;
       const detached = await sessionManager.detachFromProcess(sessionId);
-      expect(detached.data?.note).toBe(note);
-      if (enabled) expect(detached.data?.note).toContain('NODE_OPTIONS after detach');
+      expect(detached.data?.note).toBe(expected ? JsDebugAdapterPolicy.childAdoption?.attachLeavesTargetChanged : undefined);
     });
 
     it.each([false, true])('omits the persistence note when the target ends (terminate=%s)', async terminate => {
       const sessionId = await borrowedSession();
-      sessionManager.getSession(sessionId)!.run.attachDetachNote = 'persistent change';
+      const session = sessionManager.getSession(sessionId)!;
+      session.language = DebugLanguage.JAVASCRIPT;
+      session.run.attachLocality = 'loopback';
       dependencies.mockProxyManager.detachResult = { trigger: 'detach', acknowledged: true, by: 'response', debuggeeExited: true };
       const detached = await sessionManager.detachFromProcess(sessionId, terminate);
       expect(detached.data?.note).toBeUndefined();
     });
+    it('does not retain detach wording across an attach-shaped start_debugging (#1288)', async () => {
+      const sessionId = await borrowedSession();
+      const session = sessionManager.getSession(sessionId)!;
+      session.run.attachLocality = 'loopback';
+      Object.assign(sessionManager, { selectPolicy: () => ({ ...MockAdapterPolicy, childAdoption: JsDebugAdapterPolicy.childAdoption }) });
+      const detached = await sessionManager.detachFromProcess(sessionId);
+      expect(detached.data?.note).toBe(JsDebugAdapterPolicy.childAdoption?.attachLeavesTargetChanged);
+      // Drain the old mock worker's queued exit before reusing it for a new run.
+      await vi.runAllTimersAsync();
+      session.proxyManager = undefined;
+      const adapter = new FakeDebugAdapter({ language: DebugLanguage.MOCK }).withAttachSupport({
+        directConnect: true, transform: config => ({ ...config, request: 'attach' })
+      });
+      vi.mocked(dependencies.adapterRegistry.create).mockResolvedValue(adapter);
+      const attachShapedArgs = { request: 'attach', stopOnEntry: false };
+      const started = sessionManager.startDebugging(sessionId, 'test.py', [], attachShapedArgs);
+      await vi.runAllTimersAsync();
+      const startResult = await started;
+      expect(startResult.state, JSON.stringify(startResult)).toBe(SessionState.RUNNING);
+      expect(session.run.attachMode).toBe(false);
+      expect(session.run.attachLocality).toBeUndefined();
+      const nextDetach = await sessionManager.detachFromProcess(sessionId);
+      expect(nextDetach.success, JSON.stringify(nextDetach)).toBe(true);
+      expect(nextDetach.data?.note).toBeUndefined();
+    });
+
     it('says released when the adapter acknowledged the detach', async () => {
       const sessionId = await borrowedSession();
       dependencies.mockProxyManager.detachResult = { trigger: 'detach', acknowledged: true, by: 'response' };

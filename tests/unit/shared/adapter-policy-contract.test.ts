@@ -741,6 +741,15 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
     }
   });
 
+  it('declares persistent local-attach child changes only for js-debug (#1288)', () => {
+    const note = policy.childAdoption?.attachLeavesTargetChanged;
+    if (language === DebugLanguage.JAVASCRIPT) {
+      expect(note).toBe("Child debugging changed the target for the rest of its life: processes it starts later still load a file from this server's install through NODE_OPTIONS after detach; see the attach_to_process description.");
+    } else {
+      expect(note).toBeUndefined();
+    }
+  });
+
   it('asks for a resume before detach exactly where CodeLLDB on Windows needs one (issue #763)', () => {
     // ProcessWindows::DoDetach resumes every thread with the resume state its
     // last stop left behind; after a step that is "stepping", so the trap flag

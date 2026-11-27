@@ -319,12 +319,6 @@ describe('JavaScript session tree over a by-port attach (issue #1082)', () => {
     await targetRanToItsEnd(target);
   }, 120_000);
 
-  /**
-   * #501's wedge guard, in CI: the fork target forks a child every 2 s that
-   * announces itself over IPC and exits; a child parked by the bootloader and
-   * never resumed is logged `child-wedged`. The default case guards untouched,
-   * undebugged forks; the explicit opt-in case guards adoption and handshakes.
-   */
   it('explains a pending child-only breakpoint on a default attach (#1288)', async () => {
     const target = await startTarget(forkTarget);
     const rootId = await server.createSession('javascript', 'js-attach-child-only-note');
@@ -337,13 +331,19 @@ describe('JavaScript session tree over a by-port attach (issue #1082)', () => {
     const baseline = (target.output().match(/child-handshake /g) ?? []).length;
     const pending = await call<Stop>('wait_for_stop', { sessionId: rootId, timeout: 10000 });
     expect(pending.pending, JSON.stringify(pending)).toBe(true);
-    expect(pending.note).toBe('If that line runs in a process the target starts (a fork or a worker process), this attach does not debug it: see adapterConfig.autoAttachChildProcesses in the attach_to_process description for what turning that on costs.');
+    expect(pending.message).toContain("If a breakpoint's code runs only in a process the target starts (a fork or a worker process), this attach does not debug that process: see adapterConfig.autoAttachChildProcesses in the attach_to_process description for what turning that on costs.");
     expect((target.output().match(/child-handshake /g) ?? []).length).toBeGreaterThan(baseline);
     const detached = await call<Stop>('detach_from_process', { sessionId: rootId });
     expect(detached.released, JSON.stringify(detached)).toBe(true);
     expect(detached.note).toBeUndefined();
   }, 120_000);
 
+  /**
+   * #501's wedge guard, in CI: the fork target forks a child every 2 s that
+   * announces itself over IPC and exits; a child parked by the bootloader and
+   * never resumed is logged `child-wedged`. The default case guards untouched,
+   * undebugged forks; the explicit opt-in case guards adoption and handshakes.
+   */
   it('forks of a forking attach target stay undebugged and keep completing their handshake by default (issue #1286)', async () => {
     const target = await startTarget(forkTarget);
     const rootId = await server.createSession('javascript', 'js-attach-default-fork-target');

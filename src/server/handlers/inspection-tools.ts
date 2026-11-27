@@ -4,6 +4,7 @@
  */
 import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import { SessionState } from '@debugmcp/shared';
+import { hasPausingBreakpoint } from '../../session/launch/launch-arming.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { enforceExplicitNames, requireSessionId } from '../tool-validation.js';
@@ -28,7 +29,7 @@ import {
 
 function hasSessionBreakpoints(ctx: ToolContext, sessionId: string): boolean {
   const session = ctx.sessionManager.getSession(sessionId);
-  return (session?.breakpoints?.size ?? 0) + (session?.functionBreakpoints?.size ?? 0) > 0;
+  return session ? hasPausingBreakpoint(session) : false;
 }
 
 /**

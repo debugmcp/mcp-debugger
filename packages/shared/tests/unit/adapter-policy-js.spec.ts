@@ -848,12 +848,3 @@ describe('JsDebugAdapterPolicy', () => {
     });
   });
 });
-
-
-describe('attach side effects surviving detach (#1288)', () => {
-  it('only reports the persistent change for an effective opt-in', () => {
-    expect(JsDebugAdapterPolicy.getAttachDetachNote?.({})).toBeUndefined();
-    expect(JsDebugAdapterPolicy.getAttachDetachNote?.({ autoAttachChildProcesses: false })).toBeUndefined();
-    expect(JsDebugAdapterPolicy.getAttachDetachNote?.({ autoAttachChildProcesses: true })).toBe("Child debugging changed the target for the rest of its life: processes it starts later still load a file from this server's install through NODE_OPTIONS after detach; see the attach_to_process description.");
-  });
-});

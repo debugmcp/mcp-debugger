@@ -520,17 +520,15 @@ before js-debug connects; and an inspector that was opened for an attach that th
 open on its port (Node never closes it by itself) — a later attach by PID or by port reuses it,
 and it stays exposed in the way described above.
 
-For a JavaScript attach with child debugging off, a pending `wait_for_stop` with a breakpoint
-armed and no observed breakpoint hit carries this `note` (#1288):
+For a JavaScript attach with child debugging off, a pending `wait_for_stop` while
+`running`, with a pausing breakpoint armed and no breakpoint-family stop recorded
+in this run, appends this clause to `message` (#1288):
 
-> If that line runs in a process the target starts (a fork or a worker process), this attach does not debug it: see adapterConfig.autoAttachChildProcesses in the attach_to_process description for what turning that on costs.
+> If a breakpoint's code runs only in a process the target starts (a fork or a worker process), this attach does not debug that process: see adapterConfig.autoAttachChildProcesses in the attach_to_process description for what turning that on costs.
 
-The no-program-frame note suggests `or set a breakpoint` only when the session
-has no line or function breakpoint. With one already set, its advice is
-`continue_execution and trigger activity`.
-
-After an attach with `autoAttachChildProcesses: true`, `detach_from_process`
-adds this `note` unless termination was requested or the target was observed to exit:
+After a local JavaScript attach (PID or loopback) with child debugging enabled,
+`detach_from_process` adds this `note` unless termination was requested or an exit
+was observed (#1288):
 
 > Child debugging changed the target for the rest of its life: processes it starts later still load a file from this server's install through NODE_OPTIONS after detach; see the attach_to_process description.
 
@@ -550,7 +548,10 @@ adds this `note` unless termination was requested or the target was observed to 
   `process.processTimers`, with `note` saying no program frame is active (issue
   #900). `get_local_variables` returns that frame's own variables with
   `noProgramFrame: true` and a `note` saying they belong to it, not to your program
-  (issue #1135). Continue and send a request, or set a breakpoint first.
+  (issue #1135). This is the form shown when no pausing breakpoint is set; with one
+  already set the note only advises continuing and triggering activity. Supported
+  logpoints do not pause and leave the breakpoint suggestion in place. Continue
+  and send a request, or set a breakpoint first.
   `pause_execution` lands the same way, on attached and launched programs. On a
   loaded machine the pause can land first inside an evaluation js-debug makes on
   its own account just after attaching: the frame is then a sourceless

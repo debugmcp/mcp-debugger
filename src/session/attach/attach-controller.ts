@@ -196,7 +196,6 @@ export class AttachController {
     // Update to INITIALIZING state and set lifecycle to ACTIVE
     this.ctx.updateState(session, SessionState.INITIALIZING);
     session.run.attachMode = true;
-    session.run.attachDetachNote = undefined;
     session.run.attachLocality = attachLocality;
     this.ctx.updateSession(sessionId, {
       sessionLifecycle: SessionLifecycleState.ACTIVE,
@@ -250,7 +249,6 @@ export class AttachController {
       // keeps, so a wait_for_stop on an attached target reads one truth: with
       // no mode the filter the adapter has was simply not requested.
       recordExceptionArming(session, policy, breakOnExceptions, attachConfigData);
-      session.run.attachDetachNote = policy.getAttachDetachNote?.(attachConfigData);
 
       // Perform language-specific handshake if required, mirroring
       // startDebugging. For js-debug the whole DAP sequence — initialize,
@@ -657,6 +655,10 @@ export class AttachController {
       };
     }
 
+    const detachNote = session.run.attachMode === true && session.run.childDebuggingOptedOut === undefined &&
+      (session.run.attachLocality === 'pid' || session.run.attachLocality === 'loopback')
+      ? this.ctx.selectPolicy(session.language).childAdoption?.attachLeavesTargetChanged
+      : undefined;
     let resumedBeforeDetach: boolean | undefined;
     let warning: string | undefined;
     // What became of the process, as observed (issue #1148).
@@ -752,8 +754,8 @@ export class AttachController {
         state: SessionState.STOPPED,
         data: {
           message: terminateProcess ? 'Detached and terminated process' : fate.message,
-          ...(!terminateProcess && !fate.processEnded && session.run.attachDetachNote
-            ? { note: session.run.attachDetachNote } : {}),
+          ...(!terminateProcess && !fate.processEnded && detachNote
+            ? { note: detachNote } : {}),
           ...(!terminateProcess && fate.released ? { released: true as const } : {}),
           ...(!terminateProcess && fate.processEnded ? { processEnded: true as const } : {}),
           ...(resumedBeforeDetach !== undefined ? { resumedBeforeDetach } : {}),

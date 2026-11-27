@@ -120,7 +120,8 @@ exists). The agent then uses `sessionId` for inspection, stepping and continuing
   agent could see on any descendant is counted on every ancestor (`descendantStops`, per run — the
   child's own record leaves with its row at its close), and a session that never stopped itself
   but whose tree did says "Its child sessions stopped N times during this run" instead of
-  "without hitting any breakpoint", listing no breakpoint as unhit.
+  "without hitting any breakpoint" (or "no breakpoint was hit" when no exit code was
+  reported), listing no breakpoint as unhit.
   A paused parent is reported before its paused children: the agent has to deal with it anyway,
   and the `children` list below shows what else is paused. A parent that ended while a child is
   paused reports the child (rule 2 before rule 3), because nothing can be done on the parent. The

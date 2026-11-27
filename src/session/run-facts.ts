@@ -32,6 +32,7 @@ export interface RunFacts {
   attached: boolean;
   /** The run's recorded reason child debugging was off, not inferred from language. */
   childDebuggingOptedOut?: Run['childDebuggingOptedOut'];
+  breakpointStopOccurred?: boolean;
   /** Where an attach's target lives; undefined for a launch. */
   targetLocality: Run['attachLocality'];
   /**
@@ -127,6 +128,7 @@ export function runFactsOf(session: RunFactsSource, get: (sessionId: string) => 
     rootSessionId: root.id,
     attached,
     ...(run.childDebuggingOptedOut ? { childDebuggingOptedOut: run.childDebuggingOptedOut } : {}),
+    ...(run.breakpointStopOccurred ? { breakpointStopOccurred: true } : {}),
     targetLocality: run.attachLocality,
     launch: attached ? undefined : run.transformedLaunch,
     request: attached ? undefined : run.lastLaunch,

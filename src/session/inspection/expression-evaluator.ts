@@ -9,6 +9,7 @@
  */
 import { getErrorMessage } from '../../errors/debug-errors.js';
 import { debuggerOffWhy } from '../debugger-off.js';
+import { hasPausingBreakpoint } from '../launch/launch-arming.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import {
   buildRedactionNotice,
@@ -174,6 +175,7 @@ export class ExpressionEvaluator {
         const outsideProgram = anchor.noProgramFrame && top
           ? `${ErrorMessages.stopWithoutProgramFrame(anchor.threadId, anchor.totalFrameCount, top, {
               framesUnseen: anchor.totalFrameCount > 1,
+              hasBreakpoints: hasPausingBreakpoint(session),
               sourceless: anchor.sourcelessFrames
             })} The expression was evaluated in that frame.`
           : undefined;

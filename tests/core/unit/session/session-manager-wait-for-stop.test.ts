@@ -7,6 +7,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import { DebugLanguage, SessionState } from '@debugmcp/shared';
 import { createMockDependencies } from './session-manager-test-utils.js';
+import { ErrorMessages } from '../../../../src/utils/error-messages.js';
 import { SessionNotFoundError } from '../../../../src/errors/debug-errors.js';
 import type { DebugResult, WaitForStopResultData } from '../../../../src/session/session-manager-core.js';
 import { internals } from '../../../test-utils/helpers/operations-internals.js';
@@ -144,18 +145,69 @@ describe('SessionManager - waitForStop (issue #849)', () => {
     expect(wait.result()?.data?.lastStop).toBeUndefined();
   });
 
-  it('puts the child-only attach explanation in the pending note (#1288)', async () => {
+  it('puts the child-only attach explanation in the pending message (#1288)', async () => {
     const sessionId = await runningSession();
     await sessionManager.setBreakpoint(sessionId, { file: 'test.py', line: 5 });
     const session = sessionManager.getSession(sessionId)!;
     // The transformed run fact is enough; core never selects a language.
     session.run.attachMode = true;
     session.run.childDebuggingOptedOut = 'adapter-default';
+    dependencies.mockProxyManager.simulateStopped(1, 'pause');
+    await afterStop();
+    await sessionManager.continue(sessionId);
+    expect(session.run.breakpointStopOccurred).toBeUndefined();
     const wait = track(sessionManager.waitForStop(sessionId, 2_000));
     await vi.advanceTimersByTimeAsync(2_000);
     expect(wait.result()?.data?.pending).toBe(true);
-    expect(wait.result()?.data?.note).toContain('If that line runs in a process the target starts');
-    expect(wait.result()?.data?.note).toContain('attach_to_process description');
+    expect(wait.result()?.data?.message).toContain("If a breakpoint's code runs only in a process the target starts");
+    expect(wait.result()?.data?.note).toBeUndefined();
+    expect(wait.result()?.data?.message).toContain('attach_to_process description');
+  });
+
+  it('withholds the clause while initialization is pending (#1288)', async () => {
+    const sessionId = await runningSession();
+    await sessionManager.setBreakpoint(sessionId, { file: 'test.py', line: 5 });
+    const session = sessionManager.getSession(sessionId)!;
+    session.run.attachMode = true;
+    session.run.childDebuggingOptedOut = 'adapter-default';
+    session.state = SessionState.INITIALIZING;
+    const spy = vi.spyOn(ErrorMessages, 'waitForStopPending');
+    try {
+      const wait = track(sessionManager.waitForStop(sessionId, 2_000));
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(wait.result()?.data?.pending).toBe(true);
+      expect(wait.result()?.data?.message).not.toContain("If a breakpoint's code");
+      expect(spy.mock.calls.at(-1)?.[2]?.attachBreakpointClause).toBeUndefined();
+    } finally { spy.mockRestore(); }
+  });
+
+  it.each(['breakpoint', 'function breakpoint', 'data breakpoint', 'instruction breakpoint'])('remembers a %s hit after a step and resume (#1288)', async reason => {
+    const sessionId = await runningSession();
+    await sessionManager.setBreakpoint(sessionId, { file: 'test.py', line: 5 });
+    const session = sessionManager.getSession(sessionId)!;
+    session.run.attachMode = true;
+    session.run.childDebuggingOptedOut = 'adapter-default';
+    // Already verified breakpoints do not acquire verifiedBy: hit.
+    for (const bp of session.breakpoints.values()) { bp.verified = true; bp.verifiedBy = 'adapter'; }
+    dependencies.mockProxyManager.simulateStopped(1, reason);
+    await afterStop();
+    const step = sessionManager.stepOver(sessionId);
+    await afterStop();
+    dependencies.mockProxyManager.simulateStopped(1, 'step');
+    await afterStop();
+    await step;
+    expect(session.lastStop?.reason).toBe('step');
+    expect(session.run.breakpointStopOccurred).toBe(true);
+    await sessionManager.continue(sessionId);
+    const wait = track(sessionManager.waitForStop(sessionId, 2_000));
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(wait.result()?.data?.pending).toBe(true);
+    expect(wait.result()?.data?.message).not.toContain("If a breakpoint's code");
+    // A new run resets hit history.
+    const restarted = sessionManager.startDebugging(sessionId, 'test.py', [], { stopOnEntry: false });
+    await vi.runAllTimersAsync();
+    await restarted;
+    expect(session.run.breakpointStopOccurred).toBeUndefined();
   });
 
   it('names what is armed when its timeout passes with a breakpoint not yet reached', async () => {
