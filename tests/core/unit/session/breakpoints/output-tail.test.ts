@@ -36,7 +36,7 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
   describe('the three cases from issue #1277 (Windows and Linux)', () => {
     it('JavaScript crash: keeps Error: uncaught on purpose above Node CJS loader frames and drops inspector banners', () => {
       const outputBuffer = bufferOf(
-        { category: 'console', output: '/home/dev/.nvm/versions/node/v22.22.3/bin/node ./crash.cjs\n' },
+        { category: 'console', output: '/home/user/.nvm/versions/node/v22.22.3/bin/node ./crash.cjs\n' },
         { category: 'stderr', output: 'Debugger attached.\n' },
         {
           category: 'stderr',
@@ -76,7 +76,7 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
 
     it('JavaScript plain non-zero exit (exit_code_test.js): drops js-debug console and inspector stderr lines, keeping the stdout line', () => {
       const outputBuffer = bufferOf(
-        { category: 'console', output: '/home/dev/bin/node --experimental-network-inspection ./exit_code_test.js\n' },
+        { category: 'console', output: '/home/user/bin/node --experimental-network-inspection ./exit_code_test.js\n' },
         { category: 'stderr', output: 'Debugger attached.\r\n' },
         { category: 'stdout', output: 'exit_code_test: exiting with status 7\n' },
         { category: 'stderr', output: 'Waiting for the debugger to disconnect...\r\n' }
