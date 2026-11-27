@@ -6,11 +6,19 @@ A companion [assurance case](docs/assurance-case.md) explains *why* these contro
 
 ## Governance Model
 
-mcp-debugger uses an **agent-first development model** where AI coding agents handle implementation while CI serves as the primary quality gate. Manual merge and release decisions remain with the project maintainers.
+mcp-debugger uses an **agent-first development model** where AI coding agents handle implementation while CI serves as the primary quality gate. Merging is delegated to a managing agent under a bar the maintainers set; release decisions remain with the project maintainers (see [GOVERNANCE.md](GOVERNANCE.md)).
 
-- Agents create pull requests but cannot merge independently
-- All PRs must pass CI status checks before merging
-- Branch protection rules enforce these constraints server-side
+Enforced server-side on `main`:
+
+- Changes reach `main` only through pull requests; force pushes to `main` and its deletion are blocked. Configured to apply to administrators as well
+- The required CI status checks (the Linux build-and-test job and lint) must pass, on a branch that is up to date with `main`, before a pull request can merge. Configured to apply to administrators as well
+- A pull request needs one approving review that covers its last push. The administrator role can bypass this one rule
+
+Policy, not enforced server-side:
+
+- The managing agent merges a pull request only when it meets the maintainers' merge bar, which includes every CI job that runs on the pull request passing (not only the two required ones) and a review by an agent other than the one that wrote the change
+- Dependabot's minor and patch updates are the exception to the bar: once approved, GitHub merges them automatically when the required checks pass (`.github/workflows/dependabot-auto-merge.yml`)
+- A release is tagged only on a maintainer's explicit word for that release
 
 ## Supply Chain Controls
 
@@ -122,10 +130,11 @@ Each release also attaches the raw sigstore bundle as `multiple.sigstore.json` /
 
 The `main` branch is protected with the following rules:
 
-- Required status checks must pass before merging (CI jobs: Build and Test, Lint Code, Container Tests, Test Summary)
+- Required status checks must pass before merging, on a branch that is up to date with `main`: `Build and Test (ubuntu-latest, 22.x, 3.11)` and `Lint Code`. The other CI jobs (the Windows build, Container Tests, the per-language host lanes, MCP conformance) are asked for by the merge bar in [GOVERNANCE.md](GOVERNANCE.md), not by branch protection
 - Force pushes are blocked
 - Branch deletion is blocked
 - All changes must go through pull requests
+- These rules are configured to apply to administrators as well; a further rule, one approving review that covers the last push, can be bypassed by the administrator role
 
 ## Process Isolation
 

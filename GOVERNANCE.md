@@ -13,16 +13,16 @@ mcp-debugger is stewarded by **Sycamore LLC**, which holds the GitHub organizati
 
 ## How changes land
 
-mcp-debugger uses an **agent-first development model with human accountability**: AI coding agents produce most implementation work, while humans retain all trust decisions.
+mcp-debugger uses an **agent-first development model with human accountability**: AI coding agents produce most implementation work, and a managing agent merges it under a bar a human maintainer sets, while a human maintainer authorizes every release and stays accountable for the project.
 
 1. All changes go through pull requests — no direct pushes to `main` (enforced server-side by branch protection).
-2. CI is the primary quality gate: required status checks (build/test on Linux and Windows, lint, container tests) must pass.
-3. **A human maintainer makes every merge decision and every release decision.** Agents cannot merge, publish, or modify branch protection.
-4. Releases are tagged by a maintainer and built/published by CI with pinned actions, OIDC trusted publishing, sigstore provenance, and SBOMs (see [SUPPLY-CHAIN-SECURITY.md](SUPPLY-CHAIN-SECURITY.md)).
+2. CI is the primary quality gate. Branch protection requires the Linux build-and-test job and lint to pass before anything merges, and is configured to apply to administrators as well; the merge bar in item 3 asks for every other CI job as well (the Windows build, the container tests, the per-language host lanes, MCP conformance).
+3. **A human maintainer sets the merge bar and authorizes every release; a managing agent merges changes that meet the bar and reports each one.** The bar asks for more than branch protection does: it includes every CI job that runs on the pull request passing, not only the two required ones, and a review by an agent other than the one that wrote the change. Dependabot's minor and patch updates are the exception: once approved, GitHub merges them automatically when the required checks pass. Changing the bar or branch protection is the maintainer's decision, not an agent's.
+4. A release is tagged only on a maintainer's explicit word for that release, and is built and published by CI with pinned actions, OIDC trusted publishing, sigstore provenance, and SBOMs (see [SUPPLY-CHAIN-SECURITY.md](SUPPLY-CHAIN-SECURITY.md)).
 
 ## Decision-making
 
-Day-to-day decisions are made by the lead maintainer. Significant directional changes (new language adapters, protocol-surface changes, deprecations) are proposed and discussed in GitHub issues before implementation — the issue tracker is the project's decision record.
+Day-to-day decisions are made by the lead maintainer, or by the managing agent under the lead maintainer's delegation, and the lead maintainer can reverse any of them. Significant directional changes (new language adapters, protocol-surface changes, deprecations) are proposed and discussed in GitHub issues before implementation — the issue tracker is the project's decision record.
 
 ## Security decisions
 

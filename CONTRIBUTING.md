@@ -347,7 +347,7 @@ which appends a `Signed-off-by: Your Name <you@example.com>` trailer. If you for
 4. **After Approval**:
    - Squash commits if requested
    - Ensure CI passes
-   - Maintainer will merge using "Squash and merge"
+   - The project merges using "Squash and merge"; [GOVERNANCE.md](GOVERNANCE.md) says who merges and under what bar
 
 ## 📁 Project Structure
 
