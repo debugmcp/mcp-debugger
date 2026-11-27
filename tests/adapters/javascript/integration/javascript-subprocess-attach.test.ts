@@ -1,8 +1,9 @@
 /**
  * The session tree over a by-port attach with real js-debug (issue #1082): a
  * target started with `node --inspect` that forks a Node child after the
- * attach. `autoAttachChildProcesses` requires an explicit opt-in on attach, unlike
- * launch. The tree helper opts in explicitly; the opt-out case overrides it. js-debug
+ * attach. By default, processes the target starts afterwards are not debugged;
+ * an already-listening child is adopted either way. The tree helper opts in
+ * explicitly for future children; the opt-out case overrides it. js-debug
  * injects its bootloader into the attached process and reports every process
  * it forks from then on, and the server adopts each as a child session.
  *
@@ -256,9 +257,11 @@ describe('JavaScript session tree over a by-port attach (issue #1082)', () => {
     expect(attached.success, JSON.stringify(attached)).toBe(true);
     // A default attach must not warn about the absent key.
     expect(String(attached.warning ?? '')).not.toContain('autoAttachChildProcesses');
-    target.go('now');
+    // Wait the fixture's full 20 s injection window before forking: a late
+    // injection must fail the no-bootloader assertion too.
+    target.go('go');
 
-    const ended = await call<Stop>('wait_for_stop', { sessionId: rootId, timeout: 30000 });
+    const ended = await call<Stop>('wait_for_stop', { sessionId: rootId, timeout: 45000 });
     expect(ended.state, JSON.stringify(ended)).toBe('stopped');
     expect(ended.sessionId).toBe(rootId);
     expect(ended.children).toBeUndefined();
@@ -279,7 +282,9 @@ describe('JavaScript session tree over a by-port attach (issue #1082)', () => {
     expect(ended.sessionId).toBe(rootId);
     expect(ended.children).toBeUndefined();
     expect((await rows()).some((row) => row.parentSessionId === rootId)).toBe(false);
-    expect(target.output(), 'an opted-out attach injects no bootloader').toContain('parent go (no bootloader)');
+    // This immediate fork records the environment at the go signal; it does
+    // not rule out a later injection (the default case waits for that).
+    expect(target.output(), 'the immediate fork saw no bootloader').toContain('parent go (no bootloader)');
     await targetRanToItsEnd(target);
   }, 120_000);
 

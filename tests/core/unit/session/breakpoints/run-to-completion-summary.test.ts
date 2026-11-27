@@ -194,7 +194,7 @@ describe('buildRunToCompletionSummary', () => {
     expect(adapterDefaultOff.summary).not.toContain('attach_to_process');
     expect(adapterDefaultOff.summary).not.toContain('so child processes were not debugged');
     expect(adapterDefaultOff.summary).toContain(
-      'without hitting any breakpoint in the attached process (child-process debugging is off on an attach unless requested; if the breakpoint\'s code runs in a process the target starts, breakpoints in code only that child process loads cannot bind; enabling adapterConfig: { autoAttachChildProcesses: true } on the attach changes NODE_OPTIONS for the target\'s later children and can leave a child forked during detach waiting (#1286)).'
+      'without hitting any breakpoint in the attached process (on an attach, processes the target starts afterwards are not debugged unless requested, so a breakpoint in code only such a process runs is never hit; adapterConfig: { autoAttachChildProcesses: true } on the attach requests it, but it changes the target: its later children get a changed NODE_OPTIONS (and fail to start if the target is not on this server\'s machine), and one forked during a detach can be left waiting (#1286)).'
     );
   });
 
@@ -210,8 +210,8 @@ describe('buildRunToCompletionSummary', () => {
       breakpoints: new Map<string, LineBp>([['a', { file: '/work/app.js', line: 14, verified: true }]]),
       run: { attachMode: true, childDebuggingOptedOut: 'adapter-default' }
     });
-    expect(verifiedAttach.summary).toContain('in the attached process (child-process debugging is off on an attach unless requested');
-    expect(verifiedAttach.summary).toContain('enabling adapterConfig: { autoAttachChildProcesses: true } on the attach changes NODE_OPTIONS');
+    expect(verifiedAttach.summary).toContain('in the attached process (on an attach, processes the target starts afterwards are not debugged unless requested');
+    expect(verifiedAttach.summary).toContain('adapterConfig: { autoAttachChildProcesses: true } on the attach requests it');
     expect(verifiedAttach.summary).toContain('Verified in the attached process but never hit: app.js:14.');
   });
 

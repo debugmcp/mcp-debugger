@@ -781,11 +781,13 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
         request: 'attach', port: 9229, autoAttachChildProcesses: value
       } as any);
       expect(cfg.autoAttachChildProcesses).toBe(false);
-      expect(adapter.consumeLaunchConfigDiagnostics()).toEqual([
-        expect.objectContaining({
+      const diagnostics = adapter.consumeLaunchConfigDiagnostics();
+      expect(diagnostics[0]).not.toHaveProperty('scope');
+      expect(diagnostics).toEqual([
+        {
           key: 'autoAttachChildProcesses',
-          message: `expected boolean, received ${type}; treating as absent and using the attach default (false)`
-        })
+          message: `expected a boolean, received ${type}; treated as absent, so the attach default (off) applies`
+        }
       ]);
     });
 

@@ -1009,8 +1009,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     if (rest.autoAttachChildProcesses !== undefined && typeof rest.autoAttachChildProcesses !== 'boolean') {
       this.launchConfigDiagnostics.push({
         key: 'autoAttachChildProcesses',
-        message: `expected boolean, received ${rest.autoAttachChildProcesses === null ? 'null' : typeof rest.autoAttachChildProcesses}; treating as absent and using the attach default (false)`,
-        scope: 'launch'
+        message: `expected a boolean, received ${rest.autoAttachChildProcesses === null ? 'null' : typeof rest.autoAttachChildProcesses}; treated as absent, so the attach default (off) applies`
       });
     }
     const autoAttachChildProcesses = typeof rest.autoAttachChildProcesses === 'boolean'

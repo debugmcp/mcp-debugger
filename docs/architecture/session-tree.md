@@ -289,7 +289,7 @@ makes it safe (M1 for Python, M2 for js-debug), as a documented behaviour change
 changelog entry, because it changes what a launch that spawns Python or Node processes shows:
 child rows for every xdist worker, autoreloader child or script that shells out.
 
-With `autoAttachChildProcesses` off, nothing is injected into the target, so processes it starts afterwards are not debugged. A child already running with an inspector port of its own (for example, a cluster worker of a primary started with `--inspect`) is still found and becomes a child session with nothing changed in it, and detach releases it (measured on Windows, 2026-11-26).
+With `autoAttachChildProcesses` off, nothing is injected into the target, so processes it starts afterwards are not debugged. A child already running with an inspector port of its own (for example, a cluster worker of a primary started with `--inspect`) is still found and becomes a child session where 0.26.0 showed no session for it: it inherits the session's breakpoints, so a breakpoint in its code stops it; nothing is changed in it, and detach releases it (measured on Windows, 2026-11-26).
 
 The Python **attach** transform flips in M1 only once its own measurement passes: the spike's
 topology is a launch served by `python -m debugpy.adapter`, and whether a by-port attach's children

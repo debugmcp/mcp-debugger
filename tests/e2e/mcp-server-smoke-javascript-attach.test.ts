@@ -13,12 +13,16 @@
  * continue to hit it, evaluate an expression at the stop, then
  * detach_from_process must leave the target alive and running.
  *
- * Test 3 — stopOnEntry:false: attaching must NOT pause the target (the
- * js-debug child adoption path must not force an entry stop), and detach
+ * Test 3 verifies a breakpoint set before attach; test 4 checks stopOnEntry:false:
+ * attaching must NOT pause the target (the js-debug child adoption path must
+ * not force an entry stop), and detach
  * must leave it alive.
  *
- * Tests 5/6 — forking targets (issues #501, #1082): attaching must not wedge
- * child processes the target fork()s. With explicit autoAttachChildProcesses:true,
+ * Tests 5-8 cover inspector-URL and PID attaches, then idle and busy pauses.
+ *
+ * Tests 9-11 (one opt-in case and default/false parameterized cases) cover
+ * forking targets (issues #501, #1082): attaching must not wedge child processes
+ * the target fork()s. With explicit autoAttachChildProcesses:true,
  * every fork js-debug reports becomes a child debug session (the session
  * tree) that runs on under the debugger; by default or with explicit false
  * the bootloader stays out and forks run untouched. Either way the fork's IPC handshake must complete.
