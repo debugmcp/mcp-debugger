@@ -214,6 +214,7 @@ export const detachFromProcessTool: ToolHandler = async (ctx, args) => {
       hoistTreeFields(responsePayload, detachResult.data);
       // What became of the process, as observed (issue #1148), beside the
       // message the way close_debug_session carries it.
+      if (detachResult.data.note) responsePayload.note = detachResult.data.note;
       if (detachResult.data.released) responsePayload.released = true;
       if (detachResult.data.processEnded) responsePayload.processEnded = true;
       if (detachResult.data.warning !== undefined) responsePayload.warning = detachResult.data.warning;

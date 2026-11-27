@@ -20,6 +20,7 @@ function result(overrides: Partial<StackTraceResult> = {}): StackTraceResult {
 
 function context(opts: {
   reason?: string;
+  hasBreakpoints?: boolean;
   stopThreadId?: number;
   state?: SessionState;
   read?: StackTraceResult | Error;
@@ -39,6 +40,7 @@ function context(opts: {
     getStackTraceDetailed,
     getSession: () => ({
       state,
+      breakpoints: new Map(opts.hasBreakpoints ? [['bp', {}]] : []),
       lastStop: opts.reason === undefined
         ? undefined
         : { reason: opts.reason, timestamp: 1, ...(opts.stopThreadId !== undefined ? { threadId: opts.stopThreadId } : {}) }
@@ -187,4 +189,12 @@ describe('describeStopLocation (issue #904)', () => {
       expect.any(Error)
     );
   });
+});
+
+
+it('omits redundant breakpoint advice in a stop landing (#1288)', async () => {
+  const { ctx } = context({ reason: 'pause', hasBreakpoints: true, read: result({ frames: [IDLE], noProgramFrame: true }) });
+  const landing = await describeStopLocation(ctx, 'sid', 'pause');
+  expect(landing.note).toContain('continue_execution and trigger activity.');
+  expect(landing.note).not.toContain('set a breakpoint');
 });

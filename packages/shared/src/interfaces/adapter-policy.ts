@@ -1240,6 +1240,11 @@ export interface AdapterPolicy {
     resumeBeforeDetachReason?: string;
   };
 
+  /** Note about attach side effects that survive detach, from the effective config.
+   * Any engine that changes its borrowed target beyond the session can implement this.
+   */
+  getAttachDetachNote?(config: Readonly<Record<string, unknown>>): string | undefined;
+
   /**
    * Get the configuration for starting the debug adapter connection.
    * Policies return either a 'spawn' config (start an adapter process, then

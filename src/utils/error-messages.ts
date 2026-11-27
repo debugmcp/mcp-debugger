@@ -474,13 +474,14 @@ export const ErrorMessages = {
    * @param frameCount - How many frames the thread reported
    * @param top - The frame shown
    * @param opts.framesUnseen - The thread has frames this answer did not show
+   * @param opts.hasBreakpoints - A line or function breakpoint is already set
    * @param opts.sourceless - Some frame is not internal by the policy's rules; it has no source
    */
   stopWithoutProgramFrame: (
     threadId: number | undefined,
     frameCount: number,
     top: { name: string; file: string; line: number },
-    opts?: { framesUnseen?: boolean; sourceless?: boolean }
+    opts?: { framesUnseen?: boolean; sourceless?: boolean; hasBreakpoints?: boolean }
   ) => {
     const where = `No program frame is active${typeof threadId === 'number' ? ` on thread ${threadId}` : ''}: `;
     const shown = `(top: '${top.name}' ${top.file}:${top.line}).`;
@@ -490,14 +491,14 @@ export const ErrorMessages = {
         where +
         `${frameCount === 1 ? 'the only frame has no source' : `all ${frameCount} frames are internal/runtime or have no source`} ` +
         `${shown} Code without source is a runtime's or a library's, or your own built without debug information. ` +
-        `continue_execution and trigger activity, or set a breakpoint in a source file${pointer}`
+        `continue_execution and trigger activity${opts?.hasBreakpoints ? '' : ', or set a breakpoint in a source file'}${pointer}`
       );
     }
     return (
       where +
       `${frameCount === 1 ? 'the only frame is' : `all ${frameCount} frames are`} internal/runtime ` +
       `${shown} The stop landed outside your code: ` +
-      `continue_execution and trigger activity, or set a breakpoint${pointer}`
+      `continue_execution and trigger activity${opts?.hasBreakpoints ? '' : ', or set a breakpoint'}${pointer}`
     );
   },
 

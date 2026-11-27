@@ -10,9 +10,32 @@
 import type { AdapterPolicy, ExceptionBreakMode } from '@debugmcp/shared';
 import { normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
 import { OUTPUT_BUFFER_CAP, type OutputRingBuffer } from '../output-buffer.js';
+import type { RunFacts } from '../run-facts.js';
 import type { ManagedSession } from '../session-store.js';
 
 const DEFAULT_ATTACH_CHILD_DEBUGGING_NOTE = "on an attach, processes the target starts afterwards are not debugged unless requested, so a breakpoint in code only such a process runs is never hit; adapterConfig: { autoAttachChildProcesses: true } on the attach requests it for a target reached through a local endpoint, but it changes the target: each process it starts from then on is made to load a file from this server (through NODE_OPTIONS) and to wait at startup for the debugger, so it can fail to start if the target cannot load this server's file, starts late when the target forks fast, and can be left waiting if it is forked during a detach (#1286)";
+
+/** A conditional explanation, never a claim about which process runs a line (#1288). */
+export function buildPendingAttachBreakpointNote(
+  session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'lastStop' | 'descendantStops' | 'adapterCapabilities'>,
+  run: Pick<RunFacts, 'attached' | 'childDebuggingOptedOut'>
+): string | undefined {
+  if (!run.attached || (run.childDebuggingOptedOut !== 'adapter-default' &&
+      run.childDebuggingOptedOut !== 'autoAttachChildProcesses: false')) {
+    return undefined;
+  }
+  const breakpoints = [
+    ...Array.from(session.breakpoints.values()).filter(bp =>
+      !(session.adapterCapabilities?.supportsLogPoints && bp.logMessage !== undefined)),
+    ...Array.from(session.functionBreakpoints?.values() ?? [])
+  ];
+  if (breakpoints.length === 0 || breakpoints.some(bp => bp.verifiedBy === 'hit') ||
+      session.lastStop?.reason === 'breakpoint' || (session.descendantStops ?? 0) > 0) {
+    return undefined;
+  }
+  return 'If that line runs in a process the target starts (a fork or a worker process), this attach does not debug it: ' +
+    'see adapterConfig.autoAttachChildProcesses in the attach_to_process description for what turning that on costs.';
+}
 
 export const OUTPUT_TAIL_LINES = 8;
 export const OUTPUT_TAIL_LINE_CHARS = 300;
@@ -371,7 +394,7 @@ function summarizeProgramEnd(
     ? ` Verified${optedOut !== undefined ? ` in ${processScope}` : ''} but never hit: ${verifiedNames.join(', ')}.`
     : '';
   return {
-    summary: withOutputTailClause(`${ended} without hitting any breakpoint${optOutClause}.${verifiedClause}`, outputTail),
+    summary: withOutputTailClause(`${ended}${exitCode === undefined ? '; no breakpoint was hit' : ' without hitting any breakpoint'}${optOutClause}.${verifiedClause}`, outputTail),
     data
   };
 }

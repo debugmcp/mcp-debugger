@@ -32,6 +32,7 @@ const CHILD_BREAKPOINT_LINE = 14;
 interface Row { id: string; name: string; state: string; parentSessionId?: string }
 interface ChildSummary { sessionId: string; name: string; state: string; parentSessionId: string }
 interface Stop extends ToolAnswer {
+  note?: string;
   sessionId?: string;
   pending?: boolean;
   exitCode?: number;
@@ -215,6 +216,7 @@ describe('JavaScript session tree over a by-port attach (issue #1082)', () => {
     const detached = await call<Stop>('detach_from_process', { sessionId: rootId });
     expect(detached.success, JSON.stringify(detached)).toBe(true);
     expect(detached.childrenReleased, JSON.stringify(detached)).toBe(1);
+    expect(detached.note).toContain('for the rest of its life');
     expect(detached.childrenClosed).toBeUndefined();
 
     // Detach keeps the rows: the child is stopped and says it was released.
@@ -323,6 +325,25 @@ describe('JavaScript session tree over a by-port attach (issue #1082)', () => {
    * never resumed is logged `child-wedged`. The default case guards untouched,
    * undebugged forks; the explicit opt-in case guards adoption and handshakes.
    */
+  it('explains a pending child-only breakpoint on a default attach (#1288)', async () => {
+    const target = await startTarget(forkTarget);
+    const rootId = await server.createSession('javascript', 'js-attach-child-only-note');
+    const bp = await call('set_breakpoint', { file: forkTarget, line: 21 });
+    expect(bp.success, JSON.stringify(bp)).toBe(true);
+    const attached = await call<Stop>('attach_to_process', { host: '127.0.0.1', port: target.port, verifyTimeout: 20000 });
+    expect(attached.success, JSON.stringify(attached)).toBe(true);
+    expect(String(attached.note ?? '')).not.toContain('or set a breakpoint');
+    await call('continue_execution', { sessionId: rootId });
+    const baseline = (target.output().match(/child-handshake /g) ?? []).length;
+    const pending = await call<Stop>('wait_for_stop', { sessionId: rootId, timeout: 10000 });
+    expect(pending.pending, JSON.stringify(pending)).toBe(true);
+    expect(pending.note).toBe('If that line runs in a process the target starts (a fork or a worker process), this attach does not debug it: see adapterConfig.autoAttachChildProcesses in the attach_to_process description for what turning that on costs.');
+    expect((target.output().match(/child-handshake /g) ?? []).length).toBeGreaterThan(baseline);
+    const detached = await call<Stop>('detach_from_process', { sessionId: rootId });
+    expect(detached.released, JSON.stringify(detached)).toBe(true);
+    expect(detached.note).toBeUndefined();
+  }, 120_000);
+
   it('forks of a forking attach target stay undebugged and keep completing their handshake by default (issue #1286)', async () => {
     const target = await startTarget(forkTarget);
     const rootId = await server.createSession('javascript', 'js-attach-default-fork-target');

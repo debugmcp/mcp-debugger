@@ -170,6 +170,8 @@ export interface Run {
   // run on a remote filesystem (container, pod, other machine), so host-side
   // file existence checks do not apply to their source paths.
   attachMode?: boolean;
+  /** Policy explanation of attach side effects surviving detach (#1288). */
+  attachDetachNote?: string;
   // Whether this session owns its program or borrows it (issue #1151),
   // recorded where the proxy launch is committed, from the one fact the
   // worker's shutdown also reads: a launch owns the program and ends it with

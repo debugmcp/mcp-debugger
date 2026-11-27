@@ -520,6 +520,20 @@ before js-debug connects; and an inspector that was opened for an attach that th
 open on its port (Node never closes it by itself) — a later attach by PID or by port reuses it,
 and it stays exposed in the way described above.
 
+For a JavaScript attach with child debugging off, a pending `wait_for_stop` with a breakpoint
+armed and no observed breakpoint hit carries this `note` (#1288):
+
+> If that line runs in a process the target starts (a fork or a worker process), this attach does not debug it: see adapterConfig.autoAttachChildProcesses in the attach_to_process description for what turning that on costs.
+
+The no-program-frame note suggests `or set a breakpoint` only when the session
+has no line or function breakpoint. With one already set, its advice is
+`continue_execution and trigger activity`.
+
+After an attach with `autoAttachChildProcesses: true`, `detach_from_process`
+adds this `note` unless termination was requested or the target was observed to exit:
+
+> Child debugging changed the target for the rest of its life: processes it starts later still load a file from this server's install through NODE_OPTIONS after detach; see the attach_to_process description.
+
 ## Known Limitations
 
 - Browser/Chrome debugging not yet supported (Node.js via `pwa-node` only)

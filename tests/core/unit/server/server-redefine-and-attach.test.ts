@@ -920,6 +920,17 @@ describe('hot_reload and attach stopOnEntry tests', () => {
       });
     });
 
+    it('hoists a persistent attach side-effect note beside the detach message (#1288)', async () => {
+      const note = 'The target retains the attach change; see attach_to_process.';
+      mockSessionManager.detachFromProcess.mockResolvedValue({
+        success: true, state: 'stopped', data: { message: 'Detached', released: true, note }
+      });
+      const result = await callDetach({ sessionId: 'sess-1' });
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.note).toBe(note);
+      expect(payload.data.note).toBe(note);
+    });
+
     it('defaults terminateProcess to false and propagates failures', async () => {
       mockSessionManager.detachFromProcess.mockResolvedValue({
         success: false,

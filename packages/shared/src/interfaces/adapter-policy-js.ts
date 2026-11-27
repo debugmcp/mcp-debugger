@@ -832,6 +832,10 @@ export const JsDebugAdapterPolicy = {
    */
   getAttachBehavior: () => ({ pauseAfterAttach: true }),
 
+  getAttachDetachNote: (config) => config.autoAttachChildProcesses === true
+    ? "Child debugging changed the target for the rest of its life: processes it starts later still load a file from this server's install through NODE_OPTIONS after detach; see the attach_to_process description."
+    : undefined,
+
   /**
    * A pause sent to a Node program that is running no JavaScript stays armed
    * in V8 and fires inside the next evaluation the inspector dispatches,

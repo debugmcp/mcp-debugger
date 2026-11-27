@@ -14,7 +14,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
-import { DebugLanguage, SessionState } from '@debugmcp/shared';
+import { DebugLanguage, SessionState, JsDebugAdapterPolicy } from '@debugmcp/shared';
 import { createMockDependencies } from './session-manager-test-utils.js';
 import { ErrorMessages } from '../../../../src/utils/error-messages.js';
 import { launchConfigIsAttach } from '../../../../src/proxy/proxy-config.js';
@@ -95,6 +95,22 @@ describe('SessionManager - the fate of a borrowed program (issue #1148)', () => 
   });
 
   describe('detach_from_process', () => {
+    it.each([undefined, false, true])('carries the policy note only for a persistent opt-in (%s)', async enabled => {
+      const sessionId = await borrowedSession();
+      const note = JsDebugAdapterPolicy.getAttachDetachNote?.({ autoAttachChildProcesses: enabled });
+      sessionManager.getSession(sessionId)!.run.attachDetachNote = note;
+      const detached = await sessionManager.detachFromProcess(sessionId);
+      expect(detached.data?.note).toBe(note);
+      if (enabled) expect(detached.data?.note).toContain('NODE_OPTIONS after detach');
+    });
+
+    it.each([false, true])('omits the persistence note when the target ends (terminate=%s)', async terminate => {
+      const sessionId = await borrowedSession();
+      sessionManager.getSession(sessionId)!.run.attachDetachNote = 'persistent change';
+      dependencies.mockProxyManager.detachResult = { trigger: 'detach', acknowledged: true, by: 'response', debuggeeExited: true };
+      const detached = await sessionManager.detachFromProcess(sessionId, terminate);
+      expect(detached.data?.note).toBeUndefined();
+    });
     it('says released when the adapter acknowledged the detach', async () => {
       const sessionId = await borrowedSession();
       dependencies.mockProxyManager.detachResult = { trigger: 'detach', acknowledged: true, by: 'response' };

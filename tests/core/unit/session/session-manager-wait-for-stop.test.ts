@@ -144,6 +144,20 @@ describe('SessionManager - waitForStop (issue #849)', () => {
     expect(wait.result()?.data?.lastStop).toBeUndefined();
   });
 
+  it('puts the child-only attach explanation in the pending note (#1288)', async () => {
+    const sessionId = await runningSession();
+    await sessionManager.setBreakpoint(sessionId, { file: 'test.py', line: 5 });
+    const session = sessionManager.getSession(sessionId)!;
+    // The transformed run fact is enough; core never selects a language.
+    session.run.attachMode = true;
+    session.run.childDebuggingOptedOut = 'adapter-default';
+    const wait = track(sessionManager.waitForStop(sessionId, 2_000));
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(wait.result()?.data?.pending).toBe(true);
+    expect(wait.result()?.data?.note).toContain('If that line runs in a process the target starts');
+    expect(wait.result()?.data?.note).toContain('attach_to_process description');
+  });
+
   it('names what is armed when its timeout passes with a breakpoint not yet reached', async () => {
     const sessionId = await runningSession();
     await sessionManager.setBreakpoint(sessionId, { file: 'test.py', line: 5 });

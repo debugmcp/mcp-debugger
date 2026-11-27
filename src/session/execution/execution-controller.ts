@@ -87,6 +87,7 @@ import { describeReleasedChildren, describeTreeAnswer, withReleasedChildren } fr
 import { resolveDapTimeoutOverride } from '../dap-request-helpers.js';
 import {
   buildRunToCompletionSummary,
+  buildPendingAttachBreakpointNote,
   describeProgramEnd,
   exitOutputTail,
   withOutputTailClause
@@ -1181,6 +1182,9 @@ export class ExecutionController {
     // armed; with nothing, no pause is promised. An entry stop is not part of
     // it — that belongs to the launch, which is behind a running program.
     const arming = describeLaunchArming(session, false);
+    const pendingNote = state === SessionState.RUNNING
+      ? buildPendingAttachBreakpointNote(session, this.runOf(session))
+      : undefined;
     const inFlightStep =
       state === SessionState.RUNNING && session.inFlightStep
         ? {
@@ -1205,6 +1209,7 @@ export class ExecutionController {
           }
         )),
         pending: true,
+        ...(pendingNote ? { note: pendingNote } : {}),
         ...tree()
       }
     };

@@ -349,6 +349,8 @@ export type LaunchResultData = DebugResultData & StopAnswerFields & TreeAnswerFi
  * terminating detach closed.
  */
 export type DetachResultData = DebugResultData & Pick<TreeAnswerFields, 'childrenReleased' | 'childrenClosed'> & {
+  /** Attach side effects that survive this detach (#1288). */
+  note?: string;
   /** The adapter acknowledged the detach and reported no exit: the process was left running (issue #1148). */
   released?: true;
   /** The adapter reported that the program exited (issue #1148). */

@@ -30,6 +30,8 @@ export interface RunFacts {
   rootSessionId: string;
   /** True when the root attached to a program it did not start. */
   attached: boolean;
+  /** The run's recorded reason child debugging was off, not inferred from language. */
+  childDebuggingOptedOut?: Run['childDebuggingOptedOut'];
   /** Where an attach's target lives; undefined for a launch. */
   targetLocality: Run['attachLocality'];
   /**
@@ -124,6 +126,7 @@ export function runFactsOf(session: RunFactsSource, get: (sessionId: string) => 
   return {
     rootSessionId: root.id,
     attached,
+    ...(run.childDebuggingOptedOut ? { childDebuggingOptedOut: run.childDebuggingOptedOut } : {}),
     targetLocality: run.attachLocality,
     launch: attached ? undefined : run.transformedLaunch,
     request: attached ? undefined : run.lastLaunch,

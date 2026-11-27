@@ -92,6 +92,7 @@ export async function describeStopLocation(
       // stack, when it has one, is get_stack_trace's to list (issue #1141).
       notes.push(ErrorMessages.stopWithoutProgramFrame(result.threadId, result.totalFrameCount, top, {
         framesUnseen: result.totalFrameCount > 1,
+        hasBreakpoints: (ctx.getSession(sessionId).breakpoints?.size ?? 0) + (ctx.getSession(sessionId).functionBreakpoints?.size ?? 0) > 0,
         sourceless: result.sourcelessFrames
       }));
     }

@@ -26,6 +26,11 @@ import {
   type ToolResult
 } from '../tool-result.js';
 
+function hasSessionBreakpoints(ctx: ToolContext, sessionId: string): boolean {
+  const session = ctx.sessionManager.getSession(sessionId);
+  return (session?.breakpoints?.size ?? 0) + (session?.functionBreakpoints?.size ?? 0) > 0;
+}
+
 /**
  * Two notes as one text: the first is given its full stop when it lacks one
  * (the locals anchor notes are clauses joined with '; ', a resolver note is a
@@ -146,6 +151,7 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
     // list them.
     if (stackTrace.noProgramFrame && stackTrace.frames[0] && (stackTrace.hiddenFrameCount === 0 || stackTrace.sourcelessFrames)) {
       notes.push(ErrorMessages.stopWithoutProgramFrame(stackTrace.threadId, stackTrace.totalFrameCount, stackTrace.frames[0], {
+        hasBreakpoints: hasSessionBreakpoints(ctx, args.sessionId!),
         sourceless: stackTrace.sourcelessFrames
       }));
     }
@@ -416,7 +422,7 @@ export async function handleGetLocalVariables(ctx: ToolContext, args: { sessionI
         : '';
       response.note = joinSentences(
         result.anchorNote,
-        ErrorMessages.stopWithoutProgramFrame(threadId, frameCount, top, { framesUnseen: frameCount > 1, sourceless }) + whose
+        ErrorMessages.stopWithoutProgramFrame(threadId, frameCount, top, { framesUnseen: frameCount > 1, sourceless, hasBreakpoints: hasSessionBreakpoints(ctx, args.sessionId!) }) + whose
       );
     }
 
