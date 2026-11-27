@@ -51,7 +51,9 @@ These scripts work directly with source files or don't execute code:
 - **`typecheck:all`**: Both of the above — the exact command the `lint` CI job and the pre-push hook run
 - **`dev`**: Runs the server from source via `ts-node-esm src/index.ts` (no compilation)
 
-`typecheck:all` is the fastest gate that still answers "does this compile?" — `.husky/pre-push` budgets it at roughly 15 seconds, against minutes for a clean build. Reach for it while iterating; the clean build in the pre-push hook remains the authoritative compile.
+`typecheck:all` gives fast type-only feedback without a build. Reach for it while iterating;
+CI's `Build and Test` job performs the authoritative compile and runs the suites. See the
+[Dev-Loop Gate](../../CONTRIBUTING.md#dev-loop-gate) for branch-push checks and the tags-only release gate.
 
 ## Common Pitfalls
 

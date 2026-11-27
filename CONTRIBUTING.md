@@ -79,9 +79,8 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 
 3. **Make your changes** following our code style guidelines
 
-4. **Build and test** — run the [Dev-Loop Gate](#dev-loop-gate) below. It is the exact set of
-   checks `.husky/pre-push` and CI enforce, so passing it locally means nothing downstream
-   surprises you.
+4. **Check your changes** — follow the [Dev-Loop Gate](#dev-loop-gate) below for the local
+   static checks and optional suite runs. CI builds and tests the pull request before merge.
 
 5. **Commit your changes** using conventional commits (see below)
 
@@ -94,17 +93,14 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 
 ## Dev-Loop Gate
 
-This is the canonical description of the checks that gate a push. `.husky/pre-push` runs all five
-steps in this order; CI's **Lint Code** job runs steps 1 and 3, and its **Build and Test** job
-covers steps 4 and 5 via `pnpm run build:ci` and `pnpm run test:ci-coverage`. Other docs should
-link here rather than restate it.
+This is the canonical description of the local and CI checks. Other docs should link here
+rather than restate it. Put a check where its result makes the decision: the push hook keeps
+fast static checks so you can fix simple mistakes without waiting for a whole CI round; CI
+runs the checks that decide whether a pull request can merge.
 
-**Lint Code** also runs four PR-blocking checks that pre-push does not, so a clean local gate is
-not a guarantee: `pnpm run check:all-personal-paths`, `pnpm run check:docs` (relative links that
-no longer resolve, and counts that fell behind the code), `pnpm run changelog:check`, and a
-"Require a changelog fragment" step on pull requests — a user-visible change needs a fragment
-(test-only changes are exempt automatically; label a genuine no-op PR `no-changelog`). Running
-those four before you push saves a CI round-trip.
+For any push that is not tags-only, `.husky/pre-push` runs these steps in order and stops at
+the first failure. It runs no build or tests, and has no switch to skip checks or restore
+the old suites.
 
 1. **Lint** — `pnpm run lint`. ESLint over `src/**/*.ts`, `packages/*/src/**/*.ts`,
    `scripts/**/*.{js,mjs,cjs}`, and `tools/**/*.{js,mjs,cjs}` (the dev-proxy supervisor lives
@@ -128,15 +124,42 @@ those four before you push saves a CI round-trip.
    `pnpm run typecheck:tests:raw` prints unfiltered `tsc` output for `tsconfig.spec.json` when you
    need to see the diagnostics themselves.
 
-4. **Clean build** — `npm run clean && npm run build`, so no stale artifact can mask a compile
-   error.
+4. **Documentation consistency** — `pnpm run check:docs`, checking relative links and counts
+   against the code.
 
-5. **Tests** — `npm run test:unit && npm run test:integration`. Deliberately *not* the full suite:
-   the heavy `e2e` project (smoke, Docker, npx) runs in CI. (A tags-only push runs the reduced
-   `npm run test:ci-no-python` instead.)
+5. **Changelog fragment validation** — `pnpm run changelog:check`, checking existing fragments'
+   names and contents. The PR-only requirement to add a fragment is a separate CI step.
 
-The **pre-commit** hook is much lighter and runs none of the above: it runs the personal-paths
-check, blocks accidentally staged build artifacts (`.js`/`.d.ts`/`.js.map` under `src/` or
+6. **Full personal-path audit** — `pnpm run check:all-personal-paths`. Unlike the staged-only
+   pre-commit check, this scans tracked files and unignored new files, catching personal paths
+   in earlier commits or unstaged work as well.
+
+CI's **Lint Code** job (`lint`) runs ESLint, `pnpm run typecheck:all` (with the existing
+Dependabot exception), the full personal-path audit, documentation consistency and changelog
+validation. Its **Require a changelog fragment** step also checks PRs for an entry when needed;
+test-only changes are exempt automatically, and contributor-process changes use the
+`no-changelog` label rather than a user-facing fragment. See [the fragment guide](changelog.d/README.md).
+
+CI's **Build and Test** job (`build-and-test`) runs on Ubuntu and Windows. It runs
+`pnpm run build:ci`, lint, the PyPI launcher unit tests, then `pnpm run test:ci-coverage`
+(which itself builds and runs `vitest run --coverage --project unit --project integration`).
+Other required CI jobs cover container tests, host adapter lanes and MCP conformance; see
+[the workflow](.github/workflows/ci.yml) for their exact selections. The pull request's required
+checks gate the merge, and branch protection requires the branch to be up to date with `main`.
+A local hook result does not replace those checks.
+
+For an answer before CI, build first with `pnpm run build`, then run `pnpm run test:unit`
+and `pnpm run test:integration`, or target a file with
+`npx vitest run tests/core/unit/session/session-manager-state.test.ts`.
+
+A **tags-only push** is a release step and retains its existing gate: cargo environment setup
+when available and the Docker buildx probe, lint, the committed-baseline guard, `typecheck:all`,
+`npm run clean && npm run build`, then `npm run test:ci-no-python` (which builds again and runs
+the unit project), followed by advisory `docstar shadow .` and `docstar check` if installed.
+It does not run the three added branch-push audits.
+
+The **pre-commit** hook runs the staged personal-paths check, blocks accidentally staged build
+artifacts (`.js`/`.d.ts`/`.js.map` under `src/` or
 `packages/*/src/`) and `.tgz` tarballs, and runs an optional docstar check if docstar is installed.
 No tests, no build.
 
@@ -236,8 +259,8 @@ npm run test:coverage
 npx vitest run tests/core/unit/session/session-manager-state.test.ts
 ```
 
-Before pushing, run the full [Dev-Loop Gate](#dev-loop-gate) — `npm test` alone is not what CI
-and the pre-push hook check.
+Before pushing, follow the [Dev-Loop Gate](#dev-loop-gate) for static checks and optional local
+suite runs. CI runs the merge checks; `npm test` alone does not cover them all.
 
 ### Test Architecture
 

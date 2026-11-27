@@ -53,7 +53,7 @@ fi
 echo "✅ No build artifacts found in staged files"
 
 # Docstar quick check (optional — runs only if docstar is installed)
-# Full shadow + audit runs on pre-push instead.
+# Full shadow + audit runs on tags-only pre-push instead.
 if command -v docstar >/dev/null 2>&1; then
   echo "Docstar: Running quick check..."
   docstar check 2>/dev/null || true

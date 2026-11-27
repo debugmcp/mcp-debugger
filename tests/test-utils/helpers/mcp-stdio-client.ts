@@ -134,8 +134,8 @@ export async function startStdioClient(options: StdioClientOptions): Promise<Std
   // it they land in os.tmpdir() and leave with the runner (issue #963). (The
   // CLI's own early lines still go to the per-pid default log; it is the
   // session directory that matters here.) Nothing else sweeps this directory,
-  // so entries older than a day go first: the pre-push hook runs these suites
-  // on every push.
+  // so entries older than a day go first: repeated local suite runs can leave
+  // logs behind between pushes.
   const stdioLogDir = path.join(REPO_ROOT, 'logs', 'tests', 'stdio');
   sweepStaleEntries(stdioLogDir, 24 * 60 * 60 * 1000);
   const logFile = path.join(stdioLogDir, `${options.name}-${process.pid}-${Date.now()}.log`);

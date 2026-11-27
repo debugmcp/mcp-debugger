@@ -15,7 +15,7 @@
 - Targeted runs: `pnpm test:unit`, `pnpm test:integration`, `pnpm test:e2e`, `pnpm test:coverage`.
 - `pnpm lint` runs ESLint over `src/**/*.ts`, `packages/*/src/**/*.ts`, `scripts/**/*.{js,mjs,cjs}`, and `tools/**/*.{js,mjs,cjs}` (the dev-proxy supervisor is production tooling; experimental probes go in `scripts/experiments/`, which is ignored). `pnpm lint:fix` runs the same globs with `--fix`.
 - `pnpm typecheck` type-checks the shipped sources via `tsconfig.typecheck.json` (no build needed; the root `tsc -p tsconfig.json` checks nothing). `pnpm typecheck:tests` runs the per-file ratchet over the test trees against `tests/typecheck-baseline.json`; `pnpm typecheck:tests:update` re-records that baseline and `pnpm typecheck:tests:raw` emits unfiltered `tsc` output. `pnpm typecheck:all` runs both, and is the exact command pre-push and CI run.
-- **Run the whole dev-loop gate before pushing.** It is lint -> baseline committed -> `typecheck:all` -> clean build -> `test:unit` + `test:integration`, and both `.husky/pre-push` and CI enforce it; `typecheck:all` is the step most likely to block a push. It is documented once, canonically, in [CONTRIBUTING.md — Dev-Loop Gate](CONTRIBUTING.md#dev-loop-gate). Follow that section rather than any restatement of it.
+- **Follow the dev-loop gate before pushing.** Branch pushes run fast static checks; CI builds and runs the suites that gate a merge. The release gate for tags-only pushes is unchanged. See [CONTRIBUTING.md — Dev-Loop Gate](CONTRIBUTING.md#dev-loop-gate) for the canonical commands and optional local suite runs.
 
 ## Coding Style & Naming Conventions
 - Source files use ES modules, TypeScript strict mode, and two-space indentation; prefer `PascalCase` for classes, `camelCase` for functions, and `SCREAMING_SNAKE_CASE` for constants.
@@ -31,6 +31,6 @@
 
 ## Commit & Pull Request Guidelines
 - Follow the existing history: short present-tense subject lines (`feat(scope): ...`, `chore: ...`) with details in the body when needed.
-- Run `scripts/safe-commit.sh` (or the `pnpm commit:safe` alias) before pushing — this runs a mandatory personal information check and then commits (use `--skip-tests` to pass `git commit --no-verify`, which bypasses the whole pre-commit hook — the personal-paths check, the staged build-artifact and `.tgz` guards, and docstar — while the script still runs its own personal info check). Note that `--no-verify` on a *commit* skips none of the [Dev-Loop Gate](CONTRIBUTING.md#dev-loop-gate); that runs on push.
+- Run `scripts/safe-commit.sh` (or the `pnpm commit:safe` alias) before pushing — this runs a mandatory personal information check and then commits (use `--skip-tests` to pass `git commit --no-verify`, which bypasses the whole pre-commit hook — the personal-paths check, the staged build-artifact and `.tgz` guards, and docstar — while the script still runs its own personal info check). Note that `--no-verify` on a *commit* skips none of the push hook's static checks; see the [Dev-Loop Gate](CONTRIBUTING.md#dev-loop-gate) for local and CI checks.
 - PRs should describe behavior changes, reference GitHub issues or roadmap items, link relevant artifacts (logs, screenshots), and highlight test commands executed.
 - Update affected docs or examples alongside code so downstream agents stay in sync.

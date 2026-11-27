@@ -16,7 +16,7 @@ Runs every pre-commit check — all of them fast:
 - ✅ Build artifact check (staged `.js` / `.d.ts` / `.js.map` under `src/` or `packages/*/src/`)
 - ✅ Package tarball (`.tgz`) check
 
-The pre-commit hook runs **no tests and no build**. The slow gates — lint, typecheck, a clean build, and the unit + integration suites — all live in the pre-push hook.
+The pre-commit hook runs **no tests and no build**. Branch pushes run fast static checks; CI builds and runs the suites that gate a merge. See the [Dev-Loop Gate](../CONTRIBUTING.md#dev-loop-gate).
 
 ### Fast Commit (Skip Git Hooks)
 ```bash
@@ -58,12 +58,8 @@ Detects and blocks:
 - `docstar check`, and only if that binary is installed — advisory, never blocking
 
 #### Pre-Push Checks (Run Before Push)
-In order, stopping at the first failure:
-1. `pnpm run lint`
-2. A guard that `tests/typecheck-baseline.json` is not modified-but-uncommitted
-3. `pnpm run typecheck:all`
-4. `npm run clean && npm run build`
-5. `npm run test:unit && npm run test:integration` — **not** the full suite; the e2e set runs in CI
+See the [Dev-Loop Gate](../CONTRIBUTING.md#dev-loop-gate) for the ordered static checks on branch
+pushes, the unchanged tags-only release gate, and the CI jobs that decide merges.
 
 ### Commands Reference
 
@@ -129,7 +125,7 @@ git cf -m "WIP: quick fix"      # Fast commit (PI check only)
 
 1. **Personal information checks cannot be bypassed** with our safe commit commands
 2. Use `git commit --no-verify` only in absolute emergencies
-3. Pre-push hooks still run lint, typecheck, a clean build, and the unit + integration suites before code goes to GitHub (e2e runs in CI)
+3. Branch pushes run the [static gate](../CONTRIBUTING.md#dev-loop-gate); CI builds and runs the suites before merge
 4. The PI check is fast (~1 second) so there's minimal overhead
 
 ## Troubleshooting

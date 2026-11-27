@@ -5,7 +5,7 @@ This project uses Husky to manage Git hooks that help maintain code quality and 
 ## Current Hook Configuration
 
 These two hooks are the local half of the dev loop. [`CONTRIBUTING.md`](../../CONTRIBUTING.md) carries the
-canonical description of the whole loop (what runs locally, and what CI adds on
+canonical [Dev-Loop Gate](../../CONTRIBUTING.md#dev-loop-gate) (what runs locally, and what CI adds on
 top); this page just documents the hooks themselves.
 
 ### Pre-commit Hook (`.husky/pre-commit`)
@@ -27,20 +27,18 @@ top); this page just documents the hooks themselves.
 
 **Purpose**: Runs before pushing to GitHub to ensure code quality.
 
-**What it does**, in order, stopping at the first failure:
+**What it does**: Branch pushes run the fast static checks listed in the
+[Dev-Loop Gate](../../CONTRIBUTING.md#dev-loop-gate), stopping at the first failure. There is
+no build or test run on that path. CI builds and runs the suites; the PR's required checks
+decide whether it can merge.
 
-1. `pnpm run lint` (ESLint)
-2. Refuses the push if `tests/typecheck-baseline.json` is modified but not committed — the ratchet check in CI reads the pushed commit, not your working tree
-3. `pnpm run typecheck:all` (source typecheck + the test ratchet)
-4. `npm run clean && npm run build` — a clean build, and the authoritative compile
-5. `npm run test:unit && npm run test:integration`
-
-**It does not run the full test suite.** The heavy e2e set (smoke, Docker, npx) runs in CI only. A tag-only push takes a different branch and runs the reduced `npm run test:ci-no-python` in place of step 5.
-
-Docker-dependent tests are skipped automatically when `docker buildx version` fails — the hook exports `SKIP_DOCKER_TESTS=true`. As on pre-commit, the `docstar` steps run only if that binary is installed and never block the push.
+Tags-only pushes retain the release gate described there, including the clean build and
+reduced `npm run test:ci-no-python` suite. Only that path sources the cargo environment,
+probes Docker buildx (exporting `SKIP_DOCKER_TESTS=true` if unavailable), and runs advisory
+`docstar shadow .` and `docstar check` when installed.
 
 **Developer Experience**:
-- **Quality gate** - Ensures only working code reaches GitHub
+- **Fast feedback** - Catches static errors before a CI round
 - **Flexible development** - Local commits can have failing tests
 - **Emergency bypass** - Use `git push --no-verify` for urgent pushes
 
@@ -49,12 +47,12 @@ Docker-dependent tests are skipped automatically when `docker buildx version` fa
 ### For Daily Development
 1. **Make incremental commits** - Tests don't run on commit, so you can save progress frequently
 2. **Personal info protection** - Automatic scanning prevents accidental exposure
-3. **Quality assurance** - Tests run before sharing code with the team
+3. **Quality assurance** - Required PR checks run the suites before merge
 
 ### For Refactoring Projects
 - **Perfect for WIP commits** during large refactoring efforts
 - **Safe experimentation** - Commit often without test pressure
-- **Clean GitHub history** - Only working code gets pushed
+- **Merge checks** - Required CI checks decide whether changes can merge
 
 ## Usage Examples
 
@@ -69,12 +67,12 @@ git add .
 git commit -m "WIP: add type safety improvements"  # ✅ Another fast commit
 
 # Ready to share
-git push origin feature-branch  # 🧪 Lint, typecheck, clean build, unit + integration tests run here
+git push origin feature-branch  # 🔎 Fast static checks run here; CI builds and tests the PR
 ```
 
 ### Emergency Situations
 ```bash
-# If you need to push despite failing tests (use sparingly!)
+# If you need to push despite failing static checks (use sparingly!)
 git push --no-verify origin hotfix-branch
 ```
 
@@ -123,10 +121,9 @@ ls -la .husky/
 2. Verify hook files exist and are executable
 3. Ensure you're in the project root directory
 
-### Tests Failing on Push
-1. Reproduce the gate locally: `pnpm run test:unit && pnpm run test:integration`
-2. Fix failing tests before pushing
-3. For emergencies only: `git push --no-verify`
+### Tests Failing in CI or on a Tags-only Push
+1. Follow the [Dev-Loop Gate](../../CONTRIBUTING.md#dev-loop-gate) to build and run suites locally
+2. Fix failing tests before merge or release
 
 ### Lint or Typecheck Failing on Push
 1. `pnpm run lint` (or `pnpm run lint:fix`) for style and syntax errors
@@ -149,7 +146,7 @@ ls -la .husky/
 ### ✅ Do
 - Commit frequently during development
 - Use descriptive commit messages
-- Fix tests before pushing to shared branches
+- Fix failing PR tests before merging
 - Keep personal information out of code
 
 ### ❌ Don't
@@ -160,7 +157,7 @@ ls -la .husky/
 
 ## Migration Notes
 
-**Previous Setup**: Tests ran on every commit, blocking WIP commits
-**New Setup**: Tests only run on push, allowing flexible local development
+**Previous Setup**: Branch pushes ran a clean build and the unit + integration suites
+**New Setup**: Branch pushes run static checks; CI runs the suites that gate merges. Tags-only release checks are unchanged.
 
 This change improves developer experience during refactoring and feature development while maintaining code quality standards for shared code.

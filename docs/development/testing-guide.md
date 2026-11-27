@@ -87,10 +87,11 @@ Two things that will bite you otherwise:
 
 ### What the Gates Actually Run
 
-Worth knowing before you wonder why a push takes four minutes:
+The [Dev-Loop Gate](../../CONTRIBUTING.md#dev-loop-gate) is the canonical description of local
+checks, CI merge checks and optional local suite runs:
 
 - **`.husky/pre-commit`** runs no tests and no build — only the personal-paths check, the build-artifact/tarball guards, and an optional docstar check. Commits stay cheap.
-- **`.husky/pre-push`** runs lint → the uncommitted-baseline guard → `typecheck:all` → a clean build → `test:unit` + `test:integration`. The e2e project is not part of the gate: CI runs its Docker container tests and the COBOL/Dart/Flutter/Java/.NET host lanes (`cobol-host`, `dart-host`, `flutter-host`, `java-host`, `dotnet-host` in `ci.yml`). The e2e cases outside those selections run on demand with `npm run test:e2e`.
+- **`.husky/pre-push`** runs fast static checks on branch pushes. Tags-only pushes keep the existing release gate, including its clean build and reduced unit suite. CI's required PR checks run the suites before merge, including the Docker container tests and host adapter lanes; other e2e cases run on demand with `npm run test:e2e`.
 - **The `Lint Code` CI job** runs ESLint → `typecheck:all` → the personal-path and changelog gates. No build needed.
 
 ## Writing Tests
@@ -588,7 +589,7 @@ describe('file operations', () => {
 
 ### Pre-push blocks on `tests/typecheck-baseline.json`
 
-**Symptom**: `tests/typecheck-baseline.json is modified but not committed`, and the push stops before any test runs.
+**Symptom**: `tests/typecheck-baseline.json is modified but not committed`, and the push stops before `typecheck:all` runs.
 
 **Fix**: commit the baseline in the same change. CI reads the pushed commit, not your working tree, so an uncommitted refresh is a guaranteed CI failure the hook is saving you from.
 
