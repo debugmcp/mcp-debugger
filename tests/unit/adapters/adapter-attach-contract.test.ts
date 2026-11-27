@@ -13,7 +13,7 @@
  * for `list_supported_languages` before a factory is loaded and must agree with them.
  */
 import { describe, it, expect } from 'vitest';
-import type { AdapterModes, AttachAddressing, AttachMechanism, IAdapterFactory } from '@debugmcp/shared';
+import type { AdapterDependencies, AdapterModes, AttachAddressing, AttachMechanism, IAdapterFactory } from '@debugmcp/shared';
 import { MockAdapterFactory } from '@debugmcp/adapter-mock';
 import { PythonAdapterFactory } from '@debugmcp/adapter-python';
 import { RubyAdapterFactory } from '@debugmcp/adapter-ruby';
@@ -34,6 +34,12 @@ interface PinnedAttach {
   hints: readonly ('processId' | 'port')[];
   /** The test-runner presets `start_debugging { testRunner }` accepts (issue #985); undefined means none. */
   testRunners: readonly string[] | undefined;
+  /**
+   * Whether the adapter hands the session layer what its attach borrowed from
+   * the target (`consumeAttachLoan`, issue #1261): JavaScript does, for the
+   * inspector an attach by processId opens.
+   */
+  attachLoan: boolean;
 }
 
 /**
@@ -42,17 +48,17 @@ interface PinnedAttach {
  * two top-level forms it does not accept, so the refusal can say what to do instead.
  */
 const PINNED: Record<string, PinnedAttach> = {
-  python: { attach: 'direct-connect', attachBy: ['port'], hints: ['processId'], testRunners: ['pytest'] },
-  ruby: { attach: 'direct-connect', attachBy: ['port'], hints: ['processId'], testRunners: undefined },
-  javascript: { attach: 'spawn', attachBy: ['processId', 'port', 'adapterConfig'], hints: [], testRunners: undefined },
-  java: { attach: 'spawn', attachBy: ['port'], hints: ['processId'], testRunners: undefined },
-  dotnet: { attach: 'spawn', attachBy: ['processId'], hints: ['port'], testRunners: undefined },
-  cpp: { attach: 'spawn', attachBy: ['processId'], hints: ['port'], testRunners: undefined },
-  cobol: { attach: 'spawn', attachBy: ['processId'], hints: ['port'], testRunners: undefined },
-  dart: { attach: 'spawn', attachBy: ['port', 'adapterConfig'], hints: ['processId'], testRunners: undefined },
-  go: { attach: 'none', attachBy: undefined, hints: [], testRunners: undefined },
-  rust: { attach: 'none', attachBy: undefined, hints: [], testRunners: undefined },
-  mock: { attach: 'none', attachBy: undefined, hints: [], testRunners: undefined }
+  python: { attach: 'direct-connect', attachBy: ['port'], hints: ['processId'], testRunners: ['pytest'], attachLoan: false },
+  ruby: { attach: 'direct-connect', attachBy: ['port'], hints: ['processId'], testRunners: undefined, attachLoan: false },
+  javascript: { attach: 'spawn', attachBy: ['processId', 'port', 'adapterConfig'], hints: [], testRunners: undefined, attachLoan: true },
+  java: { attach: 'spawn', attachBy: ['port'], hints: ['processId'], testRunners: undefined, attachLoan: false },
+  dotnet: { attach: 'spawn', attachBy: ['processId'], hints: ['port'], testRunners: undefined, attachLoan: false },
+  cpp: { attach: 'spawn', attachBy: ['processId'], hints: ['port'], testRunners: undefined, attachLoan: false },
+  cobol: { attach: 'spawn', attachBy: ['processId'], hints: ['port'], testRunners: undefined, attachLoan: false },
+  dart: { attach: 'spawn', attachBy: ['port', 'adapterConfig'], hints: ['processId'], testRunners: undefined, attachLoan: false },
+  go: { attach: 'none', attachBy: undefined, hints: [], testRunners: undefined, attachLoan: false },
+  rust: { attach: 'none', attachBy: undefined, hints: [], testRunners: undefined, attachLoan: false },
+  mock: { attach: 'none', attachBy: undefined, hints: [], testRunners: undefined, attachLoan: false }
 };
 
 const FACTORIES: Record<string, () => IAdapterFactory> = {
@@ -118,6 +124,19 @@ describe('attach-addressing contract (issue #903)', () => {
         }
       }
     });
+  });
+
+  // Issue #1261: the optional hook through which an attach gives back what it
+  // borrowed. Which adapters implement it is pinned here, so one gaining or
+  // losing it is a deliberate edit.
+  it.each(LANGUAGES)('%s implements consumeAttachLoan exactly when pinned', (language) => {
+    const dependencies = {
+      fileSystem: {},
+      logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
+      environment: { get: () => undefined, getAll: () => ({}), getCurrentWorkingDirectory: () => process.cwd() }
+    } as unknown as AdapterDependencies;
+    const adapter = FACTORIES[language]().createAdapter(dependencies);
+    expect(typeof adapter.consumeAttachLoan === 'function', language).toBe(PINNED[language].attachLoan);
   });
 
   it("mirrors the factories in the loader's known-adapters list", async () => {

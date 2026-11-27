@@ -50,6 +50,7 @@ import { resolveLaunchEnvironment } from './utils/launch-environment.js';
 import {
   activateInspector,
   DEFAULT_INSPECTOR_PORT,
+  inspectPortByPid,
   type InspectorActivationOptions,
   type InspectorActivationResult
 } from './utils/inspector-activation.js';
@@ -253,6 +254,9 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
    */
   protected activateInspector: (options: InspectorActivationOptions) => Promise<InspectorActivationResult> =
     activateInspector;
+
+  /** The inspector port a target's command line or NODE_OPTIONS names (issue #1261); a field so tests can stand in. */
+  protected inspectPortOf: (pid: number) => Promise<number | undefined> = (pid) => inspectPortByPid(pid);
 
   /**
    * Which inspectors this server opened, and which sessions use them (issue
@@ -1003,30 +1007,55 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
 
     const byPid = processId !== undefined && processId !== null && processId !== '';
     if (byPid) {
-      // A close of this port's inspector that another session of this server
-      // has in flight finishes first (issue #1261): probed mid-close, it would
-      // read as open and js-debug would connect to an inspector that is going.
-      await this.inspectorLoans.settled('127.0.0.1', attachPort ?? DEFAULT_INSPECTOR_PORT);
-      const activated = await this.activateInspector({
-        pid: processId as number | string,
-        host: attachHost,
-        port: attachPort
-      });
+      // Where the inspector is, or will open (issue #1261): the caller's port,
+      // else the one the target's own command line or NODE_OPTIONS names
+      // (--inspect-port, --inspect=…), else Node's default. When neither the
+      // caller nor the command line says, the activation also watches the
+      // target's other ports for the one its signal opens.
+      const pid = Number(String(processId).trim());
+      const validPid = Number.isInteger(pid) && pid > 0;
+      // An inspector this server already opened in that process and still
+      // holds is where a second attach looks first: the first may have found
+      // it on a port nothing names.
+      const held = attachPort === undefined && validPid ? this.inspectorLoans.portOpenedFor(pid) : undefined;
+      const configured = attachPort === undefined && held === undefined && validPid
+        ? await this.inspectPortOf(pid)
+        : undefined;
+      const expectedPort = attachPort ?? held ?? configured ?? DEFAULT_INSPECTOR_PORT;
+      if (configured !== undefined) {
+        this.dependencies.logger.info(
+          `[JavascriptDebugAdapter] PID ${processId} names inspector port ${configured} on its command line or in NODE_OPTIONS`
+        );
+      }
+      // The activation and what the attach then holds, in one turn of the
+      // endpoint's queue: an attach cannot find the inspector open and lose
+      // it to another session's close before it counts as a holder. What the
+      // attach borrowed: an inspector its signal opened is closed when the
+      // session ends; one it found open is left open; and when it signalled
+      // and then failed, the loan looks for what the signal may have opened.
+      const lookElsewhere = attachPort === undefined && held === undefined && configured === undefined;
+      const outcome = await this.inspectorLoans.attachByProcessId(
+        pid,
+        { host: '127.0.0.1', port: expectedPort },
+        () => this.activateInspector({
+          pid: processId as number | string,
+          host: attachHost,
+          port: expectedPort,
+          findOpenedElsewhere: lookElsewhere
+        }),
+        { mayOpenElsewhere: lookElsewhere }
+      );
+      this.attachLoan = outcome.loan;
+      if (!outcome.activated) {
+        throw outcome.error;
+      }
+      const activated = outcome.activated;
       attachHost = activated.host;
       attachPort = activated.port;
       this.dependencies.logger.info(
         `[JavascriptDebugAdapter] ${activated.alreadyActive ? 'Found' : 'Activated'} the inspector of PID ${processId} ` +
           `on ${attachHost}:${attachPort} (${activated.title})`
       );
-      // What the attach borrowed (issue #1261): an inspector its signal opened
-      // is closed when the session ends; one it found open is left open.
-      this.attachLoan = this.inspectorLoans.forActivation({
-        pid: Number(String(processId).trim()),
-        host: activated.host,
-        port: activated.port,
-        alreadyActive: activated.alreadyActive,
-        targetId: activated.targetId
-      });
     } else if (!(attachPort !== undefined && attachPort > 0) && !(typeof rest.websocketAddress === 'string' && rest.websocketAddress.length > 0)) {
       throw new AdapterError(
         'JavaScript attach needs port (the --inspect port of the target) or a local processId ' +

@@ -257,12 +257,33 @@ export interface Run {
    * What this run's attach borrowed from its target and has not given back
    * yet (issue #1261): drained from the adapter right after its attach
    * transform (`IDebugAdapter.consumeAttachLoan`), on success and failure
-   * alike, and given back once — by `SessionManagerCore.giveBackAttachLoan`
-   * — after the adapter has disconnected: on detach, on close, before the
-   * session is launched or attached again, and when the attach fails. Only
-   * the root gives it back; its children share this record.
+   * alike, and given back once the adapter has disconnected: on detach, on
+   * close, before the session is launched or attached again, when the attach
+   * fails, and when the root's last worker teardown completes after its
+   * connection ended by itself. Only the root gives it back; its children
+   * share this record.
    */
   attachLoan?: AttachLoan;
+  /**
+   * The give-back of that loan once it has started, until an answer carries
+   * its report (issue #1261): a detach, close or failed attach answers with
+   * it and clears it; a teardown no answer is made of (the connection ended by
+   * itself, the previous run's before a new one) leaves it here for the next
+   * answer about the session.
+   */
+  attachLoanReturn?: Promise<AttachLoanReport>;
+}
+
+/**
+ * What became of what an attach borrowed from its target (issue #1261), in
+ * the adapter's words: `field` names the thing (the JavaScript adapter's is
+ * `inspector`), `text` says what was done with it. The tool answers carry it
+ * as one top-level field, `[field]: text`, the same on attach, detach and
+ * close.
+ */
+export interface AttachLoanReport {
+  field: string;
+  text: string;
 }
 
 export interface ManagedSession extends DebugSessionInfo {

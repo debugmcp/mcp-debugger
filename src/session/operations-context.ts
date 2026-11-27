@@ -16,7 +16,6 @@
  */
 import type {
   AdapterPolicy,
-  AttachLoan,
   DapClientBehavior,
   DebugLanguage,
   IAdapterRegistry,
@@ -152,7 +151,7 @@ export interface OperationsContext {
    * once the adapter has disconnected; the adapter's report, or undefined
    * when nothing is held. See `SessionManagerCore.giveBackAttachLoan`.
    */
-  giveBackAttachLoan(session: ManagedSession, loan?: AttachLoan): Promise<AttachLoanReport | undefined>;
+  giveBackAttachLoan(session: ManagedSession): Promise<AttachLoanReport | undefined>;
   getStackTrace(
     sessionId: string,
     threadId?: number,

@@ -9,7 +9,7 @@ import {
   SessionState, SessionLifecycleState, DebugLanguage, DebugSessionInfo, mapLegacyState,
   isTerminalSessionState, AdapterPolicy, SessionOutputEntry, redactSecretsInString
 } from '@debugmcp/shared';
-import type { AttachLoan, Breakpoint, DapClientBehavior, FunctionBreakpoint, ProgramEndExplanation, SessionStopInfo, StackFrame, StopTopFrameLine } from '@debugmcp/shared';
+import type { Breakpoint, DapClientBehavior, FunctionBreakpoint, ProgramEndExplanation, SessionStopInfo, StackFrame, StopTopFrameLine } from '@debugmcp/shared';
 import { USER_BREAK_REASONS } from '@debugmcp/shared';
 import { stopProvesDebuggerOn } from './debugger-off.js';
 import { isRedactionEnabled } from '../utils/redaction-mode.js';
@@ -19,7 +19,7 @@ import type { FrameSummary } from './inspection/frame-anchor-resolver.js';
 import { ValidationResultCache } from '../utils/language-availability.js';
 import { SessionStore, ManagedSession, borrowsProgram } from './session-store.js';
 import type { UnhitBreakpointSummary } from './breakpoints/launch-warnings.js';
-import type { ChildReleaseCause, ToolchainValidationState } from './session-store.js';
+import type { AttachLoanReport, ChildReleaseCause, ToolchainValidationState } from './session-store.js';
 import { OutputRingBuffer } from './output-buffer.js';
 import {
   beginProxyGeneration,
@@ -343,17 +343,8 @@ export type LaunchResultData = DebugResultData & StopAnswerFields & TreeAnswerFi
   pausedChild?: PausedChildSummary;
 };
 
-/**
- * What became of what an attach borrowed from its target (issue #1261), in
- * the adapter's words: `field` names the thing (the JavaScript adapter's is
- * `inspector`), `text` says what was done with it. The tool answers carry it
- * as one top-level field, `[field]: text`, the same on attach, detach and
- * close.
- */
-export interface AttachLoanReport {
-  field: string;
-  text: string;
-}
+/** What became of what an attach borrowed from its target (issue #1261); see `session-store.ts`. */
+export type { AttachLoanReport } from './session-store.js';
 
 /**
  * What a detach returns on top of the common fields (the session tree, issue
@@ -1465,47 +1456,74 @@ export abstract class SessionManagerCore extends EventEmitter {
       session.pendingProxyStop = undefined;
     }
     // The previous run is over: what its attach borrowed goes back before a
-    // new launch or attach writes the next run (issue #1261).
-    await this.giveBackAttachLoan(session);
+    // new launch or attach writes the next run (issue #1261). Its report stays
+    // for the next answer: a failed attach's own teardown runs through here,
+    // and that attach's answer says what it gave back.
+    await this.returnAttachLoan(session);
     return childrenClosed;
   }
 
   /**
-   * Give back what the run's attach borrowed from its target (issue #1261):
-   * the adapter closes what the attach opened there and leaves what it found
-   * open, and says which. Call it once the adapter has disconnected from the
-   * target — the worker is stopped — so the give-back cannot cut off the
-   * session's own connection. Only a root gives back: its children share its
-   * run. Resolves to the adapter's report, or undefined when nothing is held;
-   * the loan is taken off the run first, so a second call reports nothing.
-   * `loan` names one already taken off the run (a failed attach reads it
-   * before its teardown); its report is the first give-back's.
+   * Start giving back what the run's attach borrowed from its target (issue
+   * #1261), or join the give-back already started: the adapter closes what
+   * the attach opened there and leaves what it found open, and says which.
+   * Call it once the adapter has disconnected from the target — the worker is
+   * stopped — so the give-back cannot cut off the session's own connection.
+   * Only a root gives back: its children share its run. The loan is taken off
+   * the run at once, and the give-back's report stays on the run
+   * (`attachLoanReturn`) until an answer carries it.
    */
-  async giveBackAttachLoan(session: ManagedSession, loan: AttachLoan | undefined = session.run.attachLoan): Promise<AttachLoanReport | undefined> {
-    if (!loan || session.parentSessionId) {
+  private startAttachLoanReturn(session: ManagedSession): Promise<AttachLoanReport> | undefined {
+    if (session.parentSessionId) {
       return undefined;
     }
-    // Taken off the run here, by this call: the one that logs it. A loan
-    // already taken is a give-back in progress or done, and its report is the
-    // first call's.
-    const takenNow = session.run.attachLoan === loan;
-    if (takenNow) {
-      session.run.attachLoan = undefined;
+    const run = session.run;
+    const loan = run.attachLoan;
+    if (loan) {
+      run.attachLoan = undefined;
+      const startedAt = Date.now();
+      run.attachLoanReturn = loan.giveBack()
+        // The contract says it never rejects; an adapter that does still gets a truthful answer.
+        .catch((error: unknown) => `not confirmed: ${error instanceof Error ? error.message : String(error)}`)
+        .then((text) => {
+          this.logger.info(
+            `[SessionManager] Session ${session.id} gave back its attach loan in ${Date.now() - startedAt} ms: ${loan.field} ${text}`
+          );
+          return { field: loan.field, text };
+        });
     }
-    const startedAt = Date.now();
-    let text: string;
-    try {
-      text = await loan.giveBack();
-    } catch (error) {
-      // The contract says it never rejects; an adapter that does still gets a truthful answer.
-      text = `not confirmed: ${error instanceof Error ? error.message : String(error)}`;
+    return run.attachLoanReturn;
+  }
+
+  /**
+   * Give back what the run's attach borrowed, for an answer to carry (issue
+   * #1261): a detach, a close, a failed attach. Resolves to the adapter's
+   * report — this give-back's, or one a teardown already made that no answer
+   * has carried yet — and hands it over: a second call reports nothing.
+   * Undefined when nothing was borrowed.
+   */
+  async giveBackAttachLoan(session: ManagedSession): Promise<AttachLoanReport | undefined> {
+    const returning = this.startAttachLoanReturn(session);
+    if (!returning) {
+      return undefined;
     }
-    if (takenNow) {
-      this.logger.info(
-        `[SessionManager] Session ${session.id} gave back its attach loan in ${Date.now() - startedAt} ms: ${loan.field} ${text}`
-      );
+    const report = await returning;
+    if (session.run.attachLoanReturn === returning) {
+      session.run.attachLoanReturn = undefined;
     }
-    return { field: loan.field, text };
+    return report;
+  }
+
+  /**
+   * Give back what the run's attach borrowed, for a teardown no answer is made
+   * of (issue #1261): the report stays on the run for the next answer about
+   * the session. Never rejects.
+   */
+  protected async returnAttachLoan(session: ManagedSession): Promise<void> {
+    const returning = this.startAttachLoanReturn(session);
+    if (returning) {
+      await returning;
+    }
   }
 
   async closeAllSessions(): Promise<void> {
@@ -1620,7 +1638,11 @@ export abstract class SessionManagerCore extends EventEmitter {
       this.logger.warn(
         `[SessionManager] Error stopping proxy after '${after}' for session ${session.id}: ${err instanceof Error ? err.message : String(err)}`
       );
-    });
+    })
+      // The root's connection ended by itself and its last worker is gone: the
+      // session that borrowed from the target has ended, so it gives back now
+      // (issue #1261), and the next answer about it carries the report.
+      .then(() => this.returnAttachLoan(session));
     if (session.parentSessionId) {
       this.reapDeferredWorkerIfIdle(session);
     }
@@ -1642,7 +1664,9 @@ export abstract class SessionManagerCore extends EventEmitter {
       this.logger.warn(
         `[SessionManager] Error stopping the deferred worker of session ${root.id}: ${err instanceof Error ? err.message : String(err)}`
       );
-    });
+    })
+      // The root's last worker teardown: what its attach borrowed goes back (issue #1261).
+      .then(() => this.returnAttachLoan(root));
   }
 
   /** How many of a tree's children are still live: the cap counts the whole tree. */
@@ -2970,6 +2994,11 @@ export abstract class SessionManagerCore extends EventEmitter {
       // process is already dead and handleProxyExit cleaned up (issue #502).
       if (expected !== undefined) {
         this.stopOrDeferWorker(session, proxyManager, 'exit');
+      } else if (!session.parentSessionId && !this.descendantsDeepestFirst(session.id).some((s) => !isTerminalSessionState(s.state))) {
+        // The worker process itself is gone, and with it the root's last
+        // connection: what its attach borrowed goes back (issue #1261).
+        const before = session.pendingProxyStop ?? Promise.resolve();
+        session.pendingProxyStop = before.then(() => this.returnAttachLoan(session));
       }
     };
     proxyManager.on('exit', handleExit);

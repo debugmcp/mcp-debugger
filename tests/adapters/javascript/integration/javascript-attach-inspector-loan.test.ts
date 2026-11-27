@@ -16,7 +16,11 @@
  *      leaves it open and names the other, which keeps working; the last
  *      closes it;
  *   and a closed inspector opens again on the next attach by processId, five
- *   times over on one target.
+ *   times over on one target; a target started with `--inspect-port` is
+ *   attached by processId alone (its port read from the command line on
+ *   Linux and macOS, found as its new listening port on Windows); and a
+ *   session whose target exits under it gives back by itself (round 2 of the
+ *   review).
  *
  * Every answer says which happened in one field, `inspector`, the same on
  * attach, detach and close.
@@ -247,6 +251,55 @@ describe('an inspector that was already open is left open (issue #1261)', () => 
 
     expect(alive(target.pid)).toBe(true);
     expect(await get(target.httpPort)).toMatch(/^work done:/);
+  }, 120000);
+});
+
+describe('a target started with --inspect-port, attached by processId alone (issue #1261)', () => {
+  it('finds the port the signal opens without being told it, owns that inspector, and closes it on detach', async (ctx) => {
+    // Where the command line cannot be read (Windows), the attach first looks at Node's default port.
+    if (await listening(9229)) {
+      console.log('[inspector-loan] 127.0.0.1:9229 is in use on this host; skipping the processId-alone case');
+      ctx.skip();
+    }
+    const target = await startTarget('closed');
+    await server.createSession('javascript', 'inspector-loan-inspect-port');
+
+    // No port: on Linux and macOS it is read from the command line, on Windows
+    // found as the target's new listening port after the signal.
+    const attached = await call('attach_to_process', { processId: target.pid, stopOnEntry: false, verifyTimeout: 20000 });
+    expect(attached.success, JSON.stringify(attached)).toBe(true);
+    expect(attached.inspector).toBe(`opened by this attach on 127.0.0.1:${target.inspectPort}; closed when this session detaches or closes`);
+
+    const detached = await call('detach_from_process');
+    expect(detached.inspector).toMatch(new RegExp(`^closed: 127\\.0\\.0\\.1:${target.inspectPort} no longer accepts connections`));
+    await expectClosedAndServing(target);
+    await call('close_debug_session');
+    server.sessionId = undefined;
+  }, 120000);
+});
+
+describe('a session whose connection ends by itself (issue #1261)', () => {
+  it('gives back when the target exits under it, and its close says what became of the inspector', async () => {
+    const target = await startTarget('closed');
+    await server.createSession('javascript', 'inspector-loan-target-exits');
+    expect((await attachByPid(target)).success).toBe(true);
+
+    target.proc.kill();
+    await new Promise<void>((resolve) => target.proc.once('exit', () => resolve()));
+    // The session notices the end, and its worker teardown gives the loan back.
+    const deadline = Date.now() + 15000;
+    let state: string | undefined;
+    while (Date.now() < deadline) {
+      const listing = await call('list_debug_sessions');
+      state = (listing as unknown as { sessions: Array<{ id: string; state: string }> }).sessions.find((row) => row.id === server.sessionId)?.state;
+      if (state === 'stopped' || state === 'error') break;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    expect(state).toMatch(/^(stopped|error)$/);
+
+    const closed = await call('close_debug_session');
+    expect(closed.inspector).toBe(`gone: PID ${target.pid} is no longer running, and its inspector went with it`);
+    server.sessionId = undefined;
   }, 120000);
 });
 

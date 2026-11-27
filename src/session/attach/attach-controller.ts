@@ -549,16 +549,15 @@ export class AttachController {
       // log the same full failure record it logs, proxy-log tail included
       // (issue #561) — an attach that dies during proxy initialization used
       // to leave the adapter's own complaint unreadable.
-      // What the attach borrowed before it failed is given back once the
-      // teardown has stopped the adapter (issue #1261): an inspector this
-      // attach opened is closed again. Read before the teardown, which gives
-      // it back itself and takes it off the run.
-      const borrowed = session.run.attachLoan;
       const diagnosticData = await failProxySetup(this.ctx, session, error, 'attachToProcess');
       session.failureDiagnostics = Object.keys(diagnosticData).length > 0
         ? diagnosticData
         : undefined;
-      const loan = await this.ctx.giveBackAttachLoan(session, borrowed);
+      // What the attach borrowed before it failed is given back once the
+      // teardown has stopped the adapter (issue #1261): an inspector this
+      // attach opened is closed again. The teardown gives it back itself and
+      // leaves the report on the run; this answer is the one that carries it.
+      const loan = await this.ctx.giveBackAttachLoan(session);
       const message = error instanceof Error ? error.message : String(error);
       // A close that landed during the teardown removed the session; the
       // state write would throw. Report the failure as-is.

@@ -577,6 +577,35 @@ describe('hot_reload and attach stopOnEntry tests', () => {
       expect(payload.pending).toBeUndefined();
       expect(payload.message).toBe('Created and attached python debug session: inline');
     });
+
+    it('carries what the attach borrowed as the same top-level field attach_to_process does (issue #1261)', async () => {
+      const sessionInfo: DebugSessionInfo = {
+        id: 'inline-attach-session',
+        name: 'inline',
+        language: 'javascript' as DebugLanguage,
+        state: 'created' as SessionState,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      mockSessionManager.createSession.mockResolvedValue(sessionInfo);
+      mockSessionManager.attachToProcess.mockResolvedValue({
+        success: true,
+        state: 'running',
+        data: {
+          message: 'Attached to process PID 4242',
+          loan: { field: 'inspector', text: 'opened by this attach on 127.0.0.1:9229; closed when this session detaches or closes' }
+        }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'create_debug_session', arguments: { language: 'python', port: 5678 } }
+      });
+
+      const payload = JSON.parse(result.content[0].text);
+      expect(payload.inspector).toBe('opened by this attach on 127.0.0.1:9229; closed when this session detaches or closes');
+      expect(payload.data).toEqual({ message: 'Attached to process PID 4242' });
+    });
   });
 
   describe('attach warning join (issue #450)', () => {
