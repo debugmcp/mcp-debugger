@@ -772,6 +772,23 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
       expect(adapter.consumeLaunchConfigDiagnostics()).toEqual([]);
     });
 
+    it.each([
+      { value: 'true', type: 'string' },
+      { value: null, type: 'null' }
+    ])('treats attach autoAttachChildProcesses $type as absent and diagnoses its type', async ({ value, type }) => {
+      const adapter = new JavascriptDebugAdapter(deps);
+      const cfg = await adapter.transformAttachConfig({
+        request: 'attach', port: 9229, autoAttachChildProcesses: value
+      } as any);
+      expect(cfg.autoAttachChildProcesses).toBe(false);
+      expect(adapter.consumeLaunchConfigDiagnostics()).toEqual([
+        expect.objectContaining({
+          key: 'autoAttachChildProcesses',
+          message: `expected boolean, received ${type}; treating as absent and using the attach default (false)`
+        })
+      ]);
+    });
+
     it('respects a caller-supplied autoAttachChildProcesses (issue #501)', async () => {
       const adapter = new JavascriptDebugAdapter(deps);
       const optIn = await adapter.transformAttachConfig({

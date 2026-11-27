@@ -21,8 +21,8 @@ default, the attach measurement, the lifecycle suites) in
 (the mechanism behind an explicit `autoAttachChildProcesses: true` — every report after the
 program's own is a child session, the throwaway release, `outputOn`, a child's close as a release,
 the fork/grandchild suite and the parent-exit measurement below) merged in
-[#1094](https://github.com/debugmcp/mcp-debugger/pull/1094), PR 2 (the launch default on and attach opt-in, the attach, cascade and cluster suites) in
-[#1096](https://github.com/debugmcp/mcp-debugger/pull/1096).
+[#1094](https://github.com/debugmcp/mcp-debugger/pull/1094), PR 2 (launch and local attach defaults on, the attach, cascade and cluster suites) in
+[#1096](https://github.com/debugmcp/mcp-debugger/pull/1096); #1286 restores the attach default to off before release.
 Scope: debuggee children reported by the adapter (debugpy subprocesses, js-debug forks and, later,
 browser targets). The tree is additive to the shipped tool surface: no new tool, no changed
 parameter, new fields only.
@@ -277,17 +277,19 @@ Two measured effects the answers name:
 
 ### On by default, opt-out per launch
 
-Adoption is on by default. The Python launch transform stops defaulting `subProcess` to `false`
+Adoption is on by default for launches. The Python launch transform stops defaulting `subProcess` to `false`
 (that default existed only because of the park hang, which adoption removes; the warning that
 names the hang goes with it) and the JavaScript launch transform defaults
-`autoAttachChildProcesses` to `true`. The JavaScript attach transform and raw policy default it to `false`, as in 0.26.0; pass `adapterConfig: { autoAttachChildProcesses: true }` on `attach_to_process` to debug the processes the target starts. An explicit attach boolean is retained. Opt-in requires the target and its children to be able to load the server's js-debug bootloader and reach its debugger endpoint; it changes `NODE_OPTIONS` for later children and can leave a child forked during detach waiting (#1286). An
+`autoAttachChildProcesses` to `true`. The JavaScript attach transform and raw policy default it to `false`, preserving 0.26.0's off default: no bootloader is injected into the target for future children. Pass `adapterConfig: { autoAttachChildProcesses: true }` on the attach to make processes the target starts afterwards debuggable. An explicit attach boolean is retained. Opt-in requires the target and its children to be able to load the server's js-debug bootloader and reach its debugger endpoint; it changes `NODE_OPTIONS` for later children and can leave a child forked during detach waiting (#1286). An
 explicit `false` in `dapLaunchArgs` turns adoption off for that launch and children run
-undebugged, as they did before the tree (JavaScript attach uses
-`adapterConfig: { autoAttachChildProcesses: false }`; Python attach uses the target's own flag,
-measured below). Each flip ships in the milestone that
+undebugged, as they did before the tree (JavaScript attach accepts an explicit
+`adapterConfig: { autoAttachChildProcesses: false }`, which keeps its default for future children;
+Python attach uses the target's own flag, measured below). Each flip ships in the milestone that
 makes it safe (M1 for Python, M2 for js-debug), as a documented behaviour change with a `changed`
 changelog entry, because it changes what a launch that spawns Python or Node processes shows:
 child rows for every xdist worker, autoreloader child or script that shells out.
+
+With `autoAttachChildProcesses` off, nothing is injected into the target, so processes it starts afterwards are not debugged. A child already running with an inspector port of its own (for example, a cluster worker of a primary started with `--inspect`) is still found and becomes a child session with nothing changed in it, and detach releases it (measured on Windows, 2026-11-26).
 
 The Python **attach** transform flips in M1 only once its own measurement passes: the spike's
 topology is a launch served by `python -m debugpy.adapter`, and whether a by-port attach's children
@@ -725,7 +727,8 @@ Taken by the author of this document, marked so they can be overturned:
 - Detach cascades as a detach (children released); restart closes and removes the previous run's
   children; neither classifies children as `error`.
 - The Python attach default flips in M1 only on its own measurement; js-debug launches default
-  child debugging on, while JavaScript attach requires explicit opt-in (#1286).
+  child debugging on, while JavaScript attach injects no bootloader for future children
+  unless explicitly enabled (#1286).
 
 ## Left to the builder
 

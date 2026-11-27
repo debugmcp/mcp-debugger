@@ -247,6 +247,26 @@ describe('JavaScript session tree over a by-port attach (issue #1082)', () => {
     await targetRanToItsEnd(target);
   }, 120_000);
 
+  it('a default attach injects no bootloader: no child row, the target runs to its end', async () => {
+    const target = await startTarget(attachParent);
+    const rootId = await server.createSession('javascript', 'js-attach-tree-default');
+    const bp = await call('set_breakpoint', { file: childFixture, line: CHILD_BREAKPOINT_LINE });
+    expect(bp.success, JSON.stringify(bp)).toBe(true);
+    const attached = await call<Stop>('attach_to_process', { host: '127.0.0.1', port: target.port, stopOnEntry: false, verifyTimeout: 20000 });
+    expect(attached.success, JSON.stringify(attached)).toBe(true);
+    // A default attach must not warn about the absent key.
+    expect(String(attached.warning ?? '')).not.toContain('autoAttachChildProcesses');
+    target.go('now');
+
+    const ended = await call<Stop>('wait_for_stop', { sessionId: rootId, timeout: 30000 });
+    expect(ended.state, JSON.stringify(ended)).toBe('stopped');
+    expect(ended.sessionId).toBe(rootId);
+    expect(ended.children).toBeUndefined();
+    expect((await rows()).some((row) => row.parentSessionId === rootId)).toBe(false);
+    expect(target.output(), 'a default attach injects no bootloader').toContain('parent go (no bootloader)');
+    await targetRanToItsEnd(target);
+  }, 120_000);
+
   it('an attach with autoAttachChildProcesses: false keeps the fork undebugged: no child row, the target runs to its end', async () => {
     const target = await startTarget(attachParent);
     const { rootId, attached } = await attachRoot('js-attach-tree-opt-out', target, { adapterConfig: { autoAttachChildProcesses: false } });
@@ -278,18 +298,18 @@ describe('JavaScript session tree over a by-port attach (issue #1082)', () => {
 
     const handshakes = (): number => (target.output().match(/child-handshake /g) ?? []).length;
     const baseline = handshakes();
-    // Observe five fork intervals, including the fixture's 5 s wedge deadline.
+    // Allow the same 30 s adoption window as the opt-in case.
     await pollUntil(async () => {
       const listing = await rows();
       expect(listing.some((row) => row.parentSessionId === rootId), JSON.stringify(listing)).toBe(false);
       expect(target.output()).not.toContain('child-wedged');
       return handshakes();
-    }, () => false, 10000, 250);
+    }, () => false, 30000, 250);
     expect(handshakes(), target.output()).toBeGreaterThanOrEqual(baseline + 2);
 
     const detached = await call<Stop>('detach_from_process', { sessionId: rootId, terminateProcess: false });
     expect(detached.success, JSON.stringify(detached)).toBe(true);
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 6000));
     expect(target.proc.exitCode, 'detach must leave the target alive').toBeNull();
     expect(target.output()).not.toContain('child-wedged');
   }, 120_000);

@@ -845,7 +845,7 @@ describe('JsDebugAdapterPolicy', () => {
       expect(sendDapRequest.mock.calls.some(([cmd]) => cmd === 'launch')).toBe(false);
     });
 
-    it('keeps an untransformed attach conservative and preserves transformed or explicit child-attach intent', async () => {
+    it('defaults an untransformed attach to no bootloader for future children and preserves explicit intent', async () => {
       const runAttachHandshake = async (dapLaunchArgs: Record<string, unknown>, launchConfig?: Record<string, unknown>) => {
         vi.useFakeTimers();
         try {
@@ -882,8 +882,8 @@ describe('JsDebugAdapterPolicy', () => {
       const defaulted = await runAttachHandshake({
         request: 'attach', attachSimplePort: 9229, type: 'pwa-node'
       });
-      // Embedders bypassing the transform have no locality proof. Injecting
-      // a host-only bootloader into a port-forwarded process breaks forks.
+      // Embedders bypassing the transform use the same default as the adapter:
+      // do not inject a bootloader for future children unless explicitly enabled.
       expect(defaulted.autoAttachChildProcesses).toBe(false);
 
       const transformed = await runAttachHandshake({ request: 'attach', port: 9229 }, {

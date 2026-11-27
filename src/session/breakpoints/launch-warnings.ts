@@ -12,6 +12,8 @@ import { normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
 import { OUTPUT_BUFFER_CAP, type OutputRingBuffer } from '../output-buffer.js';
 import type { ManagedSession } from '../session-store.js';
 
+const DEFAULT_ATTACH_CHILD_DEBUGGING_NOTE = "child-process debugging is off on an attach unless requested; if the breakpoint's code runs in a process the target starts, breakpoints in code only that child process loads cannot bind; enabling adapterConfig: { autoAttachChildProcesses: true } on the attach changes NODE_OPTIONS for the target's later children and can leave a child forked during detach waiting (#1286)";
+
 export const OUTPUT_TAIL_LINES = 8;
 export const OUTPUT_TAIL_LINE_CHARS = 300;
 
@@ -123,7 +125,7 @@ export function buildUnboundBreakpointExitWarning(
   if (optedOut !== undefined || released > 0 || unconfirmed > 0) {
     const childClause = optedOut !== undefined
       ? optedOut === 'adapter-default'
-        ? 'child-process debugging was left off by default for this attach; pass adapterConfig: { autoAttachChildProcesses: true } on attach_to_process to debug the processes the target starts'
+        ? DEFAULT_ATTACH_CHILD_DEBUGGING_NOTE
         : `child-process debugging was off (${optedOut}), so breakpoints in code only a child process loads could not bind`
       : released > 0
         ? `${released} child process${released === 1 ? ' ran' : 'es ran'} undebugged, so breakpoints in code only ${released === 1 ? 'it loads' : 'they load'} could not bind`
@@ -360,12 +362,11 @@ function summarizeProgramEnd(
   ];
   const optedOut = session.run?.childDebuggingOptedOut;
   const processScope = session.run?.attachMode ? 'the attached process' : 'the launched process';
-  const offWhy = optedOut === 'adapter-default'
-    ? 'left off by default for this attach'
-    : `off via ${optedOut}`;
-  const optOutClause = optedOut !== undefined
-    ? ` in ${processScope} (child-process debugging was ${offWhy}, so any child processes would not be debugged${optedOut === 'adapter-default' ? '; pass adapterConfig: { autoAttachChildProcesses: true } on attach_to_process to debug the processes the target starts' : ''})`
-    : '';
+  const optOutClause = optedOut === 'adapter-default'
+    ? ` in ${processScope} (${DEFAULT_ATTACH_CHILD_DEBUGGING_NOTE})`
+    : optedOut !== undefined
+      ? ` in ${processScope} (child-process debugging was off via ${optedOut}, so any child processes would not be debugged)`
+      : '';
   const verifiedClause = verifiedNames.length > 0
     ? ` Verified${optedOut !== undefined ? ` in ${processScope}` : ''} but never hit: ${verifiedNames.join(', ')}.`
     : '';

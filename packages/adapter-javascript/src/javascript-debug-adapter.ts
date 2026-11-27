@@ -1006,6 +1006,13 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       );
     }
 
+    if (rest.autoAttachChildProcesses !== undefined && typeof rest.autoAttachChildProcesses !== 'boolean') {
+      this.launchConfigDiagnostics.push({
+        key: 'autoAttachChildProcesses',
+        message: `expected boolean, received ${rest.autoAttachChildProcesses === null ? 'null' : typeof rest.autoAttachChildProcesses}; treating as absent and using the attach default (false)`,
+        scope: 'launch'
+      });
+    }
     const autoAttachChildProcesses = typeof rest.autoAttachChildProcesses === 'boolean'
       ? rest.autoAttachChildProcesses
       : false;
@@ -1021,7 +1028,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       name: 'Attach to Node.js process',
       host: attachHost,
       port: attachPort,
-      // An attach borrows the target: child debugging requires an explicit opt-in.
+      // Do not inject the bootloader for future children unless explicitly enabled.
       // An explicit caller boolean always wins.
       autoAttachChildProcesses,
       // js-debug's smart-stepper turns a user pause that lands on a
