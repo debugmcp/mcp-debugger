@@ -6,11 +6,17 @@ A companion [assurance case](docs/assurance-case.md) explains *why* these contro
 
 ## Governance Model
 
-mcp-debugger uses an **agent-first development model** where AI coding agents handle implementation while CI serves as the primary quality gate. Manual merge and release decisions remain with the project maintainers.
+mcp-debugger uses an **agent-first development model** where AI coding agents handle implementation while CI serves as the primary quality gate. Merging is delegated to a managing agent under a bar the maintainers set; release decisions remain with the project maintainers (see [GOVERNANCE.md](GOVERNANCE.md)).
 
-- Agents create pull requests but cannot merge independently
-- All PRs must pass CI status checks before merging
-- Branch protection rules enforce these constraints server-side
+Enforced server-side by branch protection, for every account, administrators included:
+
+- Changes reach `main` only through pull requests; force pushes to `main` and its deletion are blocked
+- The required CI status checks (the Linux build-and-test job and lint) must pass, on a branch that is up to date with `main`, before a pull request can merge
+
+Policy, not enforced server-side:
+
+- The managing agent merges a pull request only when it meets the maintainers' merge bar, which includes every CI check passing (not only the two required ones) and a review by a model from a different family than the change's author
+- A release is tagged only on a maintainer's explicit word for that release
 
 ## Supply Chain Controls
 

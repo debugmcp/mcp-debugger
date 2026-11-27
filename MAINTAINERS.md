@@ -8,7 +8,7 @@ mcp-debugger is maintained by [Sycamore LLC](mailto:admin@debugmcp.io).
 
 ## Responsibilities
 
-Maintainers review and merge pull requests, cut releases, hold publishing access for the distribution channels below, and triage security reports per [SECURITY.md](SECURITY.md).
+Maintainers set the bar pull requests are merged under, authorize releases, hold publishing access for the distribution channels below, and triage security reports per [SECURITY.md](SECURITY.md). Merging under that bar is delegated to a managing agent, as [GOVERNANCE.md](GOVERNANCE.md) describes.
 
 | Channel | Identity |
 |---|---|
