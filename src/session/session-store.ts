@@ -244,7 +244,7 @@ export interface Run {
    * Set when child-process adoption was turned off for this run on an adapter
    * that supports it (issue #1150): either explicitly by the caller
    * (`subProcess: false` / `autoAttachChildProcesses: false`) or by the
-   * adapter's own default (unverified JavaScript attach, `'adapter-default'`).
+   * adapter's own default (JavaScript attach, `'adapter-default'`).
    */
   childDebuggingOptedOut?: 'subProcess: false' | 'autoAttachChildProcesses: false' | 'adapter-default';
   /**

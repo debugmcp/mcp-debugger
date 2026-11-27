@@ -1050,7 +1050,10 @@ export const JsDebugAdapterPolicy = {
         request: 'attach',
         ...(hasPort ? { address: attachHost, port: attachPort } : {}),
         continueOnAttach: true,
-        attachExistingChildren: true
+        // The scan uses inspector ports in child arguments; an inherited --inspect
+        // flag carries the parent's port, yielding a second connection to the parent
+        // under the child's name (measured 2026-11-26, issue #1286).
+        attachExistingChildren: false
       };
       if (!hasPort) {
         // js-debug dials websocketAddress directly; the transform's
@@ -1070,10 +1073,9 @@ export const JsDebugAdapterPolicy = {
       if (typeof stopOnEntryValue === 'boolean') {
         attachArgs.stopOnEntry = stopOnEntryValue;
       }
-      // The adapter transform enables children after proving the attach is
-      // local. An embedder bypassing that transform has no locality proof:
-      // stay off rather than injecting a host-only bootloader into a remote
-      // target. A transformed or caller-supplied boolean is respected.
+      // Attach leaves the target's children untouched unless explicitly enabled.
+      // Match the adapter transform, including for embedders that bypass it;
+      // a transformed or caller-supplied boolean is respected.
       if (typeof attachArgs.autoAttachChildProcesses !== 'boolean') {
         attachArgs.autoAttachChildProcesses =
           typeof a.autoAttachChildProcesses === 'boolean'

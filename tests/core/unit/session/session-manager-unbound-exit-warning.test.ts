@@ -92,7 +92,8 @@ describe('buildUnboundBreakpointExitWarning', () => {
   it('does not blame the caller when the JavaScript adapter itself left child debugging off on attach (m5)', () => {
     const bp = new Map([['a', { id: 'a', file: '/w/child.js', line: 14, verified: false }]]);
     const warning = build({ breakpoints: bp, run: { childDebuggingOptedOut: 'adapter-default' } });
-    expect(warning).toContain('child-process debugging was left off by the adapter for this attach, so breakpoints in code only a child process loads could not bind');
+    expect(warning).toContain('on an attach, processes the target starts afterwards are not debugged unless requested, so a breakpoint in code only such a process runs is never hit; adapterConfig: { autoAttachChildProcesses: true } on the attach requests it for a target reached through a local endpoint, but it changes the target: each process it starts from then on is made to load a file from this server (through NODE_OPTIONS) and to wait at startup for the debugger, so it can fail to start if the target cannot load this server\'s file, starts late when the target forks fast, and can be left waiting if it is forked during a detach (#1286)');
     expect(warning).not.toContain('autoAttachChildProcesses: false');
+    expect(warning).not.toContain('attach_to_process');
   });
 });

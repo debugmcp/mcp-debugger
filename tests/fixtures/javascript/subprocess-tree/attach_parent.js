@@ -48,6 +48,8 @@ process.stdin.once('data', (line) => {
     // any child whose arguments carry an inspector port as a nameless
     // "Child Process" target (seen on a slow CI runner) instead of the
     // bootloader's own report, which is what the session tree is built on.
+    // The product no longer scans existing children (#1286); the fixture
+    // retains this historical setup to isolate bootloader reports.
     const child = fork(join(here, 'child.js'), [], { execArgv: [], stdio: 'inherit', windowsHide: true });
     child.on('exit', (code) => {
       console.log(`parent child exit ${code}`);

@@ -33,6 +33,19 @@ describe('collectLaunchConfigNotices — launch-scoped diagnostics (issue #796)'
 });
 
 describe('collectAttachTransformNotices (issue #908)', () => {
+  it('names the invalid JavaScript child-auto-attach key in the rendered warning', () => {
+    const adapter = {
+      consumeLaunchConfigDiagnostics: () => [{
+        key: 'autoAttachChildProcesses',
+        message: 'expected a boolean, received string; treated as absent, so the attach default (off) applies'
+      }]
+    } as unknown as IDebugAdapter;
+
+    expect(collectAttachTransformNotices(adapter)).toEqual([
+      'autoAttachChildProcesses: expected a boolean, received string; treated as absent, so the attach default (off) applies'
+    ]);
+  });
+
   it('names each note by its key, renders an operation-scoped note as-is, and dedupes', () => {
     const adapter = {
       consumeLaunchConfigDiagnostics: () => [

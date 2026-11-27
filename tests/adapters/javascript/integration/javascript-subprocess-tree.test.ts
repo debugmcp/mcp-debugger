@@ -11,7 +11,7 @@
  * releases it.
  *
  * Every case names the key explicitly for the record; it is on by default
- * since M2's second PR, which the attach and cascade suites rely on.
+ * for launches since M2's second PR; the cascade suite checks that default.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
