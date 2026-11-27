@@ -34,6 +34,7 @@ import {
 import { detectBinary } from '../../src/utils/typescript-detector.js';
 import { JavascriptDebugAdapter } from '../../src/index.js';
 import { scrubInheritedExitCodeShim } from '../../src/javascript-debug-adapter.js';
+import { InspectorLoans } from '../../src/utils/inspector-loans.js';
 
 // Minimal AdapterDependencies stub for constructor
 const deps = {
@@ -927,6 +928,85 @@ describe('JavascriptDebugAdapter.transformAttachConfig by processId (issue #871)
     expect(activate).not.toHaveBeenCalled();
     expect(cfg.websocketAddress).toBe('ws://127.0.0.1:9229/abc');
     expect(cfg.port).toBeUndefined();
+  });
+
+  describe('what the attach borrowed (issue #1261)', () => {
+    /** The adapter with a loan record of its own, over a target whose inspector is open until closed. */
+    function adapterWithLoans(impl?: (o: Activation) => Promise<Result & { targetId?: string }>) {
+      const { adapter, activate } = adapterWithActivation(impl ?? (async (o) => ({
+        host: '127.0.0.1', port: o.port ?? 9229, alreadyActive: false, title: 'server.js', targetId: 'id-1'
+      })));
+      // Open (as id-1) until the close ends it.
+      let ended = false;
+      const endSession = vi.fn(async () => { ended = true; return { status: 'dropped' as const }; });
+      const loans = new InspectorLoans({
+        listTargets: async () => (ended
+          ? { status: 'closed' as const }
+          : { status: 'inspector' as const, targets: [{ id: 'id-1', webSocketDebuggerUrl: 'ws://127.0.0.1:9229/id-1' }] }),
+        endSession,
+        processExists: () => true
+      });
+      (adapter as unknown as { inspectorLoans: InspectorLoans }).inspectorLoans = loans;
+      return { adapter, activate, loans, endSession };
+    }
+
+    it('hands the session layer a loan for the inspector its activation opened, once, labelled with the holder', async () => {
+      const { adapter } = adapterWithLoans();
+      await adapter.transformAttachConfig({ request: 'attach', processId: 4242 } as any);
+
+      const loan = adapter.consumeAttachLoan('session-a');
+      expect(loan?.field).toBe('inspector');
+      expect(loan?.holder).toBe('session-a');
+      expect(loan?.describe()).toBe('opened by this attach on 127.0.0.1:9229; closed when this session detaches or closes');
+      expect(adapter.consumeAttachLoan('session-a')).toBeUndefined();
+    });
+
+    it('a loan for an inspector the activation found open is one that leaves it open', async () => {
+      const { adapter } = adapterWithLoans(async (o) => ({
+        host: '127.0.0.1', port: o.port ?? 9229, alreadyActive: true, title: 'server.js', targetId: 'id-1'
+      }));
+      await adapter.transformAttachConfig({ request: 'attach', processId: 4242, port: 9230 } as any);
+
+      await expect(adapter.consumeAttachLoan('s')!.giveBack()).resolves.toBe(
+        'left open: it was already open on 127.0.0.1:9230 before this attach'
+      );
+    });
+
+    it('an attach by port gets a loan too, one that touches nothing it did not open', async () => {
+      const { adapter, activate } = adapterWithLoans();
+      await adapter.transformAttachConfig({ request: 'attach', host: '10.0.0.5', port: 9229 } as any);
+
+      expect(activate).not.toHaveBeenCalled();
+      await expect(adapter.consumeAttachLoan('s')!.giveBack()).resolves.toMatch(/^left as it was: this server did not open it/);
+    });
+
+    it('has no opt-out: no adapterConfig key keeps an inspector the attach opened; an unknown one is forwarded as before', async () => {
+      const { adapter, endSession } = adapterWithLoans();
+      const cfg = await adapter.transformAttachConfig({ request: 'attach', processId: 4242, keepInspectorOpen: true } as any) as Record<string, unknown>;
+
+      expect(cfg.keepInspectorOpen).toBe(true);
+      const loan = adapter.consumeAttachLoan('s')!;
+      expect(loan.describe()).toMatch(/^opened by this attach/);
+      await loan.giveBack();
+      expect(endSession).toHaveBeenCalledTimes(1);
+    });
+
+    it('gives back a loan nobody drained when the adapter is disposed, so the inspector is not held for good', async () => {
+      const { adapter, endSession } = adapterWithLoans();
+      await adapter.transformAttachConfig({ request: 'attach', processId: 4242 } as any);
+
+      await adapter.dispose();
+
+      await vi.waitFor(() => expect(endSession).toHaveBeenCalledTimes(1));
+    });
+
+    it('a failed activation leaves no loan behind', async () => {
+      const { adapter } = adapterWithLoans(async () => {
+        throw new Error('JavaScript attach: PID 4242 is not a Node.js process');
+      });
+      await expect(adapter.transformAttachConfig({ request: 'attach', processId: 4242 } as any)).rejects.toThrow(/not a Node\.js process/);
+      expect(adapter.consumeAttachLoan('s')).toBeUndefined();
+    });
   });
 
   it('refuses a port of 0 and an empty websocketAddress the same way (review of #896)', async () => {

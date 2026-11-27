@@ -25,6 +25,7 @@ import {
   SessionLifecycleState,
   SessionState,
   type AdapterPolicy,
+  type AttachLoan,
   type Breakpoint,
   type ExceptionBreakMode,
   type FunctionBreakpoint,
@@ -105,9 +106,15 @@ function makeHarness(options: HarnessOptions = {}): Harness {
     selectPolicy: () => policy as unknown as AdapterPolicy,
     findFreePort: vi.fn(async () => 5678),
     setupProxyEventHandlers: vi.fn(),
-    redactionEnabled: vi.fn(() => true)
+    redactionEnabled: vi.fn(() => true),
+    giveBackAttachLoan: vi.fn(async () => undefined)
   };
   return { launcher: new ProxyLauncher(ctx), ctx, policy };
+}
+
+/** A loan as an adapter hands one over after its attach transform (issue #1261). */
+function fakeLoan(): AttachLoan {
+  return { field: 'inspector', describe: () => 'opened by this attach', giveBack: vi.fn(async () => 'closed') };
 }
 
 describe('ProxyLauncher.prepareLaunchInputs', () => {
@@ -830,6 +837,88 @@ describe('ProxyLauncher.start', () => {
     vi.mocked(h.ctx.redactionEnabled).mockReturnValue(false);
     await h.launcher.start(session, { scriptPath: SCRIPT, dapLaunchArgs: launchArgs({}), adapterLaunchConfig: { [token]: true } });
     expect(session.run.launchConfigNotices).toEqual([`adapterLaunchConfig.${token}: forwarded to the adapter but unrecognized`]);
+  });
+
+  describe('what an attach borrowed from its target (issue #1261)', () => {
+    function adapterLending(loan: AttachLoan | undefined): FakeDebugAdapter & { consumeAttachLoan: Mock } {
+      const adapter = new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE });
+      adapter.withAttachSupport();
+      return Object.assign(adapter, { consumeAttachLoan: vi.fn(() => loan) });
+    }
+    const attachRequest = { scriptPath: 'attach://pid', dapLaunchArgs: launchArgs({ request: 'attach', __attachMode: true }) };
+
+    it('drains it from the adapter right after the transform, names the session as its holder, and keeps it on the run', async () => {
+      const loan = fakeLoan();
+      const adapter = adapterLending(loan);
+      const h = makeHarness({ adapter, proxyManager: new MockProxyManager() });
+      const session = makeSession();
+
+      await h.launcher.start(session, attachRequest);
+
+      expect(adapter.consumeAttachLoan).toHaveBeenCalledWith('sess-1');
+      expect(session.run.attachLoan).toBe(loan);
+      expect(loan.giveBack).not.toHaveBeenCalled();
+    });
+
+    it('keeps it on the run when a step after the transform fails, so the failed attach gives it back', async () => {
+      const loan = fakeLoan();
+      const adapter = adapterLending(loan);
+      vi.mocked(adapter.resolveExecutablePath).mockRejectedValueOnce(new Error('js-debug is missing from this install'));
+      const h = makeHarness({ adapter, proxyManager: new MockProxyManager() });
+      const session = makeSession();
+
+      await expect(h.launcher.start(session, attachRequest)).rejects.toThrow('js-debug is missing from this install');
+
+      expect(session.run.attachLoan).toBe(loan);
+    });
+
+    it('writes it to the run before the store write that throws once a close removed the session mid-prepare', async () => {
+      const loan = fakeLoan();
+      const h = makeHarness({ adapter: adapterLending(loan), proxyManager: new MockProxyManager() });
+      let touches = 0;
+      vi.mocked(h.ctx.updateSession).mockImplementation((_id, patch) => {
+        if (Object.keys(patch).length === 0 && ++touches === 2) {
+          throw new Error('Session not found: sess-1');
+        }
+      });
+      const session = makeSession();
+
+      await expect(h.launcher.start(session, attachRequest)).rejects.toThrow('Session not found');
+
+      expect(session.run.attachLoan).toBe(loan);
+    });
+
+    it('has a loan an earlier run still holds given back before this attempt records its own', async () => {
+      const earlier = fakeLoan();
+      const h = makeHarness({ adapter: adapterLending(fakeLoan()), proxyManager: new MockProxyManager() });
+      const session = makeSession({ run: { attachLoan: earlier } } as Partial<ManagedSession>);
+      const order: string[] = [];
+      vi.mocked(h.ctx.giveBackAttachLoan).mockImplementation(async (s) => {
+        order.push(`giveBack:${s.run.attachLoan === earlier ? 'earlier' : 'other'}`);
+        return undefined;
+      });
+      vi.mocked(h.ctx.adapterRegistry.create).mockImplementationOnce(async () => {
+        order.push('acquire');
+        return adapterLending(fakeLoan());
+      });
+
+      await h.launcher.start(session, attachRequest);
+
+      expect(order).toEqual(['giveBack:earlier', 'acquire']);
+    });
+
+    it('drains nothing for a launch', async () => {
+      const adapter = Object.assign(new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE }), {
+        consumeAttachLoan: vi.fn(() => fakeLoan())
+      });
+      const h = makeHarness({ adapter, proxyManager: new MockProxyManager() });
+      const session = makeSession();
+
+      await h.launcher.start(session, { scriptPath: SCRIPT });
+
+      expect(adapter.consumeAttachLoan).not.toHaveBeenCalled();
+      expect(session.run.attachLoan).toBeUndefined();
+    });
   });
 
   it('awaits an async transformAttachConfig and forwards its result as the attach config', async () => {

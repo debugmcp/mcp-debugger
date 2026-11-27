@@ -487,13 +487,17 @@ export class AttachController {
       // Landing parity with the other stop answers (issue #982): location,
       // threadId and note — not just the note (issue #900's shape) — plus the
       // snapshot.
+      // What the attach borrowed from the target and what the session's end
+      // will do with it (issue #1261), in the adapter's words.
+      const loan = session.run.attachLoan;
       const attachData: AttachResultData = {
         message: attachPausePending
           ? `${attachedTo}; ${ErrorMessages.attachPausePending}`
           : attachedTo,
         ...(attachPausePending ? { pending: true } : {}),
         ...(landing ? landingFields(landing) : {}),
-        ...(snapshot ? { snapshot } : {})
+        ...(snapshot ? { snapshot } : {}),
+        ...(loan ? { loan: { field: loan.field, text: loan.describe() } } : {})
       };
       // Surface adapterConfig keys the adapter's attach transform dropped
       // (issue #450) and keys forwarded to the adapter unrecognized (issue
@@ -545,10 +549,16 @@ export class AttachController {
       // log the same full failure record it logs, proxy-log tail included
       // (issue #561) — an attach that dies during proxy initialization used
       // to leave the adapter's own complaint unreadable.
+      // What the attach borrowed before it failed is given back once the
+      // teardown has stopped the adapter (issue #1261): an inspector this
+      // attach opened is closed again. Read before the teardown, which gives
+      // it back itself and takes it off the run.
+      const borrowed = session.run.attachLoan;
       const diagnosticData = await failProxySetup(this.ctx, session, error, 'attachToProcess');
       session.failureDiagnostics = Object.keys(diagnosticData).length > 0
         ? diagnosticData
         : undefined;
+      const loan = await this.ctx.giveBackAttachLoan(session, borrowed);
       const message = error instanceof Error ? error.message : String(error);
       // A close that landed during the teardown removed the session; the
       // state write would throw. Report the failure as-is.
@@ -558,11 +568,12 @@ export class AttachController {
       if (state === SessionState.ERROR) {
         this.ctx.updateState(session, SessionState.ERROR);
       }
+      const data: AttachResultData = { ...diagnosticData, ...(loan ? { loan } : {}) };
       return {
         success: false,
         state,
         error: `Failed to attach: ${message}`,
-        ...(Object.keys(diagnosticData).length > 0 ? { data: diagnosticData } : {})
+        ...(Object.keys(data).length > 0 ? { data } : {})
       };
     }
   }
@@ -646,12 +657,19 @@ export class AttachController {
 
     // A proxy that has stopped is a program this session let go of already
     // (issue #1148): a second detach has nothing to detach from, and must not
-    // answer from what the first one saw.
+    // answer from what the first one saw. What the attach borrowed is still
+    // held when the connection ended by itself (the adapter or its worker
+    // went, the target lives on): this detach gives it back (issue #1261).
     if (!session.proxyManager || !session.proxyManager.isRunning()) {
+      if (session.pendingProxyStop) {
+        await session.pendingProxyStop;
+      }
+      const loan = await this.ctx.giveBackAttachLoan(session);
       return {
         success: false,
         state: session.state,
-        error: 'No active debug session to detach from'
+        error: 'No active debug session to detach from',
+        ...(loan ? { data: { loan } } : {})
       };
     }
 
@@ -666,13 +684,18 @@ export class AttachController {
     // each runs on undebugged, then detaches the parent.
     let childrenClosed = 0;
     let childrenReleased = 0;
+    // What the attach borrowed from the target, given back once the adapter
+    // has disconnected (issue #1261).
+    let loan: DetachResultData['loan'];
     const finishClose = this.ctx.beginSubtreeClose(sessionId);
 
     try {
       if (terminateProcess) {
         // End children before disconnecting the root, and override an
         // attach root's usual keep-the-target-running close semantics.
-        childrenClosed = (await this.ctx.closeSessionReporting(sessionId, { terminateDebuggee: true })).childrenClosed ?? 0;
+        const closed = await this.ctx.closeSessionReporting(sessionId, { terminateDebuggee: true });
+        childrenClosed = closed.childrenClosed ?? 0;
+        loan = closed.loan;
       } else {
         const proxyManager = session.proxyManager;
         childrenReleased = await this.ctx.releaseDescendants(session);
@@ -738,11 +761,16 @@ export class AttachController {
           }
           await proxyManager.stop();
         }
+        // A teardown a terminal event started meanwhile is the same worker.
+        if (session.pendingProxyStop) {
+          await session.pendingProxyStop;
+        }
 
         this.ctx.updateState(session, SessionState.STOPPED);
         this.ctx.updateSession(sessionId, {
           sessionLifecycle: SessionLifecycleState.TERMINATED
         });
+        loan = await this.ctx.giveBackAttachLoan(session);
       }
 
       return {
@@ -757,7 +785,8 @@ export class AttachController {
             ? { warning: [fate.warning, warning].filter((part) => part !== undefined).join('; ') }
             : terminateProcess && warning !== undefined ? { warning } : {}),
           ...(childrenClosed > 0 ? { childrenClosed } : {}),
-          ...(childrenReleased > 0 ? { childrenReleased } : {})
+          ...(childrenReleased > 0 ? { childrenReleased } : {}),
+          ...(loan ? { loan } : {})
         }
       };
     } catch (error) {

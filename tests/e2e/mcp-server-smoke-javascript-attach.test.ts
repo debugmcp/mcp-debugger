@@ -511,7 +511,7 @@ describe('MCP Server JavaScript Attach-Mode Smoke Tests', () => {
     expect(targetProcess!.exitCode, 'detach must leave the target running').toBeNull();
   }, 120000);
 
-  it('attaches by PID to a node process started without --inspect, then re-attaches through the inspector it opened (issue #871)', async (ctx) => {
+  it('attaches by PID to a node process started without --inspect, closes the inspector it opened on detach, and opens it again on the next attach (issues #871, #1261)', async (ctx) => {
     if (await portInUse(9229)) {
       console.log('[JS Attach Test] 127.0.0.1:9229 is in use on this host; skipping the PID attach case (a signalled Node process opens its inspector there)');
       ctx.skip();
@@ -534,6 +534,7 @@ describe('MCP Server JavaScript Attach-Mode Smoke Tests', () => {
     expect(String(attachResponse.message)).toContain(`Attached to process PID ${pid}`);
     expect(target.stderr(), 'the target must have opened its inspector on the default port')
       .toMatch(/Debugger listening on ws:\/\/127\.0\.0\.1:9229\//);
+    expect(attachResponse.inspector).toBe('opened by this attach on 127.0.0.1:9229; closed when this session detaches or closes');
 
     // 2. The session is real: a breakpoint in the tick loop fires and program state is readable.
     const bpResult = await callToolSafely(mcpClient!, 'set_breakpoint', {
@@ -551,18 +552,22 @@ describe('MCP Server JavaScript Attach-Mode Smoke Tests', () => {
     expect(evalResult.success, `evaluate_expression failed: ${JSON.stringify(evalResult)}`).toBe(true);
     expect(Number(evalResult.result)).toBeGreaterThanOrEqual(1);
 
-    // 3. Detach leaves the target alive and ticking.
+    // 3. Detach leaves the target alive and ticking, and closes the inspector
+    //    the attach opened (issue #1261): 9229 is free again.
     const outputBeforeDetach = target.stdout().length;
     const detachResult = await callToolSafely(mcpClient!, 'detach_from_process', {
       sessionId: sessionId!, terminateProcess: false
     });
     expect(detachResult.success, `detach_from_process failed: ${JSON.stringify(detachResult)}`).toBe(true);
+    expect(detachResult.inspector).toBe(
+      `closed: 127.0.0.1:9229 no longer accepts connections, and PID ${pid} runs on; an attach by processId opens it again`
+    );
+    expect(await portInUse(9229), 'the inspector the attach opened must be closed by the detach').toBe(false);
     await new Promise(r => setTimeout(r, 2500));
     expect(targetProcess!.exitCode, 'detach must leave the target process alive').toBeNull();
     expect(target.stdout().length, 'the target must resume ticking after detach').toBeGreaterThan(outputBeforeDetach);
 
-    // 4. A second attach by PID finds the inspector still open on 9229 (Node keeps it
-    //    open after a detach) and attaches without signalling again.
+    // 4. A second attach by PID signals again, and the inspector opens again.
     await callToolSafely(mcpClient!, 'close_debug_session', { sessionId: sessionId! });
     const again = await mcpClient!.callTool({
       name: 'create_debug_session',
@@ -574,9 +579,17 @@ describe('MCP Server JavaScript Attach-Mode Smoke Tests', () => {
     });
     expect(reattach.success, `re-attach by PID failed: ${JSON.stringify(reattach)}`).toBe(true);
     expect(reattach.state).toBe('running');
+    expect(reattach.inspector).toMatch(/^opened by this attach on 127\.0\.0\.1:9229/);
     const threadsResult = await callToolSafely(mcpClient!, 'list_threads', { sessionId: sessionId! });
     expect(((threadsResult.threads as unknown[] | undefined) ?? []).length).toBeGreaterThan(0);
-    expect((target.stderr().match(/Debugger listening on/g) ?? []).length, 'the inspector was opened once').toBe(1);
+    expect((target.stderr().match(/Debugger listening on/g) ?? []).length, 'the inspector was opened once per attach').toBe(2);
+
+    // 5. Closing that session closes it again.
+    const closed = await callToolSafely(mcpClient!, 'close_debug_session', { sessionId: sessionId! });
+    sessionId = null;
+    expect(closed.inspector).toMatch(/^closed: 127\.0\.0\.1:9229 no longer accepts connections/);
+    expect(await portInUse(9229)).toBe(false);
+    expect(targetProcess!.exitCode, 'close must leave the target process alive').toBeNull();
   }, 120000);
 
   /** Poll list_debug_sessions until this session reports the wanted state. */

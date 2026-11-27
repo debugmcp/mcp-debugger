@@ -12,14 +12,17 @@ import type { AddressInfo } from 'node:net';
 import { AdapterError, AdapterErrorCode } from '@debugmcp/shared';
 import {
   activateInspector,
+  endInspectorSession,
   inspectorSignalDisabledByPid,
   isNodeProcessByPid,
   pidViaInspector,
   probeInspector,
+  processExistsByPid,
   type InspectorActivationOptions,
   type InspectorProbe,
   type InspectorTarget
 } from '../../src/utils/inspector-activation.js';
+import { InspectorLoans } from '../../src/utils/inspector-loans.js';
 
 const inspector = (...titles: string[]): InspectorProbe => ({
   status: 'inspector',
@@ -76,7 +79,7 @@ describe('activateInspector (issue #871)', () => {
     const result = await activateInspector(options);
     expect(signal).toHaveBeenCalledWith(4242);
     expect(listTargets).toHaveBeenCalledWith('127.0.0.1', 9229);
-    expect(result).toEqual({ host: '127.0.0.1', port: 9229, alreadyActive: false, title: 'node[4242]' });
+    expect(result).toEqual({ host: '127.0.0.1', port: 9229, alreadyActive: false, title: 'node[4242]', targetId: '0' });
   });
 
   it('does not signal a process whose inspector is already open on the port (a --inspect target, or a re-attach)', async () => {
@@ -108,7 +111,7 @@ describe('activateInspector (issue #871)', () => {
     const result = await activateInspector(options);
     expect(pidOf).toHaveBeenCalledOnce();
     expect(signal).not.toHaveBeenCalled();
-    expect(result).toEqual({ host: '127.0.0.1', port: 9229, alreadyActive: true, title: 'C:_app_server.js' });
+    expect(result).toEqual({ host: '127.0.0.1', port: 9229, alreadyActive: true, title: 'C:_app_server.js', targetId: '0' });
   });
 
   it('refuses an already-open inspector whose owner cannot be told, naming the paused-by-another-debugger case and attach by port', async () => {
@@ -174,7 +177,7 @@ describe('activateInspector (issue #871)', () => {
     const { options, signal } = harness({ probes: [closed, inspector('C:_app_server.js')], pidOf: async () => undefined });
     const result = await activateInspector(options);
     expect(signal).toHaveBeenCalledWith(4242);
-    expect(result).toEqual({ host: '127.0.0.1', port: 9229, alreadyActive: false, title: 'C:_app_server.js' });
+    expect(result).toEqual({ host: '127.0.0.1', port: 9229, alreadyActive: false, title: 'C:_app_server.js', targetId: '0' });
   });
 
   it('refuses when the port is held by something that is not a Node inspector', async () => {
@@ -322,6 +325,47 @@ describe('pidViaInspector (the real CDP ownership question)', () => {
       child.kill('SIGKILL');
       await new Promise<void>((resolve) => child.once('exit', () => resolve()));
       expect(await pidViaInspector(`ws://127.0.0.1:${port}/gone`, 2000)).toBeUndefined();
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    }
+  }, 30000);
+});
+
+describe('endInspectorSession (the real CDP close, issue #1261)', () => {
+  it('ends the inspector of the PID it names and of no other; the process runs on, and the loan reports closed only once the port refuses', async () => {
+    const child = spawn(process.execPath, ['--inspect=127.0.0.1:0', '-e', 'setInterval(() => {}, 1000)'], {
+      stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true
+    });
+    try {
+      let stderr = '';
+      const wsUrl = await new Promise<string>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`no inspector banner: ${stderr}`)), 15000);
+        child.stderr!.on('data', (chunk: Buffer) => {
+          stderr += chunk.toString();
+          const match = /Debugger listening on (ws:\/\/127\.0\.0\.1:\d+\/[0-9a-f-]+)/.exec(stderr);
+          if (match) { clearTimeout(timer); resolve(match[1]); }
+        });
+        child.once('exit', (code) => { clearTimeout(timer); reject(new Error(`child exited early (${code}): ${stderr}`)); });
+      });
+      const port = Number(new URL(wsUrl).port);
+
+      // The guard: named for another PID, it answers with the real one and ends nothing.
+      expect(await endInspectorSession(wsUrl, child.pid! + 1, 5000)).toEqual({ status: 'other-pid', pid: child.pid });
+      expect((await probeInspector('127.0.0.1', port)).status).toBe('inspector');
+
+      // Through the loan, as a session's end does it: the opening is told by its id.
+      const listed = await probeInspector('127.0.0.1', port);
+      const targetId = listed.status === 'inspector' ? listed.targets[0].id : undefined;
+      const loan = new InspectorLoans().forActivation({ pid: child.pid!, host: '127.0.0.1', port, alreadyActive: false, targetId });
+      await expect(loan.giveBack()).resolves.toBe(
+        `closed: 127.0.0.1:${port} no longer accepts connections, and PID ${child.pid} runs on; an attach by processId opens it again`
+      );
+      expect((await probeInspector('127.0.0.1', port)).status).toBe('closed');
+      expect(child.exitCode).toBeNull();
+      expect(processExistsByPid(child.pid!)).toBe(true);
+
+      // An inspector that is already gone is not reachable, and nothing is claimed.
+      expect((await endInspectorSession(wsUrl, child.pid!, 2000)).status).toBe('unreachable');
     } finally {
       if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
     }

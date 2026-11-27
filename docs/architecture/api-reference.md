@@ -181,6 +181,12 @@ Whether attach connects directly to an already-listening DAP server (e.g. `rdbg`
 
 **Returns**: `true` if attach uses direct connection
 
+#### `consumeAttachLoan?(holder: string): AttachLoan | undefined`
+Drains what the last attach transform borrowed from its target (issue #1261): something the attach opened or used there that the session gives back when it ends. The session layer drains it right after `transformAttachConfig`, on success and failure alike, keeps it on the run, and calls its `giveBack()` once the adapter has disconnected — on detach, on close, before the session is launched or attached again, and when the attach fails. Only the root of a session tree gives it back.
+
+**Parameters**: `holder` — the session's id, so a loan shared by several sessions can name the others
+**Returns**: an `AttachLoan` — `field` (the answer field, e.g. `inspector`), `describe()` (what the attach did, for its answer) and `giveBack()` (idempotent, never rejects; resolves to what became of it, as observed) — or `undefined`. The JavaScript adapter's loan is the inspector an attach by processId opened (closed when the session ends) or found open (left open)
+
 ### Launch Barrier (Optional)
 
 #### `createLaunchBarrier?(command: string, args?: unknown): AdapterLaunchBarrier | undefined`

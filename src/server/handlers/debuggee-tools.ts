@@ -4,7 +4,7 @@
  */
 import type { ToolHandler } from '../tool-context.js';
 import type { HotReloadArgs } from '@debugmcp/shared';
-import { attachRequestFromArgs, childSessionRefusal, hoistPausedChild, hoistProgramEnd, hoistStopLanding, hoistTreeFields, successWarning } from './shared.js';
+import { attachRequestFromArgs, childSessionRefusal, hoistAttachLoan, hoistPausedChild, hoistProgramEnd, hoistStopLanding, hoistTreeFields, successWarning } from './shared.js';
 import {
   assertPlainObjectArg,
   foldTestRunnerPreset,
@@ -173,6 +173,9 @@ export const attachToProcessTool: ToolHandler = async (ctx, args) => {
     // location, threadId, note, snapshot, the source line and the
     // stale-build sentence — not just the note (issue #900's shape).
     await hoistStopLanding(ctx, responsePayload, attachResult.data, args.sessionId!, 'attach result');
+    // What the attach borrowed from the target (issue #1261): on success what
+    // the session's end will do with it, on failure what was given back.
+    hoistAttachLoan(responsePayload, attachResult.data?.loan);
 
     return jsonResult(responsePayload);
   } catch (error) {
@@ -217,6 +220,8 @@ export const detachFromProcessTool: ToolHandler = async (ctx, args) => {
       if (detachResult.data.released) responsePayload.released = true;
       if (detachResult.data.processEnded) responsePayload.processEnded = true;
       if (detachResult.data.warning !== undefined) responsePayload.warning = detachResult.data.warning;
+      // And what the detach gave back to it (issue #1261), as close does.
+      hoistAttachLoan(responsePayload, detachResult.data.loan);
     }
 
     return jsonResult(responsePayload);

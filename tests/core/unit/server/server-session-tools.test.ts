@@ -290,6 +290,27 @@ describe('Server Session Tools Tests', () => {
       expect(announce).toHaveBeenCalledTimes(3);
     });
 
+    it('carries what closing an attach root gave back to its target, the field detach carries (issue #1261)', async () => {
+      mockSessionManager.closeSessionReporting.mockResolvedValue({
+        closed: true,
+        closedSessionIds: ['test-session'],
+        released: true,
+        loan: { field: 'inspector', text: 'closed: 127.0.0.1:9229 no longer accepts connections, and PID 4242 runs on' }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'close_debug_session', arguments: { sessionId: 'test-session' } }
+      });
+
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        success: true,
+        message: 'Closed debug session: test-session',
+        released: true,
+        inspector: 'closed: 127.0.0.1:9229 no longer accepts connections, and PID 4242 runs on'
+      });
+    });
+
     it('says the release was not confirmed, and why, when nothing acknowledged the detach (issue #1148)', async () => {
       mockSessionManager.closeSessionReporting.mockResolvedValue({
         closed: true, closedSessionIds: ['test-session'], releaseUnconfirmed: 'DAP disconnect request timed out after 1000ms'

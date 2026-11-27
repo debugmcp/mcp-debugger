@@ -18,7 +18,7 @@ import {
   getPolicyForLanguage,
   isSettledSessionState
 } from '@debugmcp/shared';
-import type { AttachLocality, ExceptionBreakMode, ProgramEndExplanation, SessionStopInfo } from '@debugmcp/shared';
+import type { AttachLocality, AttachLoan, ExceptionBreakMode, ProgramEndExplanation, SessionStopInfo } from '@debugmcp/shared';
 import { SessionNotFoundError } from '../errors/debug-errors.js';
 import type { NoUncaughtStop } from '../utils/error-messages.js';
 
@@ -155,9 +155,10 @@ export interface StepStopProvenance {
  *
  * Written by the launch-shaped code (the launcher, the proxy launcher and
  * the attach controller, which refuse a child session), each field reset
- * where it was reset before the move, and in one place by the core: a stop
+ * where it was reset before the move, and in two places by the core: a stop
  * that proves the debugger on clears `launchDebuggerOff`, from whichever
- * session of the tree stopped. A dry run leaves the record as it was; a real
+ * session of the tree stopped; and `giveBackAttachLoan` clears `attachLoan`
+ * when the root gives it back (issue #1261). A dry run leaves the record as it was; a real
  * start that fails has already reset the facts it resets at its top.
  *
  * The record is mutated in place, not replaced per run. A child row that
@@ -252,6 +253,16 @@ export interface Run {
    * (issue #1221), settled before launch/end/wait answers finalize.
    */
   inFlightChildReleases?: Set<Promise<void>>;
+  /**
+   * What this run's attach borrowed from its target and has not given back
+   * yet (issue #1261): drained from the adapter right after its attach
+   * transform (`IDebugAdapter.consumeAttachLoan`), on success and failure
+   * alike, and given back once — by `SessionManagerCore.giveBackAttachLoan`
+   * — after the adapter has disconnected: on detach, on close, before the
+   * session is launched or attached again, and when the attach fails. Only
+   * the root gives it back; its children share this record.
+   */
+  attachLoan?: AttachLoan;
 }
 
 export interface ManagedSession extends DebugSessionInfo {

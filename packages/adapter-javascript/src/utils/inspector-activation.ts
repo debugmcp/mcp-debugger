@@ -85,6 +85,12 @@ export interface InspectorActivationResult {
   alreadyActive: boolean;
   /** The inspector target's title, `<process title>[<pid>]`. */
   title: string;
+  /**
+   * The target's `/json/list` id. Node draws a new one each time the
+   * inspector opens, so it tells this opening of the inspector from a later
+   * one on the same port (issue #1261). Absent when the list gave none.
+   */
+  targetId?: string;
 }
 
 // Loopback is decided by the shared `isLoopbackHost` (issue #903). A
@@ -178,7 +184,8 @@ function describeTargets(targets: InspectorTarget[]): string {
   return titles.length > 0 ? titles.join(', ') : 'an inspector with no target title';
 }
 
-function defaultProcessExists(pid: number): boolean {
+/** Is there a process with this PID? (Signal 0 sends nothing.) */
+export function processExistsByPid(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
@@ -186,6 +193,88 @@ function defaultProcessExists(pid: number): boolean {
     // EPERM: the process exists but belongs to another user.
     return (err as NodeJS.ErrnoException).code === 'EPERM';
   }
+}
+const defaultProcessExists = processExistsByPid;
+
+/** What a request to end an inspector got back (issue #1261). */
+export type InspectorEndResult =
+  /** The inspector dropped the connection without answering: `_debugEnd()` ran. */
+  | { status: 'dropped' }
+  /** The guard answered: the inspector belongs to another process, and nothing was ended. */
+  | { status: 'other-pid'; pid: number }
+  /** The evaluation answered with an exception (no `_debugEnd` in that Node, for one). */
+  | { status: 'failed'; detail: string }
+  /** Neither within the window: a target paused, or busy outside JavaScript. */
+  | { status: 'timeout' }
+  /** No connection was made at all. */
+  | { status: 'unreachable'; detail: string };
+
+/**
+ * Close the inspector behind `webSocketDebuggerUrl` from inside its process
+ * (issue #1261): one short CDP session evaluating `process._debugEnd()`,
+ * guarded so it runs only when `process.pid` is `pid`. A signal can open a
+ * Node inspector but nothing outside the process can close it; this is what
+ * does. Node stops the inspector inside the call, so the evaluation never
+ * answers: the connection simply drops (code 1005, measured 1–10 ms after
+ * the request). A guard that does not match answers with the other PID and
+ * ends nothing. The caller confirms the close by probing the port.
+ */
+export function endInspectorSession(webSocketDebuggerUrl: string, pid: number, timeoutMs: number): Promise<InspectorEndResult> {
+  const WebSocketImpl = (globalThis as { WebSocket?: WebSocketConstructor }).WebSocket;
+  if (typeof WebSocketImpl !== 'function') {
+    return Promise.resolve({ status: 'unreachable', detail: 'this server\'s Node.js has no WebSocket client' });
+  }
+  const expression =
+    `(() => { if (process.pid !== ${pid}) return process.pid; process._debugEnd(); return 'ended'; })()`;
+  return new Promise((resolve) => {
+    let socket: MinimalWebSocket | undefined;
+    let opened = false;
+    let settled = false;
+    const finish = (result: InspectorEndResult): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { socket?.close(); } catch { /* already closed */ }
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish({ status: 'timeout' }), timeoutMs);
+    try {
+      socket = new WebSocketImpl(webSocketDebuggerUrl);
+    } catch (err) {
+      finish({ status: 'unreachable', detail: err instanceof Error ? err.message : String(err) });
+      return;
+    }
+    socket.onopen = () => {
+      opened = true;
+      socket!.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression, returnByValue: true } }));
+    };
+    socket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(String(event.data)) as {
+          id?: number;
+          result?: { result?: { value?: unknown }; exceptionDetails?: { text?: string; exception?: { description?: string } } };
+          error?: { message?: string };
+        };
+        if (message.id !== 1) return;
+        const value = message.result?.result?.value;
+        if (typeof value === 'number') {
+          finish({ status: 'other-pid', pid: value });
+          return;
+        }
+        const exception = message.result?.exceptionDetails;
+        const detail = exception?.exception?.description ?? exception?.text ?? message.error?.message;
+        finish({ status: 'failed', detail: detail ?? `the evaluation answered ${JSON.stringify(value)}` });
+      } catch {
+        finish({ status: 'failed', detail: 'the inspector answered something that is not CDP' });
+      }
+    };
+    socket.onerror = () => {
+      if (!opened) finish({ status: 'unreachable', detail: 'the inspector refused the connection' });
+    };
+    socket.onclose = () => {
+      finish(opened ? { status: 'dropped' } : { status: 'unreachable', detail: 'the inspector closed the connection before it opened' });
+    };
+  });
 }
 
 /**
@@ -308,6 +397,11 @@ export function probeInspector(host: string, port: number, timeoutMs = 1000): Pr
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** The result, with the target's id when the list gave one. */
+function withTargetId(result: InspectorActivationResult, target: InspectorTarget | undefined): InspectorActivationResult {
+  return typeof target?.id === 'string' && target.id.length > 0 ? { ...result, targetId: target.id } : result;
+}
+
 /**
  * Make the inspector of `pid` reachable on `host:port` and say where it is.
  * Every failure is an AdapterError whose message names what to do instead.
@@ -361,7 +455,7 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
     const owners = await Promise.all(probe.targets.map((target) => pidOf(target)));
     const index = owners.indexOf(pid);
     if (index >= 0) {
-      return { host, port, alreadyActive: !afterSignal, title: probe.targets[index].title ?? '' };
+      return withTargetId({ host, port, alreadyActive: !afterSignal, title: probe.targets[index].title ?? '' }, probe.targets[index]);
     }
     const other = owners.find((owner) => owner !== undefined && owner !== pid);
     if (other !== undefined) {
@@ -370,7 +464,7 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
     if (afterSignal) {
       // Closed before our signal, open right after it: PID pid's, even though
       // it did not say so (a target paused at a breakpoint cannot answer).
-      return { host, port, alreadyActive: false, title: probe.targets[0]?.title ?? '' };
+      return withTargetId({ host, port, alreadyActive: false, title: probe.targets[0]?.title ?? '' }, probe.targets[0]);
     }
     throw invalid(
       `${where} is already held by a Node inspector (${describeTargets(probe.targets)}) that could not be confirmed to be PID ${pid}'s — ` +

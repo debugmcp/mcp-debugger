@@ -33,6 +33,7 @@ import {
 import { internals } from '../../../test-utils/helpers/operations-internals.js';
 import type {
   AdapterMetadata,
+  AttachLoan,
   ExceptionBreakMode,
   GenericAttachConfig,
   LanguageSpecificAttachConfig,
@@ -1164,5 +1165,66 @@ describe('SessionManagerOperations attach modes', () => {
 
     expect(failure).toBeInstanceOf(DebugSessionCreationError);
     expect((failure as Error).message).not.toContain('attach_to_process');
+  });
+
+  describe('what the attach borrowed from its target (issue #1261)', () => {
+    let events: string[];
+
+    function lendingAdapter(text: string) {
+      const loan = {
+        field: 'inspector',
+        describe: vi.fn(() => 'opened by this attach on 127.0.0.1:9229; closed when this session detaches or closes'),
+        giveBack: vi.fn(async () => {
+          events.push('giveBack');
+          return text;
+        })
+      } satisfies AttachLoan;
+      const adapter = Object.assign(makeDirectConnectRubyAdapter(), { consumeAttachLoan: vi.fn(() => loan) });
+      return { adapter, loan };
+    }
+
+    beforeEach(() => {
+      events = [];
+      mockProxyManager.stop.mockImplementation(async () => { events.push('workerStop'); });
+    });
+
+    it('the attach answer says what the session\'s end will do with it, and the run keeps it to give back', async () => {
+      const { adapter, loan } = lendingAdapter('closed');
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapter);
+
+      const result = await operations.attachToProcess('test-session', { port: 12345, stopOnEntry: false });
+
+      expect(result.success).toBe(true);
+      expect(result.data?.loan).toEqual({
+        field: 'inspector',
+        text: 'opened by this attach on 127.0.0.1:9229; closed when this session detaches or closes'
+      });
+      expect(mockSession.run.attachLoan).toBe(loan);
+      expect(loan.giveBack).not.toHaveBeenCalled();
+    });
+
+    it('a failed attach gives it back once its teardown has stopped the adapter, and its answer says what became of it', async () => {
+      const { adapter, loan } = lendingAdapter('closed: 127.0.0.1:9229 no longer accepts connections');
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapter);
+      mockProxyManager.sendDapRequest.mockResolvedValue({ body: { threads: [] } });
+
+      const result = await operations.attachToProcess('test-session', { port: 12345, stopOnEntry: false, verifyTimeout: 30 });
+
+      expect(result).toMatchObject({ success: false, state: SessionState.ERROR });
+      expect(result.data?.loan).toEqual({ field: 'inspector', text: 'closed: 127.0.0.1:9229 no longer accepts connections' });
+      expect(events[0]).toBe('workerStop');
+      expect(events).toContain('giveBack');
+      expect(loan.giveBack.mock.calls.length).toBeGreaterThanOrEqual(1);
+      expect(mockSession.run.attachLoan).toBeUndefined();
+    });
+
+    it('an attach that fails before the transform ran has nothing to give back', async () => {
+      vi.mocked(mockDependencies.adapterRegistry.create).mockRejectedValue(new Error('no adapter'));
+
+      const result = await operations.attachToProcess('test-session', { port: 12345, stopOnEntry: false });
+
+      expect(result.success).toBe(false);
+      expect(result.data?.loan).toBeUndefined();
+    });
   });
 });

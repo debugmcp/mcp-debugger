@@ -204,6 +204,72 @@ describe('debuggee lifecycle tool handlers', () => {
     });
   });
 
+  describe('what the attach borrowed, on the attach and detach answers (issue #1261)', () => {
+    it('detach carries it as one top-level field named for it, and only there', async () => {
+      ctx.sessionManager.detachFromProcess.mockResolvedValueOnce({
+        success: true,
+        state: 'stopped',
+        data: { message: 'released', released: true, loan: { field: 'inspector', text: 'closed: 127.0.0.1:9229 no longer accepts connections' } }
+      });
+      const payload = JSON.parse((await detachFromProcessTool(ctx, { sessionId: 'test-session' }, 'detach_from_process')).content[0].text);
+
+      expect(payload).toMatchObject({ success: true, released: true, inspector: 'closed: 127.0.0.1:9229 no longer accepts connections' });
+      expect(payload.data).not.toHaveProperty('loan');
+    });
+
+    it('a detach refused for want of a connection still says what it gave back', async () => {
+      ctx.sessionManager.detachFromProcess.mockResolvedValueOnce({
+        success: false,
+        state: 'stopped',
+        error: 'No active debug session to detach from',
+        data: { loan: { field: 'inspector', text: 'closed: 127.0.0.1:9229 had already stopped listening' } }
+      });
+      const payload = JSON.parse((await detachFromProcessTool(ctx, { sessionId: 'test-session' }, 'detach_from_process')).content[0].text);
+
+      expect(payload).toEqual({
+        success: false,
+        state: 'stopped',
+        message: 'No active debug session to detach from',
+        inspector: 'closed: 127.0.0.1:9229 had already stopped listening'
+      });
+    });
+
+    it('attach carries what the session\'s end will do with it, and a failed attach what it gave back', async () => {
+      ctx.sessionManager.attachToProcess.mockResolvedValueOnce({
+        success: true,
+        state: 'running',
+        data: { message: 'Attached to process PID 4242', loan: { field: 'inspector', text: 'opened by this attach on 127.0.0.1:9229' } }
+      });
+      let payload = JSON.parse((await attachToProcessTool(ctx, { sessionId: 'test-session', processId: 4242 }, 'attach_to_process')).content[0].text);
+      expect(payload).toMatchObject({ success: true, inspector: 'opened by this attach on 127.0.0.1:9229' });
+      expect(payload.data).toEqual({ message: 'Attached to process PID 4242' });
+
+      ctx.sessionManager.attachToProcess.mockResolvedValueOnce({
+        success: false,
+        state: 'error',
+        error: 'Failed to attach: no threads',
+        data: { loan: { field: 'inspector', text: 'closed: 127.0.0.1:9229 no longer accepts connections' } }
+      });
+      payload = JSON.parse((await attachToProcessTool(ctx, { sessionId: 'test-session', processId: 4242 }, 'attach_to_process')).content[0].text);
+      expect(payload).toEqual({
+        success: false,
+        state: 'error',
+        message: 'Failed to attach: no threads',
+        inspector: 'closed: 127.0.0.1:9229 no longer accepts connections'
+      });
+    });
+
+    it('a field name that is not a plain word, or that the answer already uses, falls back to attachLoan', async () => {
+      for (const field of ['message', 'not a word']) {
+        ctx.sessionManager.detachFromProcess.mockResolvedValueOnce({
+          success: true, state: 'stopped', data: { message: 'released', loan: { field, text: 'left open' } }
+        });
+        const payload = JSON.parse((await detachFromProcessTool(ctx, { sessionId: 'test-session' }, 'detach_from_process')).content[0].text);
+        expect(payload).toMatchObject({ message: 'released', attachLoan: 'left open' });
+      }
+    });
+  });
+
   describe('the tree fields on the detach_from_process answer (issue #1081)', () => {
     it('hoists childrenReleased (a plain detach) and childrenClosed (a terminating one) beside the message', async () => {
       ctx.sessionManager.detachFromProcess.mockResolvedValueOnce({

@@ -316,7 +316,7 @@
                 "number",
                 "string"
               ],
-              "description": "Process ID (for local attach, language-specific)"
+              "description": "Process ID (for local attach, language-specific). JavaScript: the Node.js process's inspector is opened for you on port (default 9229); it is unauthenticated while it listens, and the session that opened it closes it again when it detaches or closes (one that was already open is left open). The attach, detach and close answers say which in inspector"
             },
             "timeout": {
               "type": "number",
@@ -363,7 +363,7 @@
       },
       {
         "name": "detach_from_process",
-        "description": "Detach from a process the session attached to, leaving it running. A program the session launched ends with its session: a plain detach there is refused (use close_debug_session, or terminateProcess: true)",
+        "description": "Detach from a process the session attached to, leaving it running, and give back what the attach opened in it (JavaScript: the inspector an attach by processId opened is closed; the answer says so in inspector). A program the session launched ends with its session: a plain detach there is refused (use close_debug_session, or terminateProcess: true)",
         "inputSchema": {
           "type": "object",
           "properties": {

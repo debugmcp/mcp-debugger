@@ -9,7 +9,7 @@ import { checkLaunchToolchain } from '../../utils/language-availability.js';
 import { isContainerRuntime } from '../../utils/container-path-utils.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { assertPlainObjectArg, requireSessionId } from '../tool-validation.js';
-import { attachRequestFromArgs, carriesLastStop, emittableStopInfo, hoistStopLanding, successWarning } from './shared.js';
+import { attachRequestFromArgs, carriesLastStop, emittableStopInfo, hoistAttachLoan, hoistStopLanding, successWarning } from './shared.js';
 import { namesAttachTarget } from '../../session/attach/attach-addressing.js';
 import { failureResult, jsonResult, rethrowAsMcpError, type ToolResult } from '../tool-result.js';
 
@@ -136,6 +136,8 @@ export const createDebugSessionTool: ToolHandler = async (ctx, args, _toolName, 
       // Landing parity with attach_to_process (issues #904/#982): location,
       // threadId, note, snapshot, line context and the stale-build sentence.
       await hoistStopLanding(ctx, responsePayload, attachData, sessionInfo.id, 'create+attach result');
+      // And the same account of what the attach borrowed (issue #1261).
+      hoistAttachLoan(responsePayload, attachData?.loan);
       return jsonResult(responsePayload);
     } catch (error) {
       ctx.logger.error('session:attach-failed', {
@@ -255,7 +257,7 @@ export const closeDebugSessionTool: ToolHandler = async (ctx, args) => {
   // The session tree (issue #1081): what the close took with it, and what
   // it did to the processes — a child's ended (debugpy) or released; an
   // attach root's descendants released with their targets, like its own.
-  return jsonResult({
+  const payload: Record<string, unknown> = {
     success: outcome.closed,
     message: outcome.closed ? `Closed debug session: ${args.sessionId}` : `Failed to close debug session: ${args.sessionId}`,
     ...(outcome.childrenClosed ? { childrenClosed: outcome.childrenClosed } : {}),
@@ -266,5 +268,9 @@ export const closeDebugSessionTool: ToolHandler = async (ctx, args) => {
     ...(outcome.releaseUnconfirmed !== undefined
       ? { warning: ErrorMessages.closeReleaseUnconfirmed(outcome.releaseUnconfirmed) }
       : {})
-  });
+  };
+  // What closing an attach root gave back to its target (issue #1261), the
+  // same field detach_from_process carries.
+  hoistAttachLoan(payload, outcome.loan);
+  return jsonResult(payload);
 };

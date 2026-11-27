@@ -184,6 +184,18 @@ export interface IDebugAdapter extends EventEmitter {
   consumeLaunchConfigDiagnostics?(): readonly LaunchConfigDiagnostic[];
 
   /**
+   * Drain what the last attach transform borrowed from its target (issue
+   * #1261), if anything: something the attach opened or used there that the
+   * session must give back when it ends. The session layer drains it right
+   * after `transformAttachConfig`, on success and failure alike, keeps it on
+   * the run, and calls `giveBack()` once the debug adapter has disconnected:
+   * on detach, on close, when the session is launched or attached again, and
+   * when the attach fails. `holder` names the session, so the loan can say
+   * which other sessions still hold what it shares with them.
+   */
+  consumeAttachLoan?(holder: string): AttachLoan | undefined;
+
+  /**
    * Transform generic attach config to language-specific format
    * Only called if supportsAttach() returns true
    *
@@ -391,6 +403,36 @@ export interface GenericLaunchConfig {
 export interface LaunchTransformContext {
   /** A non-empty cwd was supplied by the caller or configured defaults, rather than derived by the launcher. */
   cwdProvided: boolean;
+}
+
+/**
+ * What an attach borrowed from its target and gives back when its session
+ * ends (issue #1261): an attach borrows, a detach returns what was borrowed,
+ * whole. What the attach opened in the target it closes; what it found open it
+ * leaves exactly as it was. The adapter that knows its engine decides which,
+ * and says so in its own words; the session layer only holds the loan and
+ * reports it.
+ *
+ * Example: the JavaScript adapter's attach by processId makes Node open its
+ * inspector, which the session closes when it ends; an inspector that was
+ * already listening is left open.
+ */
+export interface AttachLoan {
+  /**
+   * The answer field the loan reports under: what was borrowed, as a short
+   * lowerCamelCase noun (the JavaScript adapter's is `inspector`). The same
+   * field on the attach, detach and close answers.
+   */
+  readonly field: string;
+  /** What the attach did and what its end will do, for the attach answer. */
+  describe(): string;
+  /**
+   * Give it back, and say what became of it as observed: a leading verdict
+   * (`closed`, `left open`, …) and why. Called once the debug adapter has
+   * disconnected from the target. Idempotent (a second call answers the
+   * first one's outcome) and never rejects.
+   */
+  giveBack(): Promise<string>;
 }
 
 /** An adapter's explanation of how it handled one launch or attach input. */

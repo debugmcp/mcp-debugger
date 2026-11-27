@@ -481,17 +481,52 @@ Three ways in:
   its inspector on `127.0.0.1:9229`, confirms through the inspector's `/json/list` that the
   port now belongs to that PID, and attaches there. A target started with
   `--inspect-port=<n>` (or `NODE_OPTIONS=--inspect-port=<n>`) opens on that port instead:
-  pass it as `port` alongside `processId`. The inspector **stays open after detach and
-  close**, until something inside the process closes it or the process exits
-  ([#1261](https://github.com/debugmcp/mcp-debugger/issues/1261)).
-  A later attach — by PID or by `port: 9229` — reuses it without a second signal, and so can
-  anything else on the host: the inspector has no authentication, so any local process can
-  connect to it and run code in the target, and while it holds 9229 an attach by PID to a
-  different Node process is refused. One tested way to close it is to evaluate
-  `process._debugEnd()` in the target while it is paused: the inspector closes and the
-  process runs on, but the call is answered `Unable to evaluate` and the session then
-  reports the program as ended ([#1262](https://github.com/debugmcp/mcp-debugger/issues/1262)).
-  Restarting the target closes it too.
+  pass it as `port` alongside `processId`. The inspector has no authentication: while it
+  listens, any local process can connect to it and run code in the target, and while it holds
+  9229 an attach by PID to a different Node process is refused. So **the session that opened
+  it closes it again when it detaches or closes**
+  ([#1261](https://github.com/debugmcp/mcp-debugger/issues/1261)): once js-debug has
+  disconnected, mcp-debugger opens one short inspector session of its own, evaluates
+  `process._debugEnd()` in the target — guarded by the PID, and sent only to the inspector
+  it opened, which it tells from a later one on the same port by its `/json/list` id — and
+  says `closed` only once the port refuses a connection. The process runs on. To attach
+  again, attach by PID again: the signal opens the inspector again (five cycles on one
+  target measured on Windows). An attach by `port: 9229` after the close finds nothing
+  listening.
+
+  An inspector that was already open when the attach found it — a target started with
+  `--inspect`, or one another tool left open — is left exactly as it was, and so is one an
+  attach by port or by inspector URL reached that this server did not open. Each attach,
+  detach and close answer says which in one field, `inspector`:
+
+  | When | `inspector` |
+  |---|---|
+  | attach that opened it | `opened by this attach on 127.0.0.1:9229; closed when this session detaches or closes` |
+  | attach that found it open | `already open on 127.0.0.1:9229 before this attach; left open when this session ends` |
+  | detach or close, inspector this session opened | `closed: 127.0.0.1:9229 no longer accepts connections, and PID <pid> runs on; an attach by processId opens it again` |
+  | detach or close, inspector found open | `left open: it was already open on 127.0.0.1:9229 before this attach` |
+  | detach or close, the close could not be confirmed | `not confirmed closed: <why>; 127.0.0.1:9229 may still be listening` |
+
+  Two sessions of this server can share an inspector it opened: a second attach by PID finds
+  it open, and an attach by port or by its URL reaches it. Closing it drops every client, so
+  it is closed by the last of them to leave; the first one's detach answers `left open:
+  session <id> uses it too and has not detached or closed yet; …` and the other session keeps
+  debugging. A client from outside this server (a browser's DevTools, another debugger)
+  cannot be seen: the close drops it too. A session whose connection to the target ended by
+  itself (js-debug went, the target runs on) keeps the inspector open until it is detached or
+  closed; that detach answers `No active debug session to detach from` and still closes it.
+  The server's own shutdown closes its sessions, and with them the inspectors they opened; a
+  server that is killed (`SIGKILL`, a crash) closes nothing, and the inspector then stays
+  open until the target exits, as it did before #1261.
+
+  The close takes 3 to 15 ms (46 closes measured on Windows 11 with Node 24.14.1) on top of the
+  detach: it waits up to 2 s for the inspector to end (measured: 1 to 10 ms) and up to 1 s
+  for the port to refuse (measured: under 1 ms after that), and answers `not confirmed
+  closed` when either passes. Evaluating `process._debugEnd()` yourself also closes it, but
+  that call is answered `Unable to evaluate` and the session then reports the program as
+  ended ([#1262](https://github.com/debugmcp/mcp-debugger/issues/1262)); a detach afterwards
+  answers `closed: 127.0.0.1:9229 had already stopped listening when this session ended
+  (not closed by this server); …`.
 - **By inspector URL** (issue #896) — `attach_to_process { adapterConfig: { websocketAddress:
   "ws://127.0.0.1:9229/<uuid>" } }`, the `webSocketDebuggerUrl` that `http://host:port/json/list`
   reports. js-debug dials it directly; no `port` is needed, and a `host`/`port` beside it is
@@ -516,19 +551,24 @@ and, in the Docker image, a host PID — the container only reaches its own PID 
 
 Two side effects to expect in the target's own logs: the ownership check opens one short
 inspector session, so the target prints `Debugger attached.` / `Debugger ending on …` once
-before js-debug connects; and an inspector that was opened for an attach that then failed stays
-open on its port (Node never closes it by itself) — a later attach by PID or by port reuses it,
-and it stays exposed in the way described above.
+before js-debug connects; and the close at the session's end opens one more, so the target
+prints `Debugger attached.` once more (with no `Debugger ending` line: the inspector stops
+inside that session). An inspector opened for an attach that then failed is closed again in
+the same way, and the failure answer's `inspector` says so.
 
 ## Known Limitations
 
 - Browser/Chrome debugging not yet supported (Node.js via `pwa-node` only)
-- Attach by PID leaves the target's inspector open after detach and close, unauthenticated
-  ([#1261](https://github.com/debugmcp/mcp-debugger/issues/1261)); see
+- Attach by PID opens the target's inspector, unauthenticated, for as long as the session
+  lasts. It is closed when the session that opened it detaches or closes
+  ([#1261](https://github.com/debugmcp/mcp-debugger/issues/1261)), but not when the server is
+  killed before its sessions end, and the close drops any client from outside this server
+  attached to it; see
   [Attaching to a running Node.js process](#attaching-to-a-running-nodejs-process)
 - Attach by PID activates the inspector on Node's default port unless the target set
   `--inspect-port`; two PID attaches to two different plain `node` processes on one host
-  therefore need the second target started with `--inspect-port=<n>` and `port: <n>` passed
+  at the same time therefore need the second target started with `--inspect-port=<n>` and
+  `port: <n>` passed (once the first session ends, its inspector is closed and 9229 is free)
 - Attach pauses the target unless you pass `stopOnEntry: false`. V8 lands a pause
   on the next JavaScript that runs, and an idle server runs none, so the server
   first schedules one no-op timer in the target (`setTimeout`, 150 ms, unref'd) and

@@ -49,9 +49,11 @@ import { JS_LAUNCH_CONSUMED_KEYS, JS_SUPPORTED_LAUNCH_KEYS, normalizeJsLaunchInp
 import { resolveLaunchEnvironment } from './utils/launch-environment.js';
 import {
   activateInspector,
+  DEFAULT_INSPECTOR_PORT,
   type InspectorActivationOptions,
   type InspectorActivationResult
 } from './utils/inspector-activation.js';
+import { inspectorLoans, type InspectorLoan, type InspectorLoans } from './utils/inspector-loans.js';
 
 /**
  * Base path js-debug uses to resolve source-map `sources` on attach (issue
@@ -252,6 +254,16 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
   protected activateInspector: (options: InspectorActivationOptions) => Promise<InspectorActivationResult> =
     activateInspector;
 
+  /**
+   * Which inspectors this server opened, and which sessions use them (issue
+   * #1261): one record per server process; a field so tests can stand in
+   * their own.
+   */
+  protected inspectorLoans: InspectorLoans = inspectorLoans;
+
+  /** What the last attach transform borrowed from its target, until the session layer drains it. */
+  private attachLoan: InspectorLoan | undefined;
+
   private currentThreadId: number | null = null;
   private connected = false;
 
@@ -303,6 +315,10 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
   }
 
   async dispose(): Promise<void> {
+    // A loan nobody drained (issue #1261) still counts as a holder of its
+    // inspector; give it back so the inspector is not held open for good.
+    this.releaseUndrainedLoan();
+
     // Clear runtime state
     const wasConnected = this.connected;
     this.connected = false;
@@ -966,6 +982,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
    */
   async transformAttachConfig(config: GenericAttachConfig): Promise<LanguageSpecificAttachConfig> {
     this.launchConfigDiagnostics = [];
+    this.releaseUndrainedLoan();
     const {
       request: _request,
       __attachMode: _attachMode,
@@ -986,6 +1003,10 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
 
     const byPid = processId !== undefined && processId !== null && processId !== '';
     if (byPid) {
+      // A close of this port's inspector that another session of this server
+      // has in flight finishes first (issue #1261): probed mid-close, it would
+      // read as open and js-debug would connect to an inspector that is going.
+      await this.inspectorLoans.settled('127.0.0.1', attachPort ?? DEFAULT_INSPECTOR_PORT);
       const activated = await this.activateInspector({
         pid: processId as number | string,
         host: attachHost,
@@ -997,6 +1018,15 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
         `[JavascriptDebugAdapter] ${activated.alreadyActive ? 'Found' : 'Activated'} the inspector of PID ${processId} ` +
           `on ${attachHost}:${attachPort} (${activated.title})`
       );
+      // What the attach borrowed (issue #1261): an inspector its signal opened
+      // is closed when the session ends; one it found open is left open.
+      this.attachLoan = this.inspectorLoans.forActivation({
+        pid: Number(String(processId).trim()),
+        host: activated.host,
+        port: activated.port,
+        alreadyActive: activated.alreadyActive,
+        targetId: activated.targetId
+      });
     } else if (!(attachPort !== undefined && attachPort > 0) && !(typeof rest.websocketAddress === 'string' && rest.websocketAddress.length > 0)) {
       throw new AdapterError(
         'JavaScript attach needs port (the --inspect port of the target) or a local processId ' +
@@ -1004,6 +1034,25 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
           'js-debug would dial localhost:9229 and exit',
         AdapterErrorCode.ENVIRONMENT_INVALID
       );
+    } else {
+      // By port or by inspector URL: a share of an inspector this server
+      // opened for another session when that is what the address reaches, so
+      // that session's end does not cut this one off (issue #1261); otherwise
+      // nothing this server will touch.
+      const address = {
+        host: attachHost,
+        port: attachPort,
+        websocketAddress: typeof rest.websocketAddress === 'string' ? rest.websocketAddress : undefined
+      };
+      try {
+        this.attachLoan = await this.inspectorLoans.forAddress(address);
+      } catch (error) {
+        this.dependencies.logger.warn(
+          `[JavascriptDebugAdapter] Could not tell whose inspector the attach address reaches: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
     }
 
     if (Object.hasOwn(rest, 'attachExistingChildren')) {
@@ -1071,6 +1120,31 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       // launch does when no program dir is known. An explicit caller value wins.
       ...('cwd' in rest ? {} : { cwd: defaultAttachCwd() }),
     } as LanguageSpecificAttachConfig;
+  }
+
+  /**
+   * Hand the session layer what the last attach transform borrowed (issue
+   * #1261): the inspector, opened by this attach or found open. Drained
+   * once; `holder` is the session, named to the others that share it.
+   */
+  consumeAttachLoan(holder: string): InspectorLoan | undefined {
+    const loan = this.attachLoan;
+    this.attachLoan = undefined;
+    if (loan) {
+      loan.holder = holder;
+    }
+    return loan;
+  }
+
+  /** Give back a loan the session layer never drained, so its inspector is not held for good. */
+  private releaseUndrainedLoan(): void {
+    const loan = this.attachLoan;
+    this.attachLoan = undefined;
+    if (loan) {
+      void loan.giveBack().then((outcome) =>
+        this.dependencies.logger?.info?.(`[JavascriptDebugAdapter] Gave back an undrained attach loan: inspector ${outcome}`)
+      );
+    }
   }
 
   // ===== DAP Protocol Operations =====

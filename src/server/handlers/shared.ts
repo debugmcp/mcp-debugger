@@ -21,7 +21,7 @@ import type { ToolContext } from '../tool-context.js';
 import type { ToolArguments } from '../tool-arguments.js';
 import { validateBreakOnExceptions } from '../tool-validation.js';
 import { debuggerOffWhy } from '../../session/debugger-off.js';
-import type { DebugResult, DebugResultData, LaunchResultData, StopAnswerFields, TreeAnswerFields } from '../../session/session-manager-core.js';
+import type { AttachLoanReport, DebugResult, DebugResultData, LaunchResultData, StopAnswerFields, TreeAnswerFields } from '../../session/session-manager-core.js';
 import type { AttachRequest } from '../../session/attach/attach-controller.js';
 import { runFactsOf, type RunFacts } from '../../session/run-facts.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
@@ -237,6 +237,33 @@ export function hoistTreeFields(response: Record<string, unknown>, data: TreeAns
   }
   if (typeof data.childrenReleased === 'number') {
     response.childrenReleased = data.childrenReleased;
+  }
+}
+
+/** A field name an adapter may give its attach loan: a lowerCamelCase word. */
+const ATTACH_LOAN_FIELD = /^[a-z][A-Za-z0-9]*$/;
+
+/**
+ * Hoist what an attach borrowed from its target (issue #1261) to one
+ * top-level field named for it — `inspector` for JavaScript — the same on
+ * the attach, detach and close answers, and strip the carrier from an
+ * embedded `data` so the text ships once. A name that is not a plain word, or
+ * that another field of the answer already uses, falls back to `attachLoan`.
+ */
+export function hoistAttachLoan(response: Record<string, unknown>, loan: AttachLoanReport | undefined): void {
+  if (!loan) {
+    return;
+  }
+  const field = ATTACH_LOAN_FIELD.test(loan.field) && !(loan.field in response) ? loan.field : 'attachLoan';
+  response[field] = loan.text;
+  const embedded = response.data;
+  if (embedded && typeof embedded === 'object' && 'loan' in embedded) {
+    const { loan: _omitted, ...rest } = embedded as Record<string, unknown>;
+    if (Object.keys(rest).length > 0) {
+      response.data = rest;
+    } else {
+      delete response.data;
+    }
   }
 }
 

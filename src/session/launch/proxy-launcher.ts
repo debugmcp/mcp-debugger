@@ -21,6 +21,7 @@
 import path from 'path';
 import {
   AdapterConfig,
+  type AttachLoan,
   type ExceptionBreakMode,
   type IDebugAdapter,
   type GenericLaunchConfig,
@@ -107,6 +108,12 @@ export interface LaunchPreparationRecord {
   toolchainValidation?: ToolchainValidationState;
   /** The artefact the launch runs (issue #950); launch mode, success only. */
   transformedLaunch?: TransformedLaunch;
+  /**
+   * What the attach transform borrowed from the target (issue #1261); attach
+   * mode, success and failure alike: an attach that opened something before
+   * it failed must still give it back.
+   */
+  attachLoan?: AttachLoan;
 }
 
 /**
@@ -146,6 +153,10 @@ export class ProxyLauncher {
     session: ManagedSession,
     request: ProxyLaunchRequest
   ): Promise<LanguageSpecificLaunchConfig> {
+    // What an earlier run's attach borrowed goes back before this attempt
+    // records its own (issue #1261). The callers' teardown of the previous
+    // proxy has already given it back; this only catches a caller that did not.
+    await this.ctx.giveBackAttachLoan(session);
     // A verdict belongs to exactly one proxy-launch attempt. Clear the stored
     // projection before any fallible setup so an adapter-acquire, filesystem,
     // or transform failure cannot inherit an earlier MSVC classification.
@@ -443,6 +454,12 @@ export class ProxyLauncher {
    * verdict attached to the thrown sentinel.
    */
   private commitPreparation(session: ManagedSession, record: LaunchPreparationRecord): void {
+    // First, before the store write below can throw: a session closed while
+    // the adapter was being prepared still holds what its attach borrowed, so
+    // the attach's failure path can give it back (issue #1261).
+    if (record.attachLoan) {
+      session.run.attachLoan = record.attachLoan;
+    }
     session.run.launchConfigNotices = record.launchConfigNotices;
     session.run.attachTransformNotices = record.attachTransformNotices;
     if (record.attachKeyDiff) {
@@ -490,6 +507,11 @@ export class ProxyLauncher {
           : notices;
         for (const notice of record.launchConfigNotices) this.ctx.logger.warn(`[SessionManager] ${notice}`);
       } else {
+        // What the transform borrowed from the target (issue #1261), drained
+        // first, here or lost with the adapter, which each attempt acquires
+        // afresh and disposes with its lease: a transform that opened
+        // something and then failed must still give it back.
+        record.attachLoan = adapter.consumeAttachLoan?.(session.id);
         // The adapter's own attach notes (issue #908): drained here or lost —
         // each attempt acquires a fresh adapter. On a thrown transform they
         // are recorded and logged only; the attach error is the adapter's own.

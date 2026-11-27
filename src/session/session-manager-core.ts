@@ -9,7 +9,7 @@ import {
   SessionState, SessionLifecycleState, DebugLanguage, DebugSessionInfo, mapLegacyState,
   isTerminalSessionState, AdapterPolicy, SessionOutputEntry, redactSecretsInString
 } from '@debugmcp/shared';
-import type { Breakpoint, DapClientBehavior, FunctionBreakpoint, ProgramEndExplanation, SessionStopInfo, StackFrame, StopTopFrameLine } from '@debugmcp/shared';
+import type { AttachLoan, Breakpoint, DapClientBehavior, FunctionBreakpoint, ProgramEndExplanation, SessionStopInfo, StackFrame, StopTopFrameLine } from '@debugmcp/shared';
 import { USER_BREAK_REASONS } from '@debugmcp/shared';
 import { stopProvesDebuggerOn } from './debugger-off.js';
 import { isRedactionEnabled } from '../utils/redaction-mode.js';
@@ -344,6 +344,18 @@ export type LaunchResultData = DebugResultData & StopAnswerFields & TreeAnswerFi
 };
 
 /**
+ * What became of what an attach borrowed from its target (issue #1261), in
+ * the adapter's words: `field` names the thing (the JavaScript adapter's is
+ * `inspector`), `text` says what was done with it. The tool answers carry it
+ * as one top-level field, `[field]: text`, the same on attach, detach and
+ * close.
+ */
+export interface AttachLoanReport {
+  field: string;
+  text: string;
+}
+
+/**
  * What a detach returns on top of the common fields (the session tree, issue
  * #1081): the children a plain detach released to run undebugged, or a
  * terminating detach closed.
@@ -353,6 +365,8 @@ export type DetachResultData = DebugResultData & Pick<TreeAnswerFields, 'childre
   released?: true;
   /** The adapter reported that the program exited (issue #1148). */
   processEnded?: true;
+  /** What the detach gave back to the target (issue #1261). */
+  loan?: AttachLoanReport;
 };
 
 /**
@@ -381,15 +395,20 @@ export interface CloseSessionOutcome {
    * detach (issue #1148): why. Neither `released` nor `processEnded` is set.
    */
   releaseUnconfirmed?: string;
+  /** What closing an attach root gave back to its target (issue #1261); absent when it held nothing. */
+  loan?: AttachLoanReport;
 }
 
 /**
  * What a successful attach returns on top of the common fields: the same
  * landing an ordinary stop answer carries (issue #982 gave attach parity —
  * location/threadId/note/snapshot; before that only the `note` survived,
- * issue #900).
+ * issue #900) — and what it borrowed from the target (issue #1261): on
+ * success what its end will do with it, on failure what was given back.
  */
-export type AttachResultData = DebugResultData & StopAnswerFields;
+export type AttachResultData = DebugResultData & StopAnswerFields & {
+  loan?: AttachLoanReport;
+};
 
 export interface DebugResult<TData extends DebugResultData = DebugResultData> {
   success: boolean;
@@ -784,7 +803,8 @@ export abstract class SessionManagerCore extends EventEmitter {
     }[outcomeOf(root.id)];
     this.logger.info(
       `Idle debug session ${root.id} closed: ${did}` +
-      (others > 0 ? ` (with ${others} child session${others === 1 ? '' : 's'})` : '')
+      (others > 0 ? ` (with ${others} child session${others === 1 ? '' : 's'})` : '') +
+      (report.loan ? `; ${report.loan.field} ${report.loan.text}` : '')
     );
   }
 
@@ -1163,6 +1183,9 @@ export abstract class SessionManagerCore extends EventEmitter {
       const fate = session.parentSessionId
         ? { released: released === true, processEnded: childEnd === 'terminate' }
         : this.borrowedProgramFate(borrowedRoot);
+      // With the worker gone, the adapter has disconnected: an attach root
+      // gives back what its attach borrowed from the target (issue #1261).
+      const loan = await this.giveBackAttachLoan(session);
       if (closed) {
         closedSessionIds.push(sessionId);
         if (fate.released) {
@@ -1176,7 +1199,8 @@ export abstract class SessionManagerCore extends EventEmitter {
         ...(childrenClosed > 0 ? { childrenClosed } : {}),
         ...(closed && fate.processEnded ? { processEnded: true as const } : {}),
         ...(closed && fate.released ? { released: true as const } : {}),
-        ...(closed && fate.unconfirmed !== undefined ? { releaseUnconfirmed: fate.unconfirmed } : {})
+        ...(closed && fate.unconfirmed !== undefined ? { releaseUnconfirmed: fate.unconfirmed } : {}),
+        ...(loan ? { loan } : {})
       };
     } finally {
       finishClose();
@@ -1440,7 +1464,48 @@ export abstract class SessionManagerCore extends EventEmitter {
       await session.pendingProxyStop;
       session.pendingProxyStop = undefined;
     }
+    // The previous run is over: what its attach borrowed goes back before a
+    // new launch or attach writes the next run (issue #1261).
+    await this.giveBackAttachLoan(session);
     return childrenClosed;
+  }
+
+  /**
+   * Give back what the run's attach borrowed from its target (issue #1261):
+   * the adapter closes what the attach opened there and leaves what it found
+   * open, and says which. Call it once the adapter has disconnected from the
+   * target — the worker is stopped — so the give-back cannot cut off the
+   * session's own connection. Only a root gives back: its children share its
+   * run. Resolves to the adapter's report, or undefined when nothing is held;
+   * the loan is taken off the run first, so a second call reports nothing.
+   * `loan` names one already taken off the run (a failed attach reads it
+   * before its teardown); its report is the first give-back's.
+   */
+  async giveBackAttachLoan(session: ManagedSession, loan: AttachLoan | undefined = session.run.attachLoan): Promise<AttachLoanReport | undefined> {
+    if (!loan || session.parentSessionId) {
+      return undefined;
+    }
+    // Taken off the run here, by this call: the one that logs it. A loan
+    // already taken is a give-back in progress or done, and its report is the
+    // first call's.
+    const takenNow = session.run.attachLoan === loan;
+    if (takenNow) {
+      session.run.attachLoan = undefined;
+    }
+    const startedAt = Date.now();
+    let text: string;
+    try {
+      text = await loan.giveBack();
+    } catch (error) {
+      // The contract says it never rejects; an adapter that does still gets a truthful answer.
+      text = `not confirmed: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    if (takenNow) {
+      this.logger.info(
+        `[SessionManager] Session ${session.id} gave back its attach loan in ${Date.now() - startedAt} ms: ${loan.field} ${text}`
+      );
+    }
+    return { field: loan.field, text };
   }
 
   async closeAllSessions(): Promise<void> {

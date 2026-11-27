@@ -16,6 +16,7 @@
  */
 import type {
   AdapterPolicy,
+  AttachLoan,
   DapClientBehavior,
   DebugLanguage,
   IAdapterRegistry,
@@ -27,7 +28,7 @@ import type {
 import type { ManagedSession } from './session-store.js';
 import type { StackTraceResult } from './inspection/frame-anchor-resolver.js';
 import type { LocalVariablesResult } from './session-manager-data.js';
-import type { CloseSessionOutcome, CustomLaunchRequestArguments } from './session-manager-core.js';
+import type { AttachLoanReport, CloseSessionOutcome, CustomLaunchRequestArguments } from './session-manager-core.js';
 import type { VariableAccessMode } from '../utils/variable-access.js';
 import type { IProxyManager } from '../proxy/proxy-manager.js';
 import type { IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
@@ -146,6 +147,12 @@ export interface OperationsContext {
   ): Promise<void>;
   /** The detach cascade (issue #1081): release every descendant, deepest first; resolves with how many. */
   releaseDescendants(session: ManagedSession): Promise<number>;
+  /**
+   * Give back what the run's attach borrowed from its target (issue #1261),
+   * once the adapter has disconnected; the adapter's report, or undefined
+   * when nothing is held. See `SessionManagerCore.giveBackAttachLoan`.
+   */
+  giveBackAttachLoan(session: ManagedSession, loan?: AttachLoan): Promise<AttachLoanReport | undefined>;
   getStackTrace(
     sessionId: string,
     threadId?: number,
@@ -191,6 +198,7 @@ export type ProxyLaunchContext = Pick<
   | 'findFreePort'
   | 'setupProxyEventHandlers'
   | 'redactionEnabled'
+  | 'giveBackAttachLoan'
 >;
 
 /**
@@ -247,6 +255,7 @@ export type AttachContext = Pick<
   | 'closeSessionReporting'
   | 'releaseDescendants'
   | 'beginSubtreeClose'
+  | 'giveBackAttachLoan'
   | 'tunables'
   | 'extractLocalsFromResolved'
   | 'redactionEnabled'

@@ -193,6 +193,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       closeSession: (sessionId) => this.closeSession(sessionId),
       closeSessionReporting: (sessionId, options) => this.closeSessionReporting(sessionId, options),
       releaseDescendants: (session) => this.releaseDescendants(session),
+      giveBackAttachLoan: (session, loan) => this.giveBackAttachLoan(session, loan),
       beginSubtreeClose: (sessionId) => this.beginSubtreeClose(sessionId),
       settleInFlightChildReleases: (sessionId, options) => this.settleInFlightChildReleases(sessionId, options),
       getStackTrace: (sessionId, threadId, includeInternals) =>

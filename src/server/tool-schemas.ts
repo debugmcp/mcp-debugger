@@ -193,7 +193,7 @@ export function buildToolDefinitions(options: BuildToolDefinitionsOptions): Tool
           sessionId: { type: 'string', description: 'Debug session ID' },
           port: { type: 'number', description: 'Debug port to attach to' },
           host: { type: 'string', description: 'Host to attach to; the adapter defaults it, usually 127.0.0.1' },
-          processId: { type: ['number', 'string'], description: 'Process ID (for local attach, language-specific)' },
+          processId: { type: ['number', 'string'], description: 'Process ID (for local attach, language-specific). JavaScript: the Node.js process\'s inspector is opened for you on port (default 9229); it is unauthenticated while it listens, and the session that opened it closes it again when it detaches or closes (one that was already open is left open). The attach, detach and close answers say which in inspector' },
           timeout: { type: 'number', description: 'Connection timeout in milliseconds, forwarded as-is; js-debug honours it (its own default is 10 s) and COBOL uses it as its manifest-build budget, the other adapters ignore it. A value longer than verifyTimeout means the verify deadline is what you hit' },
           verifyTimeout: { type: 'number', description: 'How long to wait (ms) for the debugger to report at least one thread after attaching before failing the attach (default: 20000, max: 600000). Decrease for fast failure-by-design probes; increase for targets that are exceptionally slow to become debuggable' },
           sourcePaths: { type: 'array', items: { type: 'string' }, description: 'Source paths for code mapping' },
@@ -205,7 +205,7 @@ export function buildToolDefinitions(options: BuildToolDefinitionsOptions): Tool
         required: ['sessionId']
       }
     },
-    { name: 'detach_from_process', description: 'Detach from a process the session attached to, leaving it running. A program the session launched ends with its session: a plain detach there is refused (use close_debug_session, or terminateProcess: true)', inputSchema: {
+    { name: 'detach_from_process', description: 'Detach from a process the session attached to, leaving it running, and give back what the attach opened in it (JavaScript: the inspector an attach by processId opened is closed; the answer says so in inspector). A program the session launched ends with its session: a plain detach there is refused (use close_debug_session, or terminateProcess: true)', inputSchema: {
         type: 'object',
         properties: {
           sessionId: { type: 'string', description: 'Debug session ID' },
