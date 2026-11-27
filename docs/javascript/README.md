@@ -481,8 +481,15 @@ Three ways in:
   its inspector on `127.0.0.1:9229`, confirms through the inspector's `/json/list` that the
   port now belongs to that PID, and attaches there. A target started with
   `--inspect-port=<n>` (or `NODE_OPTIONS=--inspect-port=<n>`) opens on that port instead:
-  pass it as `port` alongside `processId`. The inspector **stays open after detach**, so a
-  later attach — by PID or by `port: 9229` — reuses it without a second signal.
+  pass it as `port` alongside `processId`. The inspector **stays open after detach and
+  close, until the process exits** ([#1261](https://github.com/debugmcp/mcp-debugger/issues/1261)).
+  A later attach — by PID or by `port: 9229` — reuses it without a second signal, and so can
+  anything else on the host: the inspector has no authentication, so any local process can
+  connect to it and run code in the target, and while it holds 9229 an attach by PID to a
+  different Node process is refused. The one way to close it today is to evaluate
+  `process._debugEnd()` in the target while it is paused: the inspector closes and the
+  process runs on, but the call is answered `Unable to evaluate` and the session then
+  reports the program as ended ([#1262](https://github.com/debugmcp/mcp-debugger/issues/1262)).
 - **By inspector URL** (issue #896) — `attach_to_process { adapterConfig: { websocketAddress:
   "ws://127.0.0.1:9229/<uuid>" } }`, the `webSocketDebuggerUrl` that `http://host:port/json/list`
   reports. js-debug dials it directly; no `port` is needed, and a `host`/`port` beside it is
@@ -508,11 +515,15 @@ and, in the Docker image, a host PID — the container only reaches its own PID 
 Two side effects to expect in the target's own logs: the ownership check opens one short
 inspector session, so the target prints `Debugger attached.` / `Debugger ending on …` once
 before js-debug connects; and an inspector that was opened for an attach that then failed stays
-open on its port (Node never closes it by itself) — a later attach by PID or by port reuses it.
+open on its port (Node never closes it by itself) — a later attach by PID or by port reuses it,
+and until the process exits it is exposed in the way described above.
 
 ## Known Limitations
 
 - Browser/Chrome debugging not yet supported (Node.js via `pwa-node` only)
+- Attach by PID leaves the target's inspector open after detach and close, unauthenticated,
+  until the process exits ([#1261](https://github.com/debugmcp/mcp-debugger/issues/1261)); see
+  [Attaching to a running Node.js process](#attaching-to-a-running-nodejs-process)
 - Attach by PID activates the inspector on Node's default port unless the target set
   `--inspect-port`; two PID attaches to two different plain `node` processes on one host
   therefore need the second target started with `--inspect-port=<n>` and `port: <n>` passed

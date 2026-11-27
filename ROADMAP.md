@@ -1,6 +1,6 @@
 # Roadmap
 
-_Last updated: 2026-10-30 (v0.26.0). This file is refreshed at each release._
+_Last updated: 2026-11-27 (v0.27.0). This file is refreshed at each release._
 
 mcp-debugger gives AI agents step-through debugging over the Model Context Protocol: 29 tools across ten language adapters (Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET, C/C++, COBOL, Dart/Flutter), plus a mock adapter for testing. This roadmap answers two questions we hear from people evaluating the project: **is the tool surface stable enough to build on?** and **what's left before 1.0?**
 
@@ -10,7 +10,7 @@ mcp-debugger gives AI agents step-through debugging over the Model Context Proto
 
 - **Tool-schema freeze.** The 29-tool surface and its response shapes are declared stable under SemVer: breaking changes to tool names, parameters, or response shapes require a major version. The prerequisite — full parameter/response documentation in the [tool reference](docs/tool-reference.md) for every tool, including the four that were long summarized without schemas (`list_supported_languages`, `attach_to_process`, `detach_from_process`, `list_threads`) — is met as of v0.26.0; the freeze itself is not yet declared.
 - **Per-platform CodeLLDB packages published and verified.** ✅ Met in v0.25.0: the five `@debugmcp/codelldb-*` platform packages (which let npm installs pull only the native debug engine for the current platform) are live on npm with provenance, and the release-gate canary verified them across install channels (npx, global npm with and without optional dependencies, Docker) on x64/arm64 Linux, arm64 macOS and Windows.
-- **A full release cycle with no breaking behavioral changes.** One complete minor release soaks with no regressions that change documented tool behavior. v0.26.0 is not that cycle: it changed documented behavior deliberately (one launch contract for every language, `hot_reload` replacing `redefine_classes`, attach requests refused for keys the adapter never used, the pi manifest replaced by a pi extension), so the clock starts with the first minor release after it.
+- **A full release cycle with no breaking behavioral changes.** One complete minor release soaks with no regressions that change documented tool behavior. v0.26.0 was not that cycle: it changed documented behavior deliberately (one launch contract for every language, `hot_reload` replacing `redefine_classes`, attach requests refused for keys the adapter never used, the pi manifest replaced by a pi extension). Neither is v0.27.0: Python and JavaScript launches now debug the program's child processes by default, every MCP client of an `http` server now sees the same debug sessions, and the deprecated `sse` command is removed. The clock starts with the first minor release that changes no documented behavior.
 - **Supply-chain milestones.** OpenSSF Best Practices Silver, and build-provenance attestations covering every distributed artifact — npm tarballs, the Docker image and the PyPI launcher are all attested as of v0.25.0 ([#422](https://github.com/debugmcp/mcp-debugger/issues/422)); OpenSSF Silver remains.
 
 ## Near-term themes
