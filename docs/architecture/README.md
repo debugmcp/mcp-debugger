@@ -271,6 +271,7 @@ async endSession(exitCode: number) {
 
 ## Version History
 
+- **v0.27.0** - Python/JavaScript launches adopt child processes as child sessions in the parent's proxy worker, with tree-aware `wait_for_stop`; one debugger core per process, `stdio`/`http` supporting MCP 2026-07-28 alongside 2025-11-25; server-side stepping through skipped JavaScript code (js-debug's stepper disabled); CodeLLDB 1.12.3 and js-debug v1.140.0
 - **v0.26.0** - Dart/Flutter adapter (the SDK's own debug adapters behind a TCP-to-stdio bridge), 11 adapters total; `wait_for_stop`, stop snapshots on every stop answer, the pytest preset, `hot_reload`
 - **v0.25.0** - COBOL adapter (GnuCOBOL + CodeLLDB behind a DAP shim), 10 adapters total; CodeLLDB ships as per-platform npm packages
 - **v0.24.0** - C/C++ adapter, 9 adapters total; shared `@debugmcp/codelldb-common` CodeLLDB vendoring for Rust and C/C++
