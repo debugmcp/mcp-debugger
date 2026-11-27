@@ -29,6 +29,18 @@
 - `pnpm test:coverage` produces Istanbul reports and triggers `analyze-coverage.js`; the thresholds in `vitest.config.ts` are enforced (statements 90, branches 80), so keep new code at or above them.
 - Use `pnpm test:no-python` or `pnpm test:no-docker` only when the toolchain is genuinely absent — they set `SKIP_PYTHON_TESTS`/`SKIP_DOCKER_TESTS` and quietly stop exercising the very thing you may have changed.
 
+## Picking Up an Issue
+Several contributors and agents may work the backlog at the same time. The `in-progress` label is how they stay out of each other's way: claim an issue before you start on it, and release it if you stop.
+
+- **Choose** an open issue with no `in-progress` label, no `blocked` label, and no open pull request that already references it. `gh issue list --state open --search "-label:in-progress -label:blocked"` lists the candidates; `gh pr list --state open` shows what is already under review.
+- **Claim it first.** Add the label before you investigate or write anything: `gh issue edit <number> --add-label in-progress`. If you take several related issues as one piece of work, label every one of them. (If you cannot edit labels, say so in a comment on the issue instead.)
+- **Stay out of claimed areas.** Read the issues that already carry `in-progress` and pick work that does not touch the same code. Issues that share a `cluster:*` label belong together: when one of them is in progress, treat the whole cluster as taken.
+- **Start from the latest `main`.** `git fetch origin main`, then `git switch -c fix/<number>-<slug> --no-track origin/main` (without `--no-track` the new branch tracks `main`, which confuses `git push` and `gh pr create`). Run `pnpm install` and `pnpm build` afterwards: dependencies and build output belong to the checkout, not to the branch, and a stale build tests yesterday's code.
+- **Test your own build.** The dev proxy serves the checkout named by `DEV_PROXY_ROOT` (see `tools/dev-proxy/README.md`). When you work in a second checkout or a git worktree, call `dev_server_status` and confirm that `projectRoot` is the checkout you are editing before you trust a live test.
+- **One pull request per claim.** Put `Closes #<number>` in its description for every issue the claim covers.
+- **Release what you drop.** If you stop without opening a pull request, remove the label (`gh issue edit <number> --remove-label in-progress`) and leave a comment saying what you found and why you stopped.
+- **`blocked`** marks an issue that waits on a maintainer decision or an upstream fix. Do not pick it up. If an issue you claimed turns out to need such a decision, ask in a comment and release it instead of deciding it yourself.
+
 ## Commit & Pull Request Guidelines
 - Follow the existing history: short present-tense subject lines (`feat(scope): ...`, `chore: ...`) with details in the body when needed.
 - Run `scripts/safe-commit.sh` (or the `pnpm commit:safe` alias) before pushing — this runs a mandatory personal information check and then commits (use `--skip-tests` to pass `git commit --no-verify`, which bypasses the whole pre-commit hook — the personal-paths check, the staged build-artifact and `.tgz` guards, and docstar — while the script still runs its own personal info check). Note that `--no-verify` on a *commit* skips none of the [Dev-Loop Gate](CONTRIBUTING.md#dev-loop-gate); that runs on push.
