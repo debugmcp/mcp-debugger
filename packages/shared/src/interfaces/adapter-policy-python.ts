@@ -71,6 +71,12 @@ const PYDEVD_CURRENT_FRAME_MARK = ' (Current frame)';
 
 export const PythonAdapterPolicy = {
   name: 'python',
+  // Python prints `Traceback (most recent call last):` and debugpy/runpy launcher
+  // frames first and the user's innermost frame + `<Exception>: <message>` last
+  // (issue #1277), so the plain last 8 lines carry both the user frame and the cause.
+  programOutput: {
+    causeLast: true,
+  },
   // A frame's name is the function's name (issue #1143). pydevd's marker
   // comes off, and what it said becomes data: the frames above the marked
   // one have been left by the exception (`unwound: true`), so the first

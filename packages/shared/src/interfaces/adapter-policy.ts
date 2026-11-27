@@ -350,6 +350,49 @@ export function generatedFileCandidatesFrom(
   return candidates;
 }
 
+/**
+ * What an adapter knows about telling the debuggee's own output from debugger
+ * housekeeping and where its runtime prints a crash's cause (issue #1277).
+ *
+ * Defaults when absent (or when an individual member is omitted):
+ * - `stdout` and `stderr` entries are the program's own;
+ * - `console` entries are the adapter's own (housekeeping, logpoints, notices);
+ * - the runtime states its failure cause at the head of a long `stderr` trace.
+ */
+export interface ProgramOutputContract {
+  /**
+   * True when a trimmed non-empty `stdout` or `stderr` line is the debugger's
+   * or runtime inspector's own banner rather than a line the program printed
+   * (Node's V8 inspector banners and js-debug's breakpoint syntax error on
+   * `stderr`; a launched JVM's JDWP `Listening for transport dt_socket ...`
+   * banner on `stdout`). Anchored at both ends so a program line that merely
+   * begins or ends with the banner text stays; an exact match cannot be told
+   * apart.
+   */
+  isAdapterLine?(category: 'stdout' | 'stderr', line: string): boolean;
+  /**
+   * True when a trimmed non-empty `console` line is the program's own output
+   * delivered on DAP `console` by the adapter (Dart's `dart:developer` `log()`
+   * `[<name>] ...` lines and `dart test` / `flutter test` per-test result lines
+   * `✓ ...`, `✖ ...`, `! ...`). `[mcp-debugger]` server notices never match.
+   */
+  isProgramConsoleLine?(line: string): boolean;
+  /**
+   * True when the runtime prints the exception type and message at the end of
+   * its traceback rather than the start (Python), so the plain last 8 program
+   * lines already hold the cause and the user's innermost frame.
+   */
+  causeLast?: boolean;
+  /**
+   * True when a trimmed non-empty program line (`stdout` or `stderr`) is the
+   * runtime's own fatal-error header (GnuCOBOL `libcob: ... error: ...`, C++
+   * `terminate called ...`). Used when the native engine merges the debuggee's
+   * `stderr` into `stdout` on a pseudo-terminal (CodeLLDB on Linux/macOS) so
+   * the `stderr`-block rule cannot see a separate `stderr` stream.
+   */
+  isFatalErrorLine?(line: string): boolean;
+}
+
 /** Arguments of a `hot_reload` call, as the policy turns them into its adapter's request (issue #876). */
 export interface HotReloadArgs {
   /** Java: the directory of the recompiled `.class` files the JDI bridge scans. */
@@ -794,17 +837,13 @@ export interface AdapterPolicy {
   shouldSuppressOutputEvent?(category: string, text: string): boolean;
 
   /**
-   * Return true when a trimmed non-empty `stdout` or `stderr` line is the
-   * debugger's or runtime inspector's own banner rather than output the
-   * program printed (issue #1277): Node's inspector writes `Debugger attached.`
-   * and `Waiting for the debugger to disconnect...` to the target's stderr,
-   * and the JVM's `-agentlib:jdwp` prints `Listening for transport dt_socket
-   * at address: <port>` on stdout. Kept in `get_output`, left out of a
-   * non-zero exit's `outputTail` so housekeeping neither crowds out the cause
-   * nor makes an otherwise silent exit read as `stderr` output. Optional —
-   * absent means every `stdout`/`stderr` line is taken as the program's own.
+   * Engine facts for building `outputTail` on a non-zero exit (issue #1277):
+   * stdio banners to drop (`isAdapterLine`), `console` lines that are the
+   * program's own (`isProgramConsoleLine`), end-of-trace causes (`causeLast`),
+   * and runtime fatal-error headers (`isFatalErrorLine`). Kept in `get_output`
+   * as captured; only `outputTail` selection consults this contract.
    */
-  isAdapterOutputLine?(category: 'stdout' | 'stderr', line: string): boolean;
+  programOutput?: ProgramOutputContract;
 
   /**
    * Return an attributed explanation for a DAP 'output' event that signals a

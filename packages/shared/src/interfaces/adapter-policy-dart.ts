@@ -165,8 +165,27 @@ interface DartLiveUpdateState {
   flutterApp?: { started: boolean; launchMode?: string; supportsRestart?: boolean };
 }
 
+/**
+ * Program output the Dart/Flutter SDK debug adapters (`package:dds`) deliver on
+ * DAP `console` rather than `stdout`/`stderr` (measured live, issue #1277):
+ * - `dart:developer` `log()` events arrive as `[<name>] <message>` (`[log] ...`
+ *   when `name` is omitted; `[<name>]` when the message line is empty). Server
+ *   notices (`[mcp-debugger] ...`) also sit on `console` and must stay excluded.
+ * - `dart test` / `flutter test` (`DartTestDebugAdapter`) sends per-test result
+ *   lines `✓ <name>`, `✖ <name>`, and `! <name>` (skipped) on `console`.
+ * Adapter lifecycle lines (`Connecting to VM Service...`, `Connected to the VM
+ * Service.`, `Exited (N).`, `Detached.`, `Application finished.`) and plain
+ * logpoints stay excluded.
+ */
+const DART_DEV_LOG_LINE = /^\[(?!mcp-debugger\])[^\]]+\](?: .+)?$/;
+const DART_TEST_RESULT_LINE = /^(?:\u2713|\u2716|!) .+$/;
+
 export const DartAdapterPolicy = {
   name: 'dart',
+  programOutput: {
+    isProgramConsoleLine: (line: string): boolean =>
+      DART_DEV_LOG_LINE.test(line) || DART_TEST_RESULT_LINE.test(line),
+  },
   supportsLogPoints: true,
   supportsFunctionBreakpoints: false,
   honoursNoDebug: true,

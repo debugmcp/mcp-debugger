@@ -272,15 +272,32 @@ const VITE_SSR_BINDING_PREFIX = '__vite_ssr_';
  * rather than `console` (issue #1277): V8's `inspector_io` attach/wait/listen
  * banners (printed to the target's stderr fd via the bootloader's
  * `NODE_OPTIONS`, so `outputCapture: 'std'` forwards them as `stderr`) and
- * js-debug's own breakpoint-condition syntax error line (#853).
+ * js-debug's own breakpoint-condition syntax error line (#853). Anchored at
+ * both ends so a program line that merely starts or ends with a banner stays.
  */
-const JS_ADAPTER_STDERR_LINE =
-  /^(?:Debugger attached\.|Waiting for the debugger to disconnect\.\.\.|Debugger (?:listening|ending) on ws:\/\/\S+|For help, see: https:\/\/nodejs\.org\/en\/docs\/inspector|Syntax error setting breakpoint with condition .+ on line \d+: )/;
+const JS_INSPECTOR_STDERR_LINE =
+  /^(?:Debugger attached\.|Waiting for the debugger to disconnect\.\.\.|Debugger (?:listening|ending) on ws:\/\/\S+|For help, see: https:\/\/nodejs\.org\/en\/docs\/inspector)$/;
+const JS_BP_SYNTAX_ERROR_PREFIX = 'Syntax error setting breakpoint with condition ';
+const JS_BP_SYNTAX_ERROR_INFIX = ' on line ';
+
+function isJsBreakpointSyntaxErrorLine(line: string): boolean {
+  if (!line.startsWith(JS_BP_SYNTAX_ERROR_PREFIX)) {
+    return false;
+  }
+  const rest = line.slice(JS_BP_SYNTAX_ERROR_PREFIX.length);
+  const marker = rest.lastIndexOf(JS_BP_SYNTAX_ERROR_INFIX);
+  if (marker <= 0) {
+    return false;
+  }
+  return /^\d+: \S[\s\S]*$/.test(rest.slice(marker + JS_BP_SYNTAX_ERROR_INFIX.length));
+}
 
 export const JsDebugAdapterPolicy = {
   name: 'js-debug',
-  isAdapterOutputLine: (category: 'stdout' | 'stderr', line: string): boolean =>
-    category === 'stderr' && JS_ADAPTER_STDERR_LINE.test(line),
+  programOutput: {
+    isAdapterLine: (category: 'stdout' | 'stderr', line: string): boolean =>
+      category === 'stderr' && (JS_INSPECTOR_STDERR_LINE.test(line) || isJsBreakpointSyntaxErrorLine(line)),
+  },
   supportsLogPoints: true,
   // js-debug delivers a logpoint through the debuggee's console.log — lost
   // in a program that replaced console (mcp-debugger's own stdio server) —
