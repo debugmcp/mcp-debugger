@@ -227,9 +227,10 @@ the MCP endpoint, and the containerized server attaches to python, ruby
   the engine (and in Python, JavaScript, and to a lesser degree Dart, slows the
   whole function), so keep logpoints off tight loops — see
   [Logpoints](tool-reference.md#logpoints) for measured costs (the table is
-  launch mode; a check in attach mode found the same whole-function slowdown
-  and a per-hit cost no higher) and for how the slowdown ends when the logpoint
-  is removed.
+  launch mode; a check of JavaScript and Python attached by port found the
+  whole-function slowdown there too, about the same as in launch mode on the
+  same loop, and a per-hit cost about the same for JavaScript and lower for
+  Python) and for how the slowdown ends when the logpoint is removed.
 - An abandoned attach no longer leaves an orphaned tracer (#337): teardown
   kills the adapter's process group, and the sidecar's idle policy — on because
   the recipe sets `MCP_DEBUG_SESSION_IDLE_MS` — closes a crashed client's debug

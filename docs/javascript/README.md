@@ -381,7 +381,7 @@ const child = fork('child.js');
 
 ### Log Points
 
-A `logMessage` turns the breakpoint into a logpoint: execution does not pause — the interpolated message (expressions in `{curly braces}`) arrives in the session output, readable via `get_output` as a `console` entry. Each hit costs about 215 µs (22% of a core at 1,000 hits/s, up to about 4,600 hits/s doing nothing else), and placing a logpoint anywhere in a function slows that whole function by 2.57×, so keep logpoints off tight loops; see [Logpoints](../tool-reference.md#logpoints) for measurement conditions and what was not measured.
+A `logMessage` turns the breakpoint into a logpoint: execution does not pause — the interpolated message (expressions in `{curly braces}`) arrives in the session output, readable via `get_output` as a `console` entry. Each hit costs about 215 µs (22% of a core at 1,000 hits/s, up to about 4,600 hits/s doing nothing else), and placing a logpoint anywhere in a function slows that whole function (by 2.57× on the measured loop, about 8× on a tighter one), so keep logpoints off tight loops; see [Logpoints](../tool-reference.md#logpoints) for measurement conditions and what was not measured.
 
 mcp-debugger compiles JavaScript logpoints itself rather than handing the `logMessage` to js-debug (issues #850, #861, #853): js-debug would print through the debuggee's `console.log`, which a program that owns its stdout may have replaced, and would turn a logpoint with a `condition` into a pausing breakpoint. The compiled form delivers the rendered message over js-debug's CDP proxy — strings raw, other values through `util.inspect`, a throwing expression as `<ReferenceError: …>` — logs only when the `condition` holds, and never pauses. While the delivery binding is not in the process (the first milliseconds of a forked process, or a process whose CDP socket could not be opened) the message is kept in the process and delivered when the binding arrives; it is never printed through the program's `console.log` (issue #1212). A `logMessage` whose `{expression}` does not compile is refused by `set_breakpoint` with V8's syntax error; a `condition` js-debug rejects shows js-debug's message on the breakpoint in `list_breakpoints`. A logpoint set before launch makes js-debug stop on entry so the delivery binding is in place before the first hit; that stop is auto-continued and never reported.
 
@@ -482,14 +482,16 @@ Three ways in:
   port now belongs to that PID, and attaches there. A target started with
   `--inspect-port=<n>` (or `NODE_OPTIONS=--inspect-port=<n>`) opens on that port instead:
   pass it as `port` alongside `processId`. The inspector **stays open after detach and
-  close, until the process exits** ([#1261](https://github.com/debugmcp/mcp-debugger/issues/1261)).
+  close**, until something inside the process closes it or the process exits
+  ([#1261](https://github.com/debugmcp/mcp-debugger/issues/1261)).
   A later attach — by PID or by `port: 9229` — reuses it without a second signal, and so can
   anything else on the host: the inspector has no authentication, so any local process can
   connect to it and run code in the target, and while it holds 9229 an attach by PID to a
-  different Node process is refused. The one way to close it today is to evaluate
+  different Node process is refused. One tested way to close it is to evaluate
   `process._debugEnd()` in the target while it is paused: the inspector closes and the
   process runs on, but the call is answered `Unable to evaluate` and the session then
   reports the program as ended ([#1262](https://github.com/debugmcp/mcp-debugger/issues/1262)).
+  Restarting the target closes it too.
 - **By inspector URL** (issue #896) — `attach_to_process { adapterConfig: { websocketAddress:
   "ws://127.0.0.1:9229/<uuid>" } }`, the `webSocketDebuggerUrl` that `http://host:port/json/list`
   reports. js-debug dials it directly; no `port` is needed, and a `host`/`port` beside it is
@@ -516,13 +518,13 @@ Two side effects to expect in the target's own logs: the ownership check opens o
 inspector session, so the target prints `Debugger attached.` / `Debugger ending on …` once
 before js-debug connects; and an inspector that was opened for an attach that then failed stays
 open on its port (Node never closes it by itself) — a later attach by PID or by port reuses it,
-and until the process exits it is exposed in the way described above.
+and it stays exposed in the way described above.
 
 ## Known Limitations
 
 - Browser/Chrome debugging not yet supported (Node.js via `pwa-node` only)
-- Attach by PID leaves the target's inspector open after detach and close, unauthenticated,
-  until the process exits ([#1261](https://github.com/debugmcp/mcp-debugger/issues/1261)); see
+- Attach by PID leaves the target's inspector open after detach and close, unauthenticated
+  ([#1261](https://github.com/debugmcp/mcp-debugger/issues/1261)); see
   [Attaching to a running Node.js process](#attaching-to-a-running-nodejs-process)
 - Attach by PID activates the inspector on Node's default port unless the target set
   `--inspect-port`; two PID attaches to two different plain `node` processes on one host
