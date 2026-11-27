@@ -35,7 +35,7 @@ describe('pending attach breakpoint clause (#1288)', () => {
 
 describe('attach verification scope warning', () => {
   it('describes the attached process scope from any recorded opt-out', () => {
-    expect(buildAttachBreakpointScopeWarning({ attached: true, childDebuggingOptedOut: 'adapter-default' })).toContain('verified says the breakpoint is bound in the attached process');
+    expect(buildAttachBreakpointScopeWarning({ attached: true, childDebuggingOptedOut: 'adapter-default' })).toContain('Verified says the breakpoint is bound in the attached process');
   });
   it.each([undefined, { attached: false, childDebuggingOptedOut: 'adapter-default' as const }, { attached: true }])('omits it for %j', run => {
     expect(buildAttachBreakpointScopeWarning(run)).toBeUndefined();

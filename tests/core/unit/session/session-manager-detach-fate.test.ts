@@ -18,6 +18,7 @@ import { DebugLanguage, SessionState, JsDebugAdapterPolicy, MockAdapterPolicy } 
 import { createMockDependencies } from './session-manager-test-utils.js';
 import { ErrorMessages } from '../../../../src/utils/error-messages.js';
 import { FakeDebugAdapter } from '../../../test-utils/fakes/fake-debug-adapter.js';
+import { attachLocalityOf } from '../../../../src/session/attach/attach-addressing.js';
 import { launchConfigIsAttach } from '../../../../src/proxy/proxy-config.js';
 
 describe('SessionManager - the fate of a borrowed program (issue #1148)', () => {
@@ -112,6 +113,18 @@ describe('SessionManager - the fate of a borrowed program (issue #1148)', () => 
       session.run.childDebuggingOptedOut = off ? 'adapter-default' : undefined;
       const detached = await sessionManager.detachFromProcess(sessionId);
       expect(detached.data?.note).toBe(expected ? JsDebugAdapterPolicy.childAdoption?.attachLeavesTargetChanged : undefined);
+    });
+
+    it('omits the persistence note when adapterConfig.host selects a remote target (#1288)', async () => {
+      const sessionId = await borrowedSession();
+      const session = sessionManager.getSession(sessionId)!;
+      session.language = DebugLanguage.JAVASCRIPT;
+      session.run.attachLocality = attachLocalityOf({ port: 9229,
+        adapterConfig: { host: 'remote.example', autoAttachChildProcesses: true } });
+      expect(session.run.attachLocality).toBe('remote');
+      const detached = await sessionManager.detachFromProcess(sessionId);
+      expect(detached.success).toBe(true);
+      expect(detached.data?.note).toBeUndefined();
     });
 
     it.each([false, true])('omits the persistence note when the target ends (terminate=%s)', async terminate => {

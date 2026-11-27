@@ -346,10 +346,6 @@ Support is adapter-dependent:
 
 ### list_breakpoints
 
-On an attach with child debugging off, the session-level `warning` adds:
-
-> verified says the breakpoint is bound in the attached process, not that a process the target starts will stop on it; see adapterConfig.autoAttachChildProcesses in the attach_to_process description.
-
 Lists all breakpoints in a session with their current verified state and adapter-assigned ids. Works before launch (queued breakpoints, `verified: false`), while running or paused, and after the program exits.
 
 **Parameters:**
@@ -385,6 +381,12 @@ Lists all breakpoints in a session with their current verified state and adapter
 ```
 
 **Notes:**
+
+When at least one breakpoint is listed and the attach is still running or paused
+with child debugging off, the session-level `warning` adds:
+
+> Verified says the breakpoint is bound in the attached process, not that a process the target starts will stop on it; see adapterConfig.autoAttachChildProcesses in the attach_to_process description.
+
 - The array is sorted by file, then line. Conditional breakpoints include their `condition`; Java suspend policies appear as `suspendPolicy`.
 - `functionBreakpoints`/`functionCount` are always present in the unfiltered response (empty arrays when none exist). When filtering by `file` they are omitted — function breakpoints are session-global, not file-scoped.
 - `adapterId` is the debug adapter's own numeric id for the breakpoint, captured from setBreakpoints responses and breakpoint events. It is absent until the adapter has seen the breakpoint.
@@ -931,12 +933,6 @@ Continues execution until the next breakpoint or program end.
 
 ### wait_for_stop
 
-For a JavaScript attach with child debugging off, a pending `wait_for_stop` while
-`running`, with a pausing breakpoint armed and no breakpoint-family stop recorded
-in this run, appends this clause to `message` (#1288):
-
-> If a breakpoint's code runs only in a process the target starts (a fork or a worker process), this attach does not debug that process: see adapterConfig.autoAttachChildProcesses in the attach_to_process description for what turning that on costs.
-
 Blocks until the session next pauses or ends, then says why and where. This is the explicit wait behind every `pending: true` answer and behind `continue_execution`, which returns as soon as the adapter acknowledges the resume — call it instead of polling `list_debug_sessions`.
 
 **Parameters:**
@@ -1002,6 +998,13 @@ see on a child (a breakpoint, an exception, a step), not of breakpoint hits alon
 ```
 
 **Notes:**
+
+For a JavaScript attach with child debugging off, a pending `wait_for_stop` while
+`running`, with a pausing breakpoint armed and no breakpoint-family stop recorded
+in this run, appends this clause to `message` (#1288):
+
+> If a breakpoint's code runs only in a process the target starts (a fork or a worker process), this attach does not debug that process: see adapterConfig.autoAttachChildProcesses in the attach_to_process description for what turning that on costs.
+
 - The wait is on the session's state, not on the adapter's raw `stopped` event, so a stop the server resumes by itself — the entry stop of a `stopOnEntry: false` launch — is never reported. The answer is the first stop `list_debug_sessions` would also show.
 - A session that is already paused answers at once with its current stop, and asking twice without resuming returns the same stop twice. After `continue_execution` (or a step that answered `pending: true`) the session is `running`, so the next call waits for the next stop.
 - `lastStop` is the record `list_debug_sessions` reports: `reason`, `rawReason` when the adapter's own reason was normalized, `threadId`, and `description`/`text` for an exception — emitted as a secret-redacted copy, like variable values (issue #982). `lastStop.exceptionInfo` is filled in a moment after an exception stop — re-query `list_debug_sessions` if it is absent. `location` and `context` are best-effort: they appear when the stack could be read, and `location` is the first visible frame, as for the step tools; `threadId` and `note` appear as for `pause_execution` (a pause collected by the wait is anchored the same way). The [stop snapshot](#the-stop-snapshot) rides on every paused answer; here it carries no `exception` key — `lastStop.description`/`text` already are the exception.
@@ -1115,8 +1118,9 @@ When the pause was reported on a thread with no program frame — on Windows, Co
 }
 ```
 The no-program-frame quotes below are the form shown when no pausing breakpoint
-is set. With a pausing line or function breakpoint already set, the advice ends
-`continue_execution and trigger activity`. Supported logpoints run on and do not
+is set. With a pausing line or function breakpoint already set, the advice says
+`continue_execution and trigger activity` without suggesting another breakpoint;
+the `get_stack_trace` pointer still follows when applicable. Supported logpoints run on and do not
 suppress the breakpoint suggestion.
 
 When no thread has a program frame — an idle Node server's pause lands in Node's timer loop (issues #900, #1146) — `location` is that frame and `note` reads `No program frame is active on thread 0: the only frame is internal/runtime (top: 'process.processTimers' <node_internals>/internal/timers:527). The stop landed outside your code: continue_execution and trigger activity, or set a breakpoint.` With no pausing breakpoint set, when the thread has more frames than the one shown, the sentence ends `…or set a breakpoint; get_stack_trace with includeInternals: true lists the frames.` instead (issue #1141); `get_stack_trace` itself never says that, since it only adds the sentence when it hid nothing.
@@ -1814,12 +1818,6 @@ When the requested pause has not landed by the time the tool answers (a Ruby pro
 
 ### detach_from_process
 
-After a local JavaScript attach (PID or loopback) with child debugging enabled,
-`detach_from_process` adds this `note` unless termination was requested or an exit
-was observed (#1288):
-
-> Child debugging changed the target for the rest of its life: processes it starts later still load a file from this server's install through NODE_OPTIONS after detach; see the attach_to_process description.
-
 Detaches the debugger from a process the session attached to, leaving the process running.
 
 **A session owns a program it launched and borrows one it attached to** (issue #1151). Ending a session ends what it owns, in every adapter, so there is no detach that leaves a launched program running: a plain `detach_from_process` on a launched session is refused before anything is touched, with `success: false`, the session's `state` unchanged, and a `message` that says so and names what to do (`close_debug_session`, or `terminateProcess: true`, to end the program; to debug a program that must keep running afterwards, start it outside the debugger and use `attach_to_process`). It used to answer `Detached from process (process still running)` while the program was gone. Owned or borrowed is what the debug adapter was actually started to do, read from the launch config after the adapter's own transform: a `start_debugging` whose arguments are attach-shaped is a launch all the same on an adapter that has no attach (Rust, Go), and is refused like one. A launch option that starts a program so it can outlive its session is tracked in #1156.
@@ -1851,6 +1849,13 @@ Detaches the debugger from a process the session attached to, leaving the proces
 The 10 s is sized by measurement: every attach-capable adapter acknowledges a detach in 0 to 15 ms, and the worker may first spend up to 2 s resuming a stopped CodeLLDB target.
 
 **Notes:**
+
+After a local JavaScript attach (PID or loopback) with child debugging enabled,
+`detach_from_process` adds this `note` unless termination was requested or an exit
+was observed (#1288):
+
+> Child debugging changed the target for the rest of its life: processes it starts later still load a file from this server's install through NODE_OPTIONS after detach; see the attach_to_process description.
+
 - With `terminateProcess: true` the whole session is closed and the message reads `Detached and terminated process`.
 - Detaching sends DAP `disconnect` with `terminateDebuggee: false`, then stops the proxy; the session ends in `"stopped"` either way, so a later re-attach needs a new session.
 - CodeLLDB sessions on Windows (C/C++ and COBOL attach sessions): while the target is stopped, a DAP `continue` goes out ahead of the detaching `disconnect` — on this path, on `close_debug_session` and on shutdown alike — and `data.resumedBeforeDetach` is `true`; if the debugger refuses the continue, the detach still proceeds with `resumedBeforeDetach: false` and `data.warning` names the risk. Why: CodeLLDB's Windows detach otherwise kills a target whose last resume was a step (issue #763; the mechanism is in the C/C++ guide's attach section).

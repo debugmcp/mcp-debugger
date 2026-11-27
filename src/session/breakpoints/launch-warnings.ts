@@ -32,7 +32,7 @@ export function buildPendingAttachBreakpointClause(
 /** Verification describes binding in this process, not a promise about future children. */
 export function buildAttachBreakpointScopeWarning(run: Pick<RunFacts, 'attached' | 'childDebuggingOptedOut'> | undefined): string | undefined {
   return run?.attached && run.childDebuggingOptedOut !== undefined
-    ? 'verified says the breakpoint is bound in the attached process, not that a process the target starts will stop on it; see adapterConfig.autoAttachChildProcesses in the attach_to_process description.'
+    ? 'Verified says the breakpoint is bound in the attached process, not that a process the target starts will stop on it; see adapterConfig.autoAttachChildProcesses in the attach_to_process description.'
     : undefined;
 }
 

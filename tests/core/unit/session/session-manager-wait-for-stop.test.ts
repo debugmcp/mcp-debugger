@@ -5,8 +5,8 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
-import { DebugLanguage, SessionState } from '@debugmcp/shared';
-import { createMockDependencies } from './session-manager-test-utils.js';
+import { DebugLanguage, SessionState, JsDebugAdapterPolicy } from '@debugmcp/shared';
+import { createMockDependencies, overridePolicy } from './session-manager-test-utils.js';
 import { ErrorMessages } from '../../../../src/utils/error-messages.js';
 import { SessionNotFoundError } from '../../../../src/errors/debug-errors.js';
 import type { DebugResult, WaitForStopResultData } from '../../../../src/session/session-manager-core.js';
@@ -179,6 +179,26 @@ describe('SessionManager - waitForStop (issue #849)', () => {
       expect(wait.result()?.data?.message).not.toContain("If a breakpoint's code");
       expect(spy.mock.calls.at(-1)?.[2]?.attachBreakpointClause).toBeUndefined();
     } finally { spy.mockRestore(); }
+  });
+
+  it('records a breakpoint-family stop from the normalized reason, not raw pause (#1288)', async () => {
+    const sessionId = await runningSession();
+    await sessionManager.setBreakpoint(sessionId, { file: 'test.py', line: 5 });
+    const session = sessionManager.getSession(sessionId)!;
+    session.run.attachMode = true;
+    session.run.childDebuggingOptedOut = 'adapter-default';
+    overridePolicy(sessionManager, { normalizeStopReason: JsDebugAdapterPolicy.normalizeStopReason });
+    dependencies.mockProxyManager.simulateStopped(1, 'pause', {
+      reason: 'pause', threadId: 1, description: 'debugger statement'
+    });
+    await afterStop();
+    expect(session.lastStop).toMatchObject({ reason: 'breakpoint', rawReason: 'pause' });
+    expect(session.run.breakpointStopOccurred).toBe(true);
+    await sessionManager.continue(sessionId);
+    const wait = track(sessionManager.waitForStop(sessionId, 2_000));
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(wait.result()?.data?.pending).toBe(true);
+    expect(wait.result()?.data?.message).not.toContain("If a breakpoint's code");
   });
 
   it.each(['breakpoint', 'function breakpoint', 'data breakpoint', 'instruction breakpoint'])('remembers a %s hit after a step and resume (#1288)', async reason => {
