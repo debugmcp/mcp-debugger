@@ -267,8 +267,20 @@ const JS_PAUSE_WAKE_EXPRESSION =
 /** The names Vite's SSR module transform binds in a module's scope (issue #1215). */
 const VITE_SSR_BINDING_PREFIX = '__vite_ssr_';
 
+/**
+ * Lines Node's inspector and js-debug write to the target's stderr stream
+ * rather than `console` (issue #1277): V8's `inspector_io` attach/wait/listen
+ * banners (printed to the target's stderr fd via the bootloader's
+ * `NODE_OPTIONS`, so `outputCapture: 'std'` forwards them as `stderr`) and
+ * js-debug's own breakpoint-condition syntax error line (#853).
+ */
+const JS_ADAPTER_STDERR_LINE =
+  /^(?:Debugger attached\.|Waiting for the debugger to disconnect\.\.\.|Debugger (?:listening|ending) on ws:\/\/\S+|For help, see: https:\/\/nodejs\.org\/en\/docs\/inspector|Syntax error setting breakpoint with condition .+ on line \d+: )/;
+
 export const JsDebugAdapterPolicy = {
   name: 'js-debug',
+  isAdapterOutputLine: (category: 'stdout' | 'stderr', line: string): boolean =>
+    category === 'stderr' && JS_ADAPTER_STDERR_LINE.test(line),
   supportsLogPoints: true,
   // js-debug delivers a logpoint through the debuggee's console.log — lost
   // in a program that replaced console (mcp-debugger's own stdio server) —

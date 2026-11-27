@@ -7,7 +7,7 @@
  * (their tests called them off the prototype with a bare receiver to prove
  * it); as free functions the purity is the signature rather than a convention.
  */
-import type { AdapterPolicy, ExceptionBreakMode } from '@debugmcp/shared';
+import { getPolicyForLanguage, type AdapterPolicy, type ExceptionBreakMode, type SessionOutputEntry } from '@debugmcp/shared';
 import { normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
 import { OUTPUT_BUFFER_CAP, type OutputRingBuffer } from '../output-buffer.js';
 import type { ManagedSession } from '../session-store.js';
@@ -16,39 +16,134 @@ const DEFAULT_ATTACH_CHILD_DEBUGGING_NOTE = "on an attach, processes the target 
 
 export const OUTPUT_TAIL_LINES = 8;
 export const OUTPUT_TAIL_LINE_CHARS = 300;
+export const OUTPUT_TAIL_STDERR_HEAD_LINES = 4;
+export const OUTPUT_TAIL_STDERR_TAIL_LINES = OUTPUT_TAIL_LINES - OUTPUT_TAIL_STDERR_HEAD_LINES - 1;
+export const OUTPUT_TAIL_GAP_MARKER = '...';
+
+interface CategoryRun {
+  category: string;
+  text: string;
+}
 
 /**
- * The last non-empty lines captured on `buffer`, with the bounds shared by a
- * failed launch's output quote and a non-zero exit's `outputTail` (issues
- * #1036, #1254): split per entry on `\n` so entries without a trailing newline
- * never run into the next one, trimmed, up to 8 lines of 300 characters each.
+ * Join consecutive buffer entries of the same category before splitting on
+ * `\n` (issue #1277): a single line delivered across two stream chunks stays
+ * one line, while entries of different categories (such as Delve's newline-less
+ * `Building <dir>` on `stdout` ahead of `stderr` or `console`, issue #1036)
+ * never run into each other.
+ */
+function joinSameCategoryRuns(
+  entries: readonly Pick<SessionOutputEntry, 'category' | 'output'>[]
+): CategoryRun[] {
+  const runs: CategoryRun[] = [];
+  for (const entry of entries) {
+    const last = runs[runs.length - 1];
+    if (last && last.category === entry.category) {
+      last.text += entry.output;
+    } else {
+      runs.push({ category: entry.category, text: entry.output });
+    }
+  }
+  return runs;
+}
+
+function boundOutputTailLine(line: string): string {
+  return line.length > OUTPUT_TAIL_LINE_CHARS ? `${line.slice(0, OUTPUT_TAIL_LINE_CHARS)}…` : line;
+}
+
+function isAdapterBannerLine(
+  policy: Pick<AdapterPolicy, 'isAdapterOutputLine'> | undefined,
+  category: 'stdout' | 'stderr',
+  line: string
+): boolean {
+  try {
+    return policy?.isAdapterOutputLine?.(category, line) === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The last non-empty lines captured on `buffer` across all categories, for a
+ * failed launch's adapter-output quote (issue #1036): consecutive chunks of
+ * the same category joined, trimmed, up to 8 lines of 300 characters each.
  * Undefined when nothing was captured.
  */
 export function readOutputTailLines(
   buffer: Pick<OutputRingBuffer, 'read'> | undefined
 ): string[] | undefined {
-  const lines = (buffer?.read(0, OUTPUT_BUFFER_CAP).entries ?? [])
-    .flatMap(entry => entry.output.split('\n'))
+  const lines = joinSameCategoryRuns(buffer?.read(0, OUTPUT_BUFFER_CAP).entries ?? [])
+    .flatMap(run => run.text.split('\n'))
     .map(line => line.trim())
     .filter(line => line.length > 0)
     .slice(-OUTPUT_TAIL_LINES)
-    .map(line => (line.length > OUTPUT_TAIL_LINE_CHARS ? `${line.slice(0, OUTPUT_TAIL_LINE_CHARS)}…` : line));
+    .map(boundOutputTailLine);
   return lines.length > 0 ? lines : undefined;
 }
 
 /**
- * The `outputTail` an end answer carries for `session`, or undefined (issues
- * #1254, #1136): present only when the run reported a non-zero exit code and
- * `session`'s own output buffer captured at least one non-empty line. Reads
- * what `get_output` on `session` reads — never walks the session tree.
+ * On a non-zero exit, `outputTail` quotes up to 8 non-empty program lines (300
+ * characters each, excluding `console` output and adapter banners), preferring
+ * `stderr` over `stdout` and, when the last contiguous `stderr` block exceeds
+ * 8 lines, keeping its first 4 and last 3 lines separated by `"..."` (issues
+ * #1254, #1136, #1277). Reads only `session`'s own buffer and never walks the
+ * session tree; undefined when `exitCode` is 0, unreported, or no program
+ * output was captured.
  */
 export function exitOutputTail(
-  session: Pick<ManagedSession, 'exitCode'> & Partial<Pick<ManagedSession, 'outputBuffer'>>
+  session: Pick<ManagedSession, 'exitCode'> & Partial<Pick<ManagedSession, 'outputBuffer' | 'language'>>,
+  policy?: Pick<AdapterPolicy, 'isAdapterOutputLine'>
 ): string[] | undefined {
   if (typeof session.exitCode !== 'number' || session.exitCode === 0) {
     return undefined;
   }
-  return readOutputTailLines(session.outputBuffer);
+  const effectivePolicy = policy ?? (session.language ? getPolicyForLanguage(session.language) : undefined);
+  const runs = joinSameCategoryRuns(session.outputBuffer?.read(0, OUTPUT_BUFFER_CAP).entries ?? []);
+  const stdoutLines: string[] = [];
+  const stderrLines: string[] = [];
+  const stderrBlocks: string[][] = [];
+  let lastProgramStream: 'stdout' | 'stderr' | undefined;
+
+  for (const run of runs) {
+    if (run.category !== 'stdout' && run.category !== 'stderr') {
+      continue;
+    }
+    const category = run.category;
+    const lines = run.text
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0 && !isAdapterBannerLine(effectivePolicy, category, line));
+    if (lines.length === 0) {
+      continue;
+    }
+    if (category === 'stderr') {
+      stderrLines.push(...lines);
+      if (lastProgramStream !== 'stderr') {
+        stderrBlocks.push([...lines]);
+      } else {
+        stderrBlocks[stderrBlocks.length - 1].push(...lines);
+      }
+    } else {
+      stdoutLines.push(...lines);
+    }
+    lastProgramStream = category;
+  }
+
+  let selected: string[];
+  if (stderrLines.length > 0) {
+    const lastBlock = stderrBlocks[stderrBlocks.length - 1];
+    selected =
+      lastBlock.length > OUTPUT_TAIL_LINES
+        ? [
+            ...lastBlock.slice(0, OUTPUT_TAIL_STDERR_HEAD_LINES),
+            OUTPUT_TAIL_GAP_MARKER,
+            ...lastBlock.slice(-OUTPUT_TAIL_STDERR_TAIL_LINES)
+          ]
+        : stderrLines.slice(-OUTPUT_TAIL_LINES);
+  } else {
+    selected = stdoutLines.slice(-OUTPUT_TAIL_LINES);
+  }
+  return selected.length > 0 ? selected.map(boundOutputTailLine) : undefined;
 }
 
 /** Appends a short `get_output` pointer clause when an end answer carries `outputTail` (issue #1254). */
@@ -284,7 +379,7 @@ export function describeProgramEnd(exitCode: number | undefined): string {
  */
 export function buildRunToCompletionSummary(
   session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'exitCode' | 'lastStop' | 'descendantStops' | 'adapterCapabilities' | 'programEndExplanation'> &
-    Partial<Pick<ManagedSession, 'run' | 'outputBuffer'>>
+    Partial<Pick<ManagedSession, 'run' | 'outputBuffer' | 'language'>>
 ): RunToCompletionSummary {
   const base = summarizeProgramEnd(session);
   // What the adapter read into the end (issue #877: the devices a Flutter launch found when
@@ -302,7 +397,7 @@ export function buildRunToCompletionSummary(
 
 function summarizeProgramEnd(
   session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'exitCode' | 'lastStop' | 'descendantStops' | 'adapterCapabilities'> &
-    Partial<Pick<ManagedSession, 'run' | 'outputBuffer'>>
+    Partial<Pick<ManagedSession, 'run' | 'outputBuffer' | 'language'>>
 ): RunToCompletionSummary {
   const exitCode = session.exitCode;
   const ended = describeProgramEnd(exitCode);

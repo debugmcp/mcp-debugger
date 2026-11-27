@@ -709,6 +709,14 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
     expect(policy.debuggeeExitCodeFromOutput?.('stdout', 'Process 1 has exited with status 7\n')).toBeUndefined();
     expect(policy.debuggeeExitCodeFromOutput?.('console', 'Hello, World!\n')).toBeUndefined();
 
+    // Adapter banner lines on stdout/stderr (issue #1277): only js-debug and
+    // java emit debugger banners on the target's stdio streams, and neither
+    // may ever match ordinary program output.
+    const adaptersWithStdioBanners = new Set<DebugLanguage>([DebugLanguage.JAVASCRIPT, DebugLanguage.JAVA]);
+    expect(typeof policy.isAdapterOutputLine === 'function').toBe(adaptersWithStdioBanners.has(language));
+    expect(policy.isAdapterOutputLine?.('stdout', 'Hello, World!') ?? false).toBe(false);
+    expect(policy.isAdapterOutputLine?.('stderr', 'Error: uncaught on purpose') ?? false).toBe(false);
+
     const clientBehavior = policy.getDapClientBehavior();
     expect(clientBehavior).toBeTypeOf('object');
     if (clientBehavior.childInitTimeout !== undefined) {

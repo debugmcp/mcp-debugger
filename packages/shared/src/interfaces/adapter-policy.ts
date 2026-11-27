@@ -794,6 +794,19 @@ export interface AdapterPolicy {
   shouldSuppressOutputEvent?(category: string, text: string): boolean;
 
   /**
+   * Return true when a trimmed non-empty `stdout` or `stderr` line is the
+   * debugger's or runtime inspector's own banner rather than output the
+   * program printed (issue #1277): Node's inspector writes `Debugger attached.`
+   * and `Waiting for the debugger to disconnect...` to the target's stderr,
+   * and the JVM's `-agentlib:jdwp` prints `Listening for transport dt_socket
+   * at address: <port>` on stdout. Kept in `get_output`, left out of a
+   * non-zero exit's `outputTail` so housekeeping neither crowds out the cause
+   * nor makes an otherwise silent exit read as `stderr` output. Optional —
+   * absent means every `stdout`/`stderr` line is taken as the program's own.
+   */
+  isAdapterOutputLine?(category: 'stdout' | 'stderr', line: string): boolean;
+
+  /**
    * Return an attributed explanation for a DAP 'output' event that signals a
    * known adapter-level capability degradation (issue #441 — e.g. CodeLLDB's
    * "Could not locate Rust toolchain" (1.12) or "Failed to initialize language

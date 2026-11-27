@@ -14,6 +14,7 @@ import { ensurePythonOnPath } from './env-utils.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = path.resolve(here, '../../../fixtures/debug-scripts/python-nonzero-exit.py');
+const CRASH_FIXTURE = path.resolve(here, '../../../fixtures/debug-scripts/python-throws-uncaught.py');
 
 function hasDebugpy(): boolean {
   const env: Record<string, string> = {};
@@ -88,5 +89,28 @@ describe.skipIf(!hasDebugpy())('Python non-zero exit carries outputTail (issues 
       expect(started.data?.exitCode).toBe(3);
       expect(started.data).not.toHaveProperty('outputTail');
     }
+  }, 60_000);
+
+  it('keeps RuntimeError: uncaught on purpose at the end of a long debugpy traceback (issue #1277)', async () => {
+    const env: Record<string, string> = {};
+    ensurePythonOnPath(env);
+    server = await startStdioClient({ name: 'python-crash-tail', env });
+    await server.createSession('python', 'python-crash-tail');
+
+    const started = await server.call<EndAnswer>('start_debugging', {
+      scriptPath: CRASH_FIXTURE,
+      breakOnExceptions: 'none'
+    });
+    expect(started.success, JSON.stringify(started)).toBe(true);
+    const ended = started.pending
+      ? await server.call<EndAnswer>('wait_for_stop', { timeout: 20_000 })
+      : started;
+
+    expect(ended.state, JSON.stringify(ended)).toBe('stopped');
+    expect(ended.exitCode, JSON.stringify(ended)).toBe(1);
+    expect(ended.outputTail?.[0], JSON.stringify(ended)).toBe('Traceback (most recent call last):');
+    expect(ended.outputTail, JSON.stringify(ended)).toContain('...');
+    expect(ended.outputTail?.at(-1), JSON.stringify(ended)).toBe('RuntimeError: uncaught on purpose');
+    expect(ended.outputTail?.length).toBe(8);
   }, 60_000);
 });
