@@ -1006,6 +1006,12 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       );
     }
 
+    if (Object.hasOwn(rest, 'attachExistingChildren')) {
+      this.launchConfigDiagnostics.push({
+        key: 'attachExistingChildren',
+        message: "ignored: an attach never scans for children that are already running (the scan can take the parent for one of its children); attach to a child's own inspector port instead"
+      });
+    }
     if (rest.autoAttachChildProcesses !== undefined && typeof rest.autoAttachChildProcesses !== 'boolean') {
       this.launchConfigDiagnostics.push({
         key: 'autoAttachChildProcesses',

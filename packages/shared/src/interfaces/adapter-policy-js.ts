@@ -1050,7 +1050,10 @@ export const JsDebugAdapterPolicy = {
         request: 'attach',
         ...(hasPort ? { address: attachHost, port: attachPort } : {}),
         continueOnAttach: true,
-        attachExistingChildren: true
+        // The scan uses inspector ports in child arguments; an inherited --inspect
+        // flag carries the parent's port, yielding a second connection to the parent
+        // under the child's name (measured 2026-11-26, issue #1286).
+        attachExistingChildren: false
       };
       if (!hasPort) {
         // js-debug dials websocketAddress directly; the transform's

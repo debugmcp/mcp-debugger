@@ -2,7 +2,7 @@
  * The session tree over a by-port attach with real js-debug (issue #1082): a
  * target started with `node --inspect` that forks a Node child after the
  * attach. By default, processes the target starts afterwards are not debugged;
- * an already-listening child is adopted either way. The tree helper opts in
+ * children that are already running are never scanned. The tree helper opts in
  * explicitly for future children; the opt-out case overrides it. js-debug
  * injects its bootloader into the attached process and reports every process
  * it forks from then on, and the server adopts each as a child session.
@@ -246,6 +246,35 @@ describe('JavaScript session tree over a by-port attach (issue #1082)', () => {
     expect(ids).not.toContain(rootId);
     expect(ids).not.toContain(childId);
     await targetRanToItsEnd(target);
+  }, 120_000);
+
+  it('never scans an existing child with its parent inspector port, with future child debugging off or on (#1286)', async () => {
+    // With the scan on, the inherited fixed-port flag creates a Child Process
+    // row connected to the parent. Bootloader reports cannot name this child:
+    // it has already ticked before either attach starts.
+    for (const autoAttachChildProcesses of [undefined, true]) {
+      const target = await startTarget(path.join(treeDir, 'attach_existing_child.js'));
+      await pollUntil(async () => target.output(), text => text.includes('scan target ready child='), 30000);
+      expect(target.output()).toContain('scan target ready child=');
+      const rootId = await server.createSession('javascript', `js-no-existing-child-scan-${autoAttachChildProcesses}`);
+      const attached = await call<Stop>('attach_to_process', {
+        host: '127.0.0.1', port: target.port, stopOnEntry: false, verifyTimeout: 20000,
+        ...(autoAttachChildProcesses === undefined ? {} : { adapterConfig: { autoAttachChildProcesses } })
+      });
+      expect(attached.success, JSON.stringify(attached)).toBe(true);
+      const parentTicks = (): number => (target.output().match(/parent tick /g) ?? []).length;
+      const baseline = parentTicks();
+      await pollUntil(async () => {
+        const listing = await rows();
+        const children = listing.filter(row => row.parentSessionId === rootId);
+        expect(children.filter(row => row.name.startsWith('Child Process')), JSON.stringify(listing)).toEqual([]);
+        expect(children, JSON.stringify(listing)).toEqual([]);
+        return parentTicks();
+      }, () => false, 15000);
+      expect(parentTicks(), target.output()).toBeGreaterThan(baseline);
+      const detached = await call<Stop>('detach_from_process', { sessionId: rootId });
+      expect(detached.success, JSON.stringify(detached)).toBe(true);
+    }
   }, 120_000);
 
   it('a default attach injects no bootloader: no child row, the target runs to its end', async () => {

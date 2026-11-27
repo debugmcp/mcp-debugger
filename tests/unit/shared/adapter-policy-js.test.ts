@@ -644,12 +644,27 @@ describe('JsDebugAdapterPolicy', () => {
           request: 'attach',
           websocketAddress: 'ws://127.0.0.1:9229/abc-def',
           continueOnAttach: true,
-          attachExistingChildren: true
+          attachExistingChildren: false
         }));
         expect(attach![1]).not.toHaveProperty('port');
         expect(attach![1]).not.toHaveProperty('address');
         expect(attach![1]).not.toHaveProperty('program');
         expect(sendDapRequest.mock.calls.some(([cmd]) => cmd === 'launch')).toBe(false);
+      });
+
+      it.each([
+        { port: 9229 },
+        { websocketAddress: 'ws://127.0.0.1:9229/abc-def' }
+      ].flatMap(target => [false, true].flatMap(autoAttachChildProcesses =>
+        [false, true].map(transformed => ({ target, autoAttachChildProcesses, transformed }))
+      )))('pins the existing-child scan off with $target, auto-attach $autoAttachChildProcesses, transformed $transformed', async ({ target, autoAttachChildProcesses, transformed }) => {
+        const args = { request: 'attach', type: 'pwa-node', ...target, autoAttachChildProcesses, attachExistingChildren: true };
+        const { result, sendDapRequest } = await runHandshake(args, transformed ? args : undefined);
+        expect(result).toBe('resolved');
+        expect(sendDapRequest).toHaveBeenCalledWith('attach', expect.objectContaining({
+          attachExistingChildren: false,
+          autoAttachChildProcesses
+        }));
       });
 
       it('refuses a port-less attach without a websocketAddress instead of launching', async () => {

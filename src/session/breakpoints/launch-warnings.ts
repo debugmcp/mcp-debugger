@@ -12,7 +12,7 @@ import { normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
 import { OUTPUT_BUFFER_CAP, type OutputRingBuffer } from '../output-buffer.js';
 import type { ManagedSession } from '../session-store.js';
 
-const DEFAULT_ATTACH_CHILD_DEBUGGING_NOTE = "on an attach, processes the target starts afterwards are not debugged unless requested, so a breakpoint in code only such a process runs is never hit; adapterConfig: { autoAttachChildProcesses: true } on the attach requests it, but it changes the target: its later children get a changed NODE_OPTIONS (and fail to start if the target is not on this server's machine), and one forked during a detach can be left waiting (#1286)";
+const DEFAULT_ATTACH_CHILD_DEBUGGING_NOTE = "on an attach, processes the target starts afterwards are not debugged unless requested, so a breakpoint in code only such a process runs is never hit; adapterConfig: { autoAttachChildProcesses: true } on the attach requests it for a target reached through a local endpoint, but it changes the target: each process it starts from then on is made to load a file from this server (through NODE_OPTIONS) and to wait at startup for the debugger, so it can fail to start if the target cannot load this server's file, starts late when the target forks fast, and can be left waiting if it is forked during a detach (#1286)";
 
 export const OUTPUT_TAIL_LINES = 8;
 export const OUTPUT_TAIL_LINE_CHARS = 300;

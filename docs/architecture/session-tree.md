@@ -280,7 +280,7 @@ Two measured effects the answers name:
 Adoption is on by default for launches. The Python launch transform stops defaulting `subProcess` to `false`
 (that default existed only because of the park hang, which adoption removes; the warning that
 names the hang goes with it) and the JavaScript launch transform defaults
-`autoAttachChildProcesses` to `true`. The JavaScript attach transform and raw policy default it to `false`, preserving 0.26.0's off default: no bootloader is injected into the target for future children. Pass `adapterConfig: { autoAttachChildProcesses: true }` on the attach to make processes the target starts afterwards debuggable. An explicit attach boolean is retained. Opt-in requires the target and its children to be able to load the server's js-debug bootloader and reach its debugger endpoint; it changes `NODE_OPTIONS` for later children and can leave a child forked during detach waiting (#1286). An
+`autoAttachChildProcesses` to `true`. The JavaScript attach transform and raw policy default it to `false`, preserving 0.26.0's off default: no bootloader is injected into the target for future children. Pass `adapterConfig: { autoAttachChildProcesses: true }` on the attach to make processes the target starts afterwards debuggable. An explicit attach boolean is retained. Opt-in requires the target and its children to be able to load the server's js-debug bootloader and reach its debugger endpoint; later children load a file from this server through `NODE_OPTIONS` and wait at startup for the debugger, so they can fail if the file is unavailable, start late if forks outpace attaches, or remain waiting if forked during detach (#1286). An
 explicit `false` in `dapLaunchArgs` turns adoption off for that launch and children run
 undebugged, as they did before the tree (JavaScript attach accepts an explicit
 `adapterConfig: { autoAttachChildProcesses: false }`, which keeps its default for future children;
@@ -289,7 +289,7 @@ makes it safe (M1 for Python, M2 for js-debug), as a documented behaviour change
 changelog entry, because it changes what a launch that spawns Python or Node processes shows:
 child rows for every xdist worker, autoreloader child or script that shells out.
 
-With `autoAttachChildProcesses` off, nothing is injected into the target, so processes it starts afterwards are not debugged. A child already running with an inspector port of its own (for example, a cluster worker of a primary started with `--inspect`) is still found and becomes a child session where 0.26.0 showed no session for it: it inherits the session's breakpoints, so a breakpoint in its code stops it; nothing is changed in it, and detach releases it (measured on Windows, 2026-11-26).
+An attach never scans for children that are already running (js-debug's `attachExistingChildren` is pinned off). That scan identifies a child by an inspector port in its arguments, and a child that inherited its parent's `--inspect` flag carries the parent's port, so the session it produced was a second connection to the parent under the child's name (measured 2026-11-26: pausing it paused the parent). To debug a process that has an inspector port of its own, attach to that port in a session of its own.
 
 The Python **attach** transform flips in M1 only once its own measurement passes: the spike's
 topology is a launch served by `python -m debugpy.adapter`, and whether a by-port attach's children

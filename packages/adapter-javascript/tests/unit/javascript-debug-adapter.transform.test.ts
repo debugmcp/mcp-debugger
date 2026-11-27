@@ -809,6 +809,18 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
       expect(adapter.consumeLaunchConfigDiagnostics()).toEqual([]);
     });
 
+    it.each([true, false, null, 'true', undefined])('diagnoses caller attachExistingChildren %s without an operation scope', async (attachExistingChildren) => {
+      const adapter = new JavascriptDebugAdapter(deps);
+      await adapter.transformAttachConfig({ request: 'attach', port: 9229, attachExistingChildren } as any);
+      expect(adapter.supportedAttachKeys).toContain('attachExistingChildren');
+      const diagnostics = adapter.consumeLaunchConfigDiagnostics();
+      expect(diagnostics).toEqual([{
+        key: 'attachExistingChildren',
+        message: "ignored: an attach never scans for children that are already running (the scan can take the parent for one of its children); attach to a child's own inspector port instead"
+      }]);
+      expect(diagnostics[0]).not.toHaveProperty('scope');
+    });
+
     it('lists autoAttachChildProcesses as a supported attach key (issue #501)', () => {
       const adapter = new JavascriptDebugAdapter(deps);
       expect(adapter.supportedAttachKeys).toContain('autoAttachChildProcesses');
