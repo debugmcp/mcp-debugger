@@ -13,11 +13,11 @@ mcp-debugger is stewarded by **Sycamore LLC**, which holds the GitHub organizati
 
 ## How changes land
 
-mcp-debugger uses an **agent-first development model with human accountability**: AI coding agents produce most implementation work and merge it under a bar a human maintainer sets, while a human maintainer authorizes every release and stays accountable for the project.
+mcp-debugger uses an **agent-first development model with human accountability**: AI coding agents produce most implementation work, and a managing agent merges it under a bar a human maintainer sets, while a human maintainer authorizes every release and stays accountable for the project.
 
 1. All changes go through pull requests — no direct pushes to `main` (enforced server-side by branch protection).
-2. CI is the primary quality gate. Branch protection requires the Linux build-and-test job and lint to pass before anything merges, administrators included; the merge bar in item 3 requires every other CI job to pass as well (the Windows build, the container tests, the per-language host lanes, MCP conformance).
-3. **A human maintainer sets the merge bar and authorizes every release; a managing agent merges changes that meet the bar and reports each one.** The bar includes every CI check passing, not only the required ones, and a review by a model from a different family than the change's author. The bar and branch protection are the maintainer's: an agent changes neither.
+2. CI is the primary quality gate. Branch protection requires the Linux build-and-test job and lint to pass before anything merges, and is configured to apply to administrators as well; the merge bar in item 3 asks for every other CI job as well (the Windows build, the container tests, the per-language host lanes, MCP conformance).
+3. **A human maintainer sets the merge bar and authorizes every release; a managing agent merges changes that meet the bar and reports each one.** The bar asks for more than branch protection does: it includes every CI job that runs on the pull request passing, not only the two required ones, and a review by an agent other than the one that wrote the change. Dependabot's minor and patch updates are the exception: once approved, GitHub merges them automatically when the required checks pass. Changing the bar or branch protection is the maintainer's decision, not an agent's.
 4. A release is tagged only on a maintainer's explicit word for that release, and is built and published by CI with pinned actions, OIDC trusted publishing, sigstore provenance, and SBOMs (see [SUPPLY-CHAIN-SECURITY.md](SUPPLY-CHAIN-SECURITY.md)).
 
 ## Decision-making

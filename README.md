@@ -581,7 +581,7 @@ See [tests/README.md](./tests/README.md) for detailed testing instructions.
 
 ## 🏛️ Who Maintains This
 
-mcp-debugger is stewarded by **Sycamore LLC** and led by John Franklin ([@debugmcpdev](https://github.com/debugmcpdev)). The project uses an agent-first development model with human accountability: AI agents write most of the code and merge it under a bar a human maintainer sets; a human maintainer authorizes every release and makes every security decision. See [MAINTAINERS.md](./MAINTAINERS.md), [GOVERNANCE.md](./GOVERNANCE.md), and [SUPPORT.md](./SUPPORT.md) (including commercial support).
+mcp-debugger is stewarded by **Sycamore LLC** and led by John Franklin ([@debugmcpdev](https://github.com/debugmcpdev)). The project uses an agent-first development model with human accountability: AI agents write most of the code, and a managing agent merges it under a bar a human maintainer sets; a human maintainer authorizes every release and handles security response. See [MAINTAINERS.md](./MAINTAINERS.md), [GOVERNANCE.md](./GOVERNANCE.md), and [SUPPORT.md](./SUPPORT.md) (including commercial support).
 
 Supply-chain posture: pinned CI actions, OIDC trusted publishing, sigstore provenance on every npm package, SBOMs attached to releases, and an [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/debugmcp/mcp-debugger) score we actively maintain — details in [SUPPLY-CHAIN-SECURITY.md](./SUPPLY-CHAIN-SECURITY.md). Report vulnerabilities via [SECURITY.md](./SECURITY.md).
 
