@@ -334,8 +334,8 @@ Three defenses around the gate itself:
 
 `pnpm run typecheck:all` = `typecheck` + `typecheck:tests`, and it is deliberately the *same command* in all three places, so a green working tree cannot mean a red required check:
 
-1. **`.husky/pre-push`** — the [Dev-Loop Gate](../../CONTRIBUTING.md#dev-loop-gate) lists the static checks for branch pushes, including the committed-baseline guard and `typecheck:all`, the unchanged tags-only release gate, and the pull request's CI checks. CI builds and runs the suites.
-2. **The `Lint Code` CI job** — ESLint, then `typecheck:all` (or the split dependabot form), then the personal-path and changelog gates. No build needed: ~3 s for the sources, ~11 s for the ratchet.
+1. **`.husky/pre-push`** — the [Dev-Loop Gate](../../CONTRIBUTING.md#dev-loop-gate) lists the static checks for branch pushes, including the committed-baseline guard and `typecheck:all`, the tags-only clean build and unit suite, and the pull request's CI checks. CI builds and runs the suites.
+2. **The `Lint Code` CI job** — ESLint, then `typecheck:all` (or the split dependabot form), then the personal-path, documentation consistency (`check:docs`) and changelog gates. No build needed: ~3 s for the sources, ~11 s for the ratchet.
 3. **Locally**, whenever you want the fast type-only answer without a build.
 
-`.husky/pre-commit` runs the staged personal-paths check, the build-artifact/tarball guards, and an optional docstar check. Commits stay cheap; branch pushes run static checks and CI runs the pull request's checks, as described in the [Dev-Loop Gate](../../CONTRIBUTING.md#dev-loop-gate).
+`.husky/pre-commit` checks working copies of files staged as added, copied or modified for personal paths, runs the build-artifact/tarball guards, and runs an optional docstar check. Commits stay cheap; branch pushes run static checks and CI runs the pull request's checks, as described in the [Dev-Loop Gate](../../CONTRIBUTING.md#dev-loop-gate).

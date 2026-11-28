@@ -90,9 +90,9 @@ Two things that will bite you otherwise:
 The [Dev-Loop Gate](../../CONTRIBUTING.md#dev-loop-gate) is the canonical description of local
 checks, CI merge checks and optional local suite runs:
 
-- **`.husky/pre-commit`** runs no tests and no build — only the personal-paths check, the build-artifact/tarball guards, and an optional docstar check. Commits stay cheap.
-- **`.husky/pre-push`** runs fast static checks on branch pushes. Tags-only pushes keep the existing release gate, including its clean build and reduced unit suite. CI runs the pull request's suites, including the Docker container tests and host adapter lanes; see the [Dev-Loop Gate](../../CONTRIBUTING.md#dev-loop-gate) for merge checks. Other e2e cases run on demand with `npm run test:e2e`.
-- **The `Lint Code` CI job** runs ESLint → `typecheck:all` → the personal-path and changelog gates. No build needed.
+- **`.husky/pre-commit`** runs no tests and no build — only the personal-paths check on working copies of files staged as added, copied or modified, the build-artifact/tarball guards, and an optional docstar check. Commits stay cheap.
+- **`.husky/pre-push`** runs fast static checks on branch pushes. Tags-only pushes run lint, the committed-baseline guard and `typecheck:all`, then a clean build and reduced unit suite. CI runs the pull request's suites, including the Docker container tests and host adapter lanes; see the [Dev-Loop Gate](../../CONTRIBUTING.md#dev-loop-gate) for CI triggers and merge checks. Other e2e cases run on demand with `npm run test:e2e`.
+- **The `Lint Code` CI job** runs ESLint → `typecheck:all` → the personal-path, documentation consistency (`check:docs`) and changelog gates. No build needed.
 
 ## Writing Tests
 

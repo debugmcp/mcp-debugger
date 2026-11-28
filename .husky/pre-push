@@ -9,8 +9,13 @@ set +e
 exec 1>&2
 
 echo "🔎 Running pre-push checks to ensure code quality..."
-echo "💡 Fast feedback here; CI builds and tests your pull request."
+echo "💡 Branch pushes run static checks; tags-only pushes also build and test."
 echo ""
+
+# Source cargo environment for Rust tools and cargo-installed Docstar on either path.
+if [ -f "$HOME/.cargo/env" ]; then
+    . "$HOME/.cargo/env"
+fi
 
 # Detect if this push contains only tags (read refs from stdin)
 TMP_REFS=$(mktemp 2>/dev/null || echo ./.prepush_tmp)
@@ -29,13 +34,8 @@ else
 fi
 rm -f "$TMP_REFS" 2>/dev/null || true
 
-# Branch pushes keep fast static checks; tag-only pushes retain the release gate.
+# Tags-only pushes probe Docker before running the build and unit suite.
 if [ "$TAGS_ONLY" = true ]; then
-    # Source cargo environment if available (for Rust tests)
-    if [ -f "$HOME/.cargo/env" ]; then
-        . "$HOME/.cargo/env"
-    fi
-
     # Auto-detect Docker availability and skip Docker tests if not fully functional
     if ! docker buildx version >/dev/null 2>&1; then
         export SKIP_DOCKER_TESTS=true
@@ -122,8 +122,8 @@ if [ "$TAGS_ONLY" != true ]; then
     echo "✅ Changelog check passed!"
     echo ""
 
-    # Audit beyond staged files: catches paths in earlier commits or unstaged work
-    # that the staged-only pre-commit check did not inspect.
+    # Audit supported text files in the working tree, tracked or unignored untracked.
+    # An untracked scratch file can block a push; delete it or ignore it.
     echo "🔒 Checking all files for personal information..."
     if ! pnpm run check:all-personal-paths > "$PRE_PUSH_LOG" 2>&1; then
         echo ""
@@ -136,7 +136,7 @@ if [ "$TAGS_ONLY" != true ]; then
     echo "✅ Personal information check passed!"
     echo ""
     echo "✅ All static checks passed! Push will proceed."
-    echo "🚀 CI will build and run the suites for your pull request."
+    echo "🚀 CI builds and runs the suites once this branch has a pull request to main."
 else
     # Clean build to ensure no stale artifacts
     echo "🔨 Running clean build to ensure fresh compilation..."
@@ -152,7 +152,7 @@ else
     echo "✅ Build successful!"
     echo ""
 
-    # Tag-only pushes keep the existing clean build and reduced release-CI suite.
+    # Tag-only pushes run a clean build and the reduced release-CI suite.
     # A tag push is a release step, so this path stays separate.
     echo "🔖 Tag-only push detected. Running reduced CI tests..."
     npm run test:ci-no-python > "$PRE_PUSH_LOG" 2>&1
@@ -170,7 +170,7 @@ else
         echo ""
         echo "❌ Tests failed! Push blocked to prevent broken code on GitHub."
         echo "💡 Fix failing tests or use 'git push --no-verify' for emergency pushes."
-        echo "🔧 You can still make local commits for WIP - tests only run on push."
+        echo "🔧 You can still make local commits for WIP - this hook runs tests only on tags-only pushes."
         echo ""
         echo "Failed test details:"
         grep -E "FAIL|Error|AssertionError" "$PRE_PUSH_LOG" | head -20 || true

@@ -1,7 +1,7 @@
 # Commit Workflow Guide
 
 ## Overview
-The pre-commit hook checks staged files for personal paths and refuses the commit on failure. The safe-commit wrapper runs the same check before invoking Git, including when it skips commit verification. For the full dev loop — what runs on commit, on push, and in CI — see the [Dev-Loop Gate](../CONTRIBUTING.md#dev-loop-gate) and the [Git Hooks Guide](./development/git-hooks-guide.md).
+The pre-commit hook checks the working copies of files staged as added, copied or modified for personal paths and refuses the commit on failure. It does not read staged content and skips renames. The safe-commit wrapper runs the same check before invoking Git, including when it skips commit verification. For the full dev loop — what runs on commit, on push, and in CI — see the [Dev-Loop Gate](../CONTRIBUTING.md#dev-loop-gate) and the [Git Hooks Guide](./development/git-hooks-guide.md).
 
 ## Quick Start
 
@@ -60,7 +60,7 @@ Detects and blocks:
 
 #### Pre-Push Checks (Run Before Push)
 See the [Dev-Loop Gate](../CONTRIBUTING.md#dev-loop-gate) for the ordered static checks on branch
-pushes, the unchanged tags-only release gate, and the pull request's CI checks.
+pushes, the tags-only clean build and unit suite, and the pull request's CI checks.
 
 ### Commands Reference
 
@@ -124,7 +124,7 @@ git cf -m "WIP: quick fix"      # Fast commit (PI check only)
 
 ## Important Notes
 
-1. **Personal information checks cannot be bypassed** with our safe commit commands
+1. The safe commit commands check the working copies of added/copied/modified staged paths before invoking Git. Stage the intended files first: `commit:fast -- -a` can add files after the check, then commit with `--no-verify` without checking those added files.
 2. Use `git commit --no-verify` only in absolute emergencies
 3. Branch pushes run the [static gate](../CONTRIBUTING.md#dev-loop-gate); CI builds and runs the suites before merge
 4. The PI check is fast (~1 second) so there's minimal overhead
@@ -156,7 +156,7 @@ git commit --no-verify -m "emergency: critical fix"
 
 ## Benefits
 
-- 🔒 **Security**: Staged checks block detected personal paths before commit
+- 🔒 **Security**: The personal-paths check reads working copies of files staged as added, copied or modified and blocks on a finding; it does not inspect staged content or renames
 - ⚡ **Speed**: Skip the remaining pre-commit checks for WIP commits
 - 🛡️ **Safety Net**: CI/CD will catch issues before merge
 - 🎯 **Flexibility**: Choose the right level of checking for your situation

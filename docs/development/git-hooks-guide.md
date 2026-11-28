@@ -13,7 +13,7 @@ top); this page just documents the hooks themselves.
 **Purpose**: Runs before each commit to keep personal data and build artifacts out of the repository. It runs **no tests and no build**.
 
 **What it does**:
-- ✅ Personal information check over staged files (`scripts/check-personal-paths.cjs`); a failure refuses the commit and shows the checker's own output
+- ✅ Personal information check over the working copies of files staged as added, copied or modified (`scripts/check-personal-paths.cjs`); it does not read staged content or check renames, and a failure refuses the commit with the checker's own output and exit status
 - ✅ Blocks staged build artifacts — `.js`, `.d.ts`, `.js.map` under `src/` or `packages/*/src/`; the one exception is `src/proxy/proxy-bootstrap.js`, which is a legitimate JavaScript source file
 - ✅ Blocks staged `.tgz` package tarballs (local-testing artifacts)
 - ✅ Runs `docstar check` if — and only if — `docstar` is on your PATH; its result never blocks the commit
@@ -32,9 +32,10 @@ top); this page just documents the hooks themselves.
 no build or test run on that path. CI builds and runs the pull request's suites; see that
 section for the merge checks.
 
-Tags-only pushes retain the release gate described there, including the clean build and
-reduced `npm run test:ci-no-python` suite. Only that path sources the cargo environment
-and probes Docker buildx (exporting `SKIP_DOCKER_TESTS=true` if unavailable).
+Tags-only pushes probe Docker buildx (exporting `SKIP_DOCKER_TESTS=true` if unavailable), run
+lint, the committed-baseline guard and `typecheck:all`, then a clean build and the reduced
+`npm run test:ci-no-python` suite. Both push paths source `~/.cargo/env` when present so
+cargo-installed tools such as Docstar are available.
 
 After either push path succeeds, advisory `docstar shadow .` and `docstar check` run if
 Docstar is installed. Neither command blocks the push.
@@ -127,10 +128,13 @@ ls -la .husky/
 1. Follow the [Dev-Loop Gate](../../CONTRIBUTING.md#dev-loop-gate) to build and run suites locally
 2. Fix failing tests before merge or release
 
-### Lint or Typecheck Failing on Push
+### Static Checks Failing on Push
 1. `pnpm run lint` (or `pnpm run lint:fix`) for style and syntax errors
 2. `pnpm run typecheck:all` for type errors
 3. If a test file's recorded error count changed on purpose, run `pnpm run typecheck:tests:update` and **commit** `tests/typecheck-baseline.json` — an uncommitted baseline is itself a push blocker
+4. `pnpm run check:docs` for broken relative links or stale counts
+5. `pnpm run changelog:check` for invalid fragment names or contents
+6. `pnpm run check:all-personal-paths` for personal paths in supported tracked or unignored untracked working-tree files; delete or ignore an offending scratch file
 
 ### Personal Information False Positives
 1. Check the detected pattern in the error message
@@ -157,9 +161,8 @@ ls -la .husky/
 - Push broken code to main/develop branches
 - Disable hooks permanently
 
-## Migration Notes
+## Push Paths
 
-**Previous Setup**: Branch pushes ran a clean build and the unit + integration suites
-**New Setup**: Branch pushes run static checks; CI runs the pull request's suites. Tags-only release checks are unchanged. See the [Dev-Loop Gate](../../CONTRIBUTING.md#dev-loop-gate) for merge checks.
-
-This change improves developer experience during refactoring and feature development while maintaining code quality standards for shared code.
+Branch pushes run static checks. Tags-only pushes also run a clean build and a reduced unit
+suite. Both paths run advisory Docstar checks when installed. See the
+[Dev-Loop Gate](../../CONTRIBUTING.md#dev-loop-gate) for CI triggers and merge checks.

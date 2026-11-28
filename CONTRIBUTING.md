@@ -99,8 +99,8 @@ fast static checks so you can fix simple mistakes without waiting for a whole CI
 runs the checks that decide whether a pull request can merge.
 
 For any push that is not tags-only, `.husky/pre-push` runs these steps in order and stops at
-the first failure. It runs no build or tests, and has no switch to skip checks or restore
-the old suites.
+the first failure. It runs no build or tests on that path. The hook has one mode; its checks
+depend only on whether the push is tags-only.
 
 1. **Lint** — `pnpm run lint`. ESLint over `src/**/*.ts`, `packages/*/src/**/*.ts`,
    `scripts/**/*.{js,mjs,cjs}`, and `tools/**/*.{js,mjs,cjs}` (the dev-proxy supervisor lives
@@ -130,15 +130,24 @@ the old suites.
 5. **Changelog fragment validation** — `pnpm run changelog:check`, checking existing fragments'
    names and contents. The PR-only requirement to add a fragment is a separate CI step.
 
-6. **Full personal-path audit** — `pnpm run check:all-personal-paths`. Unlike the staged-only
-   pre-commit check, this scans tracked files and unignored new files, catching personal paths
-   in earlier commits or unstaged work as well.
+6. **Full personal-path audit** — `pnpm run check:all-personal-paths`. This selects tracked
+   files and untracked files that are not ignored, then checks supported text files in the
+   working tree; it does not read commit history. An untracked scratch file with a personal
+   path blocks the push even though it is not being pushed: delete it or ignore it.
 
 CI's **Lint Code** job (`lint`) runs ESLint, `pnpm run typecheck:all` (with the existing
 Dependabot exception), the full personal-path audit, documentation consistency and changelog
-validation. Its **Require a changelog fragment** step also checks PRs for an entry when needed;
-test-only changes are exempt automatically, and contributor-process changes use the
-`no-changelog` label rather than a user-facing fragment. See [the fragment guide](changelog.d/README.md).
+validation. Its **Require a changelog fragment** step requires a fragment or the `no-changelog`
+label for non-test changes under `src/`, `packages/` or `tools/`, or changes to the root
+manifest's shipping keys. Manifest-only changes that leave shipping keys unchanged are
+exempt. Changes touching none of those surfaces need neither a fragment nor the label.
+See [the fragment guide](changelog.d/README.md).
+
+CI runs on pull requests to `main`, pushes to `main` and `develop`, and manual dispatch;
+another branch without a pull request to `main` gets no automatic suite run, so open a draft
+pull request, run `gh workflow run ci.yml --ref <branch>`, or run the suites locally.
+For first-time contributors from forks, CI waits for a maintainer's approval; run the suites
+locally if you want a result before that approval.
 
 CI's **Build and Test** job (`build-and-test`) runs on Ubuntu and Windows. It runs
 `pnpm run build:ci`, lint, the PyPI launcher unit tests, then `pnpm run test:ci-coverage`
@@ -155,17 +164,20 @@ For an answer before CI, build first with `pnpm run build`, then run `pnpm run t
 and `pnpm run test:integration`, or target a file with
 `npx vitest run tests/core/unit/session/session-manager-state.test.ts`.
 
-A **tags-only push** is a release step and retains its existing gate: cargo environment setup
-when available and the Docker buildx probe, lint, the committed-baseline guard, `typecheck:all`,
+For every push, the hook sources `~/.cargo/env` when present so cargo-installed tools such as
+Docstar are available. A **tags-only push** probes Docker buildx, then runs lint, the
+committed-baseline guard, `typecheck:all`,
 `npm run clean && npm run build`, then `npm run test:ci-no-python` (which builds again and runs
-the unit project).
-It does not run the three added branch-push audits.
+the unit project). It omits the documentation, changelog and full personal-path audits.
 
 After either push path succeeds, the hook runs advisory `docstar shadow .` and `docstar check`
 if Docstar is installed. Neither command blocks the push.
 
-The **pre-commit** hook runs the staged personal-paths check and refuses the commit if it fails,
-showing the checker's own output. It also blocks accidentally staged build
+The **pre-commit** hook checks the working copies of files staged as added, copied or modified
+for personal paths and refuses the commit if the checker fails, preserving its exit status
+and output. It reads working copies, not staged content, and skips renames: an unstaged
+personal path can block clean staged content, while cleaning a working copy can let a
+personal path in the staged content pass. It also blocks accidentally staged build
 artifacts (`.js`/`.d.ts`/`.js.map` under `src/` or
 `packages/*/src/`) and `.tgz` tarballs, and runs an optional docstar check if docstar is installed.
 No tests, no build.
@@ -181,7 +193,9 @@ No tests, no build.
 
 ### Pre-commit Hook
 
-We have a pre-commit hook that automatically checks for personal information patterns. If detected, your commit will be blocked with instructions on how to fix it.
+The pre-commit hook checks the working copies of files staged as added, copied or modified
+for personal information patterns. If detected, your commit is blocked with instructions on
+how to fix it.
 
 ### How to Handle Paths
 
@@ -194,7 +208,7 @@ When documenting or writing examples, always use generic paths like:
 
 You can manually run the privacy check:
 ```bash
-# Check staged files (what pre-commit does)
+# Check working copies of files staged as added, copied or modified (what pre-commit does)
 npm run check:personal-paths
 
 # Check all files in the repository
@@ -244,7 +258,9 @@ Example VS Code settings:
 
 ## Testing
 
-The project includes a comprehensive test suite. Please ensure all tests pass before submitting a pull request. If you're adding a new feature, please include tests for it.
+Run the tests your change touches before submitting a pull request; CI runs the suites.
+If you're adding a new feature, please include tests for it. See the [Dev-Loop Gate](#dev-loop-gate)
+for CI triggers and optional local suite runs.
 
 ### Running Tests
 
@@ -346,16 +362,16 @@ which appends a `Signed-off-by: Your Name <you@example.com>` trailer. If you for
 ## 🚦 Pull Request Process
 
 1. **Before submitting**:
-   - Ensure all tests pass
+   - Run the tests your change touches; CI runs the suites
    - Update documentation if needed
    - Add tests for new functionality
    - Run linting and fix any issues
    - Add a changelog fragment if the change is user-visible — a new file at
      `changelog.d/<issue-number>.<category>.md` holding the entry text. Do **not** edit
      `CHANGELOG.md` directly; fragments are collated into it at release time. See
-     [`changelog.d/README.md`](changelog.d/README.md). CI requires one for changes under
-     `src/`, `packages/`, or `tools/` (test-only changes are exempt; apply the
-     `no-changelog` label for a PR that genuinely needs no entry).
+     [`changelog.d/README.md`](changelog.d/README.md). The [Dev-Loop Gate](#dev-loop-gate)
+     explains when CI requires a fragment or the `no-changelog` label; changes outside those
+     shipping surfaces need neither.
 
 2. **PR Guidelines**:
    - Use the PR template
