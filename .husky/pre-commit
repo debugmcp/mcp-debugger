@@ -1,15 +1,19 @@
 # Disable set -e inherited from husky's sh -e wrapper.
 # Git hooks run with stdout as a closed/broken pipe, causing echo to fail
 # with "write error: Bad file descriptor". Under set -e this silently kills
-# the entire hook. This script has explicit exit 1 calls for real failures.
+# the entire hook. This script checks command status explicitly for real failures.
 set +e
 
 # Redirect stdout to stderr so user-facing messages reach the terminal
 # instead of git's closed stdout pipe.
 exec 1>&2
 
-# Run existing personal info check
+# Check working copies of paths staged as added, copied or modified.
 node "$(dirname -- "$0")/../scripts/check-personal-paths.cjs"
+status=$?
+if [ "$status" -ne 0 ]; then
+    exit "$status"
+fi
 
 # Check for build artifacts in src directories
 echo "🔍 Checking for build artifacts in source directories..."
