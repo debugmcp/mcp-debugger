@@ -117,7 +117,13 @@ describe('JavaScript non-zero exit carries outputTail (issues #1254, #1136, #127
 
     expect(ended.state, JSON.stringify(ended)).toBe('stopped');
     expect(ended.exitCode, JSON.stringify(ended)).toBe(1);
-    expect(ended.outputTail?.at(-1), JSON.stringify(ended)).toBe('FAIL suite/auth.spec.js: expected 200, got 401');
-    expect(ended.outputTail?.some(line => line.includes('DeprecationWarning: legacy config flag used'))).toBe(true);
+    // stdout and stderr are separate pipes read independently by js-debug, so cross-stream
+    // arrival order is not guaranteed; assert presence across streams and order within stderr.
+    const tail = ended.outputTail ?? [];
+    expect(tail, JSON.stringify(ended)).toContain('FAIL suite/auth.spec.js: expected 200, got 401');
+    const warnHeaderIdx = tail.findIndex(line => line.includes('DeprecationWarning: legacy config flag used'));
+    const warnHintIdx = tail.findIndex(line => line.includes('--trace-deprecation'));
+    expect(warnHeaderIdx, JSON.stringify(tail)).toBeGreaterThanOrEqual(0);
+    expect(warnHintIdx, JSON.stringify(tail)).toBeGreaterThan(warnHeaderIdx);
   }, 60_000);
 });

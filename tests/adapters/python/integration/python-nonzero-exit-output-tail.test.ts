@@ -134,9 +134,17 @@ describe.skipIf(!hasDebugpy())('Python non-zero exit carries outputTail (issues 
 
     expect(ended.state, JSON.stringify(ended)).toBe('stopped');
     expect(ended.exitCode, JSON.stringify(ended)).toBe(1);
-    expect(ended.outputTail?.at(-1), JSON.stringify(ended)).toBe(
+    // stdout and stderr are separate pipes read independently by debugpy, so cross-stream
+    // arrival order is not guaranteed; assert presence across streams and order within stderr.
+    const tail = ended.outputTail ?? [];
+    expect(tail, JSON.stringify(ended)).toContain(
       'FAILED tests/test_auth.py::test_login - AssertionError: expected 200, got 401'
     );
-    expect(ended.outputTail?.some(line => line.includes('DeprecationWarning: legacy config flag used'))).toBe(true);
+    const warnHeaderIdx = tail.findIndex(line => line.includes('DeprecationWarning: legacy config flag used'));
+    const warnSourceIdx = tail.findIndex(
+      line => line === 'warnings.warn("legacy config flag used", DeprecationWarning, stacklevel=1)'
+    );
+    expect(warnHeaderIdx, JSON.stringify(tail)).toBeGreaterThanOrEqual(0);
+    expect(warnSourceIdx, JSON.stringify(tail)).toBeGreaterThan(warnHeaderIdx);
   }, 60_000);
 });
