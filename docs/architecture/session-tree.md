@@ -503,9 +503,12 @@ A child is a session of its own, and what is read about it is read where it is t
   worker serves a tree and writes one proxy log, named after the root, so a child's
   `debug://sessions/<child>/proxy-log` is its tree's.
   The record is written by the launch-shaped code (the launcher, the proxy launcher, the attach
-  controller), each fact reset where it always was, and in one place by the core: a stop that
-  proves the debugger on clears the debugger-off decision. A dry run leaves the record as it
-  was. The launch-shaped operations refuse a child session at the session layer too
+  controller), each fact reset where it always was; during the run, the core clears the
+  debugger-off decision on a stop that proves the debugger on (and tracks
+  `breakpointStopOccurred` and `inFlightChildReleases`), breakpoint verification records
+  `treeVerifiedBreakpointIds`, and the execution controller (`ExecutionController`) records
+  `deliveredStepFilterHints` when a returned stop answer on an ordinary step or `wait_for_stop`
+  carries a step-in filter hint. A dry run leaves the record as it was. The launch-shaped operations refuse a child session at the session layer too
   (`refuseChildSession`, `src/session/in-flight-guard.ts`), not only in the tool handlers: on a
   child they would write, replay or judge by its root's run.
   Three things follow from sharing the record and are meant: a stop in a child that proves the
@@ -519,7 +522,9 @@ A child is a session of its own, and what is read about it is read where it is t
   (`subProcess: false` on Python launch, `autoAttachChildProcesses: false` on JavaScript
   launch/attach, or `'adapter-default'` when the JavaScript adapter itself left it off on an
   attach) so end summaries and unbound warnings qualify that any child processes would
-  not be debugged.
+  not be debugged, and `deliveredStepFilterHints` (issue #1328) whenever a returned stop answer
+  carries a `describeStepInFilter` hint so each distinct hint is delivered once per run across the
+  tree.
   One thing does not follow: the notes of the root's launch are seeded into
   the root's output only. The record is mutated in place and not replaced per run, so a child
   row that outlives its run reads what its root reads; the readers that are new to children

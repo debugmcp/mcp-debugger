@@ -6,10 +6,13 @@
  * and DAP frame IDs are ephemeral per stop. This module captures the step's
  * starting stack from one `stackTrace` read and computes:
  *
- * 1. Factual disclosures when a `step` landing contradicts the requested step's
- *    stack motion (`step_out` still in the origin function, `step_out` dropping
- *    multiple frames, `step_into` entering no function, or a stack switch that
- *    shares no active frame with the origin);
+ * 1. Factual positional disclosures when a `step` landing does not match the
+ *    requested step's expected stack motion (`step_out` stopping at the same
+ *    visible depth or with a frame of the starting function's name below the
+ *    stop, `step_out` landing more than one frame shallower, `step_into`
+ *    stopping in the starting function at the same visible depth, or a landing
+ *    stack in which no starting function — or only the outermost entry —
+ *    appears);
  * 2. Meaningful adapter-supplied step descriptions (e.g. COBOL PERFORM summaries),
  *    filtering generic boilerplate ("Paused", "Paused on step", "step");
  * 3. Call-stack-aware frame identity for `StopSnapshot.changedVariables`, so
@@ -131,7 +134,7 @@ export function captureStepOrigin(
 }
 
 export interface CompareStepLandingOptions {
-  /** Optional policy explanation for why `step_into` skipped callees (issue #1184). */
+  /** Optional conditional policy explanation for active engine step filtering (issues #1184, #1328). */
   stepFilterHint?: string;
   /**
    * True when the proxy's own stepper already supplied a walk-limit explanation
@@ -145,8 +148,8 @@ export interface CompareStepLandingOptions {
 
 /**
  * Compare a step's starting stack with its `reason: 'step'` landing stack and
- * return a neutral, factual disclosure when the two stacks prove something the
- * fixed `"Stepped ..."` message hides (issues #1180, #1184).
+ * return a neutral, factual positional disclosure when the two stacks prove
+ * something the fixed `"Stepped ..."` message hides (issues #1180, #1184, #1328).
  */
 export function compareStepOriginAndLanding(
   kind: StepFlavor,
@@ -166,21 +169,18 @@ export function compareStepOriginAndLanding(
   const originTop = originLive[0];
   const landingTop = landingLive[0];
 
-  // 1. Disjoint call stacks (e.g. Ruby Fiber/Enumerator switch, #1198):
-  //    First check whether the two stacks share any function at all.
+  // 1. No starting function in common, or only an outermost entry in common
+  //    (e.g. Ruby Fiber / Enumerator switch #1198, or every starting frame having returned to its caller):
   const anySharedFrame = landingLive.some((lf) =>
     originLive.some((of) => sameFrameFunction(lf, of))
   );
   if (!anySharedFrame) {
-    return (
-      `The stop is on a different call stack from the one the step was taken on ` +
-      `(from '${originTop.name}', now in '${landingTop.name}').`
-    );
+    return `No starting function appears in the current visible stack (from '${originTop.name}', now in '${landingTop.name}').`;
   }
-  //    Also catch two multi-frame stacks that share ONLY an outermost module/main
-  //    entry while every call above it differs — except `stepInto` from a
-  //    depth-2 frame (`foo < main` -> `bar < main` on `bar(foo())`), which is a
-  //    normal return-and-enter on the caller's line.
+  //    Also catch two multi-frame stacks where only an outermost module/main
+  //    entry appears in both while every call above it differs — except `stepInto`
+  //    returning to the outermost line and entering a sibling call (`foo < main` ->
+  //    `bar < main` on `bar(foo())`).
   if (originLive.length >= 2 && landingLive.length >= 2) {
     const originBottom = originLive[originLive.length - 1];
     const landingBottom = landingLive[landingLive.length - 1];
@@ -189,20 +189,18 @@ export function compareStepOriginAndLanding(
     const sharesAboveOutermost = landingAboveBottom.some((lf) =>
       originAboveBottom.some((of) => sameFrameFunction(lf, of))
     );
-    const isStepIntoSiblingFromDepth2 =
+    const isStepIntoSiblingAtOutermost =
       kind === 'stepInto' &&
-      originLive.length === 2 &&
+      landingLive.length === 2 &&
       sameFrameFunction(originBottom, landingBottom) &&
       originBottom.line === landingBottom.line;
     if (
       !sharesAboveOutermost &&
-      !isStepIntoSiblingFromDepth2 &&
+      !isStepIntoSiblingAtOutermost &&
+      sameFrameFunction(originBottom, landingBottom) &&
       TOP_LEVEL_ENTRY_NAMES.has(canonicalFrameName(originBottom.name))
     ) {
-      return (
-        `The stop is on a different call stack from the one the step was taken on ` +
-        `(from '${originTop.name}', now in '${landingTop.name}').`
-      );
+      return `Only '${originBottom.name}' appears in both visible stacks (from '${originTop.name}', now in '${landingTop.name}').`;
     }
   }
 
@@ -217,13 +215,13 @@ export function compareStepOriginAndLanding(
     ) {
       if (landingIdxAtOriginSlot === 0) {
         return (
-          `The stop is still in '${originTop.name}' at the same call-stack depth; ` +
-          `'${originTop.name}' has not returned (or this is a later call to it).`
+          `The stop is in '${originTop.name}' at the same visible call-stack depth as before step_out ` +
+          `(the same call, or another call of '${originTop.name}').`
         );
       }
       return (
-        `The function stepped out of ('${originTop.name}') has not returned; ` +
-        `it is ${landingIdxAtOriginSlot} frame(s) below the stop.`
+        `A frame named '${originTop.name}' appears ${landingIdxAtOriginSlot} visible frame(s) below the stop ` +
+        `(the original call, or another call of '${originTop.name}').`
       );
     }
 
@@ -231,13 +229,13 @@ export function compareStepOriginAndLanding(
     if (framesDropped >= 2) {
       const expectedAncestor = originLive[framesDropped];
       if (expectedAncestor && sameFrameFunction(landingTop, expectedAncestor)) {
-        return `The stop is ${framesDropped} frames below '${originTop.name}' (where step_out was issued).`;
+        return `The visible stack is ${framesDropped} frame(s) shallower than before step_out.`;
       }
     }
     return undefined;
   }
 
-  // 3. step_into comparisons (#1180, #1184):
+  // 3. step_into comparisons (#1180, #1184, #1328):
   if (kind === 'stepInto' && !opts.hasStepperWalkNote) {
     if (
       landingLive.length === originLive.length &&
@@ -245,9 +243,9 @@ export function compareStepOriginAndLanding(
     ) {
       const onStartingLine =
         landingTop.line === originTop.line && samePath(landingTop.file, originTop.file);
-      const base = onStartingLine
-        ? 'No function was entered; execution is still on the starting line.'
-        : 'No function was entered.';
+      const base =
+        `The stop is in '${originTop.name}' at the same visible call-stack depth as before step_into.` +
+        (onStartingLine ? ' It is on the starting source line.' : '');
       return opts.stepFilterHint ? `${base} ${opts.stepFilterHint}` : base;
     }
   }

@@ -527,16 +527,20 @@ export class ExecutionController {
           const rawDescription =
             this.ctx.redactionEnabled() ? redactStopInfo(ownStop).description : ownStop.description;
           const adapterDescription = meaningfulStepStopDescription(rawDescription);
+          const candidateHint = this.undeliveredStepFilterHint(session, options.stepFilterHint);
           const provenanceNote = compareStepOriginAndLanding(
             flavor,
             stoppedOnRequestedThread && landedOnRequestedThread ? options.stepOrigin : undefined,
             landing.stackResult?.frames ?? [],
             {
-              stepFilterHint: options.stepFilterHint,
+              stepFilterHint: candidateHint,
               hasStepperWalkNote: stepNote !== undefined,
               noProgramFrame: landing.noProgramFrame === true
             }
           );
+          if (!settled) {
+            this.recordDeliveredStepFilterHint(session, candidateHint, provenanceNote);
+          }
           const mergedNotes = [adapterDescription, landing.note, provenanceNote].filter(
             (part): part is string => typeof part === 'string' && part.length > 0
           );
@@ -1108,17 +1112,22 @@ export class ExecutionController {
         const prov = target.lastStepProvenance;
         const landedOnOriginThread =
           landing.stackResult?.threadId === undefined || landing.stackResult.threadId === prov.origin?.threadId;
+        const candidateHint =
+          prov.flavor === 'stepInto'
+            ? this.undeliveredStepFilterHint(target, this.describeStepInFilter(target, target.id))
+            : undefined;
         const provenanceNote = compareStepOriginAndLanding(
           prov.flavor,
           landedOnOriginThread ? prov.origin : undefined,
           landing.stackResult?.frames ?? [],
           {
-            stepFilterHint: prov.flavor === 'stepInto' ? this.describeStepInFilter(target, target.id) : undefined,
+            stepFilterHint: candidateHint,
             hasStepperWalkNote: stopAtLanding.text !== undefined,
             noProgramFrame: landing.noProgramFrame === true
           }
         );
         if (provenanceNote) {
+          this.recordDeliveredStepFilterHint(target, candidateHint, provenanceNote);
           waitLanding = {
             ...landing,
             note: landing.note ? `${landing.note} ${provenanceNote}` : provenanceNote
@@ -1372,7 +1381,9 @@ export class ExecutionController {
 
   /**
    * The adapter policy's explanation for an engine step filter that skips
-   * callees during `step_into` (issue #1184), or `undefined`.
+   * callees during `step_into` (issues #1184, #1328), or `undefined`. Calling
+   * this helper never marks the hint delivered: delivery is recorded on
+   * `session.run` only when a returned stop answer actually carries the hint.
    */
   private describeStepInFilter(session: ManagedSession, sessionId: string): string | undefined {
     const policy = this.ctx.selectPolicy(session.language);
@@ -1394,6 +1405,31 @@ export class ExecutionController {
     } catch (error) {
       this.ctx.logger.debug(`[SM stepInto ${sessionId}] Step-in filter explanation failed:`, error);
       return undefined;
+    }
+  }
+
+  /**
+   * Withhold a `describeStepInFilter` hint once it has already been delivered
+   * in this run (`session.run.deliveredStepFilterHints`, issue #1328).
+   */
+  private undeliveredStepFilterHint(
+    session: Pick<ManagedSession, 'run'>,
+    hint: string | undefined
+  ): string | undefined {
+    return hint && !session.run.deliveredStepFilterHints?.has(hint) ? hint : undefined;
+  }
+
+  /**
+   * Mark `hint` delivered on the tree's shared `Run` record only when the
+   * computed `provenanceNote` for the returned stop answer actually includes it.
+   */
+  private recordDeliveredStepFilterHint(
+    session: Pick<ManagedSession, 'run'>,
+    hint: string | undefined,
+    provenanceNote: string | undefined
+  ): void {
+    if (hint && provenanceNote?.endsWith(hint)) {
+      (session.run.deliveredStepFilterHints ??= new Set()).add(hint);
     }
   }
 
