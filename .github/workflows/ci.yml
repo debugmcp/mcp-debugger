@@ -268,15 +268,6 @@ jobs:
     - name: Run ESLint
       run: pnpm run lint
 
-    # Structure ratchet (under a second, no build needed): session-state writers,
-    # AdapterPolicy members and the ones only one engine uses, and language
-    # branches outside the policy files, against tests/structure-baseline.json.
-    # Fails when a count goes up (names the new items) or down (the baseline must
-    # be re-recorded in the same PR). Nothing a dependency bump can move, so no
-    # Dependabot split.
-    - name: Check structure ratchet
-      run: pnpm run structure:check
-
     # Type-only checks, no build needed: ~3 s for the sources and ~11 s for the ratchet
     # (Lint Code goes from ~25 s to ~40 s). `tsc -b -f .` in `build` stays the
     # authoritative compile; this catches type errors before the build job does.
@@ -303,7 +294,18 @@ jobs:
       run: |
         pnpm run typecheck
         pnpm run typecheck:tests -- --allow-improvement
-    
+
+    # Structure ratchet: session-state writers, AdapterPolicy members and the ones
+    # only one engine uses, and language branches outside the policy files,
+    # against tests/structure-baseline.json. It builds the type checker's program
+    # over tsconfig.typecheck.json (the one the step above checks, ~3 s, no build
+    # needed) and loads the engine policies from source with esbuild. Growth fails
+    # and names the new items; a reduction fails until the baseline is
+    # re-recorded in the same PR; a move passes with a notice. Run for every
+    # author: a toolchain bump that moved a count needs a human re-record.
+    - name: Check structure ratchet
+      run: pnpm run structure:check
+
     - name: Check for personal information
       run: pnpm run check:all-personal-paths
 

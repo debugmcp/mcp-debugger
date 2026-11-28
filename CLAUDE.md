@@ -133,9 +133,10 @@ npm run lint
 # Fix linting issues automatically
 npm run lint:fix
 
-# Structure ratchet against tests/structure-baseline.json (CI's Lint job runs it)
+# Structure ratchet against tests/structure-baseline.json (~3 s; CI runs it after the type-check)
 npm run structure:check
-npm run structure:update        # re-record the baseline (see the note below)
+npm run structure:update        # re-record a reduction or a move (see the note below)
+npm run structure:update -- --accept-growth "<why>"  # accept growth, with its reason
 npm run structure:check -- --list  # print every counted item
 
 # Check for personal paths (pre-commit hook)
@@ -173,21 +174,23 @@ wrong shape, a negative or non-integer count, a path outside the test trees), it
 and tells you to **delete the file first**: `--update` reads the baseline before writing
 one, so a corrupt file blocks its own repair.
 
-The structure ratchet (`scripts/check-structure.mjs`; its header and each rule's comment
-say exactly what is counted) reads the syntax tree of `src/` and `packages/shared/src/` and
-counts five measures: session-state writers, the direct writes among them that skip
-`_updateSessionState`, `AdapterPolicy` members, the members only one engine's policy uses,
-and language branches outside the policy files. Comments, strings and reformatting never
-move a count. It fails in both directions:
+The structure ratchet (`scripts/check-structure.mjs`) counts five measures:
+- session-state writers;
+- the direct writes among them that skip `_updateSessionState`;
+- `AdapterPolicy` members;
+- the members only one engine's policy uses;
+- language branches outside the policy files.
 
-- **A count went UP.** It names the new items and says what to do instead. Re-recording is
-  the exception: only when the item is unavoidable, or the change only moved or renamed
-  one, and say so in the PR.
-- **A count went DOWN.** That is progress. Run `npm run structure:update` and commit
-  `tests/structure-baseline.json` in the same PR.
+It asks rather than pattern-matches. Its header and each rule's comment say exactly what is counted:
+- The writer and branch rules read the type checker over `tsconfig.typecheck.json`. A write is a write to the session's own `state` symbol, and a branch is one whose operand is typed as a language.
+- Who uses a contract member is read from the engines' real policy objects, loaded from source with esbuild.
 
-It exits 2 rather than guess, for example on a corrupt baseline or a policy getter it cannot
-read. `--update` never reads the baseline, so it repairs a corrupt one.
+Comments, formatting, and moving code between files never change an item. Each check reports one of four results:
+
+- **Growth** fails, and is the only result called debt. It names the new items and says what to do instead. `structure:update` refuses growth. Only `--accept-growth "<why>"` records it, writing each accepted item and the reason into the baseline so the PR's diff shows both. Use it only when the growth is unavoidable.
+- **A reduction** fails as progress: run `npm run structure:update` and commit `tests/structure-baseline.json` in the same PR.
+- **A move or rename with an unchanged total** passes with a notice that nothing grew. Re-record to keep the item lists current.
+- **An analysis that cannot be done** exits 2: a source that does not parse or type-check, a policy that cannot be loaded, an anchor type that has moved. A corrupt baseline is also refused: restore it from main, since `--update` needs the old counts to know what grew.
 
 ### Docker
 

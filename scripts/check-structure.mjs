@@ -4,34 +4,44 @@
  * A review on 2026-11-24 counted how this codebase's structure had moved over two months, and
  * every count had gone the wrong way while each change, read alone, looked careful: more
  * places that write session state, more members in the adapter contract, more of them
- * serving a single engine, more `if language is X` in the core. A fix that adds one more of
- * these is a cone beside a pothole. This script counts them, so a pull request that adds one
- * has to say so instead of slipping it in.
+ * serving a single engine, more `if language is X` in the core. This script counts them, so a
+ * pull request that adds one has to say so instead of slipping it in.
  *
- * The measures (each rule is spelled out where it is implemented below):
+ * It asks rather than pattern-matches:
  *
- *   session-state writers       calls that set a session's state, and the raw writes
- *   direct session-state writes the subset that bypasses `_updateSessionState`, so skips its
- *                               PAUSED-needs-lastStop invariant and its state listeners
- *   AdapterPolicy members       the contract every adapter is written against
- *   one-adapter members         members exactly one engine's policy uses
- *   language branches           comparisons with, and `case`s on, a specific language
- *                               outside the policy files
+ *   - The static measures come from the TypeScript checker, over the program
+ *     `tsconfig.typecheck.json` already type-checks: a write is a write to the session's own
+ *     `state` property symbol, a call to the gate is a call whose resolved signature is the
+ *     gate's, a language branch is one whose operand is typed as a language.
+ *   - Which engine uses which contract member is read from the engines' real policy objects,
+ *     loaded from source (esbuild, in memory) through the policy registry, with the
+ *     descriptor getters called.
  *
- * Everything is read from the TypeScript syntax tree, so reformatting code or editing a
- * comment, a string or a template literal never changes a count.
+ * Measures (each rule is spelled out where it is implemented):
  *
- * Like the test-typing ratchet (`typecheck-tests-ratchet.mjs`), it fails in both directions:
- * a count that went up names the new items and says what to do instead; a count that went
- * down is progress, but fails until the baseline is re-recorded in the same pull request, so
- * the recorded numbers stay true and only ever move down.
+ *   session-state writers        places that decide a session's next state
+ *   direct session-state writes  the subset that bypasses `_updateSessionState`
+ *   AdapterPolicy members        the contract every adapter is written against
+ *   one-adapter members          members exactly one engine's policy uses
+ *   language branches            branches on a specific language outside the policy files
+ *
+ * A check reports one of four things per measure, and only the first is called debt:
+ *   growth     the count went up: exit 1, names the new items. `--update` refuses it; it is
+ *              recorded only with `--update --accept-growth "<reason>"`, which writes each
+ *              accepted item and the reason into the baseline, so the diff shows both.
+ *   reduction  the count went down: exit 1 until `--update` re-records it (progress).
+ *   change     same count, different items (a move or a rename): passes, with a notice;
+ *              `--update` re-records it.
+ *   (exit 2)   the analysis could not be done: a source that does not parse or type-check,
+ *              a policy that could not be loaded, an anchor type that could not be resolved.
  *
  * Modes:
- *   (default)  compare the tree with tests/structure-baseline.json.
- *   --update   rewrite the baseline from the tree.
- *   --list     print every counted item, then compare as usual.
+ *   (default)                      compare the tree with tests/structure-baseline.json
+ *   --update [--accept-growth why] re-record reductions and changes; growth only with a reason
+ *   --init                         write a first baseline (refused when one exists)
+ *   --list                         print every counted item, then compare as usual
  *
- * Exit codes: 0 clean, 1 ratchet failure, 2 the check could not be run.
+ * Exit codes: 0 clean (notices allowed), 1 growth or reduction, 2 the check could not be run.
  */
 import fs from 'fs';
 import path from 'path';
@@ -39,121 +49,95 @@ import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { isMain } from './lib/is-main.mjs';
 
-/** Recorded counts, relative to the repo root (beside the test-typing baseline). */
+/** Recorded counts and items, relative to the repo root (beside the test-typing baseline). */
 export const BASELINE_FILE = 'tests/structure-baseline.json';
 
+/** The program the analysis reads: the one `npm run typecheck` already checks. */
+export const CONFIG_FILE = 'tsconfig.typecheck.json';
+
 const UPDATE_COMMAND = 'pnpm run structure:update';
+const ACCEPT_COMMAND = `${UPDATE_COMMAND} -- --accept-growth "<why the structure must grow>"`;
+const RESTORE_BASELINE =
+  `--update needs the recorded counts to know what grew, so it cannot repair a broken baseline. ` +
+  `Restore it and re-run: git checkout origin/main -- ${BASELINE_FILE}`;
 
-/** Why a broken baseline blocks nothing: `--update` never reads it. */
-const REPAIR_BASELINE = `Re-record it with: ${UPDATE_COMMAND}`;
-
-/**
- * The core: the server's own sources and the shared package. The language packages
- * (`packages/adapter-*`, `packages/codelldb-common`) are each one engine's code, so a
- * branch on their own runtime there is the point of them, and none of them writes session
- * state.
- */
+/** The core: the server's own sources and the shared package. */
 const SOURCE_ROOTS = ['src', 'packages/shared/src'];
 
 /**
- * The policy files: one per engine, the language-to-policy map, and the module the three
- * LLDB policies share. They are where engine differences are meant to live, so a language
- * branch in them is not counted.
+ * The policy files: one per engine, the language-to-policy registry, and the module the three
+ * LLDB policies share. Engine differences are meant to live there, so a language branch in
+ * them is not counted.
  */
 const POLICY_FILE = /^packages\/shared\/src\/interfaces\/(adapter-policy-[^/]+|[^/]+-policy-shared)\.ts$/;
 
-/**
- * The engines whose policies count as users of a contract member. The mock adapter's policy
- * is the test infrastructure's stand-in, not an engine: a member it shares with one engine
- * is still that engine's quirk.
- */
-const ENGINE_POLICY_FILE = /^packages\/shared\/src\/interfaces\/adapter-policy-(?!mock\.ts$)[^/]+\.ts$/;
+/** Where the anchors are exported from. Each is resolved through the checker, never by text. */
+const SHARED_INDEX = 'packages/shared/src/index.ts';
+const SESSION_STORE = 'src/session/session-store.ts';
+const SESSION_CORE = 'src/session/session-manager-core.ts';
 
-/** The one function that moves a session between states with its invariant and listeners. */
-const STATE_GATE = '_updateSessionState';
-
-/** Names a writer call goes by: the gate, and `updateState` (its context alias, the store). */
-const WRITER_CALLS = new Set([STATE_GATE, 'updateState']);
-
-/** Partial updates that `Object.assign` into a session: a `state` in them is a raw write. */
-const PARTIAL_UPDATES = new Set(['update', 'updateSession']);
-
-/** The session store's own setter, reached as `<…>.sessionStore.updateState(…)`: raw. */
-const RAW_STORE = 'sessionStore';
-
-/** How much of an item's source text to quote in a message. */
-const SNIPPET_LENGTH = 100;
+/** The one method that moves a session between states with its invariant and listeners. */
+const GATE = '_updateSessionState';
 
 /**
- * The measures, in report order. `kind` is how the baseline records each: `files` maps a
- * repo-relative path to its count, `names` lists member names, `owners` maps a member to the
- * one policy that uses it.
+ * The mock adapter's language. Its policy is the test infrastructure's stand-in, not an
+ * engine: a member it shares with one engine is still that engine's quirk.
  */
+const TEST_DOUBLE_LANGUAGE = 'mock';
+
+/** Longest source text an item quotes. */
+const SNIPPET_LENGTH = 160;
+
 export const MEASURES = [
   {
     id: 'sessionStateWriters',
     label: 'session-state writers',
-    kind: 'files',
     advice:
-      'A new place that sets session state is one more path through the state machine that the ' +
-      'others do not know about. Reach the state through an existing transition (or the event ' +
-      'that already drives it); if a new transition is genuinely needed, say why in the pull ' +
-      'request and re-record.'
+      'A new place that decides a session\'s state is one more path through the state machine that ' +
+      'the others do not know about. Reach the state through an existing transition, or the event ' +
+      'that already drives it.'
   },
   {
     id: 'directStateWrites',
     label: 'direct session-state writes',
-    kind: 'files',
     advice:
-      `A direct write skips ${STATE_GATE}'s invariant (no PAUSED without lastStop) and its ` +
-      `listeners, so waiters and subscribers never hear of the change. Call ${STATE_GATE} ` +
-      '(ctx.updateState from a collaborator) instead.'
+      `A direct write skips ${GATE}'s invariant (no PAUSED without lastStop) and its listeners, so ` +
+      `waiters and subscribers never hear of the change. Call ${GATE} (ctx.updateState from a ` +
+      'collaborator) instead.'
   },
   {
     id: 'policyMembers',
     label: 'AdapterPolicy members',
-    kind: 'names',
     advice:
       'A new member widens the contract every adapter is written against. Express the behaviour ' +
-      'through an existing member if one fits; otherwise say in the pull request why the ' +
-      'contract must grow, and re-record.'
+      'through an existing member if one fits.'
   },
   {
     id: 'oneAdapterMembers',
     label: 'AdapterPolicy members used by one adapter',
-    kind: 'owners',
     advice:
       "A member that only one engine's policy uses is that engine's quirk entering the core's " +
-      'contract. Express it through an existing member, or keep it inside the adapter; if the ' +
-      'contract really must grow, say why in the pull request and re-record.'
+      'contract. Express it through an existing member, or keep it inside the adapter.'
   },
   {
     id: 'languageBranches',
     label: 'language branches outside the policy files',
-    kind: 'files',
     advice:
-      'A branch on one language outside the policy files puts engine knowledge in the core. ' +
-      "Move the difference into that adapter's policy and keep the core language-blind; if the " +
-      'branch must stay, say why in the pull request and re-record.'
+      'A branch on one language outside the policy files puts engine knowledge in the core. Move ' +
+      "the difference into that adapter's policy and keep the core language-blind."
   }
 ];
 
-/** A check that cannot be run: reported with exit code 2, never as a ratchet failure. */
+/** A check that cannot be run: reported with exit code 2, never as a ratchet result. */
 export class StructureError extends Error {}
 
 // ---------------------------------------------------------------------------
-// Sources
+// Scope
 // ---------------------------------------------------------------------------
 
 /**
- * Is this repo-relative, forward-slash path a source file the measures read?
- *
- * Only hand-written TypeScript: `.d.ts` and compiled `.js` can sit beside the sources in a
- * working tree (see .gitignore), and would count every item twice. Test files and anything
- * under `dist/` or `node_modules/` are not shipped source.
- *
- * @param {string} file
- * @returns {boolean}
+ * Is this repo-relative, forward-slash path a core source the measures read? Hand-written
+ * TypeScript under the source roots; tests and generated files are not shipped source.
  */
 export function isSourcePath(file) {
   if (!SOURCE_ROOTS.some(root => file.startsWith(`${root}/`))) return false;
@@ -167,47 +151,18 @@ export function isPolicyFile(file) {
   return POLICY_FILE.test(file);
 }
 
-/**
- * Read every source file under the source roots.
- *
- * @param {string} root repo root
- * @returns {{ path: string, text: string }[]} sorted by path
- */
-export function collectSources(root) {
-  const files = [];
-  const walk = relative => {
-    const absolute = path.join(root, relative);
-    let entries;
-    try {
-      entries = fs.readdirSync(absolute, { withFileTypes: true });
-    } catch (error) {
-      if (error && error.code === 'ENOENT') return;
-      throw error;
-    }
-    for (const entry of entries) {
-      const child = `${relative}/${entry.name}`;
-      if (entry.isDirectory()) {
-        if (entry.name !== 'node_modules' && entry.name !== 'dist') walk(child);
-      } else if (entry.isFile() && isSourcePath(child)) {
-        files.push({ path: child, text: fs.readFileSync(path.join(root, child), 'utf-8') });
-      }
-    }
-  };
-  for (const sourceRoot of SOURCE_ROOTS) walk(sourceRoot);
-  return files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-}
-
 // ---------------------------------------------------------------------------
-// Syntax helpers
+// The program
 // ---------------------------------------------------------------------------
 
+const require = createRequire(import.meta.url);
 let typescript;
 
-/** The TypeScript compiler API, resolved from the repo's own devDependency. */
-function ts() {
+/** The TypeScript compiler API, from the repo's own devDependency. */
+function tsApi() {
   if (!typescript) {
     try {
-      typescript = createRequire(import.meta.url)('typescript');
+      typescript = require('typescript');
     } catch (error) {
       throw new StructureError(`Cannot load typescript -- run 'pnpm install' first.\n${describe(error)}`);
     }
@@ -215,600 +170,878 @@ function ts() {
   return typescript;
 }
 
-function parse(file) {
-  const t = ts();
-  return t.createSourceFile(file.path, file.text, t.ScriptTarget.Latest, true, t.ScriptKind.TS);
+/**
+ * Parsed lib files, shared between programs in one process (the unit tests build many). A
+ * parsed and bound lib file does not depend on the program that loaded it, which is how the
+ * language service's document registry shares them too.
+ */
+const libCache = new Map();
+
+function formatDiagnostics(ts, diagnostics, root, limit = 10) {
+  const lines = diagnostics.slice(0, limit).map(d => {
+    const text = ts.flattenDiagnosticMessageText(d.messageText, ' ');
+    if (!d.file || d.start === undefined) return `  ${text}`;
+    const { line } = d.file.getLineAndCharacterOfPosition(d.start);
+    return `  ${relative(root, d.file.fileName)}:${line + 1}  ${text}`;
+  });
+  if (diagnostics.length > limit) lines.push(`  ... and ${diagnostics.length - limit} more`);
+  return lines.join('\n');
 }
 
-/** Strip the wrappers that do not change what an expression evaluates to. */
-function unwrap(node) {
-  const t = ts();
+function relative(root, fileName) {
+  return path.relative(root, fileName).split(path.sep).join('/').replace(/\\/g, '/');
+}
+
+/**
+ * The checker's program over `tsconfig.typecheck.json`, refused when the files the analysis
+ * reads do not parse or do not type-check: every rule below reads types, and on a program tsc
+ * rejects they would be guesses.
+ */
+function createAnalysisProgram(root) {
+  const ts = tsApi();
+  const configPath = path.join(root, CONFIG_FILE);
+  if (!fs.existsSync(configPath)) throw new StructureError(`Missing ${CONFIG_FILE}: the analysis reads that program.`);
+
+  const configErrors = [];
+  const parsed = ts.getParsedCommandLineOfConfigFile(configPath, {}, {
+    ...ts.sys,
+    onUnRecoverableConfigFileDiagnostic: diagnostic => configErrors.push(diagnostic)
+  });
+  if (!parsed || configErrors.length > 0 || parsed.errors.length > 0) {
+    throw new StructureError(`${CONFIG_FILE} could not be read:\n${formatDiagnostics(ts, [...configErrors, ...(parsed?.errors ?? [])], root)}`);
+  }
+
+  const host = ts.createCompilerHost(parsed.options, true);
+  const libDir = path.dirname(require.resolve('typescript')).split(path.sep).join('/');
+  const readSourceFile = host.getSourceFile.bind(host);
+  host.getSourceFile = (fileName, languageVersion, onError, shouldCreate) => {
+    const normalized = fileName.split(path.sep).join('/');
+    if (!normalized.startsWith(`${libDir}/`)) return readSourceFile(fileName, languageVersion, onError, shouldCreate);
+    const key = `${normalized}|${JSON.stringify(languageVersion)}`;
+    if (!libCache.has(key)) libCache.set(key, readSourceFile(fileName, languageVersion, onError, shouldCreate));
+    return libCache.get(key);
+  };
+
+  const program = ts.createProgram({ rootNames: parsed.fileNames, options: parsed.options, host });
+  const files = new Map();
+  for (const sf of program.getSourceFiles()) files.set(relative(root, sf.fileName), sf);
+  const scope = [...files.entries()].filter(([file]) => isSourcePath(file)).map(([, sf]) => sf);
+
+  const syntax = scope.flatMap(sf => program.getSyntacticDiagnostics(sf));
+  if (syntax.length > 0) {
+    throw new StructureError(`A source does not parse, so nothing in it can be counted:\n${formatDiagnostics(ts, syntax, root)}`);
+  }
+  const semantic = [
+    ...program.getOptionsDiagnostics(),
+    ...program.getGlobalDiagnostics(),
+    ...scope.flatMap(sf => program.getSemanticDiagnostics(sf))
+  ];
+  if (semantic.length > 0) {
+    throw new StructureError(
+      `The analysis reads the type checker, and it reports errors in the files the analysis reads. ` +
+      `Fix them first (pnpm run typecheck):\n${formatDiagnostics(ts, semantic, root)}`
+    );
+  }
+  return { ts, program, checker: program.getTypeChecker(), root, files, scope };
+}
+
+// ---------------------------------------------------------------------------
+// Anchors: the types and declarations the rules are about
+// ---------------------------------------------------------------------------
+
+function moduleExport(an, file, name, why) {
+  const { ts, checker } = an;
+  const sf = an.files.get(file);
+  const moduleSymbol = sf && checker.getSymbolAtLocation(sf);
+  const found = moduleSymbol && checker.getExportsOfModule(moduleSymbol).find(symbol => symbol.name === name);
+  if (!found) {
+    throw new StructureError(
+      `${file} does not export '${name}', which ${why}. If it moved or was renamed, update the ` +
+      'anchor in scripts/check-structure.mjs.'
+    );
+  }
+  return found.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(found) : found;
+}
+
+function findAnchors(an) {
+  const { ts, checker } = an;
+
+  const managed = moduleExport(an, SESSION_STORE, 'ManagedSession', 'the session-state rules read');
+  const stateProperty = checker.getPropertyOfType(checker.getDeclaredTypeOfSymbol(managed), 'state');
+  if (!stateProperty?.declarations?.length) throw new StructureError("ManagedSession has no 'state' property to follow.");
+
+  const sessionStateEnum = checker.getDeclaredTypeOfSymbol(moduleExport(an, SHARED_INDEX, 'SessionState', 'the gate takes'));
+  const languageSymbol = moduleExport(an, SHARED_INDEX, 'DebugLanguage', 'the language rules read');
+  const languageEnum = checker.getDeclaredTypeOfSymbol(languageSymbol);
+  const policySymbol = moduleExport(an, SHARED_INDEX, 'AdapterPolicy', 'the contract measures read');
+  const registrySymbol = moduleExport(an, SHARED_INDEX, 'getPolicyForLanguage', 'the engines are loaded through');
+
+  const core = moduleExport(an, SESSION_CORE, 'SessionManagerCore', 'declares the state gate');
+  const gateSymbol = checker.getPropertyOfType(checker.getDeclaredTypeOfSymbol(core), GATE);
+  const gate = gateSymbol?.declarations?.find(decl => ts.isMethodDeclaration(decl) && decl.body);
+  if (!gate) {
+    throw new StructureError(`SessionManagerCore has no method ${GATE}; the writer rules count calls to it.`);
+  }
+  const sessionStateMembers = new Set(sessionStateEnum.isUnion() ? sessionStateEnum.types : [sessionStateEnum]);
+  const gateStateIndex = gate.parameters.findIndex(param => sessionStateMembers.has(checker.getTypeAtLocation(param)) ||
+    checker.getTypeAtLocation(param) === sessionStateEnum);
+  if (gateStateIndex < 0) throw new StructureError(`${GATE} has no parameter typed SessionState.`);
+
+  const policyType = checker.getDeclaredTypeOfSymbol(policySymbol);
+  const nameProperty = checker.getPropertyOfType(policyType, 'name');
+  const languageMembers = languageEnum.isUnion() ? languageEnum.types : [languageEnum];
+
+  return {
+    stateDecls: new Set(stateProperty.declarations),
+    sessionStateEnum,
+    sessionStateMembers,
+    gate,
+    gateStateIndex,
+    policyType,
+    policyNameDecls: new Set(nameProperty?.declarations ?? []),
+    languageEnum,
+    languageMembers: new Set(languageMembers),
+    languageValues: languageMembers.map(member => member.value).filter(value => typeof value === 'string'),
+    registryFile: registrySymbol.valueDeclaration?.getSourceFile().fileName,
+    languageFile: languageSymbol.valueDeclaration?.getSourceFile().fileName
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Shared syntax helpers
+// ---------------------------------------------------------------------------
+
+function unwrap(ts, node) {
   while (
-    t.isParenthesizedExpression(node) || t.isAsExpression(node) || t.isSatisfiesExpression(node) ||
-    t.isNonNullExpression(node) || t.isTypeAssertionExpression(node)
+    node && (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node) ||
+      ts.isNonNullExpression(node) || ts.isTypeAssertionExpression(node))
   ) {
     node = node.expression;
   }
   return node;
 }
 
-/** A property or member name as written, or undefined for a computed one. */
-function nameOf(name) {
-  const t = ts();
+function nameText(ts, name) {
   if (!name) return undefined;
-  if (t.isIdentifier(name) || t.isPrivateIdentifier(name)) return name.text;
-  if (t.isStringLiteral(name) || t.isNoSubstitutionTemplateLiteral(name) || t.isNumericLiteral(name)) return name.text;
+  if (ts.isIdentifier(name) || ts.isPrivateIdentifier(name) || ts.isStringLiteral(name) ||
+    ts.isNoSubstitutionTemplateLiteral(name) || ts.isNumericLiteral(name)) return name.text;
   return undefined;
 }
 
-/** The name a call goes by: `f(…)` → f, `a.b.f(…)` → f. */
-function calleeName(call) {
-  const t = ts();
-  const callee = unwrap(call.expression);
-  if (t.isIdentifier(callee)) return callee.text;
-  if (t.isPropertyAccessExpression(callee)) return callee.name.text;
-  return undefined;
-}
-
-/** The name a function-like node is known by: its own, or the binding it is assigned to. */
-function functionName(node) {
-  const t = ts();
-  if (node.name && nameOf(node.name)) return nameOf(node.name);
+/** The name a function-like node goes by: its own, or the binding it is assigned to. */
+function functionName(ts, node) {
+  const own = nameText(ts, node.name);
+  if (own) return own;
   const parent = node.parent;
-  if (parent && (t.isPropertyAssignment(parent) || t.isVariableDeclaration(parent) || t.isPropertyDeclaration(parent))) {
-    return nameOf(parent.name);
+  if (parent && (ts.isPropertyAssignment(parent) || ts.isVariableDeclaration(parent) || ts.isPropertyDeclaration(parent))) {
+    return nameText(ts, parent.name);
   }
   return undefined;
 }
 
-/** Every function-like ancestor's name, innermost first. */
-function enclosingFunctionNames(node) {
-  const t = ts();
-  const names = [];
-  for (let current = node.parent; current; current = current.parent) {
-    if (t.isFunctionLike(current)) {
-      const name = functionName(current);
-      if (name) names.push(name);
-    }
-  }
-  return names;
-}
-
-/** `Class.method`, `function`, or `(top level)`: where an item sits, for a message. */
-function whereIs(node) {
-  const t = ts();
+/** `Class.method`, `function`, or `(top level)`. */
+function whereIs(ts, node) {
   let fn;
-  let cls;
   for (let current = node.parent; current; current = current.parent) {
-    if (!fn && t.isFunctionLike(current) && functionName(current)) fn = functionName(current);
-    if (t.isClassLike(current) && current.name) {
-      cls = current.name.text;
-      break;
-    }
+    if (!fn && ts.isFunctionLike(current) && functionName(ts, current)) fn = functionName(ts, current);
+    if (ts.isClassLike(current) && current.name) return fn ? `${current.name.text}.${fn}` : current.name.text;
   }
-  if (cls) return fn ? `${cls}.${fn}` : cls;
   return fn ?? '(top level)';
 }
 
-/**
- * A located item: what the gate prints when a count goes up. `group` is the key the
- * baseline counts it under inside its file: the enclosing function, unless `extra`
- * narrows it.
- */
-function item(sourceFile, node, extra = {}) {
-  const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
-  const text = node.getText(sourceFile).replace(/\s+/g, ' ');
-  const where = whereIs(node);
+function innermostFunction(ts, node) {
+  for (let current = node.parent; current; current = current.parent) {
+    if (ts.isFunctionLike(current) && current.body) return current;
+  }
+  return undefined;
+}
+
+let printer;
+
+/** A node's source, comments dropped and whitespace collapsed: the same for any formatting. */
+function printed(ts, node) {
+  printer ??= ts.createPrinter({ removeComments: true, newLine: ts.NewLineKind.LineFeed });
+  const text = printer.printNode(ts.EmitHint.Unspecified, node, node.getSourceFile()).replace(/\s+/g, ' ').trim();
+  return text.length > SNIPPET_LENGTH ? `${text.slice(0, SNIPPET_LENGTH - 3)}...` : text;
+}
+
+/** A located item: what the gate prints, keyed without file or line so a move never changes it. */
+function item(an, node, extra = {}, textNode = node) {
+  const { ts } = an;
+  const sf = node.getSourceFile();
+  const where = whereIs(ts, node);
+  const text = extra.text ?? printed(ts, textNode);
   return {
-    file: sourceFile.fileName,
-    line: line + 1,
+    file: relative(an.root, sf.fileName),
+    line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
     where,
-    group: where,
-    text: text.length > SNIPPET_LENGTH ? `${text.slice(0, SNIPPET_LENGTH - 3)}...` : text,
-    ...extra
+    ...extra,
+    text,
+    key: `${where} :: ${text}`
   };
 }
 
-/** Does this expression mention a `SessionState.<MEMBER>` anywhere inside it? */
-function namesSessionState(node) {
-  const t = ts();
-  let found = false;
-  const visit = child => {
-    if (found) return;
-    if (t.isPropertyAccessExpression(child) && t.isIdentifier(child.expression) && child.expression.text === 'SessionState') {
-      found = true;
-      return;
-    }
-    child.forEachChild(visit);
-  };
-  visit(node);
-  return found;
+function isAssignmentOperator(ts, kind) {
+  return kind >= ts.SyntaxKind.FirstAssignment && kind <= ts.SyntaxKind.LastAssignment;
+}
+
+/** Is this expression on the receiving side of an assignment (directly or in a pattern)? */
+function isAssignmentTarget(ts, node) {
+  let child = node;
+  for (let parent = node.parent; parent; child = parent, parent = parent.parent) {
+    if (ts.isParenthesizedExpression(parent) || ts.isArrayLiteralExpression(parent) || ts.isSpreadElement(parent) ||
+      ts.isSpreadAssignment(parent) || ts.isShorthandPropertyAssignment(parent)) continue;
+    if (ts.isPropertyAssignment(parent) && parent.initializer === child) continue;
+    if (ts.isObjectLiteralExpression(parent)) continue;
+    if (ts.isBinaryExpression(parent)) return isAssignmentOperator(ts, parent.operatorToken.kind) && parent.left === child;
+    if (ts.isForOfStatement(parent) || ts.isForInStatement(parent)) return parent.initializer === child;
+    return false;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
-// Measure 1 and 2: session-state writers, and the direct writes among them
+// Measures 1 and 2: session-state writers, and the direct ones among them
 // ---------------------------------------------------------------------------
 
 /**
- * Every place in the core that writes a session's state.
+ * Every place that decides a session's next state.
  *
- * A writer is any one of:
- *   - a call to `_updateSessionState(…)` or `updateState(…)` — the gate, the operations
- *     context's alias for it, and the session store's raw setter;
- *   - an assignment to a `state` property whose receiver is not `this` (another object's
- *     state: `session.state = …`) or whose value names a `SessionState` member;
- *   - an object literal with a `state` property passed to `update(…)` or `updateSession(…)`,
- *     the partial updates that `Object.assign` into the session.
+ * A write site is any of:
+ *   - a call whose resolved signature is the gate (`_updateSessionState`) or a setter (below),
+ *     however the callee was reached: `this.ctx.updateState`, a destructured alias, a `Pick<>`;
+ *   - a write to the `state` property symbol `ManagedSession` carries (declared on
+ *     `DebugSessionInfo`): an assignment, an element access `session['state']`, a destructuring
+ *     target; a `state` on any other type is a different symbol and is never counted;
+ *   - an object literal that sets `state` where the literal is typed as a partial session (the
+ *     property is optional there, as in `Partial<ManagedSession>`): it is merged into an existing
+ *     session. A literal where `state` is required constructs a session or a snapshot, and is
+ *     not a write;
+ *   - an `Object.assign` whose target is a session and whose source literal sets `state`.
  *
- * Excluded: anything inside a function, method or property named `_updateSessionState` or
- * `updateState`. Those are the writer's own implementation (the gate's call to the store, the
- * alias that forwards to the gate, the store's own assignment), not one more writer.
+ * A site that passes its own function's parameter straight through is not a decision: it makes
+ * that function a setter, and the setter's callers are the write sites. That is how the
+ * plumbing drops out without naming it: the store's `session.state = newState`, the gate's call
+ * to the store, the operations context's `updateState: (s, n) => this._updateSessionState(s, n)`.
+ * A setter implementing an interface member (the context's `updateState`) is reached through
+ * calls to that member.
  *
- * A writer is direct when it does not go through the gate: the assignments, the partial
- * updates, and calls to the store's setter (`sessionStore.updateState(…)`).
- *
- * @param {{ path: string, text: string }[]} sources
- * @returns {{ writers: object[], direct: object[] }}
+ * A site is direct when it does not go through the gate: a raw write, or a call to a setter
+ * that ends in one (the store's `updateState`).
  */
-export function findStateWriters(sources) {
-  const t = ts();
-  const writers = [];
-  let gateDefined = false;
+function findStateWriters(an, anchors) {
+  const { ts, checker } = an;
+  const writerDecls = new Map([[anchors.gate, { index: anchors.gateStateIndex, gated: true }]]);
 
-  for (const source of sources) {
-    const sf = parse(source);
-    const visit = node => {
-      if (t.isMethodDeclaration(node) && nameOf(node.name) === STATE_GATE && node.body) gateDefined = true;
+  const refersToState = expression => {
+    const node = unwrap(ts, expression);
+    let symbol;
+    if (ts.isPropertyAccessExpression(node)) symbol = checker.getSymbolAtLocation(node.name);
+    else if (ts.isElementAccessExpression(node)) symbol = checker.getSymbolAtLocation(node.argumentExpression);
+    else return false;
+    return Boolean(symbol?.declarations?.some(decl => anchors.stateDecls.has(decl)));
+  };
 
-      const insideWriter = () => enclosingFunctionNames(node).some(name => WRITER_CALLS.has(name));
-
-      if (t.isCallExpression(node)) {
-        const callee = calleeName(node);
-        if (WRITER_CALLS.has(callee) && !insideWriter()) {
-          const receiver = t.isPropertyAccessExpression(unwrap(node.expression))
-            ? unwrap(unwrap(node.expression).expression)
-            : undefined;
-          const raw = callee === 'updateState' && receiver !== undefined &&
-            ((t.isPropertyAccessExpression(receiver) && receiver.name.text === RAW_STORE) ||
-              (t.isIdentifier(receiver) && receiver.text === RAW_STORE));
-          writers.push(item(sf, node, { direct: raw, form: raw ? 'store setter' : 'call' }));
-        } else if (PARTIAL_UPDATES.has(callee) && !insideWriter()) {
-          const carriesState = node.arguments.some(argument => {
-            const value = unwrap(argument);
-            return t.isObjectLiteralExpression(value) && value.properties.some(property =>
-              (t.isPropertyAssignment(property) || t.isShorthandPropertyAssignment(property)) &&
-              nameOf(property.name) === 'state');
-          });
-          if (carriesState) writers.push(item(sf, node, { direct: true, form: 'partial update' }));
-        }
+  const stateTargetsIn = (pattern, found = []) => {
+    const node = unwrap(ts, pattern);
+    if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+      if (refersToState(node)) found.push(node);
+    } else if (ts.isObjectLiteralExpression(node)) {
+      for (const property of node.properties) {
+        if (ts.isPropertyAssignment(property)) stateTargetsIn(property.initializer, found);
+        else if (ts.isSpreadAssignment(property)) stateTargetsIn(property.expression, found);
       }
+    } else if (ts.isArrayLiteralExpression(node)) {
+      for (const element of node.elements) stateTargetsIn(ts.isSpreadElement(element) ? element.expression : element, found);
+    } else if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      stateTargetsIn(node.left, found);
+    }
+    return found;
+  };
 
-      if (
-        t.isBinaryExpression(node) &&
-        node.operatorToken.kind === t.SyntaxKind.EqualsToken &&
-        t.isPropertyAccessExpression(unwrap(node.left)) &&
-        unwrap(node.left).name.text === 'state' &&
-        !insideWriter()
-      ) {
-        const receiver = unwrap(unwrap(node.left).expression);
-        if (receiver.kind !== t.SyntaxKind.ThisKeyword || namesSessionState(node.right)) {
-          writers.push(item(sf, node, { direct: true, form: 'assignment' }));
+  const literalStateProperty = literal => literal.properties.find(property =>
+    (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) && nameText(ts, property.name) === 'state');
+
+  const valueOf = property => ts.isShorthandPropertyAssignment(property) ? property.name : property.initializer;
+
+  /** Literals (this one and those spread into it) that set `state`. */
+  const stateLiterals = (expression, found = []) => {
+    const node = unwrap(ts, expression);
+    if (!ts.isObjectLiteralExpression(node)) return found;
+    const property = literalStateProperty(node);
+    if (property) found.push({ literal: node, property });
+    for (const spread of node.properties.filter(p => ts.isSpreadAssignment(p))) stateLiterals(spread.expression, found);
+    return found;
+  };
+
+  const isObjectAssign = (call, declaration) =>
+    declaration && ts.isMethodSignature(declaration) && nameText(ts, declaration.name) === 'assign' &&
+    ts.isInterfaceDeclaration(declaration.parent) && declaration.parent.name.text === 'ObjectConstructor';
+
+  const hasSessionState = expression => {
+    const type = checker.getTypeAtLocation(expression);
+    const property = checker.getPropertyOfType(checker.getApparentType(type), 'state');
+    return Boolean(property?.declarations?.some(decl => anchors.stateDecls.has(decl)));
+  };
+
+  /** The call (or property) a partial-update literal belongs to, for its message. */
+  const ownerOf = literal => {
+    for (let current = literal; current.parent; current = current.parent) {
+      if (ts.isCallExpression(current.parent) && current.parent.arguments.includes(current)) return current.parent;
+      if (!(ts.isObjectLiteralExpression(current.parent) || ts.isSpreadAssignment(current.parent) ||
+        ts.isParenthesizedExpression(current.parent) || ts.isAsExpression(current.parent) ||
+        ts.isSatisfiesExpression(current.parent) || ts.isPropertyAssignment(current.parent))) break;
+    }
+    return literal;
+  };
+
+  const collect = () => {
+    const sites = [];
+    const add = (node, kind, gated, value, textNode = node) => sites.push({ node, kind, gated, value, textNode });
+    for (const sf of an.scope) {
+      const visit = node => {
+        if (ts.isCallExpression(node)) {
+          const declaration = checker.getResolvedSignature(node)?.declaration;
+          const writer = declaration && writerDecls.get(declaration);
+          if (writer) {
+            add(node, 'call', writer.gated, node.arguments[writer.index]);
+            sites[sites.length - 1].callee = declaration;
+          }
+          else if (isObjectAssign(node, declaration) && node.arguments.length > 1 && hasSessionState(node.arguments[0])) {
+            for (const source of node.arguments.slice(1)) {
+              for (const { property } of stateLiterals(source)) add(node, 'Object.assign', false, valueOf(property));
+            }
+          }
+        } else if (ts.isBinaryExpression(node) && isAssignmentOperator(ts, node.operatorToken.kind)) {
+          const left = unwrap(ts, node.left);
+          if (ts.isPropertyAccessExpression(left) || ts.isElementAccessExpression(left)) {
+            if (refersToState(left)) {
+              add(node, 'assignment', false, node.operatorToken.kind === ts.SyntaxKind.EqualsToken ? node.right : undefined);
+            }
+          } else if (node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+            for (const target of stateTargetsIn(left)) add(target, 'destructuring', false, undefined, node);
+          }
+        } else if (ts.isObjectLiteralExpression(node) && !isAssignmentTarget(ts, node)) {
+          const property = literalStateProperty(node);
+          if (property) {
+            const contextual = checker.getContextualType(node);
+            const target = contextual && checker.getPropertyOfType(contextual, 'state');
+            if (target && target.flags & ts.SymbolFlags.Optional &&
+              target.declarations?.some(decl => anchors.stateDecls.has(decl))) {
+              add(node, 'partial update', false, valueOf(property), ownerOf(node));
+            }
+          }
         }
-      }
+        node.forEachChild(visit);
+      };
+      visit(sf);
+    }
+    return sites;
+  };
 
-      node.forEachChild(visit);
+  /** The function and parameter position a site passes straight through, if any. */
+  const forwarded = site => {
+    const value = unwrap(ts, site.value);
+    if (!value || !ts.isIdentifier(value)) return undefined;
+    const symbol = ts.isShorthandPropertyAssignment(value.parent) && value.parent.name === value
+      ? checker.getShorthandAssignmentValueSymbol(value.parent)
+      : checker.getSymbolAtLocation(value);
+    const declaration = symbol?.valueDeclaration;
+    const fn = innermostFunction(ts, site.node);
+    if (!declaration || !ts.isParameter(declaration) || declaration.parent !== fn) return undefined;
+    return { fn, index: fn.parameters.indexOf(declaration) };
+  };
+
+  /** The interface members a function implements, so calls through them reach it. */
+  const implemented = fn => {
+    const found = [];
+    const expand = declarations => {
+      for (const declaration of declarations ?? []) {
+        found.push(declaration);
+        if (ts.isPropertySignature(declaration) && declaration.type && ts.isFunctionTypeNode(declaration.type)) found.push(declaration.type);
+      }
     };
-    visit(sf);
+    const holder = ts.isMethodDeclaration(fn) ? fn : fn.parent;
+    const name = nameText(ts, holder.name);
+    if (name && (ts.isPropertyAssignment(holder) || ts.isMethodDeclaration(holder)) && ts.isObjectLiteralExpression(holder.parent)) {
+      const contextual = checker.getContextualType(holder.parent);
+      expand(contextual && checker.getPropertyOfType(contextual, name)?.declarations);
+    } else if (name && ts.isMethodDeclaration(fn) && ts.isClassLike(fn.parent)) {
+      for (const clause of fn.parent.heritageClauses ?? []) {
+        for (const heritage of clause.types) {
+          expand(checker.getPropertyOfType(checker.getTypeAtLocation(heritage), name)?.declarations);
+        }
+      }
+    }
+    return found.filter(declaration => declaration !== fn);
+  };
+
+  let sites;
+  for (let changed = true; changed;) {
+    changed = false;
+    sites = collect();
+    for (const site of sites) {
+      const pass = forwarded(site);
+      if (!pass) continue;
+      site.forwarding = pass.fn === anchors.gate ? 'gate' : [pass.fn, ...implemented(pass.fn)];
+      if (pass.fn === anchors.gate) continue;
+      for (const declaration of site.forwarding) {
+        if (!writerDecls.has(declaration)) {
+          writerDecls.set(declaration, { index: pass.index, gated: site.gated });
+          changed = true;
+        }
+      }
+    }
   }
 
-  if (!gateDefined) {
-    throw new StructureError(
-      `No method named ${STATE_GATE} was found under ${SOURCE_ROOTS.join(' and ')}. The ` +
-      `session-state rule counts calls to it, so a rename would make every writer invisible. ` +
-      `Update the rule in scripts/check-structure.mjs to the new name.`
-    );
+  // A setter stands in for its callers only if it has some: a forwarding site whose function
+  // no call in the core reaches (`states.forEach(s => this._updateSessionState(session, s))`,
+  // a `.then(state => ...)`, a helper nothing calls yet) is counted where it is. An
+  // implementation of an interface member (the operations context's `updateState`) is the
+  // entry itself, called or not.
+  const called = new Set(sites.filter(site => site.callee).map(site => site.callee));
+  for (const site of sites) {
+    if (!Array.isArray(site.forwarding)) continue;
+    const [fn, ...implementedMembers] = site.forwarding;
+    if (implementedMembers.length === 0 && !called.has(fn)) site.forwarding = undefined;
   }
+
+  const writers = sites.filter(site => !site.forwarding)
+    .map(site => item(an, site.node, { direct: !site.gated, form: site.kind }, site.textNode));
   return { writers, direct: writers.filter(writer => writer.direct) };
 }
 
 // ---------------------------------------------------------------------------
-// Measures 3 and 4: the AdapterPolicy contract, and who uses each member
+// Measures 3 and 4: the contract, and which engine uses which member
 // ---------------------------------------------------------------------------
 
-/** Index the shared package's top-level declarations, for resolving names. */
-function indexShared(parsed) {
-  const t = ts();
-  const types = new Map();
-  const values = new Map();
-  const add = (map, name, entry) => {
-    if (!map.has(name)) map.set(name, []);
-    map.get(name).push(entry);
-  };
-  for (const sf of parsed) {
-    if (!sf.fileName.startsWith('packages/shared/src/')) continue;
-    for (const statement of sf.statements) {
-      if (t.isInterfaceDeclaration(statement) || t.isTypeAliasDeclaration(statement)) {
-        add(types, statement.name.text, statement);
-      } else if (t.isFunctionDeclaration(statement) && statement.name) {
-        add(values, statement.name.text, statement);
-      } else if (t.isVariableStatement(statement)) {
-        for (const declaration of statement.declarationList.declarations) {
-          if (t.isIdentifier(declaration.name) && declaration.initializer) {
-            add(values, declaration.name.text, declaration.initializer);
-          }
-        }
-      }
-    }
-  }
-  return { types, values };
+function isBooleanType(ts, type) {
+  const parts = type.isUnion() ? type.types : [type];
+  return parts.length > 0 && parts.every(part => part.flags & ts.TypeFlags.BooleanLike);
 }
 
-/** The one declaration a name resolves to, preferring the file it is used in. */
-function resolveOne(map, name, fromFile, what) {
-  const candidates = map.get(name) ?? [];
-  const local = candidates.filter(node => node.getSourceFile().fileName === fromFile);
-  if (local.length === 1) return local[0];
-  if (candidates.length === 1) return candidates[0];
-  if (candidates.length > 1) {
-    throw new StructureError(`${what}: '${name}' is declared ${candidates.length} times in packages/shared/src.`);
-  }
-  return undefined;
-}
-
-/** Members of an interface or type-literal declaration, or undefined if it is neither. */
-function objectTypeMembers(node, index, fromFile) {
-  const t = ts();
-  if (t.isTypeLiteralNode(node)) return [...node.members];
-  if (t.isTypeReferenceNode(node) && t.isIdentifier(node.typeName) && !node.typeArguments) {
-    const declarations = index.types.get(node.typeName.text);
-    if (!declarations) return undefined;
-    const members = [];
-    for (const declaration of declarations) {
-      if (t.isInterfaceDeclaration(declaration)) {
-        if (declaration.heritageClauses?.length) return undefined;
-        members.push(...declaration.members);
-      } else if (t.isTypeAliasDeclaration(declaration)) {
-        const inner = objectTypeMembers(declaration.type, index, fromFile);
-        if (!inner) return undefined;
-        members.push(...inner);
-      }
-    }
-    return members;
-  }
-  return undefined;
+function isRecordType(ts, checker, type) {
+  const parts = type.isUnion() ? type.types : [type];
+  return parts.every(part => (part.flags & ts.TypeFlags.Object || part.flags & ts.TypeFlags.Intersection) &&
+    part.getCallSignatures().length === 0 && part.getConstructSignatures().length === 0 &&
+    !checker.getIndexInfoOfType(part, ts.IndexKind.Number));
 }
 
 /**
- * The contract: the members of `interface AdapterPolicy`, plus the members of each object
- * its descriptor getters return.
- *
- * A descriptor getter is a member that takes no parameters and returns an object type
- * every member of which is optional (`getInitializationBehavior()`, `getDapClientBehavior()`,
- * …). Each of those optional members is a switch an adapter sets or leaves out on its own,
- * exactly like an optional member of the interface, so each is a member of the contract,
- * named `getter().member`. A returned object with a required member is a value with a shape
- * (`getDapAdapterConfiguration(): { type }`), not a set of switches, and counts once, as the
- * method. Members of members (`exceptionFilters.uncaught`) are the shape of one switch's
- * value and are not counted again.
- *
- * @returns {{ members: string[], getters: Set<string> }}
+ * The contract: every property of the `AdapterPolicy` type (inherited ones included), plus
+ * every optional property of the object a descriptor getter returns, named `getter().field`.
+ * A descriptor getter is a member callable with no arguments that returns an object. Its
+ * optional properties are switches each engine sets or leaves out on its own, exactly like an
+ * optional member of the interface; its required properties are the value every implementer
+ * must give, counted once as the getter. Properties of a switch's value
+ * (`exceptionFilters.uncaught`) are that value's shape, not further switches.
  */
-function contractMembers(parsed, index) {
-  const t = ts();
-  const declarations = index.types.get('AdapterPolicy') ?? [];
-  const contract = declarations.filter(node => t.isInterfaceDeclaration(node));
-  if (contract.length !== 1) {
-    throw new StructureError(
-      `Expected one 'interface AdapterPolicy' in packages/shared/src, found ${contract.length}.`
-    );
-  }
-  const [decl] = contract;
-  if (decl.members.length === 0) {
-    throw new StructureError('interface AdapterPolicy has no members: the count would record an empty contract.');
-  }
-  if (decl.heritageClauses?.length) {
-    throw new StructureError(
-      'interface AdapterPolicy now extends another type; the member count cannot see inherited ' +
-      'members. Teach scripts/check-structure.mjs to follow the heritage clause.'
-    );
-  }
-  const fromFile = decl.getSourceFile().fileName;
-
+function contractMembers(an, anchors) {
+  const { ts, checker } = an;
+  const properties = checker.getPropertiesOfType(anchors.policyType);
+  if (properties.length === 0) throw new StructureError('The AdapterPolicy type has no members.');
   const members = [];
-  const getters = new Set();
-  for (const member of decl.members) {
-    const name = nameOf(member.name);
-    if (!name) {
-      throw new StructureError(`interface AdapterPolicy has a member without a plain name: ${member.getText()}`);
+  /** Every field (optional or not) of each descriptor's returned type, for the outside-keys report. */
+  members.descriptorFields = new Map();
+  for (const property of properties) {
+    const type = checker.getNonNullableType(checker.getTypeOfSymbol(property));
+    members.push({ key: property.name, name: property.name, decls: property.declarations ?? [], boolean: isBooleanType(ts, type) });
+    const signatures = type.getCallSignatures();
+    if (signatures.length !== 1) continue;
+    const [signature] = signatures;
+    if (signature.parameters.some(param => !param.valueDeclaration || !checker.isOptionalParameter(param.valueDeclaration))) continue;
+    const returned = checker.getNonNullableType(signature.getReturnType());
+    if (!isRecordType(ts, checker, returned)) continue;
+    members.descriptorFields.set(property.name, new Set(checker.getPropertiesOfType(returned).map(field => field.name)));
+    for (const field of checker.getPropertiesOfType(returned)) {
+      if (!(field.flags & ts.SymbolFlags.Optional)) continue;
+      members.push({
+        key: `${property.name}().${field.name}`,
+        getter: property.name,
+        field: field.name,
+        decls: field.declarations ?? [],
+        boolean: isBooleanType(ts, checker.getNonNullableType(checker.getTypeOfSymbol(field)))
+      });
     }
-    members.push(name);
-
-    let parameters;
-    let returnType;
-    if (t.isMethodSignature(member)) {
-      parameters = member.parameters;
-      returnType = member.type;
-    } else if (t.isPropertySignature(member) && member.type && t.isFunctionTypeNode(member.type)) {
-      parameters = member.type.parameters;
-      returnType = member.type.type;
-    }
-    if (!parameters || parameters.length > 0 || !returnType) continue;
-
-    const returned = objectTypeMembers(returnType, index, fromFile);
-    if (!returned || returned.length === 0) continue;
-    const switches = returned.every(field => (t.isPropertySignature(field) || t.isMethodSignature(field)) &&
-      field.questionToken && nameOf(field.name));
-    if (!switches) continue;
-
-    getters.add(name);
-    for (const field of returned) members.push(`${name}().${nameOf(field.name)}`);
   }
-  return { members, getters };
+  return members;
 }
 
 /**
- * A value that says "not used": a property set to `undefined`, `null` or `false`. For almost
- * every switch the core reads `false` exactly as it reads a missing member, and policies spell
- * the default out all the time (`mirrorBreakpointsToChild: false`), so it is not a use.
+ * How the code reads each member, which decides what an explicit `false` means.
  *
- * Known exceptions, where the core reads an explicit `false` differently: `supportsLogPoints`
- * and `supportsFunctionBreakpoints` (false refuses, absent means unknown) and
- * `getInitializationBehavior().defaultStopOnEntry` (false overrides the launch default). Each
- * has two or more users either way today, so no count depends on it; a new member like them
- * would be counted as unused by the engines that set it to `false`.
+ * A read is a *truth test* when only the value's truthiness can matter: an `if`/`while`/`?:`
+ * condition, an operand of `!`, a comparison with `true`, or an operand of `&&`/`||` that is
+ * itself in a truth test. For a boolean member whose every read is a truth test, `false`
+ * behaves exactly as leaving the member out, so setting it `false` is not a use. Any other
+ * read (`=== false`, `typeof … === 'boolean'`, `??`, passing the value on, destructuring) can
+ * tell `false` from absent, and so can a member nothing reads: there `false` counts as a use.
  */
-function isNoUse(value) {
-  const t = ts();
-  const node = unwrap(value);
-  return node.kind === t.SyntaxKind.FalseKeyword || node.kind === t.SyntaxKind.NullKeyword ||
-    (t.isIdentifier(node) && node.text === 'undefined');
-}
+function classifyReads(an, members) {
+  const { ts, checker } = an;
+  const byDecl = new Map();
+  for (const member of members) for (const decl of member.decls) byDecl.set(decl, member);
+  const names = new Set(members.map(member => member.field ?? member.name));
+  const reads = new Map(members.map(member => [member.key, { reads: 0, valueReads: 0 }]));
 
-/**
- * The property names an expression's object value sets to something other than a no-use,
- * following spreads, conditionals, local constants and calls to functions declared in the
- * shared package.
- */
-function objectKeys(expression, context, seen = new Set()) {
-  const t = ts();
-  const node = unwrap(expression);
-  const keys = new Set();
-
-  if (t.isObjectLiteralExpression(node)) {
-    for (const property of node.properties) {
-      if (t.isSpreadAssignment(property)) {
-        for (const key of objectKeys(property.expression, context, seen)) keys.add(key);
-        continue;
-      }
-      const name = nameOf(property.name);
-      if (!name) throw new StructureError(`${context.what}: a computed property name cannot be counted: ${property.getText()}`);
-      if (t.isPropertyAssignment(property) && isNoUse(property.initializer)) continue;
-      keys.add(name);
+  // A read through a policy constant (`JsDebugAdapterPolicy.matchesAdapter`, whose type
+  // `satisfies` keeps literal) resolves to the policy literal's own property. Its contextual
+  // type is the contract, so the contract member is one lookup away.
+  const viaLiteral = new Map();
+  const memberOfDeclaration = decl => {
+    if (byDecl.has(decl)) return byDecl.get(decl);
+    if (viaLiteral.has(decl)) return viaLiteral.get(decl);
+    let member;
+    if ((ts.isPropertyAssignment(decl) || ts.isShorthandPropertyAssignment(decl) || ts.isMethodDeclaration(decl)) &&
+      ts.isObjectLiteralExpression(decl.parent)) {
+      const contextual = checker.getContextualType(decl.parent);
+      const name = nameText(ts, decl.name);
+      const property = contextual && name && checker.getPropertyOfType(contextual, name);
+      member = property?.declarations?.map(d => byDecl.get(d)).find(Boolean);
     }
-    return keys;
-  }
-  if (t.isConditionalExpression(node)) {
-    for (const key of objectKeys(node.whenTrue, context, seen)) keys.add(key);
-    for (const key of objectKeys(node.whenFalse, context, seen)) keys.add(key);
-    return keys;
-  }
-  if (t.isCallExpression(node) && t.isIdentifier(unwrap(node.expression))) {
-    const target = resolveOne(context.index.values, unwrap(node.expression).text, node.getSourceFile().fileName, context.what);
-    if (target) return returnedKeys(target, context, seen);
-  }
-  if (t.isIdentifier(node)) {
-    const local = context.locals?.get(node.text);
-    if (local) return objectKeys(local, context, seen);
-    const target = resolveOne(context.index.values, node.text, node.getSourceFile().fileName, context.what);
-    if (target && t.isObjectLiteralExpression(unwrap(target))) return objectKeys(target, context, seen);
-  }
-  throw new StructureError(
-    `${context.what}: cannot tell which members '${node.getText().slice(0, 80)}' sets. Return an ` +
-    'object literal, or call a function declared in packages/shared/src that returns one.'
-  );
-}
-
-/** The keys of every object a function returns. */
-function returnedKeys(fn, context, seen) {
-  const t = ts();
-  const target = unwrap(fn);
-  if (!t.isFunctionLike(target) || !target.body) {
-    if (t.isIdentifier(target)) {
-      const resolved = resolveOne(context.index.values, target.text, target.getSourceFile().fileName, context.what);
-      if (resolved) return returnedKeys(resolved, context, seen);
-    }
-    throw new StructureError(`${context.what}: '${target.getText().slice(0, 80)}' is not a function the count can read.`);
-  }
-  if (seen.has(target)) return new Set();
-  seen.add(target);
-
-  if (!t.isBlock(target.body)) return objectKeys(target.body, context, seen);
-
-  const keys = new Set();
-  const locals = new Map();
-  const inner = { ...context, locals };
-  const visit = node => {
-    if (t.isVariableDeclaration(node) && t.isIdentifier(node.name) && node.initializer) {
-      locals.set(node.name.text, node.initializer);
-    }
-    if (t.isReturnStatement(node)) {
-      if (node.expression) for (const key of objectKeys(node.expression, inner, seen)) keys.add(key);
-      return;
-    }
-    if (t.isFunctionLike(node)) return;
-    node.forEachChild(visit);
+    viaLiteral.set(decl, member);
+    return member;
   };
-  target.body.forEachChild(visit);
-  return keys;
-}
+  const memberOf = symbol => symbol?.declarations?.map(memberOfDeclaration).find(Boolean);
 
-/** The engine policies: each `AdapterPolicy`-typed object literal in an engine's policy file. */
-function enginePolicies(parsed, index, getters) {
-  const t = ts();
-  const policies = [];
-  for (const sf of parsed) {
-    if (!ENGINE_POLICY_FILE.test(sf.fileName)) continue;
-    for (const statement of sf.statements) {
-      if (!t.isVariableStatement(statement)) continue;
-      for (const declaration of statement.declarationList.declarations) {
-        let value = declaration.initializer;
-        let typed = declaration.type?.getText(sf) === 'AdapterPolicy';
-        while (value && (t.isSatisfiesExpression(value) || t.isAsExpression(value) || t.isParenthesizedExpression(value))) {
-          if (!t.isParenthesizedExpression(value) && value.type.getText(sf) === 'AdapterPolicy') typed = true;
-          value = value.expression;
-        }
-        if (!typed) continue;
-        const binding = declaration.name.getText(sf);
-        const what = `${sf.fileName}: ${binding}`;
-        if (!value || !t.isObjectLiteralExpression(value)) {
-          throw new StructureError(`${what} is not an object literal, so the count cannot see which members it uses.`);
-        }
-
-        const context = { index, what };
-        const used = new Set();
-        let policyName;
-        const visitProperty = property => {
-          if (t.isSpreadAssignment(property)) {
-            for (const key of objectKeys(property.expression, context)) used.add(key);
-            return;
-          }
-          const name = nameOf(property.name);
-          if (!name) throw new StructureError(`${what}: a computed member name cannot be counted: ${property.getText(sf)}`);
-          if (name === 'name' && t.isPropertyAssignment(property) && t.isStringLiteral(unwrap(property.initializer))) {
-            policyName = unwrap(property.initializer).text;
-          }
-          if (t.isPropertyAssignment(property) && isNoUse(property.initializer)) return;
-          used.add(name);
-          if (!getters.has(name)) return;
-          const implementation = t.isMethodDeclaration(property)
-            ? property
-            : t.isPropertyAssignment(property)
-              ? property.initializer
-              : undefined;
-          if (!implementation) {
-            throw new StructureError(`${what}: cannot read ${name}'s implementation (${property.getText(sf).slice(0, 60)}).`);
-          }
-          for (const key of returnedKeys(implementation, { index, what: `${what}.${name}` }, new Set())) {
-            used.add(`${name}().${key}`);
-          }
-        };
-        for (const property of value.properties) visitProperty(property);
-        policies.push({ binding, name: policyName ?? binding, file: sf.fileName, used });
+  const truthTest = node => {
+    let current = node;
+    while (current.parent && (ts.isParenthesizedExpression(current.parent) || ts.isNonNullExpression(current.parent))) current = current.parent;
+    const parent = current.parent;
+    if (!parent) return false;
+    if ((ts.isIfStatement(parent) || ts.isWhileStatement(parent) || ts.isDoStatement(parent)) && parent.expression === current) return true;
+    if (ts.isForStatement(parent) && parent.condition === current) return true;
+    if (ts.isConditionalExpression(parent) && parent.condition === current) return true;
+    if (ts.isPrefixUnaryExpression(parent) && parent.operator === ts.SyntaxKind.ExclamationToken) return true;
+    if (ts.isBinaryExpression(parent)) {
+      const kind = parent.operatorToken.kind;
+      if (kind === ts.SyntaxKind.AmpersandAmpersandToken || kind === ts.SyntaxKind.BarBarToken) return truthTest(parent);
+      if (kind === ts.SyntaxKind.EqualsEqualsEqualsToken || kind === ts.SyntaxKind.ExclamationEqualsEqualsToken) {
+        const other = parent.left === current ? parent.right : parent.left;
+        return unwrap(ts, other).kind === ts.SyntaxKind.TrueKeyword;
       }
     }
+    return false;
+  };
+
+  const record = (member, node, valueRead) => {
+    const entry = reads.get(member.key);
+    entry.reads += 1;
+    if (valueRead || !truthTest(node)) entry.valueReads += 1;
+  };
+
+  for (const sf of an.scope) {
+    const visit = node => {
+      if (ts.isPropertyAccessExpression(node) && names.has(node.name.text) && !isAssignmentTarget(ts, node)) {
+        const member = memberOf(checker.getSymbolAtLocation(node.name));
+        if (member) record(member, node, false);
+      } else if (ts.isElementAccessExpression(node) && ts.isStringLiteral(node.argumentExpression) &&
+        names.has(node.argumentExpression.text) && !isAssignmentTarget(ts, node)) {
+        const member = memberOf(checker.getSymbolAtLocation(node.argumentExpression));
+        if (member) record(member, node, false);
+      } else if (ts.isBindingElement(node) && ts.isObjectBindingPattern(node.parent)) {
+        const name = nameText(ts, node.propertyName ?? node.name);
+        if (name && names.has(name)) {
+          const member = memberOf(checker.getPropertyOfType(checker.getTypeAtLocation(node.parent), name));
+          if (member) record(member, node, true);
+        }
+      }
+      node.forEachChild(visit);
+    };
+    visit(sf);
   }
-  return policies;
+  return reads;
+}
+
+/** Load the policy registry from source and evaluate it: the real objects the engines export. */
+async function loadEnginePolicies(an, anchors) {
+  let esbuild;
+  try {
+    esbuild = require('esbuild');
+  } catch (error) {
+    throw new StructureError(`Cannot load esbuild -- run 'pnpm install' first.\n${describe(error)}`);
+  }
+  if (!anchors.registryFile || !anchors.languageFile) throw new StructureError('Cannot locate the policy registry or DebugLanguage source.');
+  const specifier = file => JSON.stringify(file.split(path.sep).join('/'));
+  let code;
+  try {
+    const result = esbuild.buildSync({
+      stdin: {
+        contents:
+          `export { getPolicyForLanguage } from ${specifier(anchors.registryFile)};\n` +
+          `export { DebugLanguage } from ${specifier(anchors.languageFile)};\n`,
+        resolveDir: an.root,
+        loader: 'ts',
+        sourcefile: 'structure-policies.ts'
+      },
+      bundle: true,
+      platform: 'node',
+      format: 'esm',
+      target: 'node20',
+      write: false,
+      logLevel: 'silent',
+      tsconfig: path.join(an.root, CONFIG_FILE)
+    });
+    code = result.outputFiles[0].text;
+  } catch (error) {
+    throw new StructureError(`The policies could not be bundled from source:\n${describe(error)}`);
+  }
+
+  let registry;
+  try {
+    registry = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+  } catch (error) {
+    throw new StructureError(`The policies could not be loaded:\n${describe(error)}`);
+  }
+
+  const fallback = registry.getPolicyForLanguage('\u0000structure-guard:no-such-language');
+  const engines = [];
+  const seen = new Set();
+  for (const language of Object.values(registry.DebugLanguage)) {
+    if (typeof language !== 'string' || language === TEST_DOUBLE_LANGUAGE) continue;
+    const policy = registry.getPolicyForLanguage(language);
+    if (!policy || policy === fallback) {
+      throw new StructureError(`The registry answers '${language}' with the fallback policy: that engine has no policy to count.`);
+    }
+    if (seen.has(policy)) continue;
+    seen.add(policy);
+    engines.push({ name: typeof policy.name === 'string' ? policy.name : language, language, policy });
+  }
+  if (engines.length === 0) throw new StructureError('The registry returned no engine policies.');
+  return engines;
 }
 
 /**
- * The contract's members, and each member's users among the engine policies.
- *
- * A policy uses a member when its object sets it (or, for a descriptor getter's switch, the
- * object the getter returns sets it) to anything but `undefined`, `null` or `false`.
- *
- * @param {{ path: string, text: string }[]} sources
+ * The platforms a descriptor getter is evaluated on. A getter may answer from the host
+ * (`stopsOnUncaughtWithoutFilter: process.platform !== 'win32'`), and the recorded baseline
+ * must not depend on which machine recorded it, so each getter is called once per platform
+ * with `process.platform` set to it, and a member set on any of them is used.
  */
-export function measurePolicyContract(sources) {
-  const parsed = sources.filter(source => source.path.startsWith('packages/shared/src/')).map(parse);
-  const index = indexShared(parsed);
-  const { members, getters } = contractMembers(parsed, index);
-  const policies = enginePolicies(parsed, index, getters);
-  if (policies.length === 0) {
-    throw new StructureError(
-      'No engine policy was found (an AdapterPolicy-typed object literal in ' +
-      'packages/shared/src/interfaces/adapter-policy-<engine>.ts).'
-    );
-  }
+const PLATFORMS = ['darwin', 'linux', 'win32'];
 
-  const usersOf = new Map(members.map(member => [member, []]));
-  const unknown = [];
-  for (const policy of policies) {
-    for (const key of policy.used) {
-      if (usersOf.has(key)) usersOf.get(key).push(policy.name);
-      else unknown.push(`${policy.name}: ${key}`);
+function onPlatform(platform, fn) {
+  const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { ...descriptor, value: platform });
+  try {
+    return fn();
+  } finally {
+    Object.defineProperty(process, 'platform', descriptor);
+  }
+}
+
+/**
+ * Who uses each member. An engine uses a member when its policy object (after every spread
+ * and helper has been applied, because this is the object itself) has it set to a value other
+ * than `undefined`; for a descriptor switch, when the object its getter returns does, on any
+ * platform. `false` is a use except where every read of a boolean member is a truth test
+ * (`classifyReads`).
+ */
+function memberUsage(members, reads, engines) {
+  const usersOf = new Map(members.map(member => [member.key, []]));
+  const ownKeys = new Map();
+  const getters = [...new Set(members.filter(member => member.getter).map(member => member.getter))];
+  for (const engine of engines) {
+    const results = new Map(getters.map(getter => [getter, []]));
+    for (const platform of PLATFORMS) {
+      onPlatform(platform, () => {
+        for (const getter of getters) {
+          const fn = engine.policy[getter];
+          if (typeof fn !== 'function') continue;
+          try {
+            results.get(getter).push(fn.call(engine.policy));
+          } catch (error) {
+            throw new StructureError(`${engine.name}'s ${getter}() threw when called with no arguments on ${platform}: ${describe(error)}`);
+          }
+        }
+      });
     }
+    const isUse = (member, value) => {
+      if (value === undefined) return false;
+      const stat = reads.get(member.key);
+      const falseIsAbsent = member.boolean && stat.reads > 0 && stat.valueReads === 0;
+      return !(value === false && falseIsAbsent);
+    };
+    for (const member of members) {
+      const values = member.getter
+        ? results.get(member.getter).map(result => (result !== null && typeof result === 'object' ? result[member.field] : undefined))
+        : [engine.policy[member.name]];
+      if (values.some(value => isUse(member, value))) usersOf.get(member.key).push(engine.name);
+    }
+    // Keys the engine sets that the contract does not declare: on the policy, or in what a
+    // descriptor getter returns.
+    const topLevel = new Set(members.filter(member => !member.getter).map(member => member.name));
+    const extra = Object.keys(engine.policy).filter(key => !topLevel.has(key));
+    for (const [getter, list] of results) {
+      const fields = members.descriptorFields.get(getter) ?? new Set();
+      for (const result of list) {
+        if (result !== null && typeof result === 'object') extra.push(...Object.keys(result).filter(key => !fields.has(key)).map(key => `${getter}().${key}`));
+      }
+    }
+    ownKeys.set(engine.name, [...new Set(extra)]);
   }
-  const oneAdapter = members
-    .filter(member => usersOf.get(member).length === 1)
-    .map(member => ({ member, policy: usersOf.get(member)[0] }));
-  const unused = members.filter(member => usersOf.get(member).length === 0);
-
-  return { members, getters: [...getters], policies, usersOf, oneAdapter, unused, unknown };
+  const outside = [...ownKeys].flatMap(([engine, keys]) => keys.map(key => `${engine}: ${key}`));
+  return { usersOf, outside };
 }
 
 // ---------------------------------------------------------------------------
 // Measure 5: language branches outside the policy files
 // ---------------------------------------------------------------------------
 
-/** The language ids: `DebugLanguage`'s values and every engine policy's `name`. */
-function languageIds(sources, policies) {
-  const t = ts();
-  const ids = new Set(policies.map(policy => policy.name));
-  const enumMembers = new Set();
-  let found = false;
-  for (const source of sources) {
-    if (!source.path.startsWith('packages/shared/src/')) continue;
-    if (!source.text.includes('DebugLanguage')) continue;
-    const sf = parse(source);
-    for (const statement of sf.statements) {
-      if (t.isEnumDeclaration(statement) && statement.name.text === 'DebugLanguage') {
-        found = true;
-        for (const member of statement.members) {
-          enumMembers.add(nameOf(member.name));
-          if (member.initializer && t.isStringLiteral(member.initializer)) ids.add(member.initializer.text);
-        }
-      }
-    }
-  }
-  if (!found) throw new StructureError("No 'enum DebugLanguage' was found in packages/shared/src.");
-  return { ids, enumMembers };
-}
-
 /**
  * Every place outside the policy files where the core branches on one specific language.
  *
- * A branch is an equality comparison (`===`, `!==`, `==`, `!=`) with a language id on
- * either side, or a `case` labelled with one. A language id is a string literal equal to a
- * `DebugLanguage` value or an engine policy's `name` (`'python'`, `'js-debug'`, …), or a
- * `DebugLanguage.<MEMBER>`. Each comparison or case is one item.
+ * A branch is one of:
+ *   - an equality comparison (`===`, `!==`, `==`, `!=`) of a language-valued operand with a
+ *     specific language, or of anything with a `DebugLanguage.<MEMBER>`;
+ *   - a `case` labelled with a specific language under a language-valued `switch`, or labelled
+ *     `DebugLanguage.<MEMBER>`;
+ *   - a membership test (`.includes`, `.has`, `.indexOf`) on a literal list that names specific
+ *     languages, with a language-valued argument (or a list of `DebugLanguage` members);
+ *   - an `in` test or an index (`table[language]`) on a table whose keys are languages, with a
+ *     language-valued key.
  *
- * @param {{ path: string, text: string }[]} sources
- * @param {{ name: string }[]} policies
+ * A specific language is an expression whose type is one `DebugLanguage` member or one string
+ * literal equal to a language id (a `DebugLanguage` value or an engine policy's `name`), so
+ * `const engine = 'python'` counts as one. An operand is language-valued when its type is
+ * `DebugLanguage` (or a union of language literals), and, where the type was lost on the way:
+ * through a cast, through a `const` holding one, through a `string` parameter that some call
+ * in the core passes one, or as an `AdapterPolicy`'s `name`. A string that is never a
+ * language (`flavour === 'java'`) is not counted.
  */
-export function findLanguageBranches(sources, policies) {
-  const t = ts();
-  const { ids, enumMembers } = languageIds(sources, policies);
-  const languageOf = expression => {
-    const node = unwrap(expression);
-    if ((t.isStringLiteral(node) || t.isNoSubstitutionTemplateLiteral(node)) && ids.has(node.text)) {
-      return { language: node.text, spelling: 'string' };
-    }
-    if (
-      t.isPropertyAccessExpression(node) && t.isIdentifier(node.expression) &&
-      node.expression.text === 'DebugLanguage' && enumMembers.has(node.name.text)
-    ) {
-      return { language: `DebugLanguage.${node.name.text}`, spelling: 'enum' };
-    }
+function findLanguageBranches(an, anchors, languageIds) {
+  const { ts, checker } = an;
+
+  const callsByDecl = new Map();
+  for (const sf of an.scope) {
+    const visit = node => {
+      if (ts.isCallExpression(node)) {
+        const declaration = checker.getResolvedSignature(node)?.declaration;
+        if (declaration) {
+          if (!callsByDecl.has(declaration)) callsByDecl.set(declaration, []);
+          callsByDecl.get(declaration).push(node);
+        }
+      }
+      node.forEachChild(visit);
+    };
+    visit(sf);
+  }
+
+  const isLanguageMember = type => type.flags & ts.TypeFlags.EnumLiteral && anchors.languageMembers.has(type);
+  const specific = expression => {
+    const type = checker.getTypeAtLocation(expression);
+    if (type.isUnion()) return undefined;
+    if (isLanguageMember(type)) return { language: String(type.value), spelling: 'enum' };
+    if (type.flags & ts.TypeFlags.StringLiteral && languageIds.has(type.value)) return { language: type.value, spelling: 'string' };
     return undefined;
   };
-  const equality = new Set([
-    t.SyntaxKind.EqualsEqualsEqualsToken, t.SyntaxKind.ExclamationEqualsEqualsToken,
-    t.SyntaxKind.EqualsEqualsToken, t.SyntaxKind.ExclamationEqualsToken
-  ]);
+  const typedAsLanguage = type => {
+    const parts = (type.isUnion() ? type.types : [type]).filter(part => !(part.flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Null)));
+    if (parts.length === 0) return false;
+    if (parts.every(isLanguageMember)) return true;
+    return parts.length >= 2 && parts.every(part => part.flags & ts.TypeFlags.StringLiteral && languageIds.has(part.value));
+  };
+
+  const memo = new Map();
+  const languageValued = (expression, visiting = new Set()) => {
+    if (!expression) return undefined;
+    if (memo.has(expression)) return memo.get(expression);
+    if (visiting.has(expression)) return undefined;
+    visiting.add(expression);
+    let via;
+    if (typedAsLanguage(checker.getTypeAtLocation(expression))) via = 'typed';
+    const node = unwrap(ts, expression);
+    if (!via && node !== expression && languageValued(node, visiting)) via = 'cast';
+    if (!via && ts.isPropertyAccessExpression(node) &&
+      checker.getSymbolAtLocation(node.name)?.declarations?.some(decl => anchors.policyNameDecls.has(decl))) via = 'policy name';
+    if (!via && ts.isIdentifier(node)) {
+      const declaration = checker.getSymbolAtLocation(node)?.valueDeclaration;
+      if (declaration && ts.isVariableDeclaration(declaration) && declaration.initializer &&
+        ts.getCombinedNodeFlags(declaration) & ts.NodeFlags.Const && languageValued(declaration.initializer, visiting)) {
+        via = 'const';
+      } else if (declaration && ts.isParameter(declaration) && declaration.parent.body) {
+        // `some`, not `every`: a second caller passing a plain string must not make the
+        // branch disappear and read as progress.
+        const index = declaration.parent.parameters.indexOf(declaration);
+        const calls = callsByDecl.get(declaration.parent) ?? [];
+        if (calls.some(call => call.arguments[index] && languageValued(call.arguments[index], visiting))) {
+          via = 'string parameter';
+        }
+      }
+    }
+    visiting.delete(expression);
+    memo.set(expression, via);
+    return via;
+  };
+
+  const constInitializer = node => {
+    if (!ts.isIdentifier(node)) return undefined;
+    const declaration = checker.getSymbolAtLocation(node)?.valueDeclaration;
+    return declaration && ts.isVariableDeclaration(declaration) && declaration.initializer &&
+      ts.getCombinedNodeFlags(declaration) & ts.NodeFlags.Const ? declaration.initializer : undefined;
+  };
+  /** The specific languages a literal list names, following a `const` and `new Set([...])`. */
+  const listed = expression => {
+    let node = unwrap(ts, expression);
+    node = unwrap(ts, constInitializer(node) ?? node);
+    if (ts.isNewExpression(node) && node.arguments?.length) node = unwrap(ts, node.arguments[0]);
+    if (!ts.isArrayLiteralExpression(node)) return [];
+    return node.elements.map(element => specific(element)).filter(Boolean);
+  };
+  /** Does this table have languages as keys? */
+  const keyedByLanguage = expression => {
+    let node = unwrap(ts, expression);
+    node = unwrap(ts, constInitializer(node) ?? node);
+    if (ts.isObjectLiteralExpression(node)) {
+      return node.properties.some(property => {
+        const name = property.name;
+        if (name && ts.isComputedPropertyName(name)) return Boolean(specific(name.expression));
+        const text = nameText(ts, name);
+        return text !== undefined && languageIds.has(text);
+      });
+    }
+    return checker.getPropertiesOfType(checker.getApparentType(checker.getTypeAtLocation(expression)))
+      .some(property => languageIds.has(property.name));
+  };
 
   const branches = [];
-  // Counted per function and language, so a failure can point at the one that is new.
-  const branch = (entry) => branches.push({ ...entry, group: `${entry.where} [${entry.language}]` });
-  for (const source of sources) {
-    if (isPolicyFile(source.path)) continue;
-    const sf = parse(source);
+  const add = (node, found, form, textOverride) =>
+    branches.push(item(an, node, { language: found.language, spelling: found.spelling, form, via: found.via, ...(textOverride ? { text: textOverride } : {}) }));
+
+  const equality = new Set([
+    ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken,
+    ts.SyntaxKind.EqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsToken
+  ]);
+  const branchOn = (candidate, other) => {
+    const found = specific(candidate);
+    if (!found) return undefined;
+    if (found.spelling === 'enum') return { ...found, via: 'enum member' };
+    const via = languageValued(other);
+    return via ? { ...found, via } : undefined;
+  };
+
+  for (const sf of an.scope) {
+    if (isPolicyFile(relative(an.root, sf.fileName))) continue;
     const visit = node => {
-      if (t.isBinaryExpression(node) && equality.has(node.operatorToken.kind)) {
-        const found = languageOf(node.left) ?? languageOf(node.right);
-        if (found) branch(item(sf, node, { ...found, form: 'comparison' }));
-      } else if (t.isCaseClause(node)) {
-        const found = languageOf(node.expression);
-        if (found) branch(item(sf, node.expression, { ...found, form: 'case', text: `case ${node.expression.getText(sf)}:` }));
+      if (ts.isBinaryExpression(node) && equality.has(node.operatorToken.kind)) {
+        const found = branchOn(node.right, node.left) ?? branchOn(node.left, node.right);
+        if (found) add(node, found, 'comparison');
+      } else if (ts.isCaseClause(node)) {
+        const found = branchOn(node.expression, node.parent.parent.expression);
+        if (found) add(node.expression, found, 'case', `case ${printed(ts, node.expression)}:`);
+      } else if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
+        ['includes', 'has', 'indexOf'].includes(node.expression.name.text) && node.arguments.length > 0) {
+        const names = listed(node.expression.expression);
+        if (names.length > 0) {
+          const via = names.some(found => found.spelling === 'enum') ? 'enum member' : languageValued(node.arguments[0]);
+          if (via) add(node, { language: names.map(found => found.language).join(','), spelling: names[0].spelling, via }, 'membership');
+        }
+      } else if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.InKeyword) {
+        const key = specific(node.left) ?? (languageValued(node.left) ? { language: '(language)', spelling: 'typed' } : undefined);
+        if (key && keyedByLanguage(node.right)) add(node, { ...key, via: key.spelling === 'enum' ? 'enum member' : languageValued(node.left) ?? 'literal' }, 'in');
+      } else if (ts.isElementAccessExpression(node) && keyedByLanguage(node.expression)) {
+        const key = specific(node.argumentExpression);
+        const via = key?.spelling === 'enum' ? 'enum member' : languageValued(node.argumentExpression) ?? (key ? 'literal' : undefined);
+        if (via) add(node, { language: key?.language ?? '(language)', spelling: key?.spelling ?? 'typed', via }, 'index');
       }
       node.forEachChild(visit);
     };
@@ -818,82 +1051,83 @@ export function findLanguageBranches(sources, policies) {
 }
 
 // ---------------------------------------------------------------------------
-// All measures, baseline and comparison
+// All measures
 // ---------------------------------------------------------------------------
 
 /**
  * Count everything.
  *
- * @param {{ path: string, text: string }[]} sources repo-relative, forward-slash paths
+ * @param {string} root repo root
  */
-export function measure(sources) {
-  const { writers, direct } = findStateWriters(sources);
-  const contract = measurePolicyContract(sources);
-  const branches = findLanguageBranches(sources, contract.policies);
+export async function measure(root) {
+  const an = createAnalysisProgram(root);
+  const anchors = findAnchors(an);
+  const { writers, direct } = findStateWriters(an, anchors);
+
+  const members = contractMembers(an, anchors);
+  const reads = classifyReads(an, members);
+  const engines = await loadEnginePolicies(an, anchors);
+  const { usersOf, outside } = memberUsage(members, reads, engines);
+
+  const languageIds = new Set([...anchors.languageValues, ...engines.map(engine => engine.name)]);
+  const branches = findLanguageBranches(an, anchors, languageIds);
+
+  const oneAdapter = members.filter(member => usersOf.get(member.key).length === 1)
+    .map(member => ({ key: `${member.key} [${usersOf.get(member.key)[0]}]`, member: member.key, policy: usersOf.get(member.key)[0] }));
+
   return {
     items: {
       sessionStateWriters: writers,
       directStateWrites: direct,
-      policyMembers: contract.members.map(member => ({ member, users: contract.usersOf.get(member) })),
-      oneAdapterMembers: contract.oneAdapter,
+      policyMembers: members.map(member => ({ key: member.key, users: usersOf.get(member.key) })),
+      oneAdapterMembers: oneAdapter,
       languageBranches: branches
     },
-    contract
+    contract: {
+      engines: engines.map(engine => engine.name),
+      usersOf,
+      unread: members.filter(member => reads.get(member.key).reads === 0).map(member => member.key),
+      falseIsAbsent: members.filter(member => member.boolean && reads.get(member.key).reads > 0 && reads.get(member.key).valueReads === 0)
+        .map(member => member.key),
+      falseIsAUse: members.filter(member => member.boolean && !(reads.get(member.key).reads > 0 && reads.get(member.key).valueReads === 0))
+        .map(member => member.key),
+      outside
+    }
   };
 }
 
-const byKey = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+// ---------------------------------------------------------------------------
+// Baseline
+// ---------------------------------------------------------------------------
 
-/**
- * Count of items per file and, within it, per enclosing function; keys sorted. The gate
- * compares files; the functions only tell a failure which items in a file are new.
- */
-function perFile(items) {
-  const counts = {};
-  for (const entry of [...items].sort((a, b) => byKey(a.file, b.file) || byKey(a.group, b.group))) {
-    counts[entry.file] ??= {};
-    counts[entry.file][entry.group] = (counts[entry.file][entry.group] ?? 0) + 1;
+const byText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+
+function counts(keys) {
+  const map = new Map();
+  for (const key of keys) map.set(key, (map.get(key) ?? 0) + 1);
+  return map;
+}
+
+/** Items in `a` beyond those in `b`, as a multiset. */
+function beyond(a, b) {
+  const remaining = counts(b);
+  const out = [];
+  for (const key of a) {
+    if ((remaining.get(key) ?? 0) > 0) remaining.set(key, remaining.get(key) - 1);
+    else out.push(key);
   }
-  return counts;
+  return out;
 }
 
-/** A file's total in a per-file record. */
-function fileTotal(record, file) {
-  return Object.values(record[file] ?? {}).reduce((sum, count) => sum + count, 0);
-}
-
-/**
- * The baseline a measurement records: per-file (and per-function) counts for located
- * items, sorted member names, and member → policy for the one-adapter members. No line
- * numbers, so moving code within a function never touches it.
- */
-export function toBaseline(measurement) {
-  const { items } = measurement;
-  const owners = {};
-  for (const { member, policy } of [...items.oneAdapterMembers].sort((a, b) => (a.member < b.member ? -1 : 1))) {
-    owners[member] = policy;
-  }
-  return {
-    sessionStateWriters: perFile(items.sessionStateWriters),
-    directStateWrites: perFile(items.directStateWrites),
-    policyMembers: items.policyMembers.map(entry => entry.member).sort(),
-    oneAdapterMembers: owners,
-    languageBranches: perFile(items.languageBranches)
-  };
-}
-
-/** Coarse type name for an error message. */
-function kindOf(value) {
-  if (value === null) return 'null';
-  if (Array.isArray(value)) return 'an array';
-  return `a ${typeof value}`;
+/** The baseline record of one measure: its count, its items, and the growth accepted into it. */
+function record(keys, accepted = []) {
+  const items = [...keys].sort(byText);
+  return { count: items.length, items, accepted };
 }
 
 /**
  * Parse and validate a baseline file's text.
  *
- * @param {string} text
- * @returns {object} the baseline
  * @throws {StructureError} for anything but a well-formed baseline
  */
 export function parseBaseline(text) {
@@ -901,281 +1135,265 @@ export function parseBaseline(text) {
   try {
     parsed = JSON.parse(text);
   } catch (error) {
-    throw new StructureError(`${BASELINE_FILE} is not valid JSON. ${REPAIR_BASELINE}\n${describe(error)}`);
+    throw new StructureError(`${BASELINE_FILE} is not valid JSON. ${RESTORE_BASELINE}\n${describe(error)}`);
   }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new StructureError(`${BASELINE_FILE} must be a JSON object, got ${kindOf(parsed)}. ${REPAIR_BASELINE}`);
-  }
+  const bad = detail => {
+    throw new StructureError(`${BASELINE_FILE} ${detail}. ${RESTORE_BASELINE}`);
+  };
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) bad('must be a JSON object');
   const expected = MEASURES.map(m => m.id);
   const extra = Object.keys(parsed).filter(key => !expected.includes(key));
   const missing = expected.filter(key => !(key in parsed));
-  if (extra.length > 0 || missing.length > 0) {
-    throw new StructureError(
-      `${BASELINE_FILE} must record exactly ${expected.join(', ')}` +
-      `${missing.length ? `; missing ${missing.join(', ')}` : ''}` +
-      `${extra.length ? `; unknown ${extra.join(', ')}` : ''}. ${REPAIR_BASELINE}`
-    );
+  if (extra.length || missing.length) {
+    bad(`must record exactly ${expected.join(', ')}${missing.length ? `; missing ${missing.join(', ')}` : ''}` +
+      `${extra.length ? `; unknown ${extra.join(', ')}` : ''}`);
   }
-  for (const m of MEASURES) {
-    const value = parsed[m.id];
-    const bad = detail => {
-      throw new StructureError(`${BASELINE_FILE} has a bad '${m.id}': ${detail}. ${REPAIR_BASELINE}`);
-    };
-    if (m.kind === 'names') {
-      if (!Array.isArray(value)) bad(`expected an array of member names, got ${kindOf(value)}`);
-      for (const name of value) if (typeof name !== 'string' || name === '') bad(`expected member names, got ${JSON.stringify(name)}`);
-      if (new Set(value).size !== value.length) bad('a member is listed twice');
-      continue;
+  for (const id of expected) {
+    const entry = parsed[id];
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) bad(`has a bad '${id}': expected { count, items, accepted }`);
+    const keys = Object.keys(entry).sort();
+    if (keys.join() !== 'accepted,count,items') bad(`has a bad '${id}': expected exactly count, items and accepted`);
+    if (!Array.isArray(entry.items) || entry.items.some(key => typeof key !== 'string' || key === '')) bad(`has a bad '${id}.items'`);
+    if (!Number.isInteger(entry.count) || entry.count !== entry.items.length) bad(`has a bad '${id}.count': it must equal the number of items`);
+    if (!Array.isArray(entry.accepted) || entry.accepted.some(a => a === null || typeof a !== 'object' ||
+      typeof a.item !== 'string' || typeof a.reason !== 'string' || a.reason.trim() === '' || Object.keys(a).length !== 2)) {
+      bad(`has a bad '${id}.accepted': expected [{ item, reason }]`);
     }
-    if (value === null || typeof value !== 'object' || Array.isArray(value)) bad(`expected an object, got ${kindOf(value)}`);
-    for (const [key, entry] of Object.entries(value)) {
-      if (m.kind === 'owners') {
-        if (typeof entry !== 'string' || entry === '') bad(`'${key}' should name one policy, got ${JSON.stringify(entry)}`);
-        continue;
-      }
-      if (!isSourcePath(key)) bad(`'${key}' is not a source file the count reads (${SOURCE_ROOTS.join(', ')}; *.ts)`);
-      if (entry === null || typeof entry !== 'object' || Array.isArray(entry) || Object.keys(entry).length === 0) {
-        bad(`'${key}' should map functions to counts, got ${JSON.stringify(entry)}`);
-      }
-      for (const [where, count] of Object.entries(entry)) {
-        if (!Number.isInteger(count) || count < 1) {
-          bad(`'${key}', '${where}': should be a positive integer, got ${JSON.stringify(count)}`);
-        }
-      }
-    }
+    if (beyond(entry.accepted.map(a => a.item), entry.items).length > 0) bad(`has a bad '${id}.accepted': it names an item the measure does not record`);
   }
   return parsed;
 }
 
-/** Total a baseline entry records. */
-function totalOf(kind, value) {
-  if (kind === 'files') return Object.keys(value).reduce((sum, file) => sum + fileTotal(value, file), 0);
-  if (kind === 'names') return value.length;
-  return Object.keys(value).length;
+/** One measure: tree against baseline. */
+export function compareItems(currentKeys, recordedKeys) {
+  const added = beyond(currentKeys, recordedKeys).sort(byText);
+  const removed = beyond(recordedKeys, currentKeys).sort(byText);
+  const delta = currentKeys.length - recordedKeys.length;
+  const outcome = delta > 0 ? 'growth' : delta < 0 ? 'reduction' : added.length || removed.length ? 'change' : 'same';
+  return { outcome, added, removed, delta };
 }
 
-/**
- * Compare one measure of the tree with its baseline entry.
- *
- * `regressed` lists what the tree has more of: files whose count went up, member names the
- * baseline does not record, one-adapter members that are new or changed owner. `improved`
- * lists what it has less of. Either fails the gate; `regressed` is reported first.
- */
-export function compareMeasure(kind, current, recorded) {
-  const regressed = [];
-  const improved = [];
-  if (kind === 'files') {
-    for (const file of new Set([...Object.keys(current), ...Object.keys(recorded)])) {
-      const now = fileTotal(current, file);
-      const then = fileTotal(recorded, file);
-      if (now > then) regressed.push(file);
-      else if (now < then) improved.push(file);
-    }
-  } else if (kind === 'names') {
-    const then = new Set(recorded);
-    const now = new Set(current);
-    for (const name of now) if (!then.has(name)) regressed.push(name);
-    for (const name of then) if (!now.has(name)) improved.push(name);
-  } else {
-    for (const [member, policy] of Object.entries(current)) {
-      if (recorded[member] !== policy) regressed.push(member);
-    }
-    for (const member of Object.keys(recorded)) {
-      if (!(member in current)) improved.push(member);
-    }
-  }
-  return { regressed: regressed.sort(), improved: improved.sort() };
+function serialize(baseline) {
+  return `${JSON.stringify(baseline, null, 2)}\n`;
 }
 
-/** One success line per measure. */
+// ---------------------------------------------------------------------------
+// Reports
+// ---------------------------------------------------------------------------
+
+/** An item for a message: located items with every place that has this key. */
+function describeItem(m, measurement, key) {
+  const entries = measurement.items[m.id].filter(candidate => candidate.key === key);
+  if (entries.length === 0) return key;
+  const [entry] = entries;
+  if (m.id === 'policyMembers') return `${key}  (used by: ${entry.users.join(', ') || 'no engine'})`;
+  if (m.id === 'oneAdapterMembers') return `${entry.member}: used only by ${entry.policy}`;
+  return `${entries.map(e => `${e.file}:${e.line}`).join(', ')}  ${key}`;
+}
+
+function describeEntry(m, entry) {
+  if (m.id === 'policyMembers') return `${entry.key}  (used by: ${entry.users.join(', ') || 'no engine'})`;
+  if (m.id === 'oneAdapterMembers') return `${entry.member}: used only by ${entry.policy}`;
+  return `${entry.file}:${entry.line}  ${entry.key}${entry.via ? `  [${entry.form}; ${entry.via}]` : entry.direct ? '  [direct]' : ''}`;
+}
+
 function summaryLine(m, measurement) {
   const items = measurement.items[m.id];
-  if (m.id === 'oneAdapterMembers') {
-    const split = {};
-    for (const { policy } of items) split[policy] = (split[policy] ?? 0) + 1;
-    const parts = Object.entries(split).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
-    return `structure: ${m.label}: ${items.length} (${parts.map(([policy, count]) => `${policy} ${count}`).join(', ')})`;
+  if (m.id !== 'oneAdapterMembers') return `structure: ${m.label}: ${items.length}`;
+  const split = {};
+  for (const { policy } of items) split[policy] = (split[policy] ?? 0) + 1;
+  const parts = Object.entries(split).sort((a, b) => b[1] - a[1] || byText(a[0], b[0]));
+  return `structure: ${m.label}: ${items.length}${parts.length ? ` (${parts.map(([p, n]) => `${p} ${n}`).join(', ')})` : ''}`;
+}
+
+function report(m, measurement, comparison, recordedCount) {
+  const { outcome, added, removed, delta } = comparison;
+  const now = measurement.items[m.id].length;
+  const lines = [];
+  if (outcome === 'growth') {
+    lines.push(`structure: ${m.label}: ${recordedCount} recorded, ${now} now. It grew by ${delta}.`);
+    for (const key of added) lines.push(`  new:  ${describeItem(m, measurement, key)}`);
+    for (const key of removed) lines.push(`  gone: ${key}`);
+    lines.push(`  ${m.advice}`);
+  } else if (outcome === 'reduction') {
+    lines.push(`structure: ${m.label}: ${recordedCount} recorded, ${now} now. ${-delta} fewer.`);
+    for (const key of removed) lines.push(`  gone: ${key}`);
+    for (const key of added) lines.push(`  new:  ${describeItem(m, measurement, key)}`);
+  } else if (outcome === 'change') {
+    lines.push(`structure: ${m.label}: ${now}, unchanged. Nothing grew; ${added.length} recorded item(s) moved, were renamed or changed:`);
+    for (const key of removed) lines.push(`  was: ${key}`);
+    for (const key of added) lines.push(`  now: ${describeItem(m, measurement, key)}`);
   }
-  return `structure: ${m.label}: ${items.length}`;
+  return lines;
 }
 
-function locate(entry) {
-  return `${entry.file}:${entry.line}  ${entry.where}  ${entry.text}`;
-}
-
-/** Every item of every measure, for `--list`. */
 function listing(measurement) {
   const lines = [];
   for (const m of MEASURES) {
     const items = measurement.items[m.id];
     lines.push(`${m.label} (${items.length}):`);
-    for (const entry of items) {
-      if (m.id === 'policyMembers') lines.push(`  ${entry.member}  [${entry.users.join(', ') || 'no engine'}]`);
-      else if (m.id === 'oneAdapterMembers') lines.push(`  ${entry.member}  [${entry.policy}]`);
-      else lines.push(`  ${locate(entry)}`);
-    }
+    for (const entry of items) lines.push(`  ${describeEntry(m, entry)}`);
   }
+  const { contract } = measurement;
+  lines.push(`engines: ${contract.engines.join(', ')}`);
+  lines.push(`members no read in the core resolves to (${contract.unread.length}): ${contract.unread.join(', ') || '-'}`);
+  lines.push(`boolean members whose false behaves as absent (${contract.falseIsAbsent.length}): ${contract.falseIsAbsent.join(', ') || '-'}`);
+  lines.push(`boolean members whose false is a use (${contract.falseIsAUse.length}): ${contract.falseIsAUse.join(', ') || '-'}`);
+  lines.push(`policy keys outside the contract (${contract.outside.length}): ${contract.outside.join(', ') || '-'}`);
   return lines;
+}
+
+// ---------------------------------------------------------------------------
+// CLI
+// ---------------------------------------------------------------------------
+
+function parseArgs(argv) {
+  const options = { update: false, init: false, list: false, reason: undefined };
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--') continue;
+    else if (arg === '--update') options.update = true;
+    else if (arg === '--init') options.init = true;
+    else if (arg === '--list') options.list = true;
+    else if (arg === '--accept-growth') options.reason = argv[++i] ?? '';
+    else if (arg.startsWith('--accept-growth=')) options.reason = arg.slice('--accept-growth='.length);
+    else return { error: `Unknown argument: ${arg}` };
+  }
+  if (options.reason !== undefined && !options.update) return { error: '--accept-growth only means something with --update.' };
+  if (options.reason !== undefined && options.reason.trim() === '') return { error: '--accept-growth needs a reason: --accept-growth "<why>".' };
+  if (options.update && options.init) return { error: '--init writes a first baseline; --update changes an existing one. Pick one.' };
+  return { options };
 }
 
 /**
- * What the gate prints about a measure that gained items. When the total did not grow, the
- * change may be a move or a rename, and the headline says so rather than calling it new.
- */
-function regressionReport(m, measurement, recorded, regressed) {
-  const items = measurement.items[m.id];
-  const lines = [];
-  const before = totalOf(m.kind, recorded);
-  const what = m.kind === 'files' ? `${regressed.length} file(s) gained items` : `${regressed.length} new`;
-  const moved = items.length <= before ? ' The total did not grow: if this only moved or renamed an item, re-record.' : '';
-  lines.push(`structure: ${m.label}: ${before} recorded, ${items.length} now; ${what}.${moved}`);
-  if (m.kind === 'files') {
-    for (const file of regressed) {
-      const inFile = items.filter(entry => entry.file === file);
-      lines.push(`  ${file}: ${fileTotal(recorded, file)} -> ${inFile.length}`);
-      // The functions whose count grew hold the new items. If none grew (a rename inside
-      // the file), every item is shown.
-      const then = recorded[file] ?? {};
-      const groups = [...new Set(inFile.map(entry => entry.group))];
-      const grown = groups.filter(group => inFile.filter(entry => entry.group === group).length > (then[group] ?? 0));
-      for (const where of grown.length > 0 ? grown : groups) {
-        const inGroup = inFile.filter(entry => entry.group === where);
-        lines.push(`    ${where}: ${then[where] ?? 0} -> ${inGroup.length}`);
-        for (const entry of inGroup) lines.push(`      ${entry.file}:${entry.line}  ${entry.text}`);
-      }
-      const rest = grown.length > 0 ? inFile.filter(entry => !grown.includes(entry.group)).length : 0;
-      if (rest > 0) lines.push(`    (${rest} more in this file, already recorded: --list shows them)`);
-    }
-  } else if (m.kind === 'names') {
-    for (const name of regressed) {
-      const entry = items.find(candidate => candidate.member === name);
-      lines.push(`  new member: ${name}  (used by: ${entry?.users.join(', ') || 'no engine'})`);
-    }
-  } else {
-    for (const name of regressed) {
-      const entry = items.find(candidate => candidate.member === name);
-      const was = recorded[name];
-      lines.push(`  ${name}: used only by ${entry.policy}${was ? ` (recorded as ${was}'s)` : ''}`);
-    }
-  }
-  lines.push(`  ${m.advice}`);
-  return lines;
-}
-
-/** What the gate prints about a measure that lost items. */
-function improvementReport(m, measurement, recorded, improved) {
-  const items = measurement.items[m.id];
-  const lines = [];
-  const what = m.kind === 'files' ? `${improved.length} file(s) lost items` : `${improved.length} gone`;
-  lines.push(`structure: ${m.label}: ${totalOf(m.kind, recorded)} recorded, ${items.length} now; ${what}.`);
-  if (m.kind === 'files') {
-    for (const file of improved) {
-      lines.push(`  ${file}: ${fileTotal(recorded, file)} -> ${items.filter(entry => entry.file === file).length}`);
-    }
-  } else {
-    for (const name of improved) lines.push(`  no longer counted: ${name}`);
-  }
-  return lines;
-}
-
-/**
- * Run the gate (or `--update`) on a repo root. Never exits the process: the caller prints
- * the output and exits with `code`.
+ * Run the gate on a repo root. Never exits the process: the caller prints and exits.
  *
  * @param {string} root
  * @param {string[]} argv
- * @returns {{ code: 0 | 1 | 2, stdout: string, stderr: string }}
+ * @returns {Promise<{ code: 0 | 1 | 2, stdout: string, stderr: string }>}
  */
-export function run(root, argv) {
+export async function run(root, argv) {
   const out = [];
   const err = [];
   const done = code => ({ code, stdout: out.length ? `${out.join('\n')}\n` : '', stderr: err.length ? `${err.join('\n')}\n` : '' });
-
-  // pnpm forwards the `--` separator itself (`pnpm run structure:check -- --list`).
-  const known = ['--', '--update', '--list'];
-  const unknown = argv.filter(arg => !known.includes(arg));
-  if (unknown.length > 0) {
-    err.push(`structure: Unknown argument(s): ${unknown.join(' ')}. Usage: node scripts/check-structure.mjs [--update | --list]`);
+  const fail = message => {
+    err.push(`structure: ${message}`);
     return done(2);
+  };
+
+  const parsedArgs = parseArgs(argv);
+  if (parsedArgs.error) {
+    return fail(`${parsedArgs.error} Usage: node scripts/check-structure.mjs [--list] [--init | --update [--accept-growth "<why>"]]`);
   }
-  const update = argv.includes('--update');
-  const list = argv.includes('--list');
+  const { options } = parsedArgs;
+  const file = path.join(root, BASELINE_FILE);
 
   let measurement;
   try {
-    measurement = measure(collectSources(root));
+    measurement = await measure(root);
   } catch (error) {
-    if (error instanceof StructureError) {
-      err.push(`structure: ${error.message}`);
-      return done(2);
-    }
+    if (error instanceof StructureError) return fail(`the analysis could not be done. ${error.message}`);
     throw error;
   }
+  if (options.list) out.push(...listing(measurement), '');
 
-  if (list) out.push(...listing(measurement), '');
+  const keysOf = id => measurement.items[id].map(entry => entry.key);
 
-  const current = toBaseline(measurement);
-
-  if (update) {
-    fs.writeFileSync(path.join(root, BASELINE_FILE), `${JSON.stringify(current, null, 2)}\n`);
+  if (options.init) {
+    if (fs.existsSync(file)) return fail(`${BASELINE_FILE} exists; --init only writes a first one. Use --update.`);
+    const baseline = Object.fromEntries(MEASURES.map(m => [m.id, record(keysOf(m.id))]));
+    fs.writeFileSync(file, serialize(baseline));
     for (const m of MEASURES) out.push(summaryLine(m, measurement));
-    out.push(`structure: baseline recorded in ${BASELINE_FILE}.`);
+    out.push(`structure: first baseline recorded in ${BASELINE_FILE}.`);
     return done(0);
   }
 
-  const file = path.join(root, BASELINE_FILE);
-  if (!fs.existsSync(file)) {
-    err.push(`structure: Missing ${BASELINE_FILE}. Record it with: ${UPDATE_COMMAND}`);
-    return done(2);
-  }
+  if (!fs.existsSync(file)) return fail(`Missing ${BASELINE_FILE}. A first one is written with: node scripts/check-structure.mjs --init`);
   let baseline;
   try {
     baseline = parseBaseline(fs.readFileSync(file, 'utf-8'));
   } catch (error) {
-    if (error instanceof StructureError) {
-      err.push(`structure: ${error.message}`);
-      return done(2);
-    }
+    if (error instanceof StructureError) return fail(error.message);
     throw error;
   }
 
-  const regressions = [];
-  const improvements = [];
-  for (const m of MEASURES) {
-    const { regressed, improved } = compareMeasure(m.kind, current[m.id], baseline[m.id]);
-    if (regressed.length > 0) regressions.push(regressionReport(m, measurement, baseline[m.id], regressed));
-    if (improved.length > 0) improvements.push(improvementReport(m, measurement, baseline[m.id], improved));
+  const comparisons = MEASURES.map(m => ({ m, ...compareItems(keysOf(m.id), baseline[m.id].items) }));
+  const grown = comparisons.filter(c => c.outcome === 'growth');
+  const reduced = comparisons.filter(c => c.outcome === 'reduction');
+  const changed = comparisons.filter(c => c.outcome === 'change');
+
+  if (options.update) {
+    if (grown.length > 0 && options.reason === undefined) {
+      err.push('');
+      for (const c of grown) err.push(...report(c.m, measurement, c, baseline[c.m.id].count), '');
+      err.push(
+        `structure: --update records reductions and changes only, and the counts above grew, so nothing\n` +
+        `was written. Growth is structural debt: remove it if you can. If it is unavoidable, accept it\n` +
+        `with a reason; each accepted item and the reason are written into the baseline, so the pull\n` +
+        `request's diff shows both:\n  ${ACCEPT_COMMAND}`
+      );
+      return done(1);
+    }
+    if (options.reason !== undefined && grown.length === 0) {
+      return fail('--accept-growth was given, but nothing grew. Run --update without it.');
+    }
+    const next = {};
+    for (const c of comparisons) {
+      const current = keysOf(c.m.id);
+      const kept = [];
+      const available = counts(current);
+      for (const accepted of baseline[c.m.id].accepted) {
+        if ((available.get(accepted.item) ?? 0) > 0) {
+          available.set(accepted.item, available.get(accepted.item) - 1);
+          kept.push(accepted);
+        }
+      }
+      const newlyAccepted = c.outcome === 'growth' ? c.added.map(key => ({ item: key, reason: options.reason.trim() })) : [];
+      next[c.m.id] = record(current, [...kept, ...newlyAccepted].sort((a, b) => byText(a.item, b.item) || byText(a.reason, b.reason)));
+      if (c.outcome !== 'same') {
+        out.push(`structure: ${c.m.label}: ${baseline[c.m.id].count} -> ${current.length} (${c.outcome}).`);
+        for (const accepted of newlyAccepted) out.push(`  accepted: ${describeItem(c.m, measurement, accepted.item)}\n    reason: ${accepted.reason}`);
+        if (newlyAccepted.length > 0 && c.removed.length > 0) {
+          out.push(
+            `  note: ${c.removed.length} recorded item(s) are gone in the same change, so ${newlyAccepted.length} item(s) are new to\n` +
+            `  the baseline for a growth of ${c.delta}. The count cannot tell a rename from a new item, so the reason\n` +
+            `  is recorded against all of them; if one is only a rename, delete its 'accepted' entry.`
+          );
+        }
+      }
+    }
+    fs.writeFileSync(file, serialize(next));
+    if (grown.length + reduced.length + changed.length === 0) out.push('structure: nothing changed; the baseline is rewritten as it was.');
+    out.push(`structure: baseline recorded in ${BASELINE_FILE}.`);
+    return done(0);
   }
 
-  if (regressions.length > 0) {
-    err.push('');
-    for (const report of regressions) err.push(...report, '');
-    for (const report of improvements) err.push(...report, '');
+  for (const c of grown) err.push(...report(c.m, measurement, c, baseline[c.m.id].count), '');
+  for (const c of reduced) err.push(...report(c.m, measurement, c, baseline[c.m.id].count), '');
+  for (const c of changed) err.push(...report(c.m, measurement, c, baseline[c.m.id].count), '');
+
+  if (grown.length > 0) {
     err.push(
-      `Each new item above is one more piece of structural debt; the note under each measure says\n` +
-      `what to do instead. Re-record only when an item is unavoidable, or the change only moved or\n` +
-      `renamed one: say why in the pull request, and commit the new baseline in it:\n` +
+      `Growth is the one result that adds structural debt; the note under each measure says what to do\n` +
+      `instead. If the growth is unavoidable, accept it with a reason, which is written into the baseline\n` +
+      `beside the items so the pull request's diff shows both:\n  ${ACCEPT_COMMAND}`
+    );
+  }
+  if (reduced.length > 0) {
+    err.push(
+      `${grown.length ? '\n' : ''}Fewer items is progress. Re-record it in this pull request so the recorded counts stay true:\n` +
       `  ${UPDATE_COMMAND}`
     );
-    return done(1);
   }
+  if (grown.length > 0 || reduced.length > 0) return done(1);
 
-  if (improvements.length > 0) {
-    err.push('');
-    for (const report of improvements) err.push(...report, '');
-    err.push(
-      `That is progress, but ${BASELINE_FILE} is now stale. Re-record it and commit it in this\n` +
-      `pull request, so the recorded numbers stay true:\n` +
-      `  ${UPDATE_COMMAND}`
-    );
-    return done(1);
+  if (changed.length > 0) {
+    err.push(`Nothing grew. Re-record to keep the item lists current: ${UPDATE_COMMAND}`);
   }
-
   for (const m of MEASURES) out.push(summaryLine(m, measurement));
   return done(0);
 }
 
-/** Human-readable form of a thrown value. */
 function describe(error) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -1183,9 +1401,9 @@ function describe(error) {
 if (isMain(import.meta.url)) {
   let result;
   try {
-    result = run(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), process.argv.slice(2));
+    result = await run(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), process.argv.slice(2));
   } catch (error) {
-    // A crash is a check that could not run, never a ratchet failure (exit 1).
+    // A crash is a check that could not run, never a ratchet result.
     result = { code: 2, stdout: '', stderr: `structure: the check crashed.\n${error instanceof Error ? error.stack : String(error)}\n` };
   }
   if (result.stdout) process.stdout.write(result.stdout);
