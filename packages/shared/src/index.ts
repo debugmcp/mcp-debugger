@@ -189,6 +189,7 @@ export { AdapterFactory } from './factories/adapter-factory.js';
 // Adapter Policy interfaces and implementations
 export type {
   AdapterPolicy,
+  ProgramOutputContract,
   HotReloadArgs,
   LiveUpdatePolicy,
   LiveUpdateRequest,

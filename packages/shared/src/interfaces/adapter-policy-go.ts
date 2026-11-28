@@ -13,6 +13,12 @@ import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from '
 
 export const GoAdapterPolicy = {
   name: 'go',
+  // Delve's own session lines (`Type 'dlv help'…`, `Process N has exited with
+  // status S`, `Detaching`) arrive as `console` and are excluded from `outputTail`
+  // by the default rule. In `debug` and `test` mode Delve also emits
+  // `Building <pkg>` on `stdout` before starting the binary, with no debugger-only
+  // marker to tell it apart from a Go program's own stdout; `programOutput` is
+  // deliberately omitted so a real program line is never dropped (issue #1277).
   // Delve runs the program undebugged under noDebug (verified live: the
   // breakpoint never fired, the process exited 0) and, correctly, sends no
   // `initialized`: the worker does not wait for one (issue #746). It runs the

@@ -350,6 +350,60 @@ export function generatedFileCandidatesFrom(
   return candidates;
 }
 
+/**
+ * What an adapter knows about telling the debuggee's own output from debugger
+ * housekeeping and where its runtime prints a crash's cause (issue #1277).
+ *
+ * Defaults when absent (or when an individual member is omitted):
+ * - `stdout` and `stderr` entries are the program's own;
+ * - `console` entries are the adapter's own (housekeeping, logpoints, notices);
+ * - the runtime states its failure cause at the head of a long `stderr` trace.
+ */
+export interface ProgramOutputContract {
+  /**
+   * True when a trimmed non-empty `stdout` or `stderr` line is the debugger's
+   * or runtime inspector's own banner rather than a line the program printed
+   * (Node's V8 inspector banners and js-debug's breakpoint syntax error on
+   * `stderr`; a launched JVM's JDWP `Listening for transport dt_socket ...`
+   * banner on `stdout`; CodeLLDB's `Stop reason: ...` line on `stderr`).
+   * Fixed banners (V8 inspector lines, JDWP `Listening for transport ...`) are
+   * anchored at both ends so only an exact match is ambiguous; open-ended
+   * diagnostics (CodeLLDB's `^Stop reason: .+$` and js-debug's `Syntax error
+   * setting breakpoint with condition ... on line N: ...`) match by prefix/shape,
+   * so a program `stderr` line with that prefix is also left out.
+   */
+  isAdapterLine?(category: 'stdout' | 'stderr', line: string): boolean;
+  /**
+   * True when DAP `output` events that carried an explicit `"category": "console"`
+   * are the program's own output, while events that omitted `category` (defaulted
+   * to `'console'`) are the adapter's lifecycle and logpoint lines (Dart/Flutter
+   * SDK adapters: `dart:developer` `log()` records including indented continuation
+   * lines, `dart test` / `flutter test` `✓` / `✖` / `!` result lines, and
+   * Flutter's pre-start launch/build lines plus `Failed to Hot Reload/Restart: ...`).
+   */
+  explicitConsoleIsProgram?: boolean;
+  /**
+   * True when the runtime prints the exception type and message at the end of
+   * its traceback rather than the start (Python), so the plain last 8 program
+   * lines already hold the cause and the user's innermost frame.
+   */
+  causeLast?: boolean;
+  /**
+   * True when a trimmed non-empty program line is the runtime's own fatal-error
+   * header (GnuCOBOL `libcob: ... error: ...`, `libstdc++` `terminate called ...`,
+   * and in Rust the main thread's panic line `thread 'main' ... panicked at ...` /
+   * `has overflowed its stack`). Applies everywhere — both when streams are
+   * separate (such as `SYSERR` output ahead of `libcob:` on Windows) and on
+   * Linux/macOS where CodeLLDB merges pty streams into `stdout`. Uses the last
+   * matching line when that line is not among the last 8. Implementations must
+   * match only a line the runtime prints as it ends the process; if an earlier
+   * child process sharing the buffer printed such a line and the parent later
+   * printed >8 lines and exited non-zero without one, that earlier line will be
+   * quoted as the head.
+   */
+  isFatalErrorLine?(line: string): boolean;
+}
+
 /** Arguments of a `hot_reload` call, as the policy turns them into its adapter's request (issue #876). */
 export interface HotReloadArgs {
   /** Java: the directory of the recompiled `.class` files the JDI bridge scans. */
@@ -792,6 +846,15 @@ export interface AdapterPolicy {
    * @param text The event's output text (may span multiple lines)
    */
   shouldSuppressOutputEvent?(category: string, text: string): boolean;
+
+  /**
+   * Engine facts for building `outputTail` on a non-zero exit (issue #1277):
+   * stdio banners to drop (`isAdapterLine`), explicit `console` events that are
+   * the program's own (`explicitConsoleIsProgram`), end-of-trace causes
+   * (`causeLast`), and runtime fatal-error headers (`isFatalErrorLine`). Kept
+   * in `get_output` as captured; only `outputTail` selection consults this contract.
+   */
+  programOutput?: ProgramOutputContract;
 
   /**
    * Return an attributed explanation for a DAP 'output' event that signals a

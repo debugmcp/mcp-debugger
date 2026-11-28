@@ -33,7 +33,8 @@ import {
   getLldbAttachBehavior,
   isLldbInternalFrame,
   describeLldbUnresolvedSource,
-  lldbShouldSuppressOutputEvent
+  lldbShouldSuppressOutputEvent,
+  isLldbAdapterOutputLine
 } from './lldb-policy-shared.js';
 
 /**
@@ -168,8 +169,36 @@ export function matchesCobolShimCommand(adapterCommand: { command: string; args:
   return adapterCommand.args.some((arg) => /cobol-shim(\.c?js)?$/i.test(arg));
 }
 
+/**
+ * libcob's fatal runtime-error header (`libcob/common.c` `cob_runtime_error` /
+ * `cob_fatal_error`): `libcob: <file>:<line>: error: <msg>`, `libcob: <file>:
+ * error: <msg>`, or `libcob: error: <msg>` when no source location is active
+ * (issue #1277). Warnings (`warning:`) and follow-up `note:` lines do not match.
+ * Needed on Linux and macOS, where CodeLLDB launches the debuggee on a pty and
+ * delivers libcob's error and storage dump merged into `stdout`.
+ */
+const LIBCOB_PREFIX = 'libcob: ';
+const LIBCOB_BARE_ERROR = 'error: ';
+const LIBCOB_LOCATED_ERROR = ': error: ';
+
+function isCobolFatalErrorLine(line: string): boolean {
+  if (!line.startsWith(LIBCOB_PREFIX)) {
+    return false;
+  }
+  const rest = line.slice(LIBCOB_PREFIX.length);
+  if (rest.startsWith(LIBCOB_BARE_ERROR)) {
+    return rest.length > LIBCOB_BARE_ERROR.length;
+  }
+  const marker = rest.lastIndexOf(LIBCOB_LOCATED_ERROR);
+  return marker > 0 && marker + LIBCOB_LOCATED_ERROR.length < rest.length;
+}
+
 export const CobolAdapterPolicy = {
   name: 'cobol',
+  programOutput: {
+    isAdapterLine: isLldbAdapterOutputLine,
+    isFatalErrorLine: isCobolFatalErrorLine,
+  },
   // The shim forwards `noDebug` to CodeLLDB untouched, so the measured
   // CodeLLDB behaviour applies (issue #746): `initialized` still arrives,
   // breakpoint requests are refused with "Not supported in noDebug mode",

@@ -7,6 +7,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
+import { exitOutputTail } from '../../../../src/session/breakpoints/launch-warnings.js';
 import { DebugLanguage, RustAdapterPolicy } from '@debugmcp/shared';
 import { createMockDependencies } from './session-manager-test-utils.js';
 import { FakeDebugAdapter } from '../../../test-utils/fakes/fake-debug-adapter.js';
@@ -194,6 +195,62 @@ describe('SessionManager - adapter-noise output suppression (issue #361)', () =>
       expect(outputs).toEqual([
         '[mcp-debugger] Warning: setBreakpoints refused under noDebug: Internal debugger error: Not supported in noDebug mode.\n'
       ]);
+    });
+  });
+
+  describe('output category provenance flags (issue #1277)', () => {
+    it('stamps categoryOmitted on category-less output events and server notices while leaving explicit console/stdout unmarked', async () => {
+      const dartSession = await launch(DebugLanguage.DART);
+
+      dependencies.mockProxyManager.emit('output', { output: '[loop] i=1\n' });
+      dependencies.mockProxyManager.emit('output', { category: 'console', output: '[log] settings missing db.url\n' });
+      dependencies.mockProxyManager.emit('output', { category: 'stdout', output: 'loading settings\n' });
+      dependencies.mockProxyManager.emit('adapter-notice', 'setBreakpoints refused under noDebug: nope');
+      dependencies.mockProxyManager.emit('exited', 2);
+
+      const dartManaged = sessionManager.getSession(dartSession.id)!;
+      const buffered = dartManaged.outputBuffer!.readBuffered().map((entry) => ({
+        category: entry.category,
+        output: entry.output,
+        categoryOmitted: entry.categoryOmitted
+      }));
+      expect(buffered).toEqual([
+        { category: 'console', output: '[loop] i=1\n', categoryOmitted: true },
+        { category: 'console', output: '[log] settings missing db.url\n', categoryOmitted: undefined },
+        { category: 'stdout', output: 'loading settings\n', categoryOmitted: undefined },
+        {
+          category: 'console',
+          output: '[mcp-debugger] Warning: setBreakpoints refused under noDebug: nope\n',
+          categoryOmitted: true
+        }
+      ]);
+
+      for (const publicEntry of dartManaged.outputBuffer!.read(0, 100).entries) {
+        expect('categoryOmitted' in publicEntry).toBe(false);
+      }
+      expect(exitOutputTail(dartManaged)).toEqual(['[log] settings missing db.url', 'loading settings']);
+    });
+
+    it('stamps categoryOmitted on unbound-function-breakpoint exit notices', async () => {
+      const rustSession = await sessionManager.createSession({
+        language: DebugLanguage.RUST,
+        executablePath: 'x'
+      });
+      await sessionManager.setFunctionBreakpoint(rustSession.id, { functionName: 'my_crate::missing' });
+      await sessionManager.startDebugging(rustSession.id, 'main');
+      await vi.runAllTimersAsync();
+
+      dependencies.mockProxyManager.emit('exited', 1);
+
+      const rustManaged = sessionManager.getSession(rustSession.id)!;
+      const buffered = rustManaged.outputBuffer!.readBuffered();
+      expect(buffered).toHaveLength(1);
+      expect(buffered[0].category).toBe('console');
+      expect(buffered[0].output).toMatch(
+        /^\[mcp-debugger\] Warning: function breakpoint\(s\) never bound during this run: 'my_crate::missing'/
+      );
+      expect(buffered[0].categoryOmitted).toBe(true);
+      expect(exitOutputTail(rustManaged)).toBeUndefined();
     });
   });
 });

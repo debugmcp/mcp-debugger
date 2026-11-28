@@ -167,6 +167,17 @@ interface DartLiveUpdateState {
 
 export const DartAdapterPolicy = {
   name: 'dart',
+  // Measured with DAP_TRACE=1 (`package:dds`, issue #1277): the Dart/Flutter SDK
+  // adapters send `dart:developer` `log()` records (including indented multi-line
+  // continuations) and `dart test` / `flutter test` per-test result lines (`✓`,
+  // `✖`, `!`) with an explicit `"category": "console"`, and Flutter's tool
+  // (`flutter_adapter.dart`, read) also sends its pre-start launch/build lines
+  // and `Failed to Hot Reload/Restart: ...` with an explicit `"category": "console"`,
+  // while lifecycle lines (`Connecting to VM Service...`, `Connected to the VM Service.`,
+  // `Exited (N).`, `Detached.`) and user logpoints omit `category` altogether.
+  programOutput: {
+    explicitConsoleIsProgram: true,
+  },
   supportsLogPoints: true,
   supportsFunctionBreakpoints: false,
   honoursNoDebug: true,
