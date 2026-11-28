@@ -192,6 +192,7 @@ describe('activateInspector (issue #871)', () => {
     const err = await failure(activateInspector(options));
     expect(signal).toHaveBeenCalledWith(4242);
     expect(err).toBeInstanceOf(SignalledActivationError);
+    expect(err.name).toBe('SignalledActivationError');
     expect(err.message).toBe(
       'JavaScript attach: PID 4242 was signalled to open its inspector, but 127.0.0.1:9229 is already held by a Node inspector ' +
         'for a different process (PID 31337: node[31337]); one may now be open on another port (a target started with ' +
@@ -209,6 +210,13 @@ describe('activateInspector (issue #871)', () => {
 
     const before = await failure(activateInspector(harness({ probes: [inspector('node[31337]')] }).options));
     expect(before).not.toBeInstanceOf(SignalledActivationError);
+  });
+
+  it('a rejection after the signal that is not an Error keeps its detail in the signalled failure', async () => {
+    const { options } = harness({ probes: [closed, inspector('server.js')], pidOf: () => Promise.reject('socket hang up') });
+    const err = await failure(activateInspector(options));
+    expect(err).toBeInstanceOf(SignalledActivationError);
+    expect(err.message).toMatch(/^JavaScript attach: PID 4242 was signalled to open its inspector, but socket hang up; /);
   });
 
   it('never signals a PID that is not a Node.js process on POSIX (SIGUSR1 would terminate it)', async () => {
@@ -325,7 +333,8 @@ describe('probeInspector (the real /json/list probe)', () => {
   it.each([
     [[], '/json/list answered a list with no Node inspector target in it (0 entries)'],
     [[{ id: 'x', title: 'app', type: 'page', webSocketDebuggerUrl: 'ws://127.0.0.1/x' }], '/json/list answered a list with no Node inspector target in it (1 entry)'],
-    [[{ id: 'x', title: 'node[1]', type: 'node' }, { name: 'thing' }], '/json/list answered a list with no Node inspector target in it (2 entries)']
+    [[{ id: 'x', title: 'node[1]', type: 'node' }, { name: 'thing' }], '/json/list answered a list with no Node inspector target in it (2 entries)'],
+    [[{ id: 'x', title: 'node[1]', type: 'node', webSocketDebuggerUrl: '' }], '/json/list answered a list with no Node inspector target in it (1 entry)']
   ])('an HTTP server whose /json/list is not a Node inspector\'s target list is "other": %j', async (list, detail) => {
     const srv = await serve((_req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(list)); });
     try {
@@ -338,6 +347,16 @@ describe('probeInspector (the real /json/list probe)', () => {
   it('keeps only the Node targets of a list that has one', async () => {
     const node = { id: 'n', title: 'server.js', type: 'node', webSocketDebuggerUrl: 'ws://127.0.0.1:9229/n' };
     const srv = await serve((_req, res) => { res.end(JSON.stringify([{ id: 'p', type: 'page' }, node])); });
+    try {
+      expect(await probeInspector('127.0.0.1', srv.port, 1000)).toEqual({ status: 'inspector', targets: [node] });
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it('a null entry beside a Node target is skipped: the list is an inspector\'s, with that target', async () => {
+    const node = { id: 'n', title: 'server.js', type: 'node', webSocketDebuggerUrl: 'ws://127.0.0.1:9229/n' };
+    const srv = await serve((_req, res) => { res.end(JSON.stringify([null, node])); });
     try {
       expect(await probeInspector('127.0.0.1', srv.port, 1000)).toEqual({ status: 'inspector', targets: [node] });
     } finally {

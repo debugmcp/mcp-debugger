@@ -122,7 +122,7 @@ const listeningNow = (target: Target) =>
   `listening: an inspector answers on 127.0.0.1:${target.inspectPort}, unauthenticated ` +
   `(one answered there after this attach signalled PID ${target.pid}); this server does not close it`;
 const found = (target: Target) =>
-  `an inspector of PID ${target.pid} answered this attach's first probe on 127.0.0.1:${target.inspectPort}, so no signal was sent`;
+  `an inspector answered this attach's first probe on 127.0.0.1:${target.inspectPort}, so no signal was sent`;
 
 beforeEach(async () => {
   server = await startStdioClient({ name: 'js-attach-inspector-stays-open', callTimeoutMs: 60_000 });

@@ -499,18 +499,18 @@ Three ways in:
   what opened the inspector or how long it will listen. After an attach that signalled, the
   detach and close look once (one `/json/list` probe of the address, 1 s at most; an answer
   counts as an inspector only when it lists a Node target with a WebSocket address) and say
-  what they saw; after one that found the inspector open, they do not look. An attach by
+  what they saw; after one that found an inspector open, they do not look. An attach by
   port or by inspector URL says nothing about it.
 
   | When | `inspector` |
   |---|---|
   | attach that signalled, and an inspector answered (a failed attach too) | `signalled: 127.0.0.1:9229 refused this attach's first probe, this attach then signalled PID <pid>, and an inspector answered there after the signal, unauthenticated; this server does not close it` |
-  | attach that found an inspector of the PID open | `already open: an inspector of PID <pid> answered this attach's first probe on 127.0.0.1:9229, so no signal was sent; this server does not close it` |
+  | attach whose first probe an inspector answered | `already open: an inspector answered this attach's first probe on 127.0.0.1:9229, so no signal was sent; this server does not close it` |
   | attach that signalled and then failed to identify one | `signalled: this attach signalled PID <pid>, and no inspector of it was identified on 127.0.0.1:9229; one may now be open on another port, and this server does not close it` (the same on its close) |
   | detach or close, an inspector answers | `listening: an inspector answers on 127.0.0.1:9229, unauthenticated (one answered there after this attach signalled PID <pid>); this server does not close it` |
   | detach or close, the port refuses | `not listening: 127.0.0.1:9229 no longer accepts connections (one answered there after this attach signalled PID <pid>)` |
   | detach or close, no answer or something else | `not checked: 127.0.0.1:9229 did not answer as an inspector (<what was seen>); one answered there after this attach signalled PID <pid>, and this server does not close it` |
-  | detach or close, it had been found open | `left as it was: an inspector of PID <pid> answered this attach's first probe on 127.0.0.1:9229, so no signal was sent; this server does not close it` |
+  | detach or close, it had been found open | `left as it was: an inspector answered this attach's first probe on 127.0.0.1:9229, so no signal was sent; this server does not close it` |
 
   A session whose connection ended by itself says nothing until its close, which carries
   the field as above.

@@ -405,7 +405,8 @@ export interface LaunchTransformContext {
  * What an attach left in its target, which this server does not undo (issue
  * #1261), in the adapter's words. The session layer only carries it: nothing
  * is given back. Example: the JavaScript adapter's attach by processId reports
- * the inspector it found open, or the one that answered after it signalled.
+ * an inspector that answered its first probe, or one that answered after it
+ * signalled; never whose inspector it is.
  */
 export interface AttachFootprint {
   /** The answer field it is reported under, a lowerCamelCase noun (JavaScript: `inspector`). */

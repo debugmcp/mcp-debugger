@@ -72,16 +72,19 @@ describe('inspectorFootprint (issue #1261)', () => {
     }
   });
 
-  it('an inspector of the PID that was already open: left as it was, under the same field, and nothing is probed', async () => {
+  // The review's construction: a title ending in `[<another PID>]` is a script's path, so whose inspector answered is not observed.
+  it('an inspector that answered the first probe: left as it was, under the same field, nothing is probed, and no PID is named', async () => {
     const probe = vi.fn();
     const footprint = inspectorFootprint({ ...at, port: 5935, alreadyActive: true }, probe);
     expect(footprint.field).toBe('inspector');
     expect(footprint.atAttach).toBe(
-      "already open: an inspector of PID 4242 answered this attach's first probe on 127.0.0.1:5935, so no signal was sent; this server does not close it"
+      "already open: an inspector answered this attach's first probe on 127.0.0.1:5935, so no signal was sent; this server does not close it"
     );
-    await expect(footprint.atEnd()).resolves.toBe(
-      "left as it was: an inspector of PID 4242 answered this attach's first probe on 127.0.0.1:5935, so no signal was sent; this server does not close it"
+    const atEnd = await footprint.atEnd();
+    expect(atEnd).toBe(
+      "left as it was: an inspector answered this attach's first probe on 127.0.0.1:5935, so no signal was sent; this server does not close it"
     );
+    for (const text of [footprint.atAttach, atEnd]) expect(text).not.toMatch(/PID|4242/);
     expect(probe).not.toHaveBeenCalled();
   });
 

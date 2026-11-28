@@ -926,7 +926,7 @@ describe('JavascriptDebugAdapter.transformAttachConfig by processId (issue #871)
     it('an inspector that was already open is handed over as left as it was', async () => {
       const { adapter } = adapterWithActivation(async (o) => ({ host: '127.0.0.1', port: o.port ?? 9229, alreadyActive: true, title: 'x' }));
       await adapter.transformAttachConfig({ request: 'attach', processId: 4242 } as any);
-      expect(adapter.consumeAttachFootprint()?.atAttach).toMatch(/^already open: an inspector of PID 4242 answered this attach's first probe on 127\.0\.0\.1:9229/);
+      expect(adapter.consumeAttachFootprint()?.atAttach).toMatch(/^already open: an inspector answered this attach's first probe on 127\.0\.0\.1:9229/);
     });
 
     /** The real activation, with its process and network replaced: `probes` answer in order, the last one repeats. */

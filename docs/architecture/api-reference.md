@@ -184,7 +184,7 @@ Whether attach connects directly to an already-listening DAP server (e.g. `rdbg`
 #### `consumeAttachFootprint?(): AttachFootprint | undefined`
 Drains what the last attach transform left in its target, which this server does not undo (issue #1261). The session layer drains it right after `transformAttachConfig`, keeps it on the run, and the attach, detach and close answers report it in one field. Nothing is given back.
 
-**Returns**: an `AttachFootprint` — `field` (the answer field, e.g. `inspector`), `atAttach` (what the attach did, for the attach answer, a failed one included) and `atEnd()` (what is seen of it now, for the detach and close answers; at most one brief look at the target; never rejects) — or `undefined`. The JavaScript adapter's says what an attach by processId observed of the target's inspector (found open, or answering after the signal); this server does not close it
+**Returns**: an `AttachFootprint` — `field` (the answer field, e.g. `inspector`), `atAttach` (what the attach did, for the attach answer, a failed one included) and `atEnd()` (what is seen of it now, for the detach and close answers; at most one brief look at the target; never rejects) — or `undefined`. The JavaScript adapter's says what an attach by processId observed of an inspector (one answering its first probe, or one answering after the signal), never whose it is; this server does not close it
 
 ### Launch Barrier (Optional)
 

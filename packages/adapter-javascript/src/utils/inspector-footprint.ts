@@ -19,7 +19,8 @@ export function inspectorFootprint(
 ): AttachFootprint {
   const where = `${inspector.host}:${inspector.port}`;
   if (inspector.alreadyActive) {
-    const found = `an inspector of PID ${inspector.pid} answered this attach's first probe on ${where}, so no signal was sent`;
+    // Whose inspector it is is not observed: a title ending in `[digits]` can be a script's path (issue #1261).
+    const found = `an inspector answered this attach's first probe on ${where}, so no signal was sent`;
     return {
       field: INSPECTOR_FIELD,
       atAttach: `already open: ${found}; this server does not close it`,
