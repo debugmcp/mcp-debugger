@@ -271,9 +271,10 @@ const VITE_SSR_BINDING_PREFIX = '__vite_ssr_';
  * Lines Node's inspector and js-debug write to the target's stderr stream
  * rather than `console` (issue #1277): V8's `inspector_io` attach/wait/listen
  * banners (printed to the target's stderr fd via the bootloader's
- * `NODE_OPTIONS`, so `outputCapture: 'std'` forwards them as `stderr`) and
- * js-debug's own breakpoint-condition syntax error line (#853). Anchored at
- * both ends so a program line that merely starts or ends with a banner stays.
+ * `NODE_OPTIONS`, so `outputCapture: 'std'` forwards them as `stderr`, anchored
+ * at both ends) and js-debug's own breakpoint-condition syntax error line (#853,
+ * matched by `Syntax error setting breakpoint with condition ... on line N: ...`
+ * prefix/shape because the trailing V8 syntax message varies).
  */
 const JS_INSPECTOR_STDERR_LINE =
   /^(?:Debugger attached\.|Waiting for the debugger to disconnect\.\.\.|Debugger (?:listening|ending) on ws:\/\/\S+|For help, see: https:\/\/nodejs\.org\/en\/docs\/inspector)$/;

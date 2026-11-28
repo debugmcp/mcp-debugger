@@ -2951,17 +2951,14 @@ export abstract class SessionManagerCore extends EventEmitter {
       const { text, redacted } = this.redactForBuffer(body.output);
       // Push to the closure-captured buffer, NOT session.outputBuffer — see
       // the buffer construction above (issue #358).
-      const categoryOmitted = body.category === undefined;
       const entry: SessionOutputEntry | undefined = outputBuffer.push(
         category,
         text,
         undefined,
-        redacted || categoryOmitted
-          ? {
-              ...(redacted ? { redacted: true } : {}),
-              ...(categoryOmitted ? { categoryOmitted: true } : {})
-            }
-          : undefined
+        {
+          ...(redacted ? { redacted: true } : {}),
+          ...(body.category === undefined ? { categoryOmitted: true } : {})
+        }
       );
       if (entry) {
         this.emit('output-captured', sessionId, entry);

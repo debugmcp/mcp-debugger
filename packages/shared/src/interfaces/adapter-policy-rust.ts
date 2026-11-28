@@ -33,15 +33,20 @@ import {
 const RUST_SOURCE_EXTENSIONS: ReadonlySet<string> = new Set(['.rs']);
 
 /**
- * Rust panic and stack-overflow headers (`library/std/src/panicking.rs` and
- * `sys/pal/unix/stack_overflow.rs`, issue #1277): covers current Rust 1.73+
- * (`thread 'main' panicked at src/main.rs:18:5:`), pre-1.73 (`thread 'main'
- * panicked at 'msg', src/main.rs:18:5`), and stack overflow (`thread 'main' has
- * overflowed its stack`, without matching the trailing `fatal runtime error:`
- * line that follows it). Needed on Linux/macOS where CodeLLDB merges pty
- * `stderr` into `stdout` and `RUST_BACKTRACE=1` pushes the header above the cut.
+ * The main thread's panic and stack-overflow lines (`library/std/src/panicking.rs`
+ * and `sys/pal/unix/stack_overflow.rs`, issue #1277): covers current Rust with
+ * the thread id in parentheses (`thread 'main' (1409179) panicked at src/main.rs:18:5:`,
+ * measured on rustc 1.91.1), Rust 1.73+ without an id (`thread 'main' panicked at
+ * src/main.rs:18:5:`), pre-1.73 (`thread 'main' panicked at 'msg', src/main.rs:18:5`),
+ * and stack overflow (`thread 'main' (1409179) has overflowed its stack` /
+ * `thread 'main' has overflowed its stack`, without matching the trailing
+ * `fatal runtime error:` line that follows it). Limited to `'main'` on purpose:
+ * `isFatalErrorLine` requires a line the runtime prints only as the process ends,
+ * and a panic in a spawned thread or a test-harness thread does not end the process.
+ * Needed on Linux/macOS where CodeLLDB merges pty `stderr` into `stdout` and
+ * `RUST_BACKTRACE=1` pushes the panic line above the cut.
  */
-const RUST_FATAL_LINE = /^thread '[^']*' (?:panicked at .+|has overflowed its stack)$/;
+const RUST_FATAL_LINE = /^thread 'main'(?: \(\d+\))? (?:panicked at .+|has overflowed its stack)$/;
 
 export const RustAdapterPolicy = {
   name: 'rust',

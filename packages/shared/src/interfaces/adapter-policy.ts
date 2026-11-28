@@ -366,8 +366,11 @@ export interface ProgramOutputContract {
    * (Node's V8 inspector banners and js-debug's breakpoint syntax error on
    * `stderr`; a launched JVM's JDWP `Listening for transport dt_socket ...`
    * banner on `stdout`; CodeLLDB's `Stop reason: ...` line on `stderr`).
-   * Anchored at both ends so a program line that merely begins or ends with
-   * the banner text stays; an exact match cannot be told apart.
+   * Fixed banners (V8 inspector lines, JDWP `Listening for transport ...`) are
+   * anchored at both ends so only an exact match is ambiguous; open-ended
+   * diagnostics (CodeLLDB's `^Stop reason: .+$` and js-debug's `Syntax error
+   * setting breakpoint with condition ... on line N: ...`) match by prefix/shape,
+   * so a program `stderr` line with that prefix is also left out.
    */
   isAdapterLine?(category: 'stdout' | 'stderr', line: string): boolean;
   /**
@@ -375,7 +378,8 @@ export interface ProgramOutputContract {
    * are the program's own output, while events that omitted `category` (defaulted
    * to `'console'`) are the adapter's lifecycle and logpoint lines (Dart/Flutter
    * SDK adapters: `dart:developer` `log()` records including indented continuation
-   * lines, plus `dart test` / `flutter test` `✓` / `✖` / `!` result lines).
+   * lines, `dart test` / `flutter test` `✓` / `✖` / `!` result lines, and
+   * Flutter's pre-start launch/build lines plus `Failed to Hot Reload/Restart: ...`).
    */
   explicitConsoleIsProgram?: boolean;
   /**
@@ -387,14 +391,15 @@ export interface ProgramOutputContract {
   /**
    * True when a trimmed non-empty program line is the runtime's own fatal-error
    * header (GnuCOBOL `libcob: ... error: ...`, `libstdc++` `terminate called ...`,
-   * Rust `thread '...' panicked at ...` / `has overflowed its stack`). Applies
-   * everywhere — both when streams are separate (such as `SYSERR` output ahead
-   * of `libcob:` on Windows) and on Linux/macOS where CodeLLDB merges pty
-   * streams into `stdout`. Uses the last matching line when that line is not
-   * among the last 8. Implementations must match only a line the runtime prints
-   * as it ends the process; if an earlier child process sharing the buffer
-   * printed such a line and the parent later printed >8 lines and exited
-   * non-zero without one, that earlier line will be quoted as the head.
+   * and in Rust the main thread's panic line `thread 'main' ... panicked at ...` /
+   * `has overflowed its stack`). Applies everywhere — both when streams are
+   * separate (such as `SYSERR` output ahead of `libcob:` on Windows) and on
+   * Linux/macOS where CodeLLDB merges pty streams into `stdout`. Uses the last
+   * matching line when that line is not among the last 8. Implementations must
+   * match only a line the runtime prints as it ends the process; if an earlier
+   * child process sharing the buffer printed such a line and the parent later
+   * printed >8 lines and exited non-zero without one, that earlier line will be
+   * quoted as the head.
    */
   isFatalErrorLine?(line: string): boolean;
 }

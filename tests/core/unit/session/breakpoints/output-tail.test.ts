@@ -232,40 +232,52 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
       ]);
     });
 
-    it('Rust panic on Linux (pty-merged stdout with RUST_BACKTRACE=1, exit 101): keeps thread panicked header above backtrace and drops Stop reason', () => {
+    it("Rust panic on Linux (pty-merged stdout with RUST_BACKTRACE=1, exit 101): keeps the main thread's panic line above backtrace", () => {
       const linuxRustBuffer = bufferOf(
+        { category: 'console', output: 'Loading Rust formatters from /path/to/codelldb/formatters\n' },
         {
           category: 'stdout',
           output:
             'panic_example: starting\r\n' +
             'panic_example: validating ticket 42 at pre-flight (3 attempts)\r\n' +
-            "thread 'main' panicked at src/main.rs:18:5:\r\n" +
+            '\r\n' +
+            "thread 'main' (1409179) panicked at src/main.rs:18:5:\r\n" +
             'intentional panic for mcp-debugger tests (ticket 42)\r\n' +
-            'stack backtrace:\r\n' +
-            '   0: rust_begin_unwind\r\n' +
-            '             at /rustc/hash/library/std/src/panicking.rs:665:5\r\n' +
+            'stack backtrace:\r\n'
+        },
+        {
+          category: 'stdout',
+          output:
+            '   0: __rustc::rust_begin_unwind\r\n' +
+            '             at /rustc/ed61e7d7e242494fb7057f2657300d9e77bb4fcb/library/std/src/panicking.rs:698:5\r\n' +
             '   1: core::panicking::panic_fmt\r\n' +
-            '             at /rustc/hash/library/core/src/panicking.rs:76:14\r\n' +
+            '             at /rustc/ed61e7d7e242494fb7057f2657300d9e77bb4fcb/library/core/src/panicking.rs:76:14\r\n' +
             '   2: panic_example::validate\r\n' +
-            '             at ./src/main.rs:18:5\r\n' +
+            '             at ./src/main.rs:18:5\r\n'
+        },
+        {
+          category: 'stdout',
+          output:
             '   3: panic_example::main\r\n' +
             '             at ./src/main.rs:10:19\r\n' +
             '   4: core::ops::function::FnOnce::call_once\r\n' +
-            '             at /rustc/hash/library/core/src/ops/function.rs:250:5\r\n' +
-            'note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.\r\n'
+            '             at /rustc/ed61e7d7e242494fb7057f2657300d9e77bb4fcb/library/core/src/ops/function.rs:250:5\r\n'
         },
-        { category: 'stderr', output: 'Stop reason: signal SIGABRT\n' },
+        {
+          category: 'stdout',
+          output: 'note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.\r\n'
+        },
         { category: 'console', output: 'Process exited with code 101.\n' }
       );
 
       expect(exitOutputTail({ exitCode: 101, language: DebugLanguage.RUST, outputBuffer: linuxRustBuffer })).toEqual([
-        "thread 'main' panicked at src/main.rs:18:5:",
+        "thread 'main' (1409179) panicked at src/main.rs:18:5:",
         'intentional panic for mcp-debugger tests (ticket 42)',
         'stack backtrace:',
-        '0: rust_begin_unwind',
+        '0: __rustc::rust_begin_unwind',
         '... (7 lines omitted)',
         '4: core::ops::function::FnOnce::call_once',
-        'at /rustc/hash/library/core/src/ops/function.rs:250:5',
+        'at /rustc/ed61e7d7e242494fb7057f2657300d9e77bb4fcb/library/core/src/ops/function.rs:250:5',
         'note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.'
       ]);
     });
@@ -521,7 +533,7 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
       ]);
     });
 
-    it('ends the line after a ring-buffer-truncated entry (8,192 chars) while still joining non-truncated chunks after it', () => {
+    it('ends the line after a ring-buffer-truncated entry (8,192 chars) both mid-run and when a run starts with one', () => {
       const buf = new OutputRingBuffer();
       buf.push('stderr', 'prefix: ');
       const pushed = buf.push('stderr', 'X'.repeat(MAX_OUTPUT_ENTRY_CHARS + 50));
@@ -538,6 +550,28 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
         expectedTruncatedLine,
         'actual cause on next entry'
       ]);
+
+      // Mutant R05: a run that STARTS with an 8,192-char truncated entry (both as the very
+      // first entry and immediately after a different category) must also start closed so the
+      // following chunk of the same category is not glued onto it.
+      const startsTruncated = new OutputRingBuffer();
+      const firstTruncated = startsTruncated.push('stderr', 'Y'.repeat(MAX_OUTPUT_ENTRY_CHARS + 50));
+      expect(firstTruncated.truncated).toBe(true);
+      startsTruncated.push('stderr', 'next line after initial truncated\n');
+      const switchedCategoryTruncated = startsTruncated.push('stdout', 'Z'.repeat(MAX_OUTPUT_ENTRY_CHARS + 50));
+      expect(switchedCategoryTruncated.truncated).toBe(true);
+      startsTruncated.push('stdout', 'next stdout line\n');
+
+      const expectedFromInitialTruncated = [
+        `${'Y'.repeat(300)}…`,
+        'next line after initial truncated',
+        `${'Z'.repeat(300)}…`,
+        'next stdout line'
+      ];
+      expect(exitOutputTail({ exitCode: 1, language: DebugLanguage.GO, outputBuffer: startsTruncated })).toEqual(
+        expectedFromInitialTruncated
+      );
+      expect(readOutputTailLines(startsTruncated)).toEqual(expectedFromInitialTruncated);
     });
 
     it('bounds lines strictly above 300 characters: 300 stays whole, 301 gets a single ellipsis', () => {
@@ -688,7 +722,7 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
       expect(isJsAdapter('stderr', 'Syntax error setting breakpoint with condition "x" on line six: bad')).toBe(false);
     });
 
-    it('pins Java stdout JDWP banner and CodeLLDB stderr Stop reason banner with both anchors', () => {
+    it('pins Java stdout JDWP banner (anchored at both ends) and CodeLLDB stderr Stop reason prefix', () => {
       const isJavaAdapter = JavaAdapterPolicy.programOutput.isAdapterLine!;
       expect(isJavaAdapter('stdout', 'Listening for transport dt_socket at address: 5005')).toBe(true);
       expect(isJavaAdapter('stdout', 'Listening for transport dt_socket at address: 127.0.0.1:5005')).toBe(true);
@@ -735,12 +769,22 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
       expect(isCppFatal('terminate called my cleanup handler')).toBe(false);
 
       const isRustFatal = RustAdapterPolicy.programOutput.isFatalErrorLine!;
+      expect(isRustFatal("thread 'main' (1409179) panicked at src/main.rs:18:5:")).toBe(true);
       expect(isRustFatal("thread 'main' panicked at src/main.rs:18:5:")).toBe(true);
-      expect(isRustFatal("thread 'main' panicked at 'intentional panic', src/main.rs:18:5")).toBe(true);
-      expect(isRustFatal("thread '' panicked at src/lib.rs:1:1:")).toBe(true);
-      expect(isRustFatal("thread 'worker-1' has overflowed its stack")).toBe(true);
+      expect(isRustFatal("thread 'main' panicked at 'msg', src/main.rs:2:5")).toBe(true);
+      expect(isRustFatal("thread 'main' (1409179) has overflowed its stack")).toBe(true);
+      expect(isRustFatal("thread 'main' has overflowed its stack")).toBe(true);
+      expect(isRustFatal("thread 'worker-1' (77) panicked at src/main.rs:18:5:")).toBe(false);
+      expect(isRustFatal("thread 'worker-1' has overflowed its stack")).toBe(false);
+      expect(isRustFatal("thread '<unnamed>' panicked at src/lib.rs:4:9:")).toBe(false);
+      expect(isRustFatal("thread '' panicked at src/lib.rs:1:1:")).toBe(false);
+      expect(isRustFatal("thread 'main' (abc) panicked at src/main.rs:18:5:")).toBe(false);
+      expect(isRustFatal("thread 'main' () panicked at src/main.rs:18:5:")).toBe(false);
+      expect(isRustFatal("thread 'main'(1409179) panicked at src/main.rs:18:5:")).toBe(false);
+      expect(isRustFatal("thread 'main' (1409179)  panicked at src/main.rs:18:5:")).toBe(false);
+      expect(isRustFatal("thread 'main' panicked at ")).toBe(false);
       expect(isRustFatal('fatal runtime error: stack overflow')).toBe(false);
-      expect(isRustFatal("prefix thread 'main' panicked at src/main.rs:18:5:")).toBe(false);
+      expect(isRustFatal("prefix thread 'main' (1409179) panicked at src/main.rs:18:5:")).toBe(false);
       expect(isRustFatal("thread 'main' has overflowed its stack extra")).toBe(false);
       expect(isRustFatal("thread 'main' exited normally")).toBe(false);
 
