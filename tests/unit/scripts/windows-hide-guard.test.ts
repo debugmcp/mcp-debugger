@@ -5,8 +5,8 @@
  * a brand-new console window, and that window takes focus. A test run or build started from an
  * agent, an IDE task or a git hook has no console, so each spawn without `windowsHide` flashes a
  * window and steals focus for the whole suite (issue #843). The runtime already hides its children
- * (#215, the adapter spawn, ProcessManagerImpl); this guard keeps the build and test tooling the
- * pre-push hook runs in line too.
+ * (#215, the adapter spawn, ProcessManagerImpl); this guard keeps the build and test tooling
+ * run locally, in CI and by the tags-only pre-push release gate in line too.
  *
  * Scope: the runtime sources, every script under scripts/ and packages/<pkg>/scripts/, tools/,
  * and the unit and integration test trees. The e2e and exploratory suites are out of scope: they

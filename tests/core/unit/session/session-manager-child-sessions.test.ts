@@ -1100,7 +1100,7 @@ describe('SessionManager child sessions (issue #1081)', () => {
 
         expect(answer.state).toBe(SessionState.STOPPED);
         expect(answer.data?.message).toBe(
-          `The program ended without reporting an exit code without hitting any breakpoint. ${OFF}`
+          `The program ended without reporting an exit code; no breakpoint was hit. ${OFF}`
         );
       });
 
@@ -1325,7 +1325,7 @@ describe('SessionManager child sessions (issue #1081)', () => {
       await vi.runAllTimersAsync();
       const answer = await sessionManager.waitForStop(rootId, 100);
 
-      expect(answer.data?.message).toContain('without hitting any breakpoint');
+      expect(answer.data?.message).toContain('no breakpoint was hit');
       expect(answer.data?.unhitBreakpoints).toEqual([expect.objectContaining({ file: '/w/child.py', line: 7 })]);
     });
   });

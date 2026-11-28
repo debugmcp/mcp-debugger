@@ -194,7 +194,7 @@ describe('buildRunToCompletionSummary', () => {
     expect(adapterDefaultOff.summary).not.toContain('attach_to_process');
     expect(adapterDefaultOff.summary).not.toContain('so child processes were not debugged');
     expect(adapterDefaultOff.summary).toContain(
-      'without hitting any breakpoint in the attached process (on an attach, processes the target starts afterwards are not debugged unless requested, so a breakpoint in code only such a process runs is never hit; adapterConfig: { autoAttachChildProcesses: true } on the attach requests it for a target reached through a local endpoint, but it changes the target: each process it starts from then on is made to load a file from this server (through NODE_OPTIONS) and to wait at startup for the debugger, so it can fail to start if the target cannot load this server\'s file, starts late when the target forks fast, and can be left waiting if it is forked during a detach (#1286)).'
+      'no breakpoint was hit in the attached process (on an attach, processes the target starts afterwards are not debugged unless requested, so a breakpoint in code only such a process runs is never hit; adapterConfig: { autoAttachChildProcesses: true } on the attach requests it for a target reached through a local endpoint, but it changes the target: each process it starts from then on is made to load a file from this server (through NODE_OPTIONS) and to wait at startup for the debugger, so it can fail to start if the target cannot load this server\'s file, starts late when the target forks fast, and can be left waiting if it is forked during a detach (#1286)).'
     );
   });
 
@@ -297,4 +297,10 @@ describe('buildRunToCompletionSummary', () => {
       );
     });
   });
+});
+
+
+it('avoids repeating without when an attach reports no exit code (#1288)', () => {
+  const result = build({ breakpoints: new Map([['bp', { file: '/parent.js', line: 21, verified: true }]]), run: { attachMode: true } });
+  expect(result.summary).toBe('The program ended without reporting an exit code; no breakpoint was hit. Verified but never hit: parent.js:21.');
 });

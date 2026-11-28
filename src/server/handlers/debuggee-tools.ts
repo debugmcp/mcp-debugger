@@ -212,6 +212,8 @@ export const detachFromProcessTool: ToolHandler = async (ctx, args) => {
       responsePayload.data = detachResult.data;
       // The children a detach released, or a terminating detach closed (issue #1081).
       hoistTreeFields(responsePayload, detachResult.data);
+      // Policy explanation of target changes that outlive the detach (#1288).
+      if (detachResult.data.note) responsePayload.note = detachResult.data.note;
       // What became of the process, as observed (issue #1148), beside the
       // message the way close_debug_session carries it.
       if (detachResult.data.released) responsePayload.released = true;

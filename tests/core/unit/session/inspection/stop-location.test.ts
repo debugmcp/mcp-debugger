@@ -20,6 +20,10 @@ function result(overrides: Partial<StackTraceResult> = {}): StackTraceResult {
 
 function context(opts: {
   reason?: string;
+  hasBreakpoints?: boolean;
+  functionBreakpoint?: boolean;
+  logpoint?: boolean;
+  supportsLogPoints?: boolean;
   stopThreadId?: number;
   state?: SessionState;
   read?: StackTraceResult | Error;
@@ -39,6 +43,9 @@ function context(opts: {
     getStackTraceDetailed,
     getSession: () => ({
       state,
+      breakpoints: new Map(opts.hasBreakpoints || opts.logpoint ? [['bp', opts.logpoint ? { logMessage: 'log' } : {}]] : []),
+      functionBreakpoints: new Map(opts.functionBreakpoint ? [['fn', {}]] : []),
+      adapterCapabilities: { supportsLogPoints: opts.supportsLogPoints },
       lastStop: opts.reason === undefined
         ? undefined
         : { reason: opts.reason, timestamp: 1, ...(opts.stopThreadId !== undefined ? { threadId: opts.stopThreadId } : {}) }
@@ -187,4 +194,17 @@ describe('describeStopLocation (issue #904)', () => {
       expect.any(Error)
     );
   });
+});
+
+
+it.each([
+  { hasBreakpoints: true, pauses: true },
+  { functionBreakpoint: true, pauses: true },
+  { logpoint: true, supportsLogPoints: true, pauses: false },
+  { logpoint: true, supportsLogPoints: false, pauses: true },
+  { pauses: false }
+])('gives stop advice for pausing breakpoints: %j (#1288)', async opts => {
+  const { ctx } = context({ reason: 'pause', ...opts, read: result({ frames: [IDLE], noProgramFrame: true }) });
+  const landing = await describeStopLocation(ctx, 'sid', 'pause');
+  expect(landing.note?.includes('or set a breakpoint')).toBe(!opts.pauses);
 });

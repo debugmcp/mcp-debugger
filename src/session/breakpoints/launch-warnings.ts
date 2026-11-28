@@ -15,9 +15,31 @@ import {
 } from '@debugmcp/shared';
 import { normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
 import type { BufferedOutputEntry, OutputRingBuffer } from '../output-buffer.js';
+import { hasPausingBreakpoint, type LaunchArming } from '../launch/launch-arming.js';
+import type { RunFacts } from '../run-facts.js';
 import type { ManagedSession } from '../session-store.js';
 
 const DEFAULT_ATTACH_CHILD_DEBUGGING_NOTE = "on an attach, processes the target starts afterwards are not debugged unless requested, so a breakpoint in code only such a process runs is never hit; adapterConfig: { autoAttachChildProcesses: true } on the attach requests it for a target reached through a local endpoint, but it changes the target: each process it starts from then on is made to load a file from this server (through NODE_OPTIONS) and to wait at startup for the debugger, so it can fail to start if the target cannot load this server's file, starts late when the target forks fast, and can be left waiting if it is forked during a detach (#1286)";
+
+/** A conditional explanation, never a claim about which process runs the code (#1288). */
+export function buildPendingAttachBreakpointClause(
+  arming: Pick<LaunchArming, 'lineBreakpoints' | 'logpointsThatPause' | 'functionBreakpoints'>,
+  run: Pick<RunFacts, 'attached' | 'childDebuggingOptedOut' | 'breakpointStopOccurred'>
+): string | undefined {
+  if (!run.attached || run.childDebuggingOptedOut === undefined ||
+      run.breakpointStopOccurred || !hasPausingBreakpoint(arming)) {
+    return undefined;
+  }
+  return "If a breakpoint's code runs only in a process the target starts (a fork or a worker process), this attach does not debug that process: " +
+    'see adapterConfig.autoAttachChildProcesses in the attach_to_process description for what turning that on costs.';
+}
+
+/** Verification describes binding in this process, not a promise about future children. */
+export function buildAttachBreakpointScopeWarning(run: Pick<RunFacts, 'attached' | 'childDebuggingOptedOut'> | undefined): string | undefined {
+  return run?.attached && run.childDebuggingOptedOut !== undefined
+    ? 'Verified says the breakpoint is bound in the attached process, not that a process the target starts will stop on it; see adapterConfig.autoAttachChildProcesses in the attach_to_process description.'
+    : undefined;
+}
 
 export const OUTPUT_TAIL_LINES = 8;
 export const OUTPUT_TAIL_LINE_CHARS = 300;
@@ -514,7 +536,7 @@ function summarizeProgramEnd(
     ? ` Verified${optedOut !== undefined ? ` in ${processScope}` : ''} but never hit: ${verifiedNames.join(', ')}.`
     : '';
   return {
-    summary: withOutputTailClause(`${ended} without hitting any breakpoint${optOutClause}.${verifiedClause}`, outputTail),
+    summary: withOutputTailClause(`${ended}${exitCode === undefined ? '; no breakpoint was hit' : ' without hitting any breakpoint'}${optOutClause}.${verifiedClause}`, outputTail),
     data
   };
 }

@@ -11,6 +11,7 @@ import { SessionState } from '@debugmcp/shared';
 import type { OperationsContext } from '../operations-context.js';
 import type { StopLandingFields } from '../session-manager-core.js';
 import type { StackTraceResult } from './frame-anchor-resolver.js';
+import { hasPausingBreakpoint } from '../launch/launch-arming.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import { isProgramNeutralStopReason } from './stop-anchor.js';
 
@@ -92,6 +93,7 @@ export async function describeStopLocation(
       // stack, when it has one, is get_stack_trace's to list (issue #1141).
       notes.push(ErrorMessages.stopWithoutProgramFrame(result.threadId, result.totalFrameCount, top, {
         framesUnseen: result.totalFrameCount > 1,
+        hasBreakpoints: hasPausingBreakpoint(ctx.getSession(sessionId)),
         sourceless: result.sourcelessFrames
       }));
     }

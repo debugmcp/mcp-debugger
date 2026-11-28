@@ -54,6 +54,8 @@ export interface ChildAdoptionContract {
    * debugpy terminates it; js-debug can only release it to run undebugged.
    */
   closeChild: 'terminate' | 'release';
+  /** Local attaches with child debugging enabled change the target beyond detach. */
+  attachLeavesTargetChanged?: string;
   /**
    * Report recognition: the child a `startDebugging` request names, or
    * undefined for a request that is not a child report of this adapter

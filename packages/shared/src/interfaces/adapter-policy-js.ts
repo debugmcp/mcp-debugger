@@ -247,6 +247,7 @@ const jsDebugChildAdoption: ChildAdoptionContract = {
   childOutput: 'launch-session',
   // `disconnect` on a fork, with either flag, leaves it running (measured).
   closeChild: 'release',
+  attachLeavesTargetChanged: "Child debugging changed the target for the rest of its life: processes it starts later still load a file from this server's install through NODE_OPTIONS after detach; see the attach_to_process description.",
   readChildReport: readJsDebugChildReport,
   // The measured second-connection attach; an attach root's forwardable
   // extras (localRoot/remoteRoot, sourceMaps, skipFiles, #466) ride along.

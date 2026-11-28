@@ -75,6 +75,27 @@ describe('Server Breakpoint Management Tools', () => {
   });
 
   describe('list_breakpoints', () => {
+    it.each([
+      { attachMode: true, off: true, state: 'running', listed: 'line', file: undefined, warns: true },
+      { attachMode: true, off: true, state: 'paused', listed: 'function', file: undefined, warns: true },
+      { attachMode: true, off: false, state: 'running', listed: 'line', file: undefined, warns: false },
+      { attachMode: false, off: true, state: 'running', listed: 'line', file: undefined, warns: false },
+      { attachMode: true, off: true, state: 'running', listed: 'none', file: undefined, warns: false },
+      { attachMode: true, off: true, state: 'running', listed: 'function', file: '/missing.js', warns: false },
+      { attachMode: true, off: true, state: 'stopped', listed: 'line', file: undefined, warns: false },
+      { attachMode: true, off: true, state: 'error', listed: 'line', file: undefined, warns: false }
+    ])('explains verification scope only for a nonempty live attach listing: %j (#1288)', async ({ warns, attachMode, off, state, listed, file }) => {
+      mockSessionManager.getSession.mockReturnValue({ id: 'test-session', state,
+        run: { attachMode, childDebuggingOptedOut: off ? 'adapter-default' : undefined } });
+      mockSessionManager.listBreakpoints.mockReturnValue(listed === 'line' ? [{ id: 'bp', file: '/parent.js', line: 21, verified: true }] : []);
+      mockSessionManager.listFunctionBreakpoints.mockReturnValue(listed === 'function' ? [{ id: 'fn', functionName: 'work', verified: true }] : []);
+      const result = await callToolHandler({ method: 'tools/call', params: {
+        name: 'list_breakpoints', arguments: { sessionId: 'test-session', ...(file ? { file } : {}) }
+      } });
+      const payload = JSON.parse(result.content[0].text);
+      if (warns) expect(payload.warning).toBe('Verified says the breakpoint is bound in the attached process, not that a process the target starts will stop on it; see adapterConfig.autoAttachChildProcesses in the attach_to_process description.');
+      else expect(payload.warning).toBeUndefined();
+    });
     it('returns the session breakpoints with a count', async () => {
       mockSessionManager.listBreakpoints.mockReturnValue([
         { id: 'bp-1', file: '/a.py', line: 10, verified: true, adapterId: 3 },

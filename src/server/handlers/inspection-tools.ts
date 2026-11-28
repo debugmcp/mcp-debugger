@@ -4,6 +4,7 @@
  */
 import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import { SessionState } from '@debugmcp/shared';
+import { hasPausingBreakpoint } from '../../session/launch/launch-arming.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import type { ToolContext, ToolHandler } from '../tool-context.js';
 import { enforceExplicitNames, requireSessionId } from '../tool-validation.js';
@@ -25,6 +26,11 @@ import {
   sessionErrorToResult,
   type ToolResult
 } from '../tool-result.js';
+
+function hasSessionBreakpoints(ctx: ToolContext, sessionId: string): boolean {
+  const session = ctx.sessionManager.getSession(sessionId);
+  return session ? hasPausingBreakpoint(session) : false;
+}
 
 /**
  * Two notes as one text: the first is given its full stop when it lacks one
@@ -146,6 +152,7 @@ export const getStackTraceTool: ToolHandler = async (ctx, args) => {
     // list them.
     if (stackTrace.noProgramFrame && stackTrace.frames[0] && (stackTrace.hiddenFrameCount === 0 || stackTrace.sourcelessFrames)) {
       notes.push(ErrorMessages.stopWithoutProgramFrame(stackTrace.threadId, stackTrace.totalFrameCount, stackTrace.frames[0], {
+        hasBreakpoints: hasSessionBreakpoints(ctx, args.sessionId!),
         sourceless: stackTrace.sourcelessFrames
       }));
     }
@@ -416,7 +423,7 @@ export async function handleGetLocalVariables(ctx: ToolContext, args: { sessionI
         : '';
       response.note = joinSentences(
         result.anchorNote,
-        ErrorMessages.stopWithoutProgramFrame(threadId, frameCount, top, { framesUnseen: frameCount > 1, sourceless }) + whose
+        ErrorMessages.stopWithoutProgramFrame(threadId, frameCount, top, { framesUnseen: frameCount > 1, sourceless, hasBreakpoints: hasSessionBreakpoints(ctx, args.sessionId!) }) + whose
       );
     }
 
