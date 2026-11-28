@@ -154,6 +154,12 @@ describe('SessionManager - giving back what an attach borrowed (issue #1261)', (
     await expect(sessionManager.giveBackAttachLoan(child)).resolves.toBeUndefined();
     expect(loan.giveBack).not.toHaveBeenCalled();
     expect(root.run.attachLoan).toBe(loan);
+
+    // Nor the report the root's teardown kept: the root's own answer carries it.
+    await sessionManager.returnAttachLoan(root);
+    await expect(sessionManager.giveBackAttachLoan(child)).resolves.toBeUndefined();
+    expect(root.run.attachLoanReturns).toHaveLength(1);
+    await expect(sessionManager.giveBackAttachLoan(root)).resolves.toMatchObject({ field: 'inspector' });
   });
 
   describe('a connection that ended by itself (review of round 1)', () => {
@@ -315,9 +321,51 @@ describe('SessionManager - giving back what an attach borrowed (issue #1261)', (
 
     expect(events).toEqual(['workerStop', 'giveBack']);
     expect(managed.run.attachLoan).toBeUndefined();
-    await expect(managed.run.attachLoanReturn).resolves.toEqual({ field: 'inspector', text: 'closed: 127.0.0.1:9229 no longer accepts connections' });
-    await expect(sessionManager.giveBackAttachLoan(managed)).resolves.toMatchObject({ field: 'inspector' });
-    expect(managed.run.attachLoanReturn).toBeUndefined();
+    expect(managed.run.attachLoanReturns).toHaveLength(1);
+    await expect(sessionManager.giveBackAttachLoan(managed)).resolves.toEqual({ field: 'inspector', text: 'closed: 127.0.0.1:9229 no longer accepts connections' });
+    expect(managed.run.attachLoanReturns).toBeUndefined();
+  });
+
+  describe('a report is never dropped by a new run (review round 2, blocker 3)', () => {
+    const unconfirmed = 'not confirmed closed: the inspector did not end within 2000 ms (PID 4242 may be held paused by another debugger, or busy outside JavaScript); 127.0.0.1:9229 may still be listening';
+
+    it('a launch after an attach whose close could not be confirmed keeps that report, and the next close carries it', async () => {
+      const loan = fakeLoan(events, unconfirmed);
+      const sessionId = await attachedSession(loan);
+
+      const relaunched = sessionManager.startDebugging(sessionId, 'test.py', [], { stopOnEntry: false });
+      await vi.runAllTimersAsync();
+      expect((await relaunched).success).toBe(true);
+      expect(loan.giveBack).toHaveBeenCalledTimes(1);
+
+      const outcome = await sessionManager.closeSessionReporting(sessionId);
+      expect(outcome.loan).toEqual({ field: 'inspector', text: unconfirmed });
+    });
+
+    it('an attach after it keeps it too: the next detach carries both, this run\'s first', async () => {
+      const earlier = fakeLoan(events, unconfirmed);
+      const sessionId = await attachedSession(earlier);
+      const managed = sessionManager.getSession(sessionId)!;
+      await (sessionManager as unknown as { stopProxyPreservingSession(s: typeof managed): Promise<number> })
+        .stopProxyPreservingSession(managed);
+
+      // The next run holds a loan of its own.
+      const later = fakeLoan(events, 'closed: 127.0.0.1:9229 no longer accepts connections, and PID 4242 runs on');
+      const relaunched = sessionManager.startDebugging(sessionId, 'test.py', [], { stopOnEntry: false });
+      await vi.runAllTimersAsync();
+      await relaunched;
+      managed.run.attachMode = true;
+      managed.run.programOwnership = 'borrowed';
+      managed.run.attachLoan = later;
+
+      const detached = await sessionManager.detachFromProcess(sessionId);
+      expect(detached.data?.loan).toEqual({
+        field: 'inspector',
+        text: `closed: 127.0.0.1:9229 no longer accepts connections, and PID 4242 runs on; earlier in this session: ${unconfirmed}`
+      });
+      // ...and once: the close after it carries nothing.
+      expect((await sessionManager.closeSessionReporting(sessionId)).loan).toBeUndefined();
+    });
   });
 
   it('a loan that rejects, against its contract, is still reported, and never as closed', async () => {

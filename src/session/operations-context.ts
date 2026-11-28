@@ -152,6 +152,12 @@ export interface OperationsContext {
    * when nothing is held. See `SessionManagerCore.giveBackAttachLoan`.
    */
   giveBackAttachLoan(session: ManagedSession): Promise<AttachLoanReport | undefined>;
+  /**
+   * Give back what the run's attach borrowed and keep the report on the run
+   * for the next answer that can carry it (issue #1261). See
+   * `SessionManagerCore.returnAttachLoan`.
+   */
+  returnAttachLoan(session: ManagedSession): Promise<void>;
   getStackTrace(
     sessionId: string,
     threadId?: number,
@@ -197,7 +203,7 @@ export type ProxyLaunchContext = Pick<
   | 'findFreePort'
   | 'setupProxyEventHandlers'
   | 'redactionEnabled'
-  | 'giveBackAttachLoan'
+  | 'returnAttachLoan'
 >;
 
 /**

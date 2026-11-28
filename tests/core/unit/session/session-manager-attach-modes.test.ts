@@ -1218,6 +1218,30 @@ describe('SessionManagerOperations attach modes', () => {
       expect(mockSession.run.attachLoan).toBeUndefined();
     });
 
+    it('a second attach on the session keeps the report of the first one\'s give-back, and the detach after it carries both (review round 2, blocker 3)', async () => {
+      const unconfirmed = 'not confirmed closed: the inspector did not end within 2000 ms (PID 4242 may be held paused by another debugger, or busy outside JavaScript); 127.0.0.1:9229 may still be listening';
+      const first = lendingAdapter(unconfirmed);
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValueOnce(first.adapter);
+      expect((await operations.attachToProcess('test-session', { port: 12345, stopOnEntry: false })).success).toBe(true);
+
+      const second = lendingAdapter('closed: 127.0.0.1:9229 no longer accepts connections, and PID 4242 runs on; an attach by processId opens it again');
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValueOnce(second.adapter);
+      const again = await operations.attachToProcess('test-session', { port: 12345, stopOnEntry: false });
+      expect(again.success).toBe(true);
+      // The second attach's answer is about its own loan; the first one's report waits on the run.
+      expect(again.data?.loan).toEqual({ field: 'inspector', text: 'opened by this attach on 127.0.0.1:9229; closed when this session detaches or closes' });
+      expect(first.loan.giveBack).toHaveBeenCalledTimes(1);
+      expect(mockSession.run.attachLoan).toBe(second.loan);
+      expect(mockSession.run.attachLoanReturns).toHaveLength(1);
+
+      const detached = await operations.detachFromProcess('test-session');
+      expect(detached.data?.loan).toEqual({
+        field: 'inspector',
+        text: `closed: 127.0.0.1:9229 no longer accepts connections, and PID 4242 runs on; an attach by processId opens it again; earlier in this session: ${unconfirmed}`
+      });
+      expect(mockSession.run.attachLoanReturns).toBeUndefined();
+    });
+
     it('an attach that fails before the transform ran has nothing to give back', async () => {
       vi.mocked(mockDependencies.adapterRegistry.create).mockRejectedValue(new Error('no adapter'));
 

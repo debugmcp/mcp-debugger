@@ -265,13 +265,15 @@ export interface Run {
    */
   attachLoan?: AttachLoan;
   /**
-   * The give-back of that loan once it has started, until an answer carries
-   * its report (issue #1261): a detach, close or failed attach answers with
-   * it and clears it; a teardown no answer is made of (the connection ended by
-   * itself, the previous run's before a new one) leaves it here for the next
-   * answer about the session.
+   * The give-backs of this session's loans that have started and that no
+   * answer has carried yet (issue #1261), oldest first. A detach, close or
+   * failed attach answers with all of them and clears them; a teardown no
+   * answer is made of (the connection ended by itself, the previous run's
+   * before a new one) leaves its own here. So a report that a close could not
+   * be confirmed is never dropped: it reaches the next answer that can carry
+   * it, even across a new run.
    */
-  attachLoanReturn?: Promise<AttachLoanReport>;
+  attachLoanReturns?: Promise<AttachLoanReport>[];
 }
 
 /**

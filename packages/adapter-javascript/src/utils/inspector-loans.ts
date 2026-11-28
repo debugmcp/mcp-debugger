@@ -11,29 +11,42 @@
  * inspector that was already open (a target started with `--inspect`, or one
  * an earlier tool left open) is left exactly as it was.
  *
- * Several sessions of this server can use one inspector: a second attach by
- * processId finds the first one's inspector open, and an attach by port or by
- * inspector URL can reach it too. Closing it drops every client, so it is
- * closed by the last session of this server to leave an inspector this server
- * opened. A client from outside this server (a browser's DevTools, another
- * debugger) cannot be seen, and is dropped by that close.
+ * The rule, in two parts:
+ *   1. One attach has one endpoint (a loopback host and port), fixed before it
+ *      queues: the caller's port; else the port of an opening this server
+ *      already holds for that PID (a lookup — nothing is signalled because of
+ *      it); else Node's default, 127.0.0.1:9229.
+ *   2. This server closes only an opening whose `/json/list` id it observed at
+ *      that endpoint during that attach: closed before the signal, open after
+ *      it. Everything else is reported and never closed — an inspector found
+ *      open, one an attach by address reached, and whatever a signal may have
+ *      opened somewhere the attach did not look (a target started with
+ *      `--inspect-port` and attached without that port: #1310).
  *
- * One endpoint (a loopback host and port) is one queue: an attach's activation
- * and its registration of the opening (or its share of one), and a last
- * holder's release with its close, run one at a time per endpoint. An attach
- * cannot find an inspector open and then have it closed under it before it
- * counts as a holder, nor find one another attach's signal just opened before
- * that attach has recorded it as this server's.
+ * Several sessions of this server can use one opening: a second attach by
+ * processId finds it open, and an attach by port or by inspector URL can reach
+ * it. Closing it drops every client, so it is closed by the last session of
+ * this server to leave it. A client from outside this server (a browser's
+ * DevTools, another debugger) cannot be seen, and is dropped by that close.
  *
- * An opening of the inspector is told from a later one on the same port by its
- * `/json/list` id, which Node draws afresh each time the inspector opens: the
- * close is sent only to the opening this server made, and the expression it
- * runs checks the PID again, so a port that changed hands since is left alone.
+ * One endpoint is one queue. Three kinds of turn hold it, one at a time: an
+ * attach by processId (its activation and its registration of the opening or
+ * of its share), an attach by address (its lookup and its share), and the last
+ * holder's release with its close. So an attach cannot find the inspector open
+ * and lose it to a close before it counts as a holder, nor find an opening
+ * another attach's signal just made before that attach recorded it. Each turn
+ * has a limit (below); a turn that reaches it gives the queue up with an
+ * answer that says so, and what it was still doing changes nothing after that.
+ *
+ * An opening is told from a later one on the same port by its `/json/list`
+ * id, which Node draws afresh each time the inspector opens: the close is sent
+ * only to the opening this server made, and the expression it runs checks the
+ * PID again, so a port that changed hands since is left alone.
  *
  * Everything outside the process is injectable, so the decisions are tested
  * without a target; the defaults are the real probe and the real CDP session.
  */
-import { isLoopbackHost, type AttachLoan } from '@debugmcp/shared';
+import { AdapterError, AdapterErrorCode, isLoopbackHost, type AttachLoan } from '@debugmcp/shared';
 import {
   endInspectorSession,
   probeInspector,
@@ -47,8 +60,8 @@ import {
 /**
  * How long the close's first probe may take: the `/json/list` read that finds
  * the opening to close (an absolute bound, like every probe here). A local
- * inspector answers it in about 1 ms; when it passes, the answer says
- * something other than an inspector answered, and nothing is sent.
+ * inspector answers it in about 1 ms; when it passes, the answer says the
+ * port did not answer, and nothing is sent.
  */
 export const INSPECTOR_DISCOVERY_MS = 1000;
 
@@ -66,7 +79,7 @@ export const INSPECTOR_END_ANSWER_MS = 2000;
 
 /**
  * How long the close then waits for the port to refuse a connection: an
- * absolute deadline, each probe capped to what is left of it, polling every
+ * absolute deadline, each probe cut to what is left of it, polling every
  * 20 ms. Measured with the same runs: refused 0–1 ms after the inspector
  * dropped the connection. When it expires the answer says the port still
  * answered, and the inspector may still be listening.
@@ -77,23 +90,27 @@ const PORT_REFUSAL_POLL_MS = 20;
 const PORT_REFUSAL_PROBE_MS = 250;
 
 /**
- * The longest one close can take: the discovery probe, the wait for the drop
- * and the wait for the refusal, each an absolute bound — 4 s. That is what a
- * give-back can add to a detach or close (measured: 3–15 ms in 46 closes). A
- * failed attach that signalled looks at up to two ports, so up to 4 s each.
+ * The limits of the three kinds of turn on an endpoint's queue, and so the
+ * worst case an attach waiting for that endpoint can see: the sum of the
+ * limits of the turns queued ahead of it.
  *
- * A give-back can also wait behind an attach by processId to the same
- * endpoint that is in flight, which is what keeps that attach from losing its
- * inspector. That activation is bounded by its own timeouts, computed from
- * them: the first probe (1 s) and the ownership read (1.5 s); on macOS two
- * `ps` reads (3 s each); on Windows, when it looks elsewhere, a `netstat` read
- * (3 s) before the signal and up to two after it, each with a probe and an
- * ownership read; then the 5 s deadline, which its last probe and ownership
- * read can overrun by 2.6 s. About 10 s on Linux, 16 s on macOS and 24 s on
- * Windows at the very worst; measured, the inspector opens 12–28 ms after the
- * signal, and is found on another port about 0.3 s after it.
+ * - An attach by processId: its activation, 7.5 s at most on Linux and
+ *   Windows and 13.5 s on macOS by its own bounds (`activateInspector`), then
+ *   a registration that does not wait. Limit 15 s.
+ * - An attach by address: one probe, 1 s. Limit 2 s.
+ * - A release with its close: the discovery probe, the wait for the drop and
+ *   the wait for the refusal, 1 + 2 + 1 = 4 s (measured: 3–15 ms in 46
+ *   closes on Windows). Limit 5 s. That is also what a give-back adds to a
+ *   detach or a close, at most.
+ *
+ * A turn that reaches its limit gives the queue up: the attach fails, saying
+ * its activation did not finish (it may have signalled the target), and is not
+ * counted as a holder; an attach by address shares nothing; a close is not
+ * confirmed, and sends nothing it had not sent yet. Measured, an activation
+ * that finds or opens the inspector takes 12–28 ms after its signal.
  */
-export const INSPECTOR_CLOSE_WORST_CASE_MS = INSPECTOR_DISCOVERY_MS + INSPECTOR_END_ANSWER_MS + INSPECTOR_PORT_REFUSAL_MS;
+export const ENDPOINT_TURN_LIMITS_MS = { activation: 15_000, lookup: 2_000, close: 5_000 } as const;
+export type EndpointTurnLimits = { activation: number; lookup: number; close: number };
 
 /** The answer field every JavaScript attach, detach and close reports the inspector under. */
 export const INSPECTOR_LOAN_FIELD = 'inspector';
@@ -104,6 +121,8 @@ export interface InspectorLoanDependencies {
   processExists: (pid: number) => boolean;
   sleep: (ms: number) => Promise<void>;
   now: () => number;
+  /** The queue's turn limits (tests shorten them). */
+  turnLimits: EndpointTurnLimits;
 }
 
 /** One opening of an inspector that this server made, and the loans that use it. */
@@ -116,27 +135,19 @@ interface OpenedInspector {
   readonly holders: Set<InspectorLoan>;
 }
 
-/** An attach that signalled the target and then failed: where an inspector the signal opened could be. */
-interface SignalledTarget {
-  readonly pid: number;
-  readonly host: string;
-  /** Ports that were not listening before the signal. */
-  readonly ports: readonly number[];
-}
-
 /**
- * - `opened`: this attach's signal opened the inspector.
+ * - `opened`: this attach's signal opened the inspector, at its endpoint.
  * - `joined`: an attach by processId found open an inspector this server had
  *   opened for an earlier attach, or an attach by port or URL reached one.
  * - `found`: an attach by processId found it open, and this server had not
  *   opened it.
  * - `addressed`: an attach by port or URL reached an inspector this server
  *   did not open. Nothing about it was observed beyond what the attach saw.
- * - `signalled`: an attach by processId signalled the target and then failed
- *   before it found the inspector: one may be open, and is looked for at the
- *   give-back where it could be.
+ * - `unresolved`: an attach by processId that failed after it had signalled
+ *   the target, or whose activation did not finish: something may be open,
+ *   and nothing identifies it. A report only; it closes nothing.
  */
-type LoanKind = 'opened' | 'joined' | 'found' | 'addressed' | 'signalled';
+type LoanKind = 'opened' | 'joined' | 'found' | 'addressed' | 'unresolved';
 
 const keyOf = (host: string, port: number): string => `${host}:${port}`;
 
@@ -151,7 +162,8 @@ export class InspectorLoan implements AttachLoan {
     readonly kind: LoanKind,
     readonly where: string,
     readonly opening?: OpenedInspector,
-    readonly signalled?: SignalledTarget
+    /** For `unresolved`: what is said at the give-back, which does nothing else. */
+    readonly report?: string
   ) {}
 
   describe(): string {
@@ -161,9 +173,8 @@ export class InspectorLoan implements AttachLoan {
         return `already open on ${this.where} before this attach; left open when this session ends`;
       case 'addressed':
         return `not opened by this server (this attach named its address); left as it was when this session ends`;
-      case 'signalled':
-        return `this attach signalled PID ${this.signalled?.pid} to open it and did not find it on ${this.where}; ` +
-          `looked for again, and closed if found, when this session ends`;
+      case 'unresolved':
+        return this.report ?? `not confirmed closed: nothing identifies what this attach may have opened`;
       case 'opened':
       case 'joined':
         if (others.length > 0) {
@@ -196,8 +207,6 @@ export class InspectorLoans {
   private readonly opened = new Map<string, OpenedInspector>();
   /** Per endpoint, the tail of its queue. */
   private readonly queues = new Map<string, Promise<void>>();
-  /** Attaches by processId in flight that may find their inspector on a port nothing named. */
-  private readonly searching = new Set<Promise<ProcessIdAttachOutcome>>();
 
   constructor(deps: Partial<InspectorLoanDependencies> = {}) {
     this.deps = {
@@ -205,25 +214,44 @@ export class InspectorLoans {
       endSession: deps.endSession ?? endInspectorSession,
       processExists: deps.processExists ?? processExistsByPid,
       sleep: deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
-      now: deps.now ?? Date.now
+      now: deps.now ?? Date.now,
+      turnLimits: deps.turnLimits ?? ENDPOINT_TURN_LIMITS_MS
     };
   }
 
   /**
-   * Run `task` alone on the endpoint `key`: after every task queued on it
-   * before, and before every task queued after. Nothing here queues on an
-   * endpoint while it holds the same one.
+   * Run one turn alone on the endpoint `key`: after every turn queued on it
+   * before, and before every turn queued after. The turn gives the queue up
+   * when it settles, or when it reaches `limitMs`: then `overdue()` is its
+   * answer, and `task` is told (`expired()`) so that it changes nothing more.
+   * Nothing here queues on an endpoint while it holds the same one.
    */
-  private async exclusive<T>(key: string, task: () => Promise<T>): Promise<T> {
+  private async exclusive<T>(
+    key: string,
+    limitMs: number,
+    task: (expired: () => boolean) => Promise<T>,
+    overdue: () => T
+  ): Promise<T> {
     const previous = this.queues.get(key) ?? Promise.resolve();
     let release!: () => void;
     const mine = new Promise<void>((resolve) => { release = resolve; });
     const tail = previous.then(() => mine);
     this.queues.set(key, tail);
     await previous;
+    let expired = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const limit = new Promise<T>((resolve) => {
+      timer = setTimeout(() => {
+        expired = true;
+        resolve(overdue());
+      }, limitMs);
+      // The limit is a bound on this turn, not a reason to keep the server alive.
+      timer.unref?.();
+    });
     try {
-      return await task();
+      return await Promise.race([task(() => expired), limit]);
     } finally {
+      clearTimeout(timer);
       release();
       if (this.queues.get(key) === tail) {
         this.queues.delete(key);
@@ -233,48 +261,40 @@ export class InspectorLoans {
 
   /** Resolves once everything queued on `host:port` so far has run: an attach, a release, a close. */
   settled(host: string, port: number): Promise<void> {
-    return this.exclusive(keyOf(host, port), async () => undefined);
+    return this.exclusive(keyOf(host, port), this.deps.turnLimits.lookup, async () => undefined, () => undefined);
   }
 
   /**
-   * An attach by processId, its activation and what it holds afterwards in
-   * one turn of the endpoint's queue: a release cannot close the inspector
-   * between the activation finding it and this attach counting as a holder,
-   * and an attach that finds an inspector another attach's signal just opened
-   * finds it recorded. An activation that fails after signalling still holds a
-   * loan: the signal may have opened an inspector, and the give-back looks
-   * for it.
+   * An attach by processId: its activation and what it holds afterwards, in
+   * one turn of its endpoint's queue. A failure after the signal holds an
+   * `unresolved` loan: a report that something may be open, and no close.
    */
   async attachByProcessId(
     pid: number,
     endpoint: { host: string; port: number },
-    activate: () => Promise<InspectorActivationResult>,
-    options: { mayOpenElsewhere?: boolean } = {}
-  ): Promise<ProcessIdAttachOutcome> {
-    const turn = this.attachInTurn(pid, endpoint, activate);
-    if (options.mayOpenElsewhere) {
-      // It may record an opening on a port nothing named (see forAddress).
-      this.searching.add(turn);
-      void turn.then(() => this.searching.delete(turn), () => this.searching.delete(turn));
-    }
-    return turn;
-  }
-
-  private attachInTurn(
-    pid: number,
-    endpoint: { host: string; port: number },
     activate: () => Promise<InspectorActivationResult>
   ): Promise<ProcessIdAttachOutcome> {
-    return this.exclusive(keyOf(endpoint.host, endpoint.port), async () => {
+    const key = keyOf(endpoint.host, endpoint.port);
+    const limitMs = this.deps.turnLimits.activation;
+    return this.exclusive<ProcessIdAttachOutcome>(key, limitMs, async (expired) => {
       let activated: InspectorActivationResult;
       try {
         activated = await activate();
       } catch (error) {
         if (error instanceof SignalledActivationError) {
-          const signalled = { pid: error.pid, host: error.host, ports: error.ports };
-          return { error, loan: new InspectorLoan(this, 'signalled', keyOf(endpoint.host, endpoint.port), undefined, signalled) };
+          const where = keyOf(error.host, error.port);
+          return {
+            error,
+            loan: new InspectorLoan(this, 'unresolved', where, undefined,
+              `not confirmed closed: this attach signalled PID ${error.pid} to open its inspector, and none of PID ${error.pid}'s appeared on ${where}; ` +
+                `one may now be open on another port, and this server closed nothing, because it could not identify one — restarting the target closes it`)
+          };
         }
         return { error };
+      }
+      if (expired()) {
+        // The turn gave the queue up already; what this activation found is not recorded.
+        return { error: undefined };
       }
       return {
         activated,
@@ -286,18 +306,28 @@ export class InspectorLoans {
           targetId: activated.targetId
         })
       };
-    });
+    }, () => ({
+      error: new AdapterError(
+        `JavaScript attach: the activation of PID ${pid}'s inspector on ${key} did not finish within ${limitMs} ms; ` +
+          `it may have signalled the target, and this server closed nothing`,
+        AdapterErrorCode.ENVIRONMENT_INVALID
+      ),
+      loan: new InspectorLoan(this, 'unresolved', key, undefined,
+        `not confirmed closed: the activation on ${key} did not finish within ${limitMs} ms and may have signalled PID ${pid}; ` +
+          `this server closed nothing, because it could not identify an inspector — restarting the target closes one it opened`)
+    }));
   }
 
   /**
-   * The port of an inspector this server opened in `pid` and still holds
-   * (issue #1261): where a second attach by processId to that process looks
-   * first, when nothing else names the port (the first found it on a port of
-   * its own). Undefined when it holds none.
+   * The port of an opening this server holds for `pid` (issue #1261): where a
+   * second attach by processId with no port of its own looks, chosen before
+   * it queues. A lookup: it opens nothing, and the attach it serves does not
+   * signal. Undefined when this server holds none. Every opening is on
+   * 127.0.0.1: the activation answers that host for every loopback spelling.
    */
-  portOpenedFor(pid: number, host = '127.0.0.1'): number | undefined {
+  portOpenedFor(pid: number): number | undefined {
     for (const opening of this.opened.values()) {
-      if (opening.pid === pid && opening.host === host) {
+      if (opening.pid === pid) {
         return opening.port;
       }
     }
@@ -341,23 +371,19 @@ export class InspectorLoans {
     }
     const { host, port, targetId } = target;
     const where = keyOf(host, port);
-    // An attach by processId that was told no port may find its inspector on
-    // a port nothing named, and record it under that port while it holds only
-    // its own endpoint's queue. Until it has, this address may be that port:
-    // wait for it, so its record is there to share. (It never waits on this.)
-    await Promise.allSettled([...this.searching]);
-    return this.exclusive(where, async () => {
+    const addressed = (): InspectorLoan => new InspectorLoan(this, 'addressed', where);
+    return this.exclusive(where, this.deps.turnLimits.lookup, async (expired) => {
       const known = this.opened.get(where);
       if (!known || known.targetId === undefined) {
-        return new InspectorLoan(this, 'addressed', where);
+        return addressed();
       }
       let reached = targetId;
       if (reached === undefined) {
         const probe = await this.deps.listTargets(host, port, INSPECTOR_DISCOVERY_MS);
         reached = probe.status === 'inspector' && probe.targets.some((t) => t.id === known.targetId) ? known.targetId : undefined;
       }
-      return reached === known.targetId ? this.hold(known, 'joined') : new InspectorLoan(this, 'addressed', where);
-    });
+      return reached === known.targetId && !expired() ? this.hold(known, 'joined') : addressed();
+    }, addressed);
   }
 
   /** The other sessions holding the opening `loan` uses, as the answers name them. */
@@ -370,8 +396,8 @@ export class InspectorLoans {
 
   /** Give a loan back: called once per loan, through `InspectorLoan.giveBack`. */
   async giveBack(loan: InspectorLoan): Promise<string> {
-    if (loan.signalled) {
-      return this.lookForSignalled(loan.signalled);
+    if (loan.kind === 'unresolved') {
+      return loan.describe();
     }
     const opening = loan.opening;
     if (!opening) {
@@ -379,7 +405,8 @@ export class InspectorLoans {
         ? `left open: it was already open on ${loan.where} before this attach`
         : `left as it was: this server did not open it (this attach named its address, ${loan.where})`;
     }
-    return this.exclusive(opening.key, async () => {
+    const limitMs = this.deps.turnLimits.close;
+    return this.exclusive(opening.key, limitMs, async (expired) => {
       const others = this.othersHolding(loan);
       opening.holders.delete(loan);
       if (others.length > 0) {
@@ -391,12 +418,12 @@ export class InspectorLoans {
       if (this.opened.get(opening.key) === opening) {
         this.opened.delete(opening.key);
       }
-      return this.close(opening);
-    });
+      return this.close(opening, expired);
+    }, () => `not confirmed closed: the close did not finish within ${limitMs} ms; ${opening.key} may still be listening`);
   }
 
   /** Close one opening, and say what was observed. Only "closed" once the port refuses. */
-  private async close(opening: OpenedInspector): Promise<string> {
+  private async close(opening: OpenedInspector, expired: () => boolean): Promise<string> {
     const { host, port, pid, targetId } = opening;
     const where = keyOf(host, port);
     const gone = `gone: PID ${pid} is no longer running, and its inspector went with it`;
@@ -413,6 +440,9 @@ export class InspectorLoans {
         ? `closed: ${where} had already stopped listening when this session ended (not closed by this server); PID ${pid} runs on`
         : gone;
     }
+    if (probe.status === 'no-answer') {
+      return notConfirmed(`${where} did not answer within ${probe.timeoutMs} ms, so nothing was sent`);
+    }
     if (probe.status === 'other') {
       return `not closed: ${where} answers as something other than a Node inspector (${probe.detail}), so nothing was sent to it`;
     }
@@ -425,27 +455,10 @@ export class InspectorLoans {
     if (typeof target.webSocketDebuggerUrl !== 'string' || target.webSocketDebuggerUrl.length === 0) {
       return notConfirmed('the target list names this opening but gives no WebSocket address for it, so nothing was sent');
     }
+    if (expired()) {
+      return notConfirmed('the close ran out of time before it was sent, so nothing was sent');
+    }
     const ended = await this.deps.endSession(target.webSocketDebuggerUrl, pid, INSPECTOR_END_ANSWER_MS);
-    return this.afterEnd(ended, pid, host, port, {
-      closed: `closed: ${where} no longer accepts connections, and PID ${pid} runs on; an attach by processId opens it again`,
-      stoppedMeanwhile: `closed: ${where} stopped listening while this session ended (not closed by this server); PID ${pid} runs on`
-    });
-  }
-
-  /**
-   * What an end request came to, as the port and the process then show it:
-   * `closed` only once the port refuses a connection after the drop.
-   */
-  private async afterEnd(
-    ended: InspectorEndResult,
-    pid: number,
-    host: string,
-    port: number,
-    texts: { closed: string; stoppedMeanwhile: string }
-  ): Promise<string> {
-    const where = keyOf(host, port);
-    const gone = `gone: PID ${pid} is no longer running, and its inspector went with it`;
-    const notConfirmed = (why: string): string => `not confirmed closed: ${why}; ${where} may still be listening`;
     switch (ended.status) {
       case 'other-pid':
         return `left open: the inspector on ${where} answers for PID ${ended.pid}, not PID ${pid}`;
@@ -460,7 +473,7 @@ export class InspectorLoans {
         const again = await this.deps.listTargets(host, port, PORT_REFUSAL_PROBE_MS);
         if (!this.deps.processExists(pid)) return gone;
         return again.status === 'closed'
-          ? texts.stoppedMeanwhile
+          ? `closed: ${where} stopped listening while this session ended (not closed by this server); PID ${pid} runs on`
           : notConfirmed(`could not reach the inspector to close it (${ended.detail})`);
       }
       case 'dropped':
@@ -473,44 +486,7 @@ export class InspectorLoans {
     if (!refused) {
       return notConfirmed(`${where} still answered ${INSPECTOR_PORT_REFUSAL_MS} ms after the inspector dropped the connection`);
     }
-    return texts.closed;
-  }
-
-  /**
-   * The give-back of an attach that signalled and then failed: an inspector of
-   * PID's on one of the ports, none of which was listening before the signal,
-   * is the one the signal opened, and is closed. Each port in its endpoint's
-   * queue; one another session of this server holds is not looked at.
-   */
-  private async lookForSignalled(signalled: SignalledTarget): Promise<string> {
-    const { pid, host, ports } = signalled;
-    if (!this.deps.processExists(pid)) {
-      return `gone: PID ${pid} is no longer running, and any inspector the signal opened went with it`;
-    }
-    for (const port of ports) {
-      const key = keyOf(host, port);
-      const outcome = await this.exclusive(key, async () => {
-        if (this.opened.has(key)) return undefined;
-        const probe = await this.deps.listTargets(host, port, INSPECTOR_DISCOVERY_MS);
-        if (probe.status !== 'inspector') return undefined;
-        for (const target of probe.targets) {
-          if (typeof target.webSocketDebuggerUrl !== 'string' || target.webSocketDebuggerUrl.length === 0) continue;
-          const ended = await this.deps.endSession(target.webSocketDebuggerUrl, pid, INSPECTOR_END_ANSWER_MS);
-          if (ended.status === 'other-pid') continue;
-          return this.afterEnd(ended, pid, host, port, {
-            closed: `closed: the signal this attach sent had opened PID ${pid}'s inspector on ${key}; ` +
-              `it no longer accepts connections, and PID ${pid} runs on`,
-            stoppedMeanwhile: `closed: the inspector the signal opened on ${key} stopped listening while this session ended ` +
-              `(not closed by this server); PID ${pid} runs on`
-          });
-        }
-        return undefined;
-      });
-      if (outcome !== undefined) return outcome;
-    }
-    return `not confirmed closed: this attach signalled PID ${pid} to open its inspector, and none of PID ${pid}'s was found on ` +
-      `${ports.map((port) => keyOf(host, port)).join(' or ')}; one may be open on a port this server could not identify ` +
-      `(a target started with --inspect-port=<n> opens it there) — restart the target to close it`;
+    return `closed: ${where} no longer accepts connections, and PID ${pid} runs on; an attach by processId opens it again`;
   }
 
   /** Poll until the port refuses a connection; false when the absolute window passes first. */

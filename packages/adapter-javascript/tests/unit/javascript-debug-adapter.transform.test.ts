@@ -863,34 +863,31 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
 });
 
 describe('JavascriptDebugAdapter.transformAttachConfig by processId (issue #871)', () => {
-  type Activation = { pid: number | string; host?: string; port?: number; findOpenedElsewhere?: boolean };
+  type Activation = { pid: number | string; host?: string; port?: number; openIfClosed?: boolean };
   type Result = { host: string; port: number; alreadyActive: boolean; title: string };
 
   /**
    * The adapter with its PID → inspector step replaced (nothing is signalled),
-   * and the target's command line naming no inspector port unless `configured`.
+   * and a loan record of its own.
    */
-  function adapterWithActivation(impl?: (o: Activation) => Promise<Result>, configured?: number) {
+  function adapterWithActivation(impl?: (o: Activation) => Promise<Result>) {
     const adapter = new JavascriptDebugAdapter(deps);
     const activate = vi.fn(impl ?? (async (o: Activation) => ({
       host: '127.0.0.1', port: o.port ?? 9229, alreadyActive: false, title: `node[${o.pid}]`
     })));
-    const inspectPortOf = vi.fn(async () => configured);
     (adapter as unknown as { activateInspector: typeof activate }).activateInspector = activate;
-    (adapter as unknown as { inspectPortOf: typeof inspectPortOf }).inspectPortOf = inspectPortOf;
     // A record of its own, so no test reads an opening another test left in the server-wide one.
     (adapter as unknown as { inspectorLoans: InspectorLoans }).inspectorLoans =
       new InspectorLoans({ listTargets: async () => ({ status: 'closed' }), processExists: () => true });
-    return { adapter, activate, inspectPortOf };
+    return { adapter, activate };
   }
 
   it('activates the inspector of the PID and hands js-debug the port it opened; processId itself is not forwarded', async () => {
     const { adapter, activate } = adapterWithActivation();
     const cfg = await adapter.transformAttachConfig({ request: 'attach', processId: 4242 } as any) as Record<string, unknown>;
 
-    // No port given and none on its command line: Node's default, and the
-    // activation watches the target's other ports too (issue #1261).
-    expect(activate).toHaveBeenCalledWith({ pid: 4242, host: '127.0.0.1', port: 9229, findOpenedElsewhere: true });
+    // No port given, and no opening held for the PID: Node's default, which a signal may open (issue #1261).
+    expect(activate).toHaveBeenCalledWith({ pid: 4242, host: '127.0.0.1', port: 9229, openIfClosed: true });
     expect(cfg.port).toBe(9229);
     expect(cfg.host).toBe('127.0.0.1');
     expect(cfg.processId).toBeUndefined();
@@ -904,7 +901,7 @@ describe('JavascriptDebugAdapter.transformAttachConfig by processId (issue #871)
     }));
     const cfg = await adapter.transformAttachConfig({ request: 'attach', processId: '4242', port: 9230 } as any) as Record<string, unknown>;
 
-    expect(activate).toHaveBeenCalledWith({ pid: '4242', host: '127.0.0.1', port: 9230, findOpenedElsewhere: false });
+    expect(activate).toHaveBeenCalledWith({ pid: '4242', host: '127.0.0.1', port: 9230, openIfClosed: true });
     expect(cfg.port).toBe(9230);
   });
 
@@ -942,57 +939,46 @@ describe('JavascriptDebugAdapter.transformAttachConfig by processId (issue #871)
   });
 
   describe('where the inspector opens (issue #1261)', () => {
-    it('uses the port the target\'s command line or NODE_OPTIONS names when the caller gave none', async () => {
-      const { adapter, activate, inspectPortOf } = adapterWithActivation(undefined, 5935);
-      const cfg = await adapter.transformAttachConfig({ request: 'attach', processId: 4242 } as any) as Record<string, unknown>;
-      expect(inspectPortOf).toHaveBeenCalledWith(4242);
-      expect(activate).toHaveBeenCalledWith({ pid: 4242, host: '127.0.0.1', port: 5935, findOpenedElsewhere: false });
-      expect(cfg.port).toBe(5935);
-    });
-
-    it('a second attach by processId looks first where this server already holds an opening for that PID', async () => {
-      const { adapter, activate, inspectPortOf } = adapterWithActivation(async (o) => ({
+    it('a second attach by processId with no port takes the endpoint of the opening this server holds, before it queues, and only looks there', async () => {
+      const { adapter, activate } = adapterWithActivation(async (o) => ({
         host: '127.0.0.1', port: o.port!, alreadyActive: true, title: 'server.js', targetId: 'id-7'
       }));
       const loans = new InspectorLoans({ listTargets: async () => ({ status: 'closed' }), processExists: () => true });
       loans.forActivation({ pid: 4242, host: '127.0.0.1', port: 5945, alreadyActive: false, targetId: 'id-7' });
       (adapter as unknown as { inspectorLoans: InspectorLoans }).inspectorLoans = loans;
+      const queued = vi.spyOn(loans, 'attachByProcessId');
 
       await adapter.transformAttachConfig({ request: 'attach', processId: 4242 } as any);
 
-      expect(inspectPortOf).not.toHaveBeenCalled();
-      expect(activate).toHaveBeenCalledWith({ pid: 4242, host: '127.0.0.1', port: 5945, findOpenedElsewhere: false });
+      // The endpoint is fixed when the turn is queued, and the activation may not signal for it.
+      expect(queued.mock.calls[0][1]).toEqual({ host: '127.0.0.1', port: 5945 });
+      expect(activate).toHaveBeenCalledWith({ pid: 4242, host: '127.0.0.1', port: 5945, openIfClosed: false });
       expect(adapter.consumeAttachLoan('s')?.kind).toBe('joined');
     });
 
-    it('tells the record when the attach may find its inspector on a port nothing named, and only then', async () => {
-      const { adapter } = adapterWithActivation();
+    it('a caller\'s port wins over an opening this server holds for the PID', async () => {
+      const { adapter, activate } = adapterWithActivation();
       const loans = (adapter as unknown as { inspectorLoans: InspectorLoans }).inspectorLoans;
-      const spy = vi.spyOn(loans, 'attachByProcessId');
-      await adapter.transformAttachConfig({ request: 'attach', processId: 4242 } as any);
-      expect(spy.mock.calls[0][3]).toEqual({ mayOpenElsewhere: true });
+      loans.forActivation({ pid: 4242, host: '127.0.0.1', port: 5945, alreadyActive: false, targetId: 'id-7' });
       await adapter.transformAttachConfig({ request: 'attach', processId: 4242, port: 9300 } as any);
-      expect(spy.mock.calls[1][3]).toEqual({ mayOpenElsewhere: false });
+      expect(activate).toHaveBeenCalledWith({ pid: 4242, host: '127.0.0.1', port: 9300, openIfClosed: true });
     });
 
-    it('does not read the command line when the caller gave the port', async () => {
-      const { adapter, inspectPortOf } = adapterWithActivation(undefined, 5935);
-      await adapter.transformAttachConfig({ request: 'attach', processId: 4242, port: 9300 } as any);
-      expect(inspectPortOf).not.toHaveBeenCalled();
-    });
-
-    it('an activation that signalled and then failed still hands over a loan, which looks for what the signal opened', async () => {
+    it('an activation that signalled and then failed still hands over a loan: a report that closes nothing', async () => {
+      const listTargets = vi.fn(async () => ({ status: 'closed' as const }));
+      const endSession = vi.fn(async () => ({ status: 'dropped' as const }));
       const { adapter } = adapterWithActivation(async () => {
-        throw new SignalledActivationError('JavaScript attach: PID 4242 was signalled to open its inspector, but none opened', 4242, '127.0.0.1', [9229]);
+        throw new SignalledActivationError('JavaScript attach: PID 4242 was signalled to open its inspector, but none appeared', 4242, '127.0.0.1', 9229);
       });
-      const loans = new InspectorLoans({ listTargets: async () => ({ status: 'closed' }), processExists: () => true });
-      (adapter as unknown as { inspectorLoans: InspectorLoans }).inspectorLoans = loans;
+      (adapter as unknown as { inspectorLoans: InspectorLoans }).inspectorLoans = new InspectorLoans({ listTargets, endSession, processExists: () => true });
 
       await expect(adapter.transformAttachConfig({ request: 'attach', processId: 4242 } as any)).rejects.toThrow(/was signalled/);
 
       const loan = adapter.consumeAttachLoan('s');
-      expect(loan?.kind).toBe('signalled');
-      await expect(loan!.giveBack()).resolves.toMatch(/^not confirmed closed: this attach signalled PID 4242/);
+      expect(loan?.kind).toBe('unresolved');
+      await expect(loan!.giveBack()).resolves.toMatch(/^not confirmed closed: this attach signalled PID 4242 .* this server closed nothing/);
+      expect(listTargets).not.toHaveBeenCalled();
+      expect(endSession).not.toHaveBeenCalled();
     });
 
     it('an attach by processId waits for a close of that endpoint already in flight before it activates', async () => {

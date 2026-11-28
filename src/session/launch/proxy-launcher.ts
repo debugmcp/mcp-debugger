@@ -155,8 +155,10 @@ export class ProxyLauncher {
   ): Promise<LanguageSpecificLaunchConfig> {
     // What an earlier run's attach borrowed goes back before this attempt
     // records its own (issue #1261). The callers' teardown of the previous
-    // proxy has already given it back; this only catches a caller that did not.
-    await this.ctx.giveBackAttachLoan(session);
+    // proxy has already given it back; this only catches a caller that did
+    // not. Its report stays on the run for the next answer that can carry it
+    // (a detach, a close, a failed attach): a new run does not drop it.
+    await this.ctx.returnAttachLoan(session);
     // A verdict belongs to exactly one proxy-launch attempt. Clear the stored
     // projection before any fallible setup so an adapter-acquire, filesystem,
     // or transform failure cannot inherit an earlier MSVC classification.

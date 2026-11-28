@@ -17,6 +17,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import {
+  ENDPOINT_TURN_LIMITS_MS,
   InspectorLoans,
   INSPECTOR_DISCOVERY_MS,
   INSPECTOR_END_ANSWER_MS,
@@ -53,6 +54,7 @@ function harness(overrides: Partial<InspectorLoanDependencies> & { endResult?: I
     processExists: vi.fn(() => true),
     sleep: vi.fn(async (ms: number) => { clock += ms; }),
     now: () => clock,
+    turnLimits: ENDPOINT_TURN_LIMITS_MS,
     ...rest
   };
   return {
@@ -288,37 +290,6 @@ describe('InspectorLoans (issue #1261)', () => {
       expect(deps.endSession).not.toHaveBeenCalled();
     });
 
-    it('an attach by port that arrives while an attach told no port is still searching waits for it, and shares what it found', async () => {
-      const { loans, deps } = harness();
-      const activation = deferred<ReturnType<typeof result>>();
-      const byPid = loans.attachByProcessId(PID, endpoint, () => activation.promise, { mayOpenElsewhere: true });
-      vi.mocked(deps.listTargets).mockResolvedValue({ status: 'inspector', targets: [{ id: 'id-5', webSocketDebuggerUrl: 'ws://127.0.0.1:5945/id-5' }] });
-      let joined = false;
-      const byPort = loans.forAddress({ host: '127.0.0.1', port: 5945 }).then((loan) => { joined = true; return loan; });
-      await tick();
-      expect(joined).toBe(false);
-
-      // The activation finds its inspector on 5945, a port nothing named.
-      activation.resolve({ ...result(false, 'id-5'), port: 5945 });
-      const a = (await byPid).loan!;
-      const b = await byPort;
-      expect(a.kind).toBe('opened');
-      expect(b.kind).toBe('joined');
-      expect(loans.portOpenedFor(PID)).toBe(5945);
-      await a.giveBack();
-      expect(deps.endSession).not.toHaveBeenCalled();
-    });
-
-    it('an attach by port does not wait for an attach by processId that was told its port', async () => {
-      const { loans } = harness();
-      const activation = deferred<ReturnType<typeof result>>();
-      const byPid = loans.attachByProcessId(PID, endpoint, () => activation.promise);
-      const b = await loans.forAddress({ host: '127.0.0.1', port: 5945 });
-      expect(b.kind).toBe('addressed');
-      activation.resolve(result(false));
-      await byPid;
-    });
-
     it('settled() resolves once everything queued on the endpoint has run', async () => {
       const finishEnd = deferred<InspectorEndResult>();
       const { loans, deps } = harness({ endSession: vi.fn(() => finishEnd.promise) });
@@ -335,21 +306,147 @@ describe('InspectorLoans (issue #1261)', () => {
       expect(settled).toBe(true);
     });
 
-    it('a failed activation that did not signal holds nothing; one that signalled holds a loan that looks for what it opened', async () => {
-      const { loans } = harness();
+    it('a failed activation that did not signal holds nothing; one that signalled holds a report, and closes nothing', async () => {
+      const { loans, deps } = harness();
       const refused = await loans.attachByProcessId(PID, endpoint, async () => { throw new Error('not a Node.js process'); });
       expect(refused.loan).toBeUndefined();
       expect(refused.error).toBeInstanceOf(Error);
 
       const signalled = await loans.attachByProcessId(PID, endpoint, async () => {
-        throw new SignalledActivationError('none opened on 127.0.0.1:9229', PID, '127.0.0.1', [9229, 5945]);
+        throw new SignalledActivationError('none appeared on 127.0.0.1:9229', PID, '127.0.0.1', 9229);
       });
-      expect(signalled.loan?.kind).toBe('signalled');
+      expect(signalled.loan?.kind).toBe('unresolved');
       expect(signalled.error).toBeInstanceOf(SignalledActivationError);
+      const report =
+        `not confirmed closed: this attach signalled PID ${PID} to open its inspector, and none of PID ${PID}'s appeared on 127.0.0.1:9229; ` +
+        'one may now be open on another port, and this server closed nothing, because it could not identify one — restarting the target closes it';
+      expect(signalled.loan!.describe()).toBe(report);
+      await expect(signalled.loan!.giveBack()).resolves.toBe(report);
+      // A report only (issue #1261): nothing is probed, nothing is sent, on any port.
+      expect(deps.listTargets).not.toHaveBeenCalled();
+      expect(deps.endSession).not.toHaveBeenCalled();
+      expect(loans.portOpenedFor(PID)).toBeUndefined();
+    });
+
+    it('a later turn waits for the one before it, however many are queued (the queue entry belongs to the last)', async () => {
+      const { loans } = harness();
+      const first = deferred<ReturnType<typeof result>>();
+      const second = deferred<ReturnType<typeof result>>();
+      const order: string[] = [];
+      const a = loans.attachByProcessId(PID, endpoint, async () => { order.push('a starts'); const r = await first.promise; order.push('a ends'); return r; });
+      const b = loans.attachByProcessId(PID, endpoint, async () => { order.push('b starts'); const r = await second.promise; order.push('b ends'); return r; });
+      await tick();
+      first.resolve(result(false));
+      await a;
+      await tick();
+      // b is running now; c arrives while it runs, and must wait for it.
+      const thirdActivation = vi.fn(async () => { order.push('c starts'); return result(true); });
+      const c = loans.attachByProcessId(PID, endpoint, thirdActivation);
+      await tick();
+      expect(thirdActivation).not.toHaveBeenCalled();
+      second.resolve(result(true));
+      await b;
+      await c;
+      expect(order).toEqual(['a starts', 'a ends', 'b starts', 'b ends', 'c starts']);
+    });
+  });
+
+  /**
+   * Every turn of an endpoint's queue has a limit (issue #1261, review round
+   * 2): a holder that never settles gives the queue up at its limit, with an
+   * answer that says so, and changes nothing after it.
+   */
+  describe('the turn limits', () => {
+    const limits = { activation: 40, lookup: 40, close: 40 };
+    const endpoint = { host: '127.0.0.1', port: 9229 };
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+    it('an activation that never settles gives the queue up at its limit, holds a report, and is never recorded', async () => {
+      let finishLate!: (value: { host: string; port: number; alreadyActive: boolean; title: string; targetId: string }) => void;
+      const late = new Promise<{ host: string; port: number; alreadyActive: boolean; title: string; targetId: string }>((resolve) => { finishLate = resolve; });
+      const { loans } = harness({ turnLimits: limits });
+      const outcome = await loans.attachByProcessId(PID, endpoint, () => late);
+
+      expect(outcome.activated).toBeUndefined();
+      expect(String((outcome.error as Error).message)).toBe(
+        `JavaScript attach: the activation of PID ${PID}'s inspector on 127.0.0.1:9229 did not finish within 40 ms; ` +
+          'it may have signalled the target, and this server closed nothing'
+      );
+      expect(outcome.loan?.kind).toBe('unresolved');
+      // The next turn runs, and the late activation, when it ends, records nothing.
+      const next = await loans.attachByProcessId(PID, endpoint, async () => ({ host: '127.0.0.1', port: 9229, alreadyActive: true, title: 'x', targetId: 'id-1' }));
+      expect(next.loan?.kind).toBe('found');
+      finishLate({ host: '127.0.0.1', port: 9229, alreadyActive: false, title: 'x', targetId: 'id-1' });
+      await tick();
+      expect(loans.portOpenedFor(PID)).toBeUndefined();
+    });
+
+    it('a close that never settles gives the queue up at its limit, says it was not confirmed, and sends nothing late', async () => {
+      const { loans, deps } = harness({ turnLimits: limits });
+      let answerProbe!: (probe: InspectorProbe) => void;
+      vi.mocked(deps.listTargets).mockImplementationOnce(() => new Promise((resolve) => { answerProbe = resolve; }));
+      const loan = loans.forActivation(activation(false));
+
+      await expect(loan.giveBack()).resolves.toBe('not confirmed closed: the close did not finish within 40 ms; 127.0.0.1:9229 may still be listening');
+      // The probe answers late: the close sees it ran out of time and sends nothing.
+      answerProbe(open());
+      await tick();
+      expect(deps.endSession).not.toHaveBeenCalled();
+      await expect(loans.settled('127.0.0.1', 9229)).resolves.toBeUndefined();
+    });
+
+    it('a close that passes its limit after it was sent changes nothing when it ends late: the next opening keeps its record and its close', async () => {
+      const { loans, deps, setInspector } = harness({ turnLimits: limits });
+      let finishEnd!: (result: InspectorEndResult) => void;
+      vi.mocked(deps.endSession).mockImplementationOnce(() => new Promise((resolve) => { finishEnd = resolve; }));
+      const first = loans.forActivation(activation(false));
+
+      await expect(first.giveBack()).resolves.toBe('not confirmed closed: the close did not finish within 40 ms; 127.0.0.1:9229 may still be listening');
+      expect(deps.endSession).toHaveBeenCalledTimes(1);
+
+      // The next attach by processId opens it again: a new opening, with a new id.
+      const next = loans.forActivation(activation(false, 'id-2'));
+      expect(next.kind).toBe('opened');
+      finishEnd({ status: 'dropped' });
+      await tick();
+      expect(loans.portOpenedFor(PID)).toBe(9229);
+
+      setInspector(open('id-2'));
+      await expect(next.giveBack()).resolves.toBe(
+        `closed: 127.0.0.1:9229 no longer accepts connections, and PID ${PID} runs on; an attach by processId opens it again`
+      );
+      expect(vi.mocked(deps.endSession).mock.calls[1][0]).toBe('ws://127.0.0.1:9229/id-2');
+    });
+
+    it('an address lookup that never settles shares nothing, and holds nothing when it ends late', async () => {
+      const { loans, deps } = harness({ turnLimits: limits });
+      loans.forActivation(activation(false));
+      let answerProbe!: (probe: InspectorProbe) => void;
+      vi.mocked(deps.listTargets).mockImplementationOnce(() => new Promise((resolve) => { answerProbe = resolve; }));
+      const loan = await loans.forAddress({ host: '127.0.0.1', port: 9229 });
+      expect(loan.kind).toBe('addressed');
+      answerProbe(open());
+      await tick();
+      // Only the opening's own holder is counted: its give-back closes it.
+      const holders = loans.forActivation(activation(true));
+      expect(holders.kind).toBe('joined');
+      expect(loans.othersHolding(holders)).toHaveLength(1);
+    });
+
+    it('the limits are what the docs state: 15 s, 2 s and 5 s', () => {
+      expect(ENDPOINT_TURN_LIMITS_MS).toEqual({ activation: 15_000, lookup: 2_000, close: 5_000 });
+      expect(INSPECTOR_DISCOVERY_MS + INSPECTOR_END_ANSWER_MS + INSPECTOR_PORT_REFUSAL_MS).toBeLessThan(ENDPOINT_TURN_LIMITS_MS.close);
     });
   });
 
   describe('who may share an opening', () => {
+    it('portOpenedFor names the port of this server\'s opening for that PID, and nothing for another PID', () => {
+      const { loans } = harness();
+      loans.forActivation({ ...activation(false), port: 5945 });
+      expect(loans.portOpenedFor(PID)).toBe(5945);
+      expect(loans.portOpenedFor(PID + 1)).toBeUndefined();
+    });
+
     it('an activation for another PID does not join this server\'s opening, even with the same id', () => {
       const { loans } = harness();
       loans.forActivation(activation(false));
@@ -375,54 +472,6 @@ describe('InspectorLoans (issue #1261)', () => {
       loans.forActivation(activation(false));
       expect((await loans.forAddress({ host: '10.0.0.5', port: 9229 })).kind).toBe('addressed');
       expect((await loans.forAddress({ websocketAddress: 'ws://10.0.0.5:9229/id-1' })).kind).toBe('addressed');
-      expect(deps.listTargets).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('an attach that signalled and then failed', () => {
-    const signalledLoan = async (loans: InspectorLoans, ports = [9229, 5945]) =>
-      (await loans.attachByProcessId(PID, { host: '127.0.0.1', port: 9229 }, async () => {
-        throw new SignalledActivationError('none opened', PID, '127.0.0.1', ports);
-      })).loan!;
-
-    it('closes an inspector of the PID it finds on one of the places the signal could open it, and says so', async () => {
-      const probes: Record<number, InspectorProbe> = { 9229: closed, 5945: open('id-9') };
-      const { loans, deps } = harness({
-        listTargets: vi.fn(async (_host: string, port: number) => probes[port] ?? closed),
-        endSession: vi.fn(async () => { probes[5945] = closed; return { status: 'dropped' as const }; })
-      });
-      const loan = await signalledLoan(loans);
-
-      await expect(loan.giveBack()).resolves.toBe(
-        `closed: the signal this attach sent had opened PID ${PID}'s inspector on 127.0.0.1:5945; it no longer accepts connections, and PID ${PID} runs on`
-      );
-      expect(deps.endSession).toHaveBeenCalledWith('ws://127.0.0.1:9229/id-9', PID, INSPECTOR_END_ANSWER_MS);
-    });
-
-    it('says plainly when nothing was found, naming where it looked, and never says closed', async () => {
-      const { loans, setInspector } = harness();
-      setInspector(closed);
-      const loan = await signalledLoan(loans);
-      await expect(loan.giveBack()).resolves.toBe(
-        `not confirmed closed: this attach signalled PID ${PID} to open its inspector, and none of PID ${PID}'s was found on ` +
-          '127.0.0.1:9229 or 127.0.0.1:5945; one may be open on a port this server could not identify ' +
-          '(a target started with --inspect-port=<n> opens it there) — restart the target to close it'
-      );
-    });
-
-    it('passes over an inspector of another PID, and a port another session of this server holds', async () => {
-      const { loans, deps } = harness({ endResult: { status: 'other-pid', pid: 777 } });
-      loans.forActivation({ pid: 777, host: '127.0.0.1', port: 5945, alreadyActive: false, targetId: 'id-5' });
-      const loan = await signalledLoan(loans);
-      await expect(loan.giveBack()).resolves.toMatch(/^not confirmed closed: this attach signalled/);
-      // 9229 was asked (and answered for PID 777); 5945 is another session's opening and was not.
-      expect(deps.endSession).toHaveBeenCalledTimes(1);
-    });
-
-    it('says the process is gone when it has exited, and looks for nothing', async () => {
-      const { loans, deps } = harness({ processExists: vi.fn(() => false) });
-      const loan = await signalledLoan(loans);
-      await expect(loan.giveBack()).resolves.toMatch(/^gone: PID 4242 is no longer running/);
       expect(deps.listTargets).not.toHaveBeenCalled();
     });
   });
@@ -462,6 +511,16 @@ describe('InspectorLoans (issue #1261)', () => {
       const loan = loans.forActivation({ pid: PID, host: '127.0.0.1', port: 9229, alreadyActive: false });
       await expect(loan.giveBack()).resolves.toMatch(/^not confirmed closed: this server did not learn which opening/);
       expect(deps.listTargets).not.toHaveBeenCalled();
+      expect(deps.endSession).not.toHaveBeenCalled();
+    });
+
+    it('a discovery probe that got no answer is said as such, not as "something else", and nothing is sent', async () => {
+      const { loans, deps, setInspector } = harness();
+      const loan = loans.forActivation(activation(false));
+      setInspector({ status: 'no-answer', timeoutMs: INSPECTOR_DISCOVERY_MS });
+      await expect(loan.giveBack()).resolves.toBe(
+        `not confirmed closed: 127.0.0.1:9229 did not answer within ${INSPECTOR_DISCOVERY_MS} ms, so nothing was sent; 127.0.0.1:9229 may still be listening`
+      );
       expect(deps.endSession).not.toHaveBeenCalled();
     });
 

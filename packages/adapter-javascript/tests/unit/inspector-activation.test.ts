@@ -13,8 +13,6 @@ import { AdapterError, AdapterErrorCode } from '@debugmcp/shared';
 import {
   activateInspector,
   endInspectorSession,
-  inspectPortByPid,
-  inspectPortFromNodeArgs,
   SignalledActivationError,
   type MinimalWebSocket,
   inspectorSignalDisabledByPid,
@@ -82,7 +80,7 @@ describe('activateInspector (issue #871)', () => {
     const { options, signal, listTargets } = harness();
     const result = await activateInspector(options);
     expect(signal).toHaveBeenCalledWith(4242);
-    expect(listTargets).toHaveBeenCalledWith('127.0.0.1', 9229);
+    expect(listTargets).toHaveBeenCalledWith('127.0.0.1', 9229, 1000);
     expect(result).toEqual({ host: '127.0.0.1', port: 9229, alreadyActive: false, title: 'node[4242]', targetId: '0' });
   });
 
@@ -97,7 +95,7 @@ describe('activateInspector (issue #871)', () => {
   it('accepts a numeric-string pid and a caller port, probing that port', async () => {
     const { options, listTargets } = harness({ pid: '4242', port: 9230, probes: [closed, inspector('node[4242]')] });
     const result = await activateInspector(options);
-    expect(listTargets).toHaveBeenCalledWith('127.0.0.1', 9230);
+    expect(listTargets).toHaveBeenCalledWith('127.0.0.1', 9230, 1000);
     expect(result.port).toBe(9230);
   });
 
@@ -133,7 +131,7 @@ describe('activateInspector (issue #871)', () => {
     expect(ok.alreadyActive).toBe(false);
 
     const err = await failure(activateInspector(harness({ probes: [closed, reset], deadlineMs: 250, pollMs: 100 }).options));
-    expect(err.message).toMatch(/none opened on 127\.0\.0\.1:9229 within 250 ms/);
+    expect(err.message).toMatch(/none appeared on 127\.0\.0\.1:9229 within 250 ms/);
     expect(err.message).toMatch(/\(last probe: read ECONNRESET\)/);
   });
 
@@ -159,7 +157,7 @@ describe('activateInspector (issue #871)', () => {
   it.each(['localhost', '::1', '[::1]'])('probes and answers 127.0.0.1 for the loopback spelling %s', async (host) => {
     const { options, listTargets } = harness({ host });
     const result = await activateInspector(options);
-    expect(listTargets).toHaveBeenCalledWith('127.0.0.1', 9229);
+    expect(listTargets).toHaveBeenCalledWith('127.0.0.1', 9229, 1000);
     expect(result.host).toBe('127.0.0.1');
   });
 
@@ -237,12 +235,17 @@ describe('activateInspector (issue #871)', () => {
   it('gives up when no inspector opens on the port before the deadline, naming the --inspect-port case', async () => {
     const { options, listTargets } = harness({ probes: [closed], deadlineMs: 350, pollMs: 100 });
     const err = await failure(activateInspector(options));
-    expect(err.message).toMatch(/PID 4242 was signalled to open its inspector, but none opened on 127\.0\.0\.1:9229 within 350 ms/);
-    expect(err.message).toMatch(/the signal may have opened one on another port/);
-    expect(err.message).toMatch(/--inspect-port/);
-    // It says it signalled, and where an inspector it opened could be (issue #1261).
+    // In this order (issue #1261): the signal was sent; nothing appeared where
+    // the attach looked; one may be open elsewhere; nothing was closed; what
+    // closes it; and, apart, how to attach to it.
+    expect(err.message).toBe(
+      'JavaScript attach: PID 4242 was signalled to open its inspector, but none appeared on 127.0.0.1:9229 within 350 ms; ' +
+        'one may now be open on another port (a target started with --inspect-port=<n> opens it there); ' +
+        'this server closed nothing, because it could not identify one; restarting the target closes it. ' +
+        'To attach to it, pass that port with processId: the attach then finds it open and leaves it open'
+    );
     expect(err).toBeInstanceOf(SignalledActivationError);
-    expect((err as SignalledActivationError).ports).toEqual([9229]);
+    expect((err as SignalledActivationError).port).toBe(9229);
     // the pre-signal probe, then one per poll until the clock passes the deadline
     expect(listTargets.mock.calls.length).toBeGreaterThanOrEqual(3);
   });
@@ -308,18 +311,42 @@ describe('probeInspector (the real /json/list probe)', () => {
     }
   });
 
-  it('bounds the whole request, not only its silences: a responder that keeps trickling is "other" when the bound passes', async () => {
-    const srv = await serve((_req, res) => {
+  it('bounds the whole request, not only its silences: a responder that keeps trickling is "no-answer" when the bound passes, and its connection is destroyed', async () => {
+    let connectionClosed!: () => void;
+    const closedByProbe = new Promise<void>((resolve) => { connectionClosed = resolve; });
+    const srv = await serve((req, res) => {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.write('[');
       const trickle = setInterval(() => res.write(' '), 20);
-      res.on('close', () => clearInterval(trickle));
+      req.socket.on('close', () => { clearInterval(trickle); connectionClosed(); });
     });
     try {
       const startedAt = Date.now();
       const probe = await probeInspector('127.0.0.1', srv.port, 300);
-      expect(probe).toEqual({ status: 'other', detail: 'no answer from /json/list within 300 ms' });
+      // A silence is not an answer (issue #1261): its own status, never "other".
+      expect(probe).toEqual({ status: 'no-answer', timeoutMs: 300 });
       expect(Date.now() - startedAt).toBeLessThan(1000);
+      // The probe destroyed its connection when the bound passed; the responder sees it go.
+      await Promise.race([
+        closedByProbe,
+        new Promise((_resolve, reject) => setTimeout(() => reject(new Error('the timed-out probe left its connection open')), 1000))
+      ]);
+    } finally {
+      srv.closeAll?.();
+      await srv.close();
+    }
+  });
+
+  it('answers "other" as soon as a body passes the cap, without waiting for the bound', async () => {
+    const srv = await serve((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.write('[' + ' '.repeat(70 * 1024));
+    });
+    try {
+      const startedAt = Date.now();
+      const probe = await probeInspector('127.0.0.1', srv.port, 5000);
+      expect(probe).toEqual({ status: 'other', detail: '/json/list answered with more than 65536 bytes' });
+      expect(Date.now() - startedAt).toBeLessThan(2000);
     } finally {
       srv.closeAll?.();
       await srv.close();
@@ -361,6 +388,107 @@ describe('pidViaInspector (the real CDP ownership question)', () => {
   }, 30000);
 });
 
+describe('one endpoint, and what is said about it (issue #1261)', () => {
+  it('an endpoint taken from an opening this server holds is only looked at: found there, it is joined; closed, nothing is signalled', async () => {
+    const found = harness({ probes: [inspector('node[4242]')], openIfClosed: false });
+    expect((await activateInspector(found.options)).alreadyActive).toBe(true);
+    expect(found.signal).not.toHaveBeenCalled();
+
+    const gone = harness({ probes: [closed], openIfClosed: false });
+    const err = await failure(activateInspector({ ...gone.options, port: 5945 }));
+    expect(err.message).toBe(
+      'JavaScript attach: the inspector of PID 4242 that this server held on 127.0.0.1:5945 closed before this attach reached it; ' +
+        'nothing was signalled — attach by processId again'
+    );
+    expect(err).not.toBeInstanceOf(SignalledActivationError);
+    expect(gone.signal).not.toHaveBeenCalled();
+  });
+
+  it('a port that takes the connection and does not answer before the signal is refused as such, not as "something else"', async () => {
+    const { options, signal } = harness({ probes: [{ status: 'no-answer', timeoutMs: 1000 }] });
+    const err = await failure(activateInspector(options));
+    expect(err.message).toMatch(/127\.0\.0\.1:9229 took the connection but did not answer \/json\/list within 1000 ms/);
+    expect(err.message).not.toMatch(/not a Node inspector/);
+    expect(signal).not.toHaveBeenCalled();
+  });
+
+  it('after the signal a silence is waited through, and named only at the deadline', async () => {
+    const quiet: InspectorProbe = { status: 'no-answer', timeoutMs: 100 };
+    const ok = await activateInspector(harness({ probes: [closed, quiet, inspector('node[4242]')] }).options);
+    expect(ok.alreadyActive).toBe(false);
+    const err = await failure(activateInspector(harness({ probes: [closed, quiet], deadlineMs: 250 }).options));
+    expect(err.message).toMatch(/\(last probe: no answer within 100 ms\)/);
+  });
+
+  it('holds the window after the signal as an absolute bound: no wait, probe or ownership read runs past it', async () => {
+    let clock = 0;
+    const budgets: number[] = [];
+    const ownership: number[] = [];
+    const options: InspectorActivationOptions = {
+      ...harness().options,
+      deadlineMs: 5000,
+      pollMs: 100,
+      sleep: async (ms) => { clock += ms; },
+      now: () => clock,
+      // Every probe after the signal uses its whole budget, and answers with an inspector nobody can vouch for.
+      listTargets: vi.fn(async (_host: string, _port: number, timeoutMs?: number) => {
+        budgets.push(timeoutMs ?? -1);
+        if (budgets.length === 1) return closed;
+        clock += timeoutMs ?? 0;
+        return { status: 'no-answer', timeoutMs: timeoutMs ?? 0 } as InspectorProbe;
+      }),
+      pidOf: async (_target, timeoutMs) => { ownership.push(timeoutMs ?? -1); clock += timeoutMs ?? 0; return undefined; }
+    };
+    const signalledAt = 0;
+    await failure(activateInspector(options));
+    expect(clock - signalledAt).toBeLessThanOrEqual(5000);
+    expect(budgets[0]).toBe(1000);
+    expect(budgets.slice(1).every((budget) => budget > 0 && budget <= 1000)).toBe(true);
+  });
+});
+
+describe('the activation window, with an ownership read at its end (issue #1261)', () => {
+  it('cuts the last wait between probes to what is left of the window', async () => {
+    let clock = 0;
+    const options: InspectorActivationOptions = {
+      ...harness().options,
+      deadlineMs: 5000,
+      pollMs: 3000,
+      sleep: async (ms) => { clock += ms; },
+      now: () => clock,
+      listTargets: vi.fn(async () => closed)
+    };
+    const err = await failure(activateInspector(options));
+    expect(err).toBeInstanceOf(SignalledActivationError);
+    expect(err.message).toMatch(/none appeared on 127\.0\.0\.1:9229 within 5000 ms/);
+    expect(clock).toBe(5000);
+  });
+
+  it('cuts the ownership read to what is left of the window, so the activation ends at its deadline', async () => {
+    let clock = 0;
+    let probes = 0;
+    const options: InspectorActivationOptions = {
+      ...harness().options,
+      deadlineMs: 5000,
+      pollMs: 100,
+      sleep: async (ms) => { clock += ms; },
+      now: () => clock,
+      // Silent until the window is all but spent, then an inspector whose owner is another PID.
+      listTargets: vi.fn(async (_host: string, _port: number, timeoutMs?: number) => {
+        probes += 1;
+        if (probes === 1) return closed;
+        clock += timeoutMs ?? 0;
+        return clock >= 5000 ? inspector('server.js') : ({ status: 'no-answer', timeoutMs: timeoutMs ?? 0 } as InspectorProbe);
+      }),
+      pidOf: async (_target, timeoutMs) => { clock += timeoutMs ?? 0; return 9999; }
+    };
+    const err = await failure(activateInspector(options));
+    expect(err).toBeInstanceOf(SignalledActivationError);
+    expect(err.message).toMatch(/held by a Node inspector for a different process \(PID 9999/);
+    expect(clock).toBeLessThanOrEqual(5001);
+  });
+});
+
 describe('the signal\'s side effect, carried on failure (issue #1261)', () => {
   it('a failure after the signal says it signalled; a refusal before it does not', async () => {
     const after = await failure(activateInspector(harness({ probes: [closed, inspector('node[9999]')] }).options));
@@ -369,52 +497,6 @@ describe('the signal\'s side effect, carried on failure (issue #1261)', () => {
 
     const before = await failure(activateInspector(harness({ probes: [inspector('node[9999]')] }).options));
     expect(before).not.toBeInstanceOf(SignalledActivationError);
-  });
-
-  it('finds the inspector the signal opened on another port of the target, and never probes the ports it had already', async () => {
-    const listeningPorts = vi.fn()
-      .mockResolvedValueOnce(new Set([3000]))
-      .mockResolvedValue(new Set([3000, 5945]));
-    const listTargets = vi.fn(async (_host: string, port: number) => (port === 5945 ? inspector('node[4242]') : closed));
-    const { options } = harness({ findOpenedElsewhere: true, listeningPorts, listTargets, deadlineMs: 2000, pollMs: 100 });
-
-    const result = await activateInspector(options);
-
-    expect(result).toEqual({ host: '127.0.0.1', port: 5945, alreadyActive: false, title: 'node[4242]', targetId: '0' });
-    expect(listTargets.mock.calls.map(([, port]) => port)).not.toContain(3000);
-  });
-
-  it('looks elsewhere only when asked to', async () => {
-    const listeningPorts = vi.fn(async () => new Set<number>());
-    await activateInspector(harness({ listeningPorts }).options);
-    expect(listeningPorts).not.toHaveBeenCalled();
-  });
-
-  it('a failure after looking elsewhere names every new port as a place the signal may have opened it', async () => {
-    const listeningPorts = vi.fn().mockResolvedValueOnce(new Set([3000])).mockResolvedValue(new Set([3000, 5946]));
-    const listTargets = vi.fn(async () => closed);
-    const err = await failure(activateInspector(harness({ findOpenedElsewhere: true, listeningPorts, listTargets, deadlineMs: 500 }).options));
-    expect(err).toBeInstanceOf(SignalledActivationError);
-    expect((err as SignalledActivationError).ports).toEqual([9229, 5946]);
-  });
-});
-
-describe('inspectPortFromNodeArgs (issue #1261)', () => {
-  it.each([
-    [['--inspect-port=5935', 'server.js'], 5935],
-    [['--inspect-port', '5935', 'server.js'], 5935],
-    [['--debug-port=127.0.0.1:5936', 'server.js'], 5936],
-    [['--inspect=0.0.0.0:5937', 'server.js'], 5937],
-    [['--inspect-brk=5938'], 5938],
-    [['--inspect-wait=[::1]:5939'], 5939],
-    [['--inspect-port=5935', '--inspect-port=5940', 'app.js'], 5940],
-    [['-r', 'dotenv/config', '--inspect-port=5941', 'app.js'], 5941],
-    [['--inspect', 'server.js'], undefined],
-    [['--inspect-port=0', 'server.js'], undefined],
-    [['server.js', '--inspect-port=5935'], undefined],
-    [[], undefined]
-  ])('%j names %s', (args, port) => {
-    expect(inspectPortFromNodeArgs(args)).toBe(port);
   });
 });
 
@@ -434,6 +516,7 @@ function fakeWebSocket(script: (socket: MinimalWebSocket & { sent: string[]; clo
     close(): void { this.closes += 1; }
   };
 }
+
 
 describe('endInspectorSession (the CDP answers, issue #1261)', () => {
   it('ignores an answer to another request id, and takes the drop that follows as the close', async () => {
@@ -553,38 +636,6 @@ describe('isNodeProcessByPid', () => {
   it.skipIf(process.platform === 'win32')('answers "unknown" for a PID that does not exist', async () => {
     // PID 2^22 is above Linux's default pid_max and far above macOS's.
     expect(await isNodeProcessByPid(4194304)).toBeUndefined();
-  });
-});
-
-describe('inspectPortByPid (issue #1261)', () => {
-  /** A child that idles; nothing listens on the inspect port until it is signalled. */
-  async function idleChild(args: string[], env: NodeJS.ProcessEnv = process.env) {
-    const child = spawn(process.execPath, [...args, '-e', 'setTimeout(() => {}, 20000)'], {
-      stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true, env
-    });
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    return child;
-  }
-
-  it.skipIf(process.platform === 'win32')('reads --inspect-port off a child\'s command line, and out of its NODE_OPTIONS', async () => {
-    const onCommandLine = await idleChild(['--inspect-port=5949']);
-    const inEnvironment = await idleChild([], { ...process.env, NODE_OPTIONS: '--inspect-port=5950' });
-    try {
-      expect(onCommandLine.exitCode).toBeNull();
-      expect(inEnvironment.exitCode).toBeNull();
-      expect(await inspectPortByPid(onCommandLine.pid!)).toBe(5949);
-      expect(await inspectPortByPid(inEnvironment.pid!)).toBe(5950);
-      // This runner names none.
-      expect(await inspectPortByPid(process.pid)).toBeUndefined();
-    } finally {
-      for (const child of [onCommandLine, inEnvironment]) {
-        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-      }
-    }
-  }, 15000);
-
-  it('answers "unknown" where the command line cannot be read here', async () => {
-    expect(await inspectPortByPid(process.pid, 'win32')).toBeUndefined();
   });
 });
 

@@ -16,11 +16,9 @@
  *      leaves it open and names the other, which keeps working; the last
  *      closes it;
  *   and a closed inspector opens again on the next attach by processId, five
- *   times over on one target; a target started with `--inspect-port` is
- *   attached by processId alone (its port read from the command line on
- *   Linux and macOS, found as its new listening port on Windows); and a
- *   session whose target exits under it gives back by itself (round 2 of the
- *   review).
+ *   times over on one target; a session whose target exits under it gives
+ *   back by itself; and a target started with `--inspect-port`, attached by
+ *   processId without that port, fails truthfully and closes nothing (#1310).
  *
  * Every answer says which happened in one field, `inspector`, the same on
  * attach, detach and close.
@@ -254,9 +252,9 @@ describe('an inspector that was already open is left open (issue #1261)', () => 
   }, 120000);
 });
 
-describe('a target started with --inspect-port, attached by processId alone (issue #1261)', () => {
-  it('finds the port the signal opens without being told it, owns that inspector, and closes it on detach', async (ctx) => {
-    // Where the command line cannot be read (Windows), the attach first looks at Node's default port.
+describe('a target started with --inspect-port, attached by processId alone (issue #1261, #1310)', () => {
+  it('fails truthfully and closes nothing; a retry with that port finds the inspector open and leaves it open', async (ctx) => {
+    // The attach looks at Node's default port: it must be free for this case.
     if (await listening(9229)) {
       console.log('[inspector-loan] 127.0.0.1:9229 is in use on this host; skipping the processId-alone case');
       ctx.skip();
@@ -264,15 +262,25 @@ describe('a target started with --inspect-port, attached by processId alone (iss
     const target = await startTarget('closed');
     await server.createSession('javascript', 'inspector-loan-inspect-port');
 
-    // No port: on Linux and macOS it is read from the command line, on Windows
-    // found as the target's new listening port after the signal.
-    const attached = await call('attach_to_process', { processId: target.pid, stopOnEntry: false, verifyTimeout: 20000 });
-    expect(attached.success, JSON.stringify(attached)).toBe(true);
-    expect(attached.inspector).toBe(`opened by this attach on 127.0.0.1:${target.inspectPort}; closed when this session detaches or closes`);
+    // One attach, one endpoint: 9229. The signal opens the inspector on the target's own port.
+    const failed = await call('attach_to_process', { processId: target.pid, stopOnEntry: false, verifyTimeout: 20000 });
+    expect(failed.success, JSON.stringify(failed)).toBe(false);
+    expect(failed.message).toContain(`PID ${target.pid} was signalled to open its inspector, but none appeared on 127.0.0.1:9229 within 5000 ms`);
+    expect(failed.message).toContain('this server closed nothing, because it could not identify one; restarting the target closes it');
+    expect(failed.inspector).toMatch(/^not confirmed closed: this attach signalled PID \d+ to open its inspector/);
+    // Nothing was closed: the inspector the signal opened is still there.
+    expect(await listening(target.inspectPort)).toBe(true);
+    await call('close_debug_session');
 
+    await server.createSession('javascript', 'inspector-loan-inspect-port-retry');
+    const retried = await attachByPid(target);
+    expect(retried.success, JSON.stringify(retried)).toBe(true);
+    expect(retried.inspector).toBe(`already open on 127.0.0.1:${target.inspectPort} before this attach; left open when this session ends`);
     const detached = await call('detach_from_process');
-    expect(detached.inspector).toMatch(new RegExp(`^closed: 127\\.0\\.0\\.1:${target.inspectPort} no longer accepts connections`));
-    await expectClosedAndServing(target);
+    expect(detached.inspector).toBe(`left open: it was already open on 127.0.0.1:${target.inspectPort} before this attach`);
+    expect(await listening(target.inspectPort)).toBe(true);
+    expect(alive(target.pid)).toBe(true);
+    expect(await get(target.httpPort)).toMatch(/^work done:/);
     await call('close_debug_session');
     server.sessionId = undefined;
   }, 120000);
@@ -325,7 +333,7 @@ describe('a failed attach gives back what it opened (issue #1261)', () => {
 });
 
 describe('two sessions on one inspector this server opened (issue #1261)', () => {
-  it.each(['port', 'processId', 'inspector URL'] as const)(
+  it.each(['port', 'processId', 'processId alone', 'inspector URL'] as const)(
     'the second, attached by %s, is not cut off when the first leaves; the last to leave closes it',
     async (how) => {
       const target = await startTarget('closed');
@@ -338,10 +346,15 @@ describe('two sessions on one inspector this server opened (issue #1261)', () =>
         ? { host: '127.0.0.1', port: target.inspectPort }
         : how === 'processId'
           ? { processId: target.pid, port: target.inspectPort }
-          : { adapterConfig: { websocketAddress: await webSocketUrl(target.inspectPort) } };
+          // No port: the endpoint is the one this server's opening for the PID is on, looked at only.
+          : how === 'processId alone'
+            ? { processId: target.pid }
+            : { adapterConfig: { websocketAddress: await webSocketUrl(target.inspectPort) } };
       const attached = await call('attach_to_process', { ...address, stopOnEntry: false, verifyTimeout: 20000 });
       expect(attached.success, JSON.stringify(attached)).toBe(true);
       expect(attached.inspector).toMatch(new RegExp(`^opened by this server on 127\\.0\\.0\\.1:${target.inspectPort}, and also used by session ${first}`));
+      // One opening for both sessions: the second attach sent no signal of its own.
+      expect((target.stderr().match(/Debugger listening on/g) ?? []).length).toBe(1);
 
       const left = await call('detach_from_process', { sessionId: first });
       expect(left.inspector).toBe(

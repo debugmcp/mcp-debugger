@@ -107,7 +107,7 @@ function makeHarness(options: HarnessOptions = {}): Harness {
     findFreePort: vi.fn(async () => 5678),
     setupProxyEventHandlers: vi.fn(),
     redactionEnabled: vi.fn(() => true),
-    giveBackAttachLoan: vi.fn(async () => undefined)
+    returnAttachLoan: vi.fn(async () => undefined)
   };
   return { launcher: new ProxyLauncher(ctx), ctx, policy };
 }
@@ -888,14 +888,14 @@ describe('ProxyLauncher.start', () => {
       expect(session.run.attachLoan).toBe(loan);
     });
 
-    it('has a loan an earlier run still holds given back before this attempt records its own', async () => {
+    it('has a loan an earlier run still holds given back, its report kept for the next answer, before this attempt records its own', async () => {
       const earlier = fakeLoan();
       const h = makeHarness({ adapter: adapterLending(fakeLoan()), proxyManager: new MockProxyManager() });
       const session = makeSession({ run: { attachLoan: earlier } } as Partial<ManagedSession>);
       const order: string[] = [];
-      vi.mocked(h.ctx.giveBackAttachLoan).mockImplementation(async (s) => {
+      // The keeping give-back, never the one that hands the report to an answer this start does not make.
+      vi.mocked(h.ctx.returnAttachLoan).mockImplementation(async (s) => {
         order.push(`giveBack:${s.run.attachLoan === earlier ? 'earlier' : 'other'}`);
-        return undefined;
       });
       vi.mocked(h.ctx.adapterRegistry.create).mockImplementationOnce(async () => {
         order.push('acquire');

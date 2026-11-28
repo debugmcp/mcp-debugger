@@ -35,9 +35,6 @@ const execFileAsync = promisify(execFile);
 /** Node's default inspector port, where SIGUSR1 / `_debugProcess` opens it. */
 export const DEFAULT_INSPECTOR_PORT = 9229;
 
-/** How long after the signal an inspector not open where expected is looked for on PID's other ports (issue #1261). */
-export const OPENED_ELSEWHERE_AFTER_MS = 300;
-
 export interface InspectorTarget {
   id?: string;
   title?: string;
@@ -46,11 +43,16 @@ export interface InspectorTarget {
   webSocketDebuggerUrl?: string;
 }
 
-/** What answered on the port: nothing, a Node inspector, or something else. */
+/**
+ * What answered on the port: nothing (refused), a Node inspector, something
+ * else that did answer, or nothing within the probe's bound (issue #1261: a
+ * silence is not an answer, and is never read as one).
+ */
 export type InspectorProbe =
   | { status: 'closed' }
   | { status: 'inspector'; targets: InspectorTarget[] }
-  | { status: 'other'; detail: string };
+  | { status: 'other'; detail: string }
+  | { status: 'no-answer'; timeoutMs: number };
 
 export interface InspectorActivationOptions {
   /** The target's PID (a numeric string is accepted). */
@@ -74,31 +76,28 @@ export interface InspectorActivationOptions {
   /** This server's own PID (default process.pid) — never a valid target. */
   selfPid?: number;
   signal?: (pid: number) => void;
-  listTargets?: (host: string, port: number) => Promise<InspectorProbe>;
-  /** The PID behind an inspector target, or undefined when it cannot be told. */
-  pidOf?: (target: InspectorTarget) => Promise<number | undefined>;
+  /** Probe host:port, within `timeoutMs` (an absolute bound). */
+  listTargets?: (host: string, port: number, timeoutMs?: number) => Promise<InspectorProbe>;
+  /** The PID behind an inspector target, within `timeoutMs`, or undefined when it cannot be told. */
+  pidOf?: (target: InspectorTarget, timeoutMs?: number) => Promise<number | undefined>;
   /**
-   * Issue #1261: the port is not known (no caller `port`, none on the
-   * target's command line), so the signal may open the inspector somewhere
-   * else than `port`. Then the TCP ports PID listens on are read before the
-   * signal and again after it, and a new one that answers as PID's inspector
-   * is taken as the one the signal opened.
+   * Issue #1261: false when the endpoint came from an inspector this server
+   * already holds for the PID — a lookup, so the attach only finds it there,
+   * and a closed one is reported rather than opened again. Default true.
    */
-  findOpenedElsewhere?: boolean;
-  /** The ports PID listens on; undefined when that cannot be read here (default: netstat on Windows). */
-  listeningPorts?: (pid: number) => Promise<ReadonlySet<number> | undefined>;
+  openIfClosed?: boolean;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
 }
 
 /**
  * An activation that failed after it had signalled the target (issue #1261):
- * the signal may have opened an inspector even though none was found where
- * the attach looked. `ports` are the places an inspector the signal opened
- * can be looked for; each was not listening before the signal.
+ * the signal may have opened an inspector even though none appeared at the
+ * endpoint the attach looked at (`host:port`). It is reported, never closed:
+ * this server closes only an opening it identified there.
  */
 export class SignalledActivationError extends AdapterError {
-  constructor(message: string, readonly pid: number, readonly host: string, readonly ports: readonly number[]) {
+  constructor(message: string, readonly pid: number, readonly host: string, readonly port: number) {
     super(message, AdapterErrorCode.ENVIRONMENT_INVALID);
     this.name = 'SignalledActivationError';
   }
@@ -198,11 +197,11 @@ export function pidViaInspector(webSocketDebuggerUrl: string, timeoutMs = 1500):
 }
 
 /** The PID behind a target: the title's `[pid]` suffix when present, else the inspector's own answer. */
-async function defaultPidOf(target: InspectorTarget): Promise<number | undefined> {
+async function defaultPidOf(target: InspectorTarget, timeoutMs?: number): Promise<number | undefined> {
   const fromTitle = pidOfTitle(target.title);
   if (fromTitle !== undefined) return fromTitle;
   if (typeof target.webSocketDebuggerUrl !== 'string') return undefined;
-  return pidViaInspector(target.webSocketDebuggerUrl);
+  return pidViaInspector(target.webSocketDebuggerUrl, timeoutMs);
 }
 
 function describeTargets(targets: InspectorTarget[]): string {
@@ -393,8 +392,9 @@ const PROBE_MAX_BODY_BYTES = 64 * 1024;
 /**
  * GET http://host:port/json/list and classify what answered. `timeoutMs` is
  * an absolute bound on the whole request (issue #1261): a responder that
- * keeps the connection busy, or keeps sending, is answered "other" when it
- * passes, not later.
+ * keeps the connection silent, or keeps sending, is answered "no-answer"
+ * when it passes, not later, and its connection is destroyed; a body larger
+ * than any inspector's is answered "other" as soon as it passes the cap.
  */
 export function probeInspector(host: string, port: number, timeoutMs = 1000): Promise<InspectorProbe> {
   return new Promise((resolve) => {
@@ -436,134 +436,11 @@ export function probeInspector(host: string, port: number, timeoutMs = 1000): Pr
       });
       response.on('error', (err) => finish({ status: 'other', detail: err.message }));
     });
-    const timer = setTimeout(
-      () => finish({ status: 'other', detail: `no answer from /json/list within ${timeoutMs} ms` }),
-      Math.max(0, timeoutMs)
-    );
+    const timer = setTimeout(() => finish({ status: 'no-answer', timeoutMs }), Math.max(0, timeoutMs));
     request.on('error', (err: NodeJS.ErrnoException) => {
       finish(err.code === 'ECONNREFUSED' ? { status: 'closed' } : { status: 'other', detail: err.message });
     });
   });
-}
-
-/** Node options that take their value as the next argument (`-r mod`, `--inspect-port 5900`). */
-const NODE_OPTIONS_WITH_VALUE = new Set([
-  '-r', '--require', '-e', '--eval', '-p', '--print', '--import', '--loader', '--experimental-loader',
-  '-C', '--conditions', '--inspect-port', '--debug-port', '--title', '--input-type', '--env-file',
-  '--stack-trace-limit', '--max-old-space-size', '--max-semi-space-size', '--icu-data-dir',
-  '--openssl-config', '--redirect-warnings', '--secure-heap', '--secure-heap-min', '--tls-cipher-list',
-  '--use-largepages', '--watch-path', '--disable-warning', '--experimental-config-file'
-]);
-const INSPECT_FLAG = /^--(inspect-port|debug-port|inspect|inspect-brk|inspect-wait)(?:=(.*))?$/;
-
-/**
- * The inspector port Node options name, as Node reads them (issue #1261):
- * `--inspect-port=[host:]port` (and its alias `--debug-port`, either also
- * with the value as the next argument), and the port of `--inspect=`,
- * `--inspect-brk=` or `--inspect-wait=`; the last one wins. `args` stop at
- * the first argument that is not a Node option (the script and its own
- * arguments). Undefined when none names a port, or the port is 0 (a port
- * drawn at random cannot be known from here).
- */
-export function inspectPortFromNodeArgs(args: readonly string[]): number | undefined {
-  let port: number | undefined;
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === '--' || !arg.startsWith('-')) break;
-    const match = INSPECT_FLAG.exec(arg);
-    let value: string | undefined;
-    if (match) {
-      value = match[2];
-      if (value === undefined && (match[1] === 'inspect-port' || match[1] === 'debug-port')) {
-        value = args[++i];
-      }
-    } else if (NODE_OPTIONS_WITH_VALUE.has(arg)) {
-      i++;
-      continue;
-    }
-    if (value === undefined) continue;
-    // [host:]port, the host possibly a bracketed IPv6 address.
-    const portText = /(?:^|:)(\d+)$/.exec(value)?.[1];
-    if (portText !== undefined) {
-      const parsed = Number(portText);
-      port = parsed > 0 && parsed < 65536 ? parsed : undefined;
-    }
-  }
-  return port;
-}
-
-/** Split NODE_OPTIONS as Node does: on whitespace, with double quotes grouping. */
-function splitNodeOptions(value: string): string[] {
-  const parts: string[] = [];
-  const pattern = /"((?:[^"\\]|\\.)*)"|(\S+)/g;
-  for (let match = pattern.exec(value); match; match = pattern.exec(value)) {
-    parts.push(match[1] !== undefined ? match[1].replace(/\\(.)/g, '$1') : match[2]);
-  }
-  return parts;
-}
-
-/**
- * The inspector port PID was started with, read from its command line and
- * NODE_OPTIONS the way `inspectorSignalDisabledByPid` reads them (issue
- * #1261): Linux reads /proc/<pid>/cmdline and environ, darwin `ps -E`.
- * NODE_OPTIONS comes first and the command line overrides it, as in Node.
- * Undefined when nothing names one, or it cannot be seen (Windows, another
- * user's process).
- */
-export async function inspectPortByPid(pid: number, platform: NodeJS.Platform = process.platform): Promise<number | undefined> {
-  try {
-    if (platform === 'linux') {
-      const argv = (await readFile(`/proc/${pid}/cmdline`, 'utf8')).split('\0').filter(Boolean);
-      let fromEnv: number | undefined;
-      try {
-        const environ = await readFile(`/proc/${pid}/environ`, 'utf8');
-        const nodeOptions = environ.split('\0').find((entry) => entry.startsWith('NODE_OPTIONS='));
-        fromEnv = nodeOptions ? inspectPortFromNodeArgs(splitNodeOptions(nodeOptions.slice('NODE_OPTIONS='.length))) : undefined;
-      } catch {
-        fromEnv = undefined;
-      }
-      return inspectPortFromNodeArgs(argv.slice(1)) ?? fromEnv;
-    }
-    if (platform === 'darwin') {
-      // -E appends the environment after the arguments (own processes only).
-      const { stdout } = await execFileAsync('ps', ['-E', '-o', 'args=', '-p', String(pid)], { windowsHide: true, timeout: 3000 });
-      const text = stdout.trim();
-      if (!text) return undefined;
-      const tokens = text.split(/\s+/);
-      const envAt = tokens.findIndex((token) => token.startsWith('NODE_OPTIONS='));
-      const fromEnv = envAt >= 0
-        ? inspectPortFromNodeArgs([tokens[envAt].slice('NODE_OPTIONS='.length), ...tokens.slice(envAt + 1)])
-        : undefined;
-      return inspectPortFromNodeArgs(tokens.slice(1)) ?? fromEnv;
-    }
-    return undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-const NETSTAT_LISTENING = /^\s*TCP\s+(\S+):(\d+)\s+\S+\s+LISTENING\s+(\d+)\s*$/i;
-
-/**
- * The TCP ports PID listens on, from `netstat -ano` (Windows, issue #1261;
- * measured at about 20 ms). Undefined elsewhere, and when netstat cannot be
- * run. Only addresses a loopback probe reaches count: 127.0.0.1 and 0.0.0.0.
- */
-export async function listeningPortsByPid(pid: number, platform: NodeJS.Platform = process.platform): Promise<ReadonlySet<number> | undefined> {
-  if (platform !== 'win32') return undefined;
-  try {
-    const { stdout } = await execFileAsync('netstat', ['-ano', '-p', 'TCP'], { windowsHide: true, timeout: 3000 });
-    const ports = new Set<number>();
-    for (const line of stdout.split(/\r?\n/)) {
-      const match = NETSTAT_LISTENING.exec(line);
-      if (match && Number(match[3]) === pid && (match[1] === '127.0.0.1' || match[1] === '0.0.0.0')) {
-        ports.add(Number(match[2]));
-      }
-    }
-    return ports;
-  } catch {
-    return undefined;
-  }
 }
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -573,9 +450,21 @@ function withTargetId(result: InspectorActivationResult, target: InspectorTarget
   return typeof target?.id === 'string' && target.id.length > 0 ? { ...result, targetId: target.id } : result;
 }
 
+/** The first probe of an activation, and each probe after the signal, is no longer than this. */
+const ACTIVATION_PROBE_MS = 1000;
+/** Each ownership read (`pidViaInspector`) is no longer than this. */
+const OWNERSHIP_READ_MS = 1500;
+
 /**
  * Make the inspector of `pid` reachable on `host:port` and say where it is.
- * Every failure is an AdapterError whose message names what to do instead.
+ * Every failure is an AdapterError whose message names what to do instead;
+ * one after the signal is a SignalledActivationError.
+ *
+ * Its bounds (issue #1261): the probe before the signal (1 s) and its
+ * ownership read (1.5 s); on macOS the two `ps` reads before signalling (3 s
+ * each); then the window after the signal (`deadlineMs`, 5 s), absolute:
+ * every wait, probe and ownership read in it is cut to what is left of it.
+ * So 7.5 s at most on Linux and Windows, and 13.5 s on macOS.
  */
 export async function activateInspector(options: InspectorActivationOptions): Promise<InspectorActivationResult> {
   const pid = parsePid(options.pid);
@@ -588,12 +477,13 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
   const isNodeProcess = options.isNodeProcess ?? ((p: number) => isNodeProcessByPid(p, platform));
   const inspectorSignalDisabled = options.inspectorSignalDisabled ?? ((p: number) => inspectorSignalDisabledByPid(p, platform));
   const signal = options.signal ?? ((p: number) => defaultSignal(p, platform));
-  const listTargets = options.listTargets ?? ((h: string, p: number) => probeInspector(h, p));
+  const listTargets = options.listTargets ?? ((h: string, p: number, t?: number) => probeInspector(h, p, t));
   const pidOf = options.pidOf ?? defaultPidOf;
   const sleep = options.sleep ?? wait;
   const now = options.now ?? Date.now;
   const deadlineMs = options.deadlineMs ?? 5000;
   const pollMs = options.pollMs ?? 100;
+  const openIfClosed = options.openIfClosed ?? true;
 
   if (!isLoopbackHost(requestedHost)) {
     throw invalid(`attach by processId is local only (host ${requestedHost}); for a remote target start it with --inspect and pass host/port`);
@@ -610,20 +500,29 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
     );
   }
 
-  // After our signal a transient probe failure (ECONNRESET or a read timeout
+  // After our signal a transient probe failure (ECONNRESET, or no answer
   // while the inspector's HTTP server comes up) is not a verdict — keep
   // polling and name it only if the deadline passes.
   let lastTransient: string | undefined;
-  const classify = async (probe: InspectorProbe, afterSignal: boolean): Promise<InspectorActivationResult | undefined> => {
+  const classify = async (
+    probe: InspectorProbe,
+    afterSignal: boolean,
+    ownershipMs: number
+  ): Promise<InspectorActivationResult | undefined> => {
     if (probe.status === 'closed') return undefined;
-    if (probe.status === 'other') {
+    if (probe.status === 'other' || probe.status === 'no-answer') {
+      const detail = probe.status === 'other' ? probe.detail : `no answer within ${probe.timeoutMs} ms`;
       if (afterSignal) {
-        lastTransient = probe.detail;
+        lastTransient = detail;
         return undefined;
       }
-      throw invalid(`${where} is in use by something that is not a Node inspector (${probe.detail}); pass port if PID ${pid} listens elsewhere, or free the port`);
+      throw invalid(
+        probe.status === 'other'
+          ? `${where} is in use by something that is not a Node inspector (${detail}); pass port if PID ${pid} listens elsewhere, or free the port`
+          : `${where} took the connection but did not answer /json/list within ${probe.timeoutMs} ms; pass port if PID ${pid} listens elsewhere, or free the port`
+      );
     }
-    const owners = await Promise.all(probe.targets.map((target) => pidOf(target)));
+    const owners = await Promise.all(probe.targets.map((target) => pidOf(target, ownershipMs)));
     const index = owners.indexOf(pid);
     if (index >= 0) {
       return withTargetId({ host, port, alreadyActive: !afterSignal, title: probe.targets[index].title ?? '' }, probe.targets[index]);
@@ -643,8 +542,17 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
     );
   };
 
-  const before = await classify(await listTargets(host, port), false);
+  const before = await classify(await listTargets(host, port, ACTIVATION_PROBE_MS), false, OWNERSHIP_READ_MS);
   if (before) return before;
+
+  // The endpoint came from an inspector this server holds for the PID (issue
+  // #1261): a lookup only, so a closed one is reported, never re-opened.
+  if (!openIfClosed) {
+    throw invalid(
+      `the inspector of PID ${pid} that this server held on ${where} closed before this attach reached it; ` +
+        `nothing was signalled — attach by processId again`
+    );
+  }
 
   if (platform !== 'win32') {
     const isNode = await isNodeProcess(pid);
@@ -658,11 +566,6 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
       throw invalid(`PID ${pid} was started with --disable-sigusr1, so no signal can open its inspector (it would terminate the process instead) — start the target with --inspect and pass port`);
     }
   }
-
-  // Where else the signal could open it, when that is not known (issue
-  // #1261): the ports PID listens on now, to tell a new one after the signal.
-  const listeningPorts = options.listeningPorts ?? ((p: number) => listeningPortsByPid(p, platform));
-  const listeningBefore = options.findOpenedElsewhere ? await listeningPorts(pid) : undefined;
 
   try {
     signal(pid);
@@ -682,63 +585,30 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
     throw invalid(`could not activate the inspector of PID ${pid}: ${detail}${hint}`);
   }
 
-  // From here the signal has been sent: any failure carries that, and the
-  // places an inspector it opened could be (issue #1261), so the attach can
-  // close it again or say it could not.
-  const elsewhere = new Set<number>();
-  const signalled = (err: unknown): never => {
-    if (err instanceof SignalledActivationError) throw err;
-    const message = err instanceof Error ? err.message : String(err);
-    throw new SignalledActivationError(message, pid, host, [port, ...elsewhere]);
-  };
-  /** A port PID listens on since the signal that answers as PID's inspector: the one the signal opened. */
-  const openedElsewhere = async (): Promise<InspectorActivationResult | undefined> => {
-    if (!listeningBefore) return undefined;
-    const after = await listeningPorts(pid);
-    for (const candidate of after ?? []) {
-      if (candidate === port || listeningBefore.has(candidate)) continue;
-      elsewhere.add(candidate);
-      const probe = await listTargets(host, candidate);
-      if (probe.status !== 'inspector') continue;
-      const owners = await Promise.all(probe.targets.map((target) => pidOf(target)));
-      const index = owners.indexOf(pid);
-      if (index >= 0) {
-        return withTargetId({ host, port: candidate, alreadyActive: false, title: probe.targets[index].title ?? '' }, probe.targets[index]);
-      }
-    }
-    return undefined;
-  };
-
+  // From here the signal has been sent: any failure says so (issue #1261),
+  // and the window is absolute — no wait, probe or ownership read in it runs
+  // past the deadline.
   try {
     const deadline = now() + deadlineMs;
-    // The inspector opens 12-28 ms after the signal (measured, Windows); a
-    // port not open after this is looked for elsewhere once, and again at the
-    // deadline.
-    const elsewhereAt = now() + OPENED_ELSEWHERE_AFTER_MS;
-    let lookedElsewhere = false;
     for (;;) {
-      await sleep(pollMs);
-      const result = await classify(await listTargets(host, port), true);
+      const beforeSleep = deadline - now();
+      if (beforeSleep <= 0) break;
+      await sleep(Math.min(pollMs, beforeSleep));
+      const left = deadline - now();
+      if (left <= 0) break;
+      const probe = await listTargets(host, port, Math.min(ACTIVATION_PROBE_MS, left));
+      const result = await classify(probe, true, Math.max(1, Math.min(OWNERSHIP_READ_MS, deadline - now())));
       if (result) return result;
-      if (!lookedElsewhere && now() >= elsewhereAt) {
-        lookedElsewhere = true;
-        const found = await openedElsewhere();
-        if (found) return found;
-      }
-      if (now() >= deadline) {
-        const found = await openedElsewhere();
-        if (found) return found;
-        throw invalid(
-          `PID ${pid} was signalled to open its inspector, but none opened on ${where} within ${deadlineMs} ms` +
-            (lastTransient ? ` (last probe: ${lastTransient})` : '') +
-            `; the signal may have opened one on another port — a target started with --inspect-port=<n> ` +
-            `(or NODE_OPTIONS=--inspect-port=<n>) opens it there: pass that port; ` +
-            `otherwise check that PID ${pid} is a Node.js process and that ${where} is free`
-        );
-      }
     }
+    throw invalid(
+      `PID ${pid} was signalled to open its inspector, but none appeared on ${where} within ${deadlineMs} ms` +
+        (lastTransient ? ` (last probe: ${lastTransient})` : '') +
+        `; one may now be open on another port (a target started with --inspect-port=<n> opens it there); ` +
+        `this server closed nothing, because it could not identify one; restarting the target closes it. ` +
+        `To attach to it, pass that port with processId: the attach then finds it open and leaves it open`
+    );
   } catch (err) {
-    return signalled(err);
+    if (err instanceof SignalledActivationError) throw err;
+    throw new SignalledActivationError(err instanceof Error ? err.message : String(err), pid, host, port);
   }
 }
-

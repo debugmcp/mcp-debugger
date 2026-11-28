@@ -1465,64 +1465,74 @@ export abstract class SessionManagerCore extends EventEmitter {
 
   /**
    * Start giving back what the run's attach borrowed from its target (issue
-   * #1261), or join the give-back already started: the adapter closes what
-   * the attach opened there and leaves what it found open, and says which.
-   * Call it once the adapter has disconnected from the target — the worker is
-   * stopped — so the give-back cannot cut off the session's own connection.
-   * Only a root gives back: its children share its run. The loan is taken off
-   * the run at once, and the give-back's report stays on the run
-   * (`attachLoanReturn`) until an answer carries it.
+   * #1261): the adapter closes what the attach opened there and leaves what it
+   * found open, and says which. Call it once the adapter has disconnected from
+   * the target — the worker is stopped — so the give-back cannot cut off the
+   * session's own connection. Only a root gives back: its children share its
+   * run. The loan is taken off the run at once; its report joins the reports
+   * on the run (`attachLoanReturns`) that no answer has carried yet.
    */
-  private startAttachLoanReturn(session: ManagedSession): Promise<AttachLoanReport> | undefined {
+  private startAttachLoanReturn(session: ManagedSession): void {
     if (session.parentSessionId) {
-      return undefined;
+      return;
     }
     const run = session.run;
     const loan = run.attachLoan;
-    if (loan) {
-      run.attachLoan = undefined;
-      const startedAt = Date.now();
-      run.attachLoanReturn = loan.giveBack()
-        // The contract says it never rejects; an adapter that does still gets a truthful answer.
-        .catch((error: unknown) => `not confirmed: ${error instanceof Error ? error.message : String(error)}`)
-        .then((text) => {
-          this.logger.info(
-            `[SessionManager] Session ${session.id} gave back its attach loan in ${Date.now() - startedAt} ms: ${loan.field} ${text}`
-          );
-          return { field: loan.field, text };
-        });
+    if (!loan) {
+      return;
     }
-    return run.attachLoanReturn;
+    run.attachLoan = undefined;
+    const startedAt = Date.now();
+    const returning = loan.giveBack()
+      // The contract says it never rejects; an adapter that does still gets a truthful answer.
+      .catch((error: unknown) => `not confirmed: ${error instanceof Error ? error.message : String(error)}`)
+      .then((text) => {
+        this.logger.info(
+          `[SessionManager] Session ${session.id} gave back its attach loan in ${Date.now() - startedAt} ms: ${loan.field} ${text}`
+        );
+        return { field: loan.field, text };
+      });
+    run.attachLoanReturns = [...(run.attachLoanReturns ?? []), returning];
   }
 
   /**
    * Give back what the run's attach borrowed, for an answer to carry (issue
-   * #1261): a detach, a close, a failed attach. Resolves to the adapter's
-   * report — this give-back's, or one a teardown already made that no answer
-   * has carried yet — and hands it over: a second call reports nothing.
+   * #1261): a detach, a close, a failed attach. Resolves to one report: this
+   * give-back's, with every earlier one no answer has carried yet (a teardown
+   * that answered nothing: the connection ending by itself, the previous run's
+   * before a new one), and hands them over — a second call reports nothing.
    * Undefined when nothing was borrowed.
    */
   async giveBackAttachLoan(session: ManagedSession): Promise<AttachLoanReport | undefined> {
-    const returning = this.startAttachLoanReturn(session);
-    if (!returning) {
+    if (session.parentSessionId) {
       return undefined;
     }
-    const report = await returning;
-    if (session.run.attachLoanReturn === returning) {
-      session.run.attachLoanReturn = undefined;
+    this.startAttachLoanReturn(session);
+    const pending = session.run.attachLoanReturns;
+    if (!pending || pending.length === 0) {
+      return undefined;
     }
-    return report;
+    session.run.attachLoanReturns = undefined;
+    const reports = await Promise.all(pending);
+    const latest = reports[reports.length - 1];
+    if (reports.length === 1) {
+      return latest;
+    }
+    const earlier = reports.slice(0, -1).map((report) => report.text).join('; ');
+    return { field: latest.field, text: `${latest.text}; earlier in this session: ${earlier}` };
   }
 
   /**
    * Give back what the run's attach borrowed, for a teardown no answer is made
-   * of (issue #1261): the report stays on the run for the next answer about
-   * the session. Never rejects.
+   * of (issue #1261): the previous run's before a new one, the connection that
+   * ended by itself. The report stays on the run until an answer that can
+   * carry it does — the next detach, close or failed attach. Never rejects.
    */
-  protected async returnAttachLoan(session: ManagedSession): Promise<void> {
-    const returning = this.startAttachLoanReturn(session);
-    if (returning) {
-      await returning;
+  async returnAttachLoan(session: ManagedSession): Promise<void> {
+    this.startAttachLoanReturn(session);
+    const pending = session.run.attachLoanReturns;
+    if (pending && pending.length > 0) {
+      await Promise.all(pending);
     }
   }
 
