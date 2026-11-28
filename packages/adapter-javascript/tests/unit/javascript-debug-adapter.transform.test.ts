@@ -33,6 +33,7 @@ import {
 
 import { detectBinary } from '../../src/utils/typescript-detector.js';
 import { JavascriptDebugAdapter } from '../../src/index.js';
+import { activateInspector, type InspectorActivationOptions, type InspectorProbe } from '../../src/utils/inspector-activation.js';
 import { scrubInheritedExitCodeShim } from '../../src/javascript-debug-adapter.js';
 
 // Minimal AdapterDependencies stub for constructor
@@ -910,6 +911,80 @@ describe('JavascriptDebugAdapter.transformAttachConfig by processId (issue #871)
     });
     await expect(adapter.transformAttachConfig({ request: 'attach', processId: 4242 } as any))
       .rejects.toThrow(/PID 4242 is not a Node\.js process/);
+  });
+
+  describe('what the attach leaves in the target (issue #1261)', () => {
+    it('an inspector that answered after the signal is handed over once, with its address and the PID', async () => {
+      const { adapter } = adapterWithActivation();
+      await adapter.transformAttachConfig({ request: 'attach', processId: '4242', port: 5935 } as any);
+      const footprint = adapter.consumeAttachFootprint();
+      expect(footprint?.field).toBe('inspector');
+      expect(footprint?.atAttach).toMatch(/^signalled: 127\.0\.0\.1:5935 refused this attach's first probe, this attach then signalled PID 4242, /);
+      expect(adapter.consumeAttachFootprint()).toBeUndefined();
+    });
+
+    it('an inspector that was already open is handed over as left as it was', async () => {
+      const { adapter } = adapterWithActivation(async (o) => ({ host: '127.0.0.1', port: o.port ?? 9229, alreadyActive: true, title: 'x' }));
+      await adapter.transformAttachConfig({ request: 'attach', processId: 4242 } as any);
+      expect(adapter.consumeAttachFootprint()?.atAttach).toMatch(/^already open: an inspector answered this attach's first probe on 127\.0\.0\.1:9229/);
+    });
+
+    /** The real activation, with its process and network replaced: `probes` answer in order, the last one repeats. */
+    function adapterWithScriptedActivation(probes: InspectorProbe[], extra: Partial<InspectorActivationOptions> = {}) {
+      const adapter = new JavascriptDebugAdapter(deps);
+      const signal = vi.fn();
+      const listTargets = vi.fn(async () => (probes.length > 1 ? probes.shift()! : probes[0]));
+      (adapter as unknown as { activateInspector: typeof activateInspector }).activateInspector = (options) => activateInspector({
+        ...options,
+        platform: 'linux', container: false, selfPid: 1,
+        processExists: () => true, isNodeProcess: async () => true, inspectorSignalDisabled: async () => false,
+        signal, listTargets, pidOf: async () => undefined,
+        sleep: async () => undefined, deadlineMs: 0, pollMs: 0,
+        ...extra
+      });
+      return { adapter, signal };
+    }
+    const nodeTarget = (id: string) => ({ id, title: 'server.js', type: 'node', webSocketDebuggerUrl: `ws://127.0.0.1:9229/${id}` });
+
+    // The review's construction: something else opens the inspector between this attach's first probe and its signal.
+    it('an inspector that another debugger opened between the first probe and the signal is not claimed as this attach\'s doing', async () => {
+      const { adapter, signal } = adapterWithScriptedActivation([{ status: 'closed' }, { status: 'inspector', targets: [nodeTarget('other-debugger')] }]);
+      await adapter.transformAttachConfig({ request: 'attach', processId: 4242 } as any);
+      expect(signal).toHaveBeenCalledTimes(1);
+      const footprint = adapter.consumeAttachFootprint()!;
+      // Only the observed order: refused, signalled, answers now.
+      expect(footprint.atAttach).toBe(
+        "signalled: 127.0.0.1:9229 refused this attach's first probe, this attach then signalled PID 4242, " +
+          'and an inspector answered there after the signal, unauthenticated; this server does not close it'
+      );
+      expect(footprint.atAttach).not.toMatch(/opened by|until|restart/);
+    });
+
+    // The review's construction: the target opens elsewhere, another process's inspector takes the expected port.
+    it('a failure after the signal still hands over a footprint that says the PID was signalled', async () => {
+      const { adapter } = adapterWithScriptedActivation(
+        [{ status: 'closed' }, { status: 'inspector', targets: [nodeTarget('b')] }],
+        { pidOf: async () => 31337 }
+      );
+      await expect(adapter.transformAttachConfig({ request: 'attach', processId: 4242, port: 5915 } as any))
+        .rejects.toThrow(/^JavaScript attach: PID 4242 was signalled to open its inspector, but 127\.0\.0\.1:5915 is already held by a Node inspector for a different process \(PID 31337/);
+      expect(adapter.consumeAttachFootprint()?.atAttach).toBe(
+        'signalled: this attach signalled PID 4242, and no inspector of it was identified on 127.0.0.1:5915; ' +
+          'one may now be open on another port, and this server does not close it'
+      );
+    });
+
+    it('an attach by port, or one whose activation failed, leaves none; nor does an earlier attach\'s outlive the next transform', async () => {
+      const { adapter, activate } = adapterWithActivation();
+      await adapter.transformAttachConfig({ request: 'attach', processId: 4242 } as any);
+      await adapter.transformAttachConfig({ request: 'attach', host: '127.0.0.1', port: 9229 } as any);
+      expect(adapter.consumeAttachFootprint()).toBeUndefined();
+
+      await adapter.transformAttachConfig({ request: 'attach', processId: 4242 } as any);
+      activate.mockRejectedValueOnce(new Error('JavaScript attach: PID 4242 is not a Node.js process'));
+      await expect(adapter.transformAttachConfig({ request: 'attach', processId: 4242 } as any)).rejects.toThrow(/not a Node\.js process/);
+      expect(adapter.consumeAttachFootprint()).toBeUndefined();
+    });
   });
 
   it('refuses an attach with neither port nor processId instead of letting js-debug dial localhost:9229', async () => {
