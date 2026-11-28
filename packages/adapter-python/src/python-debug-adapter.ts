@@ -49,36 +49,31 @@ const PYTHON_NON_PROGRAM_TARGETS = launchTargetKeysOf(PythonAdapterPolicy).filte
 const LAUNCH_TARGET_FLAGS: Record<string, string> = { module: 'python -m', code: 'python -c' };
 
 /**
- * The `clientOS` an attach sends when the caller set none (issue #1304): the
- * operating system of the machine this server runs on, which is the DAP
- * client, spelled as pydevd compares it. `pydevd_file_utils.set_ide_os`
- * asserts `WINDOWS` or `UNIX` (it also maps PyCharm's `WIN`), and any other
- * value fails the attach in the target; debugpy 1.8 upper-cases the key first
- * (`pydevd_json_debug_options.py`), but the exact strings do not depend on
- * that. Without the key pydevd assumes the TARGET's own system
- * (`_ide_os = "WINDOWS" if IS_WINDOWS else "UNIX"`). The value decides which
- * separator pydevd expects in the client's paths, `localRoot` included, and
- * writes in the paths it returns: a Windows client of a Linux target got
- * "Breakpoint in file that does not exist." for every mapped `C:\…` path, and
- * a stop reached through the target's path came back as `C:\…\app/x.py`. A
- * launch needs none of this: its debuggee runs on this machine.
+ * The `clientOS` an attach sends by default (issue #1304): the operating
+ * system of the machine this server runs on, which is the DAP client, spelled
+ * as pydevd compares it. `pydevd_file_utils.set_ide_os` asserts `WINDOWS` or
+ * `UNIX` and maps PyCharm's `WIN`; debugpy 1.8 upper-cases the key first
+ * (`pydevd_json_debug_options.py`), so `windows`, `unix` and `win` pass in any
+ * case, an empty string skips `set_ide_os` and leaves the target's own system
+ * assumed, and any other value fails the attach in the target. Without the
+ * key pydevd assumes the TARGET's own system (`_ide_os = "WINDOWS" if
+ * IS_WINDOWS else "UNIX"`). The value decides which separator pydevd expects
+ * in the client's paths, `localRoot` included, and writes in the paths it
+ * returns. When a Linux target took a Windows client for Linux, roots without
+ * a trailing separator went wrong: `C:\…\app\service.py` matched `localRoot`
+ * `C:\…\app`, but the rest of the path kept its `\` (`/srv/app\service.py`,
+ * no such file on the target, so "Breakpoint in file that does not exist."),
+ * and a stop reached through the target's path came back as
+ * `C:\…\app/service.py`. Roots that both ended in a separator already
+ * translated. A launch needs none of this: its debuggee runs on this machine.
  */
 function hostClientOS(): 'WINDOWS' | 'UNIX' {
   return process.platform === 'win32' ? 'WINDOWS' : 'UNIX';
 }
 
-/**
- * Whether the caller named the client's system through debugpy's older flags,
- * `debugOptions: ["WindowsClient" | "UnixClient"]` or `CLIENT_OS_TYPE=` in an
- * `options` string (`pydevd_json_debug_options.py`). pydevd applies
- * `clientOS` after them, so a default sent beside one would overrule it.
- */
-function namesClientOSByFlag(config: Record<string, unknown>): boolean {
-  const flags = config.debugOptions;
-  if (Array.isArray(flags) && flags.some(flag => flag === 'WindowsClient' || flag === 'UnixClient')) {
-    return true;
-  }
-  return typeof config.options === 'string' && config.options.includes('CLIENT_OS_TYPE=');
+/** A key the caller passed: present with a value other than null or undefined. */
+function isPassed(value: unknown): boolean {
+  return value !== undefined && value !== null;
 }
 
 /**
@@ -693,14 +688,12 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
       subProcess: (subProcess as boolean | undefined) ?? true
     };
 
-    // The paths this server sends are the caller's, verbatim (the path
-    // policy), so they are in this machine's style unless the caller wrote
-    // them in another and said so. The caller's own value is forwarded as
-    // given, and one named through debugpy's older flags is left alone
-    // (issue #1304).
-    if (clientOS !== undefined && clientOS !== null) {
+    // The adapter adds clientOS only when the caller passed none of clientOS,
+    // debugOptions and options, pydevd's client options (issue #1304); a
+    // clientOS the caller passed is forwarded as given.
+    if (isPassed(clientOS)) {
       attachConfig.clientOS = clientOS;
-    } else if (!namesClientOSByFlag(rest)) {
+    } else if (!isPassed(rest.debugOptions) && !isPassed(rest.options)) {
       attachConfig.clientOS = hostClientOS();
     }
     if (subProcess === false) {

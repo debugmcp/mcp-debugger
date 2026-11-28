@@ -704,7 +704,9 @@ describe('PythonDebugAdapter', () => {
 
   // pydevd translates the client's paths by the client's operating system and,
   // without `clientOS`, assumes its own: from a Windows host, a Linux target
-  // never matched a `C:\…` path against `localRoot` (issue #1304).
+  // turned a mapped `C:\…\app\service.py` into `/srv/app\service.py` (issue
+  // #1304). The rule: the adapter adds clientOS only when the caller passed
+  // none of clientOS, debugOptions and options (null counts as not passed).
   describe('clientOS on an attach (issue #1304)', () => {
     const onPlatform = <T>(platform: NodeJS.Platform, fn: () => T): T => {
       const original = process.platform;
@@ -724,8 +726,17 @@ describe('PythonDebugAdapter', () => {
       ['win32', 'WINDOWS'],
       ['linux', 'UNIX'],
       ['darwin', 'UNIX']
-    ] as const)('sends the operating system of this machine when the caller set none (%s -> %s)', (platform, expected) => {
+    ] as const)('sends the operating system of this machine when the caller passed none of the three keys (%s -> %s)', (platform, expected) => {
       expect(onPlatform(platform, () => attach()).clientOS).toBe(expected);
+    });
+
+    // A null or undefined carrier is not a passed one.
+    it.each([
+      ['win32', { debugOptions: null }, 'WINDOWS'],
+      ['linux', { options: null }, 'UNIX'],
+      ['darwin', { debugOptions: undefined, options: undefined, clientOS: undefined }, 'UNIX']
+    ] as const)('still sends it when the keys are present but null or undefined (%s, %o)', (platform, keys, expected) => {
+      expect(onPlatform(platform, () => attach({ ...keys })).clientOS).toBe(expected);
     });
 
     it('sends it beside pathMappings, which it is about', () => {
@@ -744,19 +755,64 @@ describe('PythonDebugAdapter', () => {
       expect(onPlatform(platform, () => attach({ clientOS: value })).clientOS).toBe(value);
     });
 
-    it('treats a null clientOS as unset: pydevd would read it as "NONE" and reject it', () => {
+    // A falsy value is still the caller's: an empty string reaches pydevd,
+    // which then skips set_ide_os; the others it rejects in the target.
+    it.each([
+      ['win32', ''],
+      ['linux', ''],
+      ['win32', 0],
+      ['linux', false],
+      ['win32', 1]
+    ] as const)("forwards a falsy or non-string value as given, never the default (%s host, caller %o)", (platform, value) => {
+      const config = onPlatform(platform, () => attach({ clientOS: value }));
+      expect('clientOS' in config).toBe(true);
+      expect(config.clientOS).toBe(value);
+    });
+
+    it('treats a null clientOS as not passed: pydevd would read it as "NONE" and reject it', () => {
       expect(onPlatform('win32', () => attach({ clientOS: null })).clientOS).toBe('WINDOWS');
     });
 
-    // pydevd applies `clientOS` after these, so a default beside them would overrule the caller.
+    // pydevd applies `clientOS` after the older carriers, so the caller's own
+    // `clientOS` is what pydevd uses, and it is forwarded whatever they hold.
     it.each([
-      [{ debugOptions: ['RedirectOutput', 'UnixClient'] }],
-      [{ debugOptions: ['WindowsClient'] }],
-      [{ options: 'CLIENT_OS_TYPE=UNIX;REDIRECT_OUTPUT=True' }]
-    ])("sends no default when the caller named the system through debugpy's older flags (%o)", (flags) => {
-      const config = onPlatform('win32', () => attach(flags));
+      ['linux', { clientOS: 'unix', debugOptions: ['WindowsClient'] }, 'unix'],
+      ['win32', { clientOS: 'WINDOWS', options: 'CLIENT_OS_TYPE=UNIX' }, 'WINDOWS'],
+      ['win32', { clientOS: '', debugOptions: ['UnixClient'], options: 'REDIRECT_OUTPUT=True' }, '']
+    ] as const)('lets an explicit clientOS stand beside the older carriers (%s, %o)', (platform, keys, expected) => {
+      const config = onPlatform(platform, () => attach({ ...keys }));
+      expect(config.clientOS).toBe(expected);
+      expect(config).toMatchObject({ ...keys });
+    });
+
+    // A caller who passes either older carrier configures pydevd's client
+    // options themselves: whatever the carrier holds, no default is added.
+    it.each([
+      [{ debugOptions: [] }],
+      [{ debugOptions: ['RedirectOutput'] }],
+      [{ debugOptions: ['UnixClient'] }],
+      [{ debugOptions: ['windowsclient'] }],
+      [{ debugOptions: 'WindowsClient' }],
+      [{ options: '' }],
+      [{ options: 'REDIRECT_OUTPUT=True' }],
+      [{ options: 'NOT_CLIENT_OS_TYPE=UNIX' }],
+      [{ options: 'CLIENT_OS_TYPE=UNIX=ignored' }],
+      [{ options: 0 }],
+      [{ options: 'REDIRECT_OUTPUT=True', debugOptions: ['WindowsClient'] }]
+    ])('adds no default beside an older carrier, whatever it holds (%o)', (keys) => {
+      for (const platform of ['win32', 'linux'] as const) {
+        const config = onPlatform(platform, () => attach({ ...keys }));
+        expect('clientOS' in config).toBe(false);
+        expect(config).toMatchObject({ ...keys });
+      }
+    });
+
+    it.each([
+      [{ clientOS: null, debugOptions: ['RedirectOutput'] }],
+      [{ clientOS: null, options: 'REDIRECT_OUTPUT=True' }]
+    ])('adds no default for a null clientOS beside an older carrier (%o)', (keys) => {
+      const config = onPlatform('win32', () => attach({ ...keys }));
       expect('clientOS' in config).toBe(false);
-      expect(config).toMatchObject(flags);
     });
 
     it('adds no note to the attach answer', () => {
@@ -765,13 +821,15 @@ describe('PythonDebugAdapter', () => {
       expect(adapter.consumeLaunchConfigDiagnostics?.() ?? []).toEqual([]);
     });
 
-    it('leaves a launch alone: its debuggee runs on this machine', async () => {
+    it.each(['win32', 'linux'] as const)('leaves a launch alone: its debuggee runs on this machine (%s)', async (platform) => {
       const original = process.platform;
-      Object.defineProperty(process, 'platform', { value: 'win32' });
+      Object.defineProperty(process, 'platform', { value: platform });
       try {
         const adapter = new PythonDebugAdapter(createDependencies());
-        const config = await adapter.transformLaunchConfig({ program: 'C:\\path\\to\\app\\main.py' } as GenericLaunchConfig);
+        const config = await adapter.transformLaunchConfig({ program: '/path/to/app/main.py' } as GenericLaunchConfig);
         expect('clientOS' in config).toBe(false);
+        const own = await adapter.transformLaunchConfig({ program: '/path/to/app/main.py', clientOS: 'unix' } as GenericLaunchConfig);
+        expect(own.clientOS).toBe('unix');
       } finally {
         Object.defineProperty(process, 'platform', { value: original });
       }
