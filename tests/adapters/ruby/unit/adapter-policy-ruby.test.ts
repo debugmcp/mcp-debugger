@@ -439,3 +439,49 @@ describe('RubyAdapterPolicy logpoint verdict (issue #469)', () => {
     expect(RubyAdapterPolicy.supportsLogPoints).toBe(false);
   });
 });
+
+describe('RubyAdapterPolicy.describeUnboundBreakpoint (issues #357, #1320)', () => {
+  const EXPECTED_HINT =
+    "Hint: attach sessions send breakpoint paths to the remote debugger verbatim; the path must be valid on the debug target's filesystem. Use target-side paths, or pass localfsMap in the attach config to map local paths to remote ones.";
+
+  it('returns the verbatim localfsMap hint on attach when a breakpoint sync fails with "is not available"', () => {
+    expect(
+      RubyAdapterPolicy.describeUnboundBreakpoint({
+        outcome: 'syncFailed',
+        message: '/host/path/app.rb is not available',
+        attachMode: true
+      })
+    ).toBe(EXPECTED_HINT);
+  });
+
+  it('returns undefined on an unverified reply, on launch, or for unrelated messages', () => {
+    expect(
+      RubyAdapterPolicy.describeUnboundBreakpoint({
+        outcome: 'unverified',
+        message: '/host/path/app.rb is not available',
+        attachMode: true
+      })
+    ).toBeUndefined();
+    expect(
+      RubyAdapterPolicy.describeUnboundBreakpoint({
+        outcome: 'syncFailed',
+        message: '/host/path/app.rb is not available',
+        attachMode: false
+      })
+    ).toBeUndefined();
+    expect(
+      RubyAdapterPolicy.describeUnboundBreakpoint({
+        outcome: 'syncFailed',
+        message: 'Breakpoint in file that does not exist.',
+        attachMode: true
+      })
+    ).toBeUndefined();
+    expect(
+      RubyAdapterPolicy.describeUnboundBreakpoint({
+        outcome: 'syncFailed',
+        message: 'Connection lost',
+        attachMode: true
+      })
+    ).toBeUndefined();
+  });
+});
