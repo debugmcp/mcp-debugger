@@ -863,7 +863,7 @@ describe('JavascriptDebugAdapter.transformLaunchConfig', () => {
 
 describe('JavascriptDebugAdapter.transformAttachConfig by processId (issue #871)', () => {
   type Activation = { pid: number | string; host?: string; port?: number };
-  type Result = { host: string; port: number; alreadyActive: boolean; title: string };
+  type Result = { host: string; port: number; alreadyActive: boolean; title: string; ownershipNote?: string };
 
   /** The adapter with its PID → inspector step replaced (nothing is signalled). */
   function adapterWithActivation(impl?: (o: Activation) => Promise<Result>) {
@@ -913,6 +913,17 @@ describe('JavascriptDebugAdapter.transformAttachConfig by processId (issue #871)
       .rejects.toThrow(/PID 4242 is not a Node\.js process/);
   });
 
+  it('surfaces a title-only ownership note from activateInspector as a launch-config diagnostic (issue #1332)', async () => {
+    const note = 'the inspector on 127.0.0.1:9229 did not answer process.pid; target title node[4242] matched PID 4242, but ownership was not confirmed';
+    const { adapter } = adapterWithActivation(async () => ({
+      host: '127.0.0.1', port: 9229, alreadyActive: true, title: 'node[4242]', ownershipNote: note
+    }));
+    await adapter.transformAttachConfig({ request: 'attach', processId: 4242 } as any);
+    expect(adapter.consumeLaunchConfigDiagnostics()).toEqual([
+      { key: 'processId', message: note }
+    ]);
+  });
+
   describe('what the attach leaves in the target (issue #1261)', () => {
     it('an inspector that answered after the signal is handed over once, with its address and the PID', async () => {
       const { adapter } = adapterWithActivation();
@@ -939,7 +950,7 @@ describe('JavascriptDebugAdapter.transformAttachConfig by processId (issue #871)
         platform: 'linux', container: false, selfPid: 1,
         processExists: () => true, isNodeProcess: async () => true, inspectorSignalDisabled: async () => false,
         signal, listTargets, pidOf: async () => undefined,
-        sleep: async () => undefined, deadlineMs: 0, pollMs: 0,
+        sleep: async () => undefined, deadlineMs: 500, pollMs: 0,
         ...extra
       });
       return { adapter, signal };
