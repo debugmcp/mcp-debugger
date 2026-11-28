@@ -130,8 +130,11 @@ export function buildServerInstructions(
   // debugger reported; a stop answered again carries full locals, not a diff.
   // Explicit-names mode withholds the locals, so its rule says only what that
   // mode's answers carry. wait_for_stop carries the exception in lastStop, not
-  // in the snapshot, so the exception is the answer's, not the snapshot's.
-  const exceptionFields = 'An exception\'s type and message are in the answer when the debugger reports them.';
+  // in the snapshot, so the exception is the answer's, not the snapshot's; and
+  // every other answer carries it only in the snapshot, so after a failed
+  // landing read (no stackResult, no snapshot) such an answer has the stop
+  // reason alone: the exception's fields are what an answer may include.
+  const exceptionFields = 'An answer at an exception stop may include the exception\'s type and message.';
   const snapshotCarries = explicitNames
     ? `the top frames. ${exceptionFields} Read it first; get_stack_trace and get_scopes -> get_variables (a variablesReference and names) read the rest.`
     : `the top frames and, when they can be read, the locals of the first of them that has any (${redactionEnabled ? 'redacted and capped' : 'capped'}). ${exceptionFields} A later stop in the same frame may carry changedVariables (what changed) instead of locals. Read it first; get_stack_trace, get_local_variables and get_scopes -> get_variables (a variablesReference) read the rest.`;
@@ -145,7 +148,7 @@ Launch: create_debug_session {language} -> ${breakpointStep} -> start_debugging 
 
 Failing test (Python): start_debugging {sessionId, scriptPath: ${testFile}, testRunner: "pytest", testTarget: "test_name"} needs no breakpoint: it pauses at the failing assert (or the raise site of an exception that escapes the test). It can also pause at an exception handled after all (a raise in a dataclass's __post_init__ inside pytest.raises): continue_execution goes on; breakOnExceptions: "none" turns exception stops off.
 
-Attach: create_debug_session {language, host, port} (or processId) attaches in the same call; attach_to_process attaches an existing session. The target runs under its debugger (debugpy --listen, rdbg --open, node --inspect, JDWP, a Dart VM service) or is a processId (C/C++, COBOL, .NET, local Node.js). Never test a debugpy port with a bare connection (nc, /dev/tcp): it stops answering for good; attach instead. Attaching requests a pause unless stopOnEntry is false or the target has not answered its breakpoints; the answer's state and warning say if it paused. Breakpoint paths are resolved on the target's filesystem: ${attachPathForms}; a remote attach takes file and line. list_supported_languages shows each language's attach forms and test runners.${snapshotRule}
+Attach: create_debug_session {language, host, port} (or processId) attaches in the same call; attach_to_process attaches an existing session. The target runs under its debugger (debugpy --listen, rdbg --open, node --inspect, JDWP, a Dart VM service) or is a processId (C/C++, COBOL, .NET, local Node.js). Never probe a debugpy --listen port with a bare connection (nc, /dev/tcp): the listener can stop answering; attach instead. Attaching requests a pause unless stopOnEntry is false or the target has not answered its breakpoints; the answer's state and warning say if it paused. Breakpoint paths are resolved on the target's filesystem: ${attachPathForms}; a remote attach takes file and line. list_supported_languages shows each language's attach forms and test runners.${snapshotRule}
 
 Steps, evaluation and variable reads need a paused session; each pause says why it stopped. continue_execution returns at once; wait_for_stop blocks until the session pauses or ends. pending:true in an answer means nothing was cancelled and breakpoints stay armed: call wait_for_stop, and again while it answers pending:true. wait_for_stop on a session whose program started child sessions (Python, JavaScript) waits on its whole tree, and its answer's sessionId names the session that stopped: inspect with that id.
 

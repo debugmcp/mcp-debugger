@@ -134,10 +134,12 @@ describe('server instructions (issue #1331)', () => {
       expect(text, label).toContain('Attach: create_debug_session {language, host, port}');
       expect(text, label).toContain("Breakpoint paths are resolved on the target's filesystem");
       expect(text, label).toContain('a remote attach takes file and line');
-      // A port check from the shell wedges a debugpy listener for the target's
-      // life (issue #1305, microsoft/debugpy#1308): agents make one before
-      // their first debugger call, so the warning has to be here.
-      expect(text, label).toContain('Never test a debugpy port with a bare connection (nc, /dev/tcp): it stops answering for good; attach instead.');
+      // A port check from the shell can wedge a debugpy --listen listener
+      // (issue #1305, microsoft/debugpy#1308; the round-2 review saw it in some
+      // trials and not others): agents make one before their first debugger
+      // call, so the warning has to be here, and says "can".
+      expect(text, label).toContain('Never probe a debugpy --listen port with a bare connection (nc, /dev/tcp): the listener can stop answering; attach instead.');
+      expect(text, label).not.toContain('for good');
       expect(text, label).toContain('continue_execution returns at once; wait_for_stop blocks');
       expect(text, label).toContain('nothing was cancelled');
       expect(text, label).toContain("its answer's sessionId names the session that stopped");
@@ -232,7 +234,10 @@ describe('server instructions (issue #1331)', () => {
         const text = buildServerInstructions(mode, opts);
         if (opts.snapshotEnabled === false) continue;
         expect(text, label).toContain('An answer that reports a stop (not an entry stop) may carry snapshot:');
-        expect(text, label).toContain("An exception's type and message are in the answer when the debugger reports them.");
+        // A failed landing read leaves an exception stop's answer with the
+        // stop reason alone: no details, no snapshot (round-2 review finding 1).
+        expect(text, label).toContain("An answer at an exception stop may include the exception's type and message.");
+        expect(text, label).not.toContain('when the debugger reports them');
         expect(text, label).not.toMatch(/\bcarries snapshot\b/);
         if (opts.variableAccessMode !== 'explicit') {
           expect(text, label).toContain('when they can be read, the locals of the first of them that has any');
@@ -331,12 +336,19 @@ describe('the rules that moved into the tool descriptions (issue #1331)', () => 
     expect(wait).toContain('When snapshots are on (the default; DEBUG_MCP_NO_SNAPSHOT=1 or true turns them off), an answer at a stop other than an entry stop may carry snapshot:');
     expect(wait).toContain('up to 3 top frames and, when they can be read, the capped locals of the first of them that has any');
     expect(wait).toContain('A later stop in the same frame may carry changedVariables in place of locals');
-    expect(wait).toContain("An exception's type and message are in lastStop when the debugger reports them.");
+    expect(wait).toContain("At an exception stop, lastStop may include the exception's type and message.");
     const withShapes = tools.filter((tool) => (tool.description ?? '').includes('{before, gone: true}')).map((tool) => tool.name);
     expect(withShapes).toEqual(['wait_for_stop']);
+    // wait_for_stop holds the exception in lastStop; the answers that point to
+    // it hold it in snapshot.exception, and each pointer says so (round-2
+    // review finding 3).
+    const inSnapshot = "what it carries: see wait_for_stop; here it holds an exception's type and message, when reported, in snapshot.exception";
     for (const name of STOP_TOOLS) {
-      expect(descriptionOf(tools, name), name).toContain('Read any snapshot in the answer first (what it carries: see wait_for_stop');
+      expect(descriptionOf(tools, name), name).toContain(`Read any snapshot in the answer first (${inSnapshot}).`);
     }
+    const start = tools.find((tool) => tool.name === 'start_debugging');
+    const testRunner = (start?.inputSchema.properties as Record<string, { description?: string }>).testRunner.description ?? '';
+    expect(testRunner).toContain(`is the autopsy (${inSnapshot}).`);
     for (const tool of tools) {
       expect(tool.description ?? '', tool.name).not.toContain('Unless the server runs with DEBUG_MCP_NO_SNAPSHOT=1');
       expect(tool.description ?? '', tool.name).not.toMatch(/\bcarries snapshot\b/);
