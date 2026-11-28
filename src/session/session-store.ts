@@ -269,7 +269,9 @@ export interface Run {
    * delivered in a returned stop answer during this run (issue #1328), keyed by
    * the hint's text so each distinct hint is appended at most once per run
    * across the session tree (`session.run`), while the positional sentence is
-   * reported every time. Reset on each launch, attach, or restart.
+   * reported every time. Reset in `ProxyLauncher.start` on each launch, attach,
+   * or replayed restart; a hot restart keeps the set because the same run goes
+   * on and the hint was already given in it.
    */
   deliveredStepFilterHints?: Set<string>;
 }

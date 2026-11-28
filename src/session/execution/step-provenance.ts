@@ -216,12 +216,12 @@ export function compareStepOriginAndLanding(
       if (landingIdxAtOriginSlot === 0) {
         return (
           `The stop is in '${originTop.name}' at the same visible call-stack depth as before step_out ` +
-          `(either that call has not returned or '${originTop.name}' was called again).`
+          `(the same call, or another call of '${originTop.name}').`
         );
       }
       return (
-        `A frame named '${originTop.name}' appears ${landingIdxAtOriginSlot} visible frame(s) below the stop; ` +
-        `it may be the original call or a later call.`
+        `A frame named '${originTop.name}' appears ${landingIdxAtOriginSlot} visible frame(s) below the stop ` +
+        `(the original call, or another call of '${originTop.name}').`
       );
     }
 

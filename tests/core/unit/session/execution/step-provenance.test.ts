@@ -168,7 +168,7 @@ describe('step-provenance (issues #1180, #1182, #1183, #1184)', () => {
       const origin = captureStepOrigin(stack, {}, 1);
       const note = compareStepOriginAndLanding('stepOut', origin, stack);
       expect(note).toBe(
-        "The stop is in 'global.key' at the same visible call-stack depth as before step_out (either that call has not returned or 'global.key' was called again)."
+        "The stop is in 'global.key' at the same visible call-stack depth as before step_out (the same call, or another call of 'global.key')."
       );
     });
 
@@ -185,7 +185,7 @@ describe('step-provenance (issues #1180, #1182, #1183, #1184)', () => {
       ];
       const note = compareStepOriginAndLanding('stepOut', origin, landing);
       expect(note).toBe(
-        "A frame named 'main.work' appears 1 visible frame(s) below the stop; it may be the original call or a later call."
+        "A frame named 'main.work' appears 1 visible frame(s) below the stop (the original call, or another call of 'main.work')."
       );
     });
 

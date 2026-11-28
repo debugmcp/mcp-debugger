@@ -487,9 +487,12 @@ A child is a session of its own, and what is read about it is read where it is t
   worker serves a tree and writes one proxy log, named after the root, so a child's
   `debug://sessions/<child>/proxy-log` is its tree's.
   The record is written by the launch-shaped code (the launcher, the proxy launcher, the attach
-  controller), each fact reset where it always was, and in one place by the core: a stop that
-  proves the debugger on clears the debugger-off decision. A dry run leaves the record as it
-  was. The launch-shaped operations refuse a child session at the session layer too
+  controller), each fact reset where it always was; during the run, the core clears the
+  debugger-off decision on a stop that proves the debugger on (and tracks
+  `breakpointStopOccurred` and `inFlightChildReleases`), breakpoint verification records
+  `treeVerifiedBreakpointIds`, and the execution controller (`ExecutionController`) records
+  `deliveredStepFilterHints` when a returned stop answer on an ordinary step or `wait_for_stop`
+  carries a step-in filter hint. A dry run leaves the record as it was. The launch-shaped operations refuse a child session at the session layer too
   (`refuseChildSession`, `src/session/in-flight-guard.ts`), not only in the tool handlers: on a
   child they would write, replay or judge by its root's run.
   Three things follow from sharing the record and are meant: a stop in a child that proves the
