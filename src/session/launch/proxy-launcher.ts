@@ -157,6 +157,7 @@ export class ProxyLauncher {
     session.run.transformedLaunch = undefined;
     session.run.treeVerifiedBreakpointIds = undefined;
     session.run.childDebuggingOptedOut = undefined;
+    session.run.breakpointStopOccurred = undefined;
     session.run.inFlightChildReleases = undefined;
 
     // Log entrance for Windows CI debugging

@@ -109,6 +109,18 @@ describe('classifyAttachAddressing', () => {
 });
 
 describe('attachLocalityOf', () => {
+  it.each([
+    { host: '127.0.0.1', adapterConfig: undefined, expected: 'loopback' },
+    { host: 'remote.example', adapterConfig: undefined, expected: 'remote' },
+    { host: undefined, adapterConfig: { host: '127.0.0.1' }, expected: 'loopback' },
+    { host: undefined, adapterConfig: { host: 'remote.example' }, expected: 'remote' },
+    { host: '127.0.0.1', adapterConfig: { host: '127.0.0.1' }, expected: 'loopback' },
+    { host: '127.0.0.1', adapterConfig: { host: 'remote.example' }, expected: 'remote' },
+    { host: 'remote.example', adapterConfig: { host: '127.0.0.1' }, expected: 'loopback' },
+    { host: 'remote.example', adapterConfig: { host: 'remote.example' }, expected: 'remote' }
+  ])('uses the effective merged host for port attaches: %j (#1288)', ({ expected, ...addressing }) => {
+    expect(attachLocalityOf({ port: 9229, ...addressing })).toBe(expected);
+  });
   it('reads a PID as this host, a port by its host, a URI by its hostname', () => {
     expect(attachLocalityOf({ processId: 7 })).toBe('pid');
     expect(attachLocalityOf({ processId: 7, host: '10.0.0.5', port: 9229 })).toBe('pid');

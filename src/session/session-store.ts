@@ -170,6 +170,8 @@ export interface Run {
   // run on a remote filesystem (container, pod, other machine), so host-side
   // file existence checks do not apply to their source paths.
   attachMode?: boolean;
+  /** A breakpoint-family stop occurred in this run, retained across later steps/pauses. */
+  breakpointStopOccurred?: boolean;
   // Whether this session owns its program or borrows it (issue #1151),
   // recorded where the proxy launch is committed, from the one fact the
   // worker's shutdown also reads: a launch owns the program and ends it with

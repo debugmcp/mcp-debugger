@@ -363,6 +363,18 @@ describe('inspection tool handlers', () => {
         return JSON.parse((await handleGetLocalVariables(ctx, { sessionId: 'test-session' })).content[0].text);
       }
 
+      it.each(['none', 'line', 'function', 'logpoint', 'downgraded'])('uses pausing-breakpoint advice for locals: %s (#1288)', async kind => {
+        ctx.sessionManager.getSession.mockReturnValue({ run: {},
+          breakpoints: new Map(kind === 'line' ? [['bp', {}]] : kind === 'logpoint' || kind === 'downgraded' ? [['log', { logMessage: 'log' }]] : []),
+          functionBreakpoints: new Map(kind === 'function' ? [['fn', {}]] : []),
+          adapterCapabilities: { supportsLogPoints: kind !== 'downgraded' }
+        });
+        const payload = await localsOf({ variables: [], frame: TIMERS, scopeName: null,
+          noProgramFrame: { threadId: 0, frameCount: 1, top: TIMERS } });
+        expect(payload.noProgramFrame).toBe(true);
+        expect(payload.note.includes('or set a breakpoint')).toBe(kind === 'none' || kind === 'logpoint');
+      });
+
       it('keeps the variables, flags the answer and says whose they are', async () => {
         const payload = await localsOf({
           variables: [{ name: 'now', value: '4210', type: 'number' }],
