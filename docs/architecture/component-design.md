@@ -179,10 +179,10 @@ protected setupProxyEventHandlers(
     // Must set PAUSED synchronously before handleAutoContinue, because
     // continue() requires session.state === SessionState.PAUSED.
     if (!effectiveLaunchArgs.stopOnEntry && reason === 'entry') {
-      this._updateSessionState(session, SessionState.PAUSED);
+      this._updateSessionState(session, SessionState.PAUSED, { site: 'settleStop.hidden', event: 'stop-hidden' });
       this.handleAutoContinue(sessionId).catch(err => { /* log error */ });
     } else {
-      this._updateSessionState(session, SessionState.PAUSED);
+      this._updateSessionState(session, SessionState.PAUSED, { site: 'settleStop.shown', event: 'stop-shown' });
     }
   };
 

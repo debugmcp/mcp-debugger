@@ -8,6 +8,10 @@
  */
 import { vi, beforeAll, afterEach, afterAll, expect } from 'vitest';
 import { portManager } from './test-utils/helpers/port-manager.js';
+// Imported statically so a test file's vi.mock('fs') cannot replace them for the
+// state-shadow count files written in afterAll below.
+import { mkdirSync as shadowMkdirSync, writeFileSync as shadowWriteFileSync } from 'fs';
+import { join as shadowJoin } from 'path';
 
 /** Best-effort path of the test file currently running (empty outside a test). */
 function currentTestPath(): string {
@@ -64,6 +68,60 @@ if (process.platform === 'win32' && (globalThis as any).__dirname) {
 beforeAll(() => {
   // Timeout is set in vitest.config.ts
   portManager.reset();
+});
+
+// --- the session transition table's shadow (src/session/machine) ------------
+// The unit project runs the shadow in strict mode (vitest.config.ts): a gate
+// call the table has no row for throws where it happens. The code under test
+// can swallow that throw (a catch that turns it into a failed answer), so the
+// shadow also queues every strict failure on a process-wide registry, and
+// this hook fails the test that left one. A test that provokes one on purpose
+// drains it itself (takeStrictFailures). With MCP_STATE_SHADOW_LOG set, the
+// verdict counts of each test file are written to that directory. The
+// registry is reached through globalThis so this file imports nothing from src.
+// Registered before the leak guard below so that, hooks running in 'stack'
+// order, it runs last of all, after every other cleanup.
+interface StateShadowRegistry {
+  counts?: Map<string, number>;
+  pending?: Array<{ outcome: string; site: string; event: string; from?: string; actual?: string; why?: string }>;
+  harness?: boolean;
+}
+const stateShadowRegistry = (
+  (globalThis as unknown as Record<symbol, StateShadowRegistry | undefined>)[Symbol.for('mcp-debugger.state-shadow')] ??= {}
+);
+stateShadowRegistry.harness = true;
+let stateShadowTestPath = '';
+
+function stateShadowStrictFailures(): string | undefined {
+  if (process.env.MCP_STATE_SHADOW !== 'strict') return undefined;
+  const pending = stateShadowRegistry.pending?.splice(0) ?? [];
+  if (pending.length === 0) return undefined;
+  return pending
+    .map((r) => `${r.outcome} at ${r.site}: ${r.event} from ${r.from ?? '?'} to ${r.actual ?? '?'}${r.why ? ` (${r.why})` : ''}`)
+    .join('; ');
+}
+
+afterEach(() => {
+  stateShadowTestPath = currentTestPath() || stateShadowTestPath;
+  const failures = stateShadowStrictFailures();
+  if (failures) {
+    throw new Error(`[state-shadow] strict mode (a transition the table does not list, a lifecycle write that disagrees with the state, or a fault of the shadow): ${failures}`);
+  }
+});
+
+afterAll(() => {
+  const dir = process.env.MCP_STATE_SHADOW_LOG;
+  const counts = stateShadowRegistry.counts;
+  if (dir && counts && counts.size > 0) {
+    shadowMkdirSync(dir, { recursive: true });
+    const name = `vitest-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
+    shadowWriteFileSync(shadowJoin(dir, name), JSON.stringify({ file: stateShadowTestPath, counts: Object.fromEntries(counts) }));
+    counts.clear();
+  }
+  const failures = stateShadowStrictFailures();
+  if (failures) {
+    throw new Error(`[state-shadow] strict mode, after the last test of the file: ${failures}`);
+  }
 });
 
 // --- process-listener leak guard (issue #159) -------------------------------

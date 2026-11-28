@@ -342,7 +342,7 @@ export class ExecutionController {
       const errorMessage = getErrorMessage(error);
       this.ctx.logger.error(`[SM ${logTag} ${sessionId}] Error during step:`, error);
       if (!(error instanceof DapResponseError) && !isTerminalSessionState(session.state)) {
-        this.ctx.updateState(session, SessionState.ERROR);
+        this.ctx.updateState(session, SessionState.ERROR, { site: 'step.failed', event: 'resume-failed' });
       }
       return { success: false, error: errorMessage, state: session.state };
     }
@@ -602,7 +602,9 @@ export class ExecutionController {
       proxyManager.on('dap-event', onDapEvent);
 
       session.inFlightStep = inFlightRecord;
-      this.ctx.updateState(session, SessionState.RUNNING);
+      // Where the step started, for the shadow's judgement of a refusal.
+      const resumeToken = this.ctx.stateShadow.token(session);
+      this.ctx.updateState(session, SessionState.RUNNING, { site: 'executeStep.sent', event: 'resume' });
 
       proxyManager
         .sendDapRequest(options.command, { threadId: options.threadId })
@@ -638,9 +640,19 @@ export class ExecutionController {
               `[SM ${options.logTag} ${sessionId}] Adapter refused '${options.command}'; reverting session to PAUSED: ${errorMessage}`
             );
             if (session.lastStop) {
-              this.ctx.updateState(session, SessionState.PAUSED);
+              this.ctx.updateState(session, SessionState.PAUSED, {
+                site: 'executeStep.refused',
+                event: 'resume-refused',
+                facts: { since: resumeToken }
+              });
             } else {
+              const unrecordedFrom = session.state;
               session.state = SessionState.PAUSED;
+              this.ctx.stateShadow.note(
+                session,
+                { site: 'executeStep.refused-unrecorded', event: 'resume-refused', facts: { since: resumeToken } },
+                { from: unrecordedFrom }
+              );
             }
             let hint: string | undefined;
             try {
@@ -664,7 +676,7 @@ export class ExecutionController {
             error
           );
           if (!isTerminalSessionState(session.state)) {
-            this.ctx.updateState(session, SessionState.ERROR);
+            this.ctx.updateState(session, SessionState.ERROR, { site: 'executeStep.failed', event: 'resume-failed' });
           }
           settle({ success: false, error: errorMessage, state: session.state });
         })
@@ -672,7 +684,13 @@ export class ExecutionController {
     });
   }
 
-  async continue(sessionId: string): Promise<DebugResult> {
+  /**
+   * Resume a paused session. `unseen` marks the core's own resume of a stop
+   * no caller was shown (an entry stop with `stopOnEntry` off); it runs the
+   * same path and only names its transition differently.
+   */
+  async continue(sessionId: string, options: { unseen?: boolean } = {}): Promise<DebugResult> {
+    const unseen = options.unseen === true;
     const session = this.ctx.getSession(sessionId);
 
     // Check if session is terminated
@@ -701,6 +719,8 @@ export class ExecutionController {
       return { success: false, error: 'No current thread ID', state: session.state };
     }
 
+    // Where the resume started, for the shadow's judgement of a refusal.
+    const resumeToken = this.ctx.stateShadow.token(session);
     try {
       this.ctx.logger.info(
         `[SessionManager continue] Sending DAP 'continue' for session ${sessionId}, threadId ${threadId}.`
@@ -710,7 +730,11 @@ export class ExecutionController {
       // If a breakpoint fires during the await, the handleStopped callback
       // will set state back to PAUSED before the await resolves.
       session.inFlightStep = undefined;
-      this.ctx.updateState(session, SessionState.RUNNING);
+      this.ctx.updateState(
+        session,
+        SessionState.RUNNING,
+        unseen ? { site: 'continue.sent', event: 'resume-unseen' } : { site: 'continue.sent', event: 'resume' }
+      );
       await session.proxyManager.sendDapRequest('continue', { threadId });
 
       this.ctx.logger.info(
@@ -731,7 +755,13 @@ export class ExecutionController {
       // other state reachable here is PAUSED itself — a breakpoint that fired
       // during the await — where the revert is a no-op.
       if (!isTerminalSessionState(session.state)) {
-        this.ctx.updateState(session, SessionState.PAUSED);
+        this.ctx.updateState(
+          session,
+          SessionState.PAUSED,
+          unseen
+            ? { site: 'continue.refused', event: 'resume-unseen-failed' }
+            : { site: 'continue.refused', event: 'resume-refused', facts: { since: resumeToken } }
+        );
       }
       const errorMessage = getErrorMessage(error);
       this.ctx.logger.error(

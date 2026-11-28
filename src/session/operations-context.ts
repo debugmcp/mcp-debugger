@@ -33,6 +33,8 @@ import type { VariableAccessMode } from '../utils/variable-access.js';
 import type { IProxyManager } from '../proxy/proxy-manager.js';
 import type { IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
 import type { ValidationResultCache } from '../utils/language-availability.js';
+import type { StateShadowPort } from './machine/shadow.js';
+import type { StateWrite, TestSetupWrite } from './machine/transition-table.js';
 
 /**
  * The timing windows debug operations wait on. Held on the facade as protected
@@ -74,8 +76,19 @@ export interface OperationsContext {
   getSession(sessionId: string): ManagedSession;
   /** `sessionStore.update` — patch stored session fields. */
   updateSession(sessionId: string, updates: Partial<ManagedSession>): void;
-  /** `_updateSessionState` — legacy state plus the derived dual-state overlay. */
-  updateState(session: ManagedSession, newState: SessionState): void;
+  /**
+   * `_updateSessionState` — legacy state plus the derived dual-state overlay.
+   * `write` names the call's site and the event of its transition, which the
+   * transition table's shadow check records (src/session/machine).
+   */
+  updateState(session: ManagedSession, newState: SessionState, write: StateWrite | TestSetupWrite): void;
+  /**
+   * The transition table's shadow (src/session/machine/shadow.ts), for the
+   * places that write no state but have a row in the table, the resume
+   * tokens a refusal's guard is judged from, and the lifecycle assertions.
+   * It observes only.
+   */
+  readonly stateShadow: StateShadowPort;
   /**
    * Be told whenever the session's state changes — every `_updateSessionState`
    * transition, and the session's removal. The listener gets no arguments and
@@ -215,6 +228,7 @@ export type LaunchContext = Pick<
   | 'getSession'
   | 'updateSession'
   | 'updateState'
+  | 'stateShadow'
   | 'onStateChange'
   | 'onSubtreeChange'
   | 'selectPolicy'
@@ -243,6 +257,7 @@ export type AttachContext = Pick<
   | 'getSession'
   | 'updateSession'
   | 'updateState'
+  | 'stateShadow'
   | 'selectPolicy'
   | 'getStackTraceDetailed'
   | 'stopProxyPreservingSession'
@@ -276,6 +291,7 @@ export type ExecutionContext = Pick<
   | 'logger'
   | 'getSession'
   | 'updateState'
+  | 'stateShadow'
   | 'onStateChange'
   | 'onSubtreeChange'
   | 'descendantsOf'

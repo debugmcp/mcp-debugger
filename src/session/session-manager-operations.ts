@@ -178,7 +178,8 @@ export abstract class SessionManagerOperations extends SessionManagerData {
       },
       getSession: (sessionId) => this._getSessionById(sessionId),
       updateSession: (sessionId, updates) => this.sessionStore.update(sessionId, updates),
-      updateState: (session, newState) => this._updateSessionState(session, newState),
+      updateState: (session, newState, write) => this._updateSessionState(session, newState, write),
+      get stateShadow() { return facade().stateShadow; },
       onStateChange: (sessionId, listener) => this.onSessionStateChange(sessionId, listener),
       onSubtreeChange: (sessionId, listener) => this.onSubtreeStateChange(sessionId, listener),
       descendantsOf: (sessionId) => this.descendantsDepthFirst(sessionId),
@@ -409,7 +410,7 @@ export abstract class SessionManagerOperations extends SessionManagerData {
    * as they would for any running program.
    */
   protected resumeUnseenStop(sessionId: string): Promise<DebugResult> {
-    return this.execution.continue(sessionId);
+    return this.execution.continue(sessionId, { unseen: true });
   }
 
   /**

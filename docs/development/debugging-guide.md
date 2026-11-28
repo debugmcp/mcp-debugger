@@ -285,22 +285,34 @@ this.logger.debug('[DEBUG] Sending DAP request:', {
 **Debug Steps**:
 
 ```typescript
-// Actual implementation in src/session/session-manager-core.ts
-protected _updateSessionState(session: ManagedSession, newState: SessionState): void {
+// Condensed from src/session/session-manager-core.ts
+protected _updateSessionState(session: ManagedSession, newState: SessionState, write: StateWrite | TestSetupWrite): void {
+  const from = session.state;
+  this.writeSessionState(session, newState);            // the write itself, below
+  this.stateShadow.check(session, from, newState, write); // observes only
+}
+
+private writeSessionState(session: ManagedSession, newState: SessionState): void {
+  if (newState === SessionState.PAUSED && !session.lastStop) {
+    throw new Error(`Invariant violation: session ${session.id} cannot enter PAUSED without lastStop`);
+  }
   if (session.state === newState) return;
   this.logger.info(`[SM _updateSessionState ${session.id}] State change: ${session.state} -> ${newState}`);
-
-  // Update legacy state
   this.sessionStore.updateState(session.id, newState);
-
-  // Update new state model based on legacy state
   const { lifecycle, execution } = mapLegacyState(newState);
-  this.sessionStore.update(session.id, {
-    sessionLifecycle: lifecycle,
-    executionState: execution
-  });
+  this.sessionStore.update(session.id, { sessionLifecycle: lifecycle, executionState: execution });
+  this.notifySessionStateListeners(session.id);
+  this.notifySubtreeListeners(session);
 }
 ```
+
+Every call names its site and the event of its transition (`{ site: 'handleTerminated', event: 'terminated' }`),
+and the transition table in `src/session/machine/transition-table.ts` says which phases each event may move a
+session between. The shadow check (`src/session/machine/shadow.ts`) records a verdict for each call and refuses
+nothing: a transition the table does not list, or one whose guard is not met, is one `[state-shadow]` warn line in
+the log. `MCP_STATE_SHADOW=off` turns it off; `MCP_STATE_SHADOW_LOG=<directory>` writes every verdict there as
+ndjson. The unit test project runs it with `MCP_STATE_SHADOW=strict`, where a transition the table does not list
+fails the test.
 
 ## Advanced Debugging Techniques
 

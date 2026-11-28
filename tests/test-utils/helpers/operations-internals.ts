@@ -14,6 +14,7 @@ import type { DebugLauncher } from '../../../src/session/launch/debug-launcher.j
 import type { ProxyLaunchRequest } from '../../../src/session/launch/proxy-launcher.js';
 import type { ManagedSession } from '../../../src/session/session-store.js';
 import type { OperationsContext } from '../../../src/session/operations-context.js';
+import type { StateShadow } from '../../../src/session/machine/shadow.js';
 import type { LanguageSpecificLaunchConfig } from '@debugmcp/shared';
 
 /**
@@ -54,6 +55,8 @@ export interface OperationsInternals {
   opsContext: OperationsContext;
   /** Protected on SessionManagerCore; spied on to model a concurrent close during teardown. */
   stopProxyPreservingSession(session: ManagedSession): Promise<number>;
+  /** Protected on SessionManagerCore: the transition table's shadow, read for its verdicts. */
+  stateShadow: StateShadow;
 }
 
 /** The protected collaborators of an operations facade, for a test to drive. */

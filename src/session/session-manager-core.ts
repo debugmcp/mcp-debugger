@@ -12,6 +12,8 @@ import {
 import type { AttachFootprint, Breakpoint, DapClientBehavior, FunctionBreakpoint, ProgramEndExplanation, SessionStopInfo, StackFrame, StopTopFrameLine } from '@debugmcp/shared';
 import { USER_BREAK_REASONS, BREAKPOINT_STOP_REASONS } from '@debugmcp/shared';
 import { stopProvesDebuggerOn } from './debugger-off.js';
+import { StateShadow } from './machine/shadow.js';
+import type { StateWrite, TestSetupWrite } from './machine/transition-table.js';
 import { isRedactionEnabled } from '../utils/redaction-mode.js';
 import { isSnapshotEnabled } from '../utils/snapshot-mode.js';
 import { getVariableAccessMode, type VariableAccessMode } from '../utils/variable-access.js';
@@ -530,6 +532,13 @@ export abstract class SessionManagerCore extends EventEmitter {
   private readonly idleExpired = new Map<string, IdleExpiryRecord>();
 
   /**
+   * The transition table's shadow check (src/session/machine/shadow.ts):
+   * every gate call and every note is judged against the table and recorded.
+   * It observes only; nothing it records changes a state or an answer.
+   */
+  protected readonly stateShadow: StateShadow;
+
+  /**
    * Constructor with full dependency injection
    */
   constructor(
@@ -551,6 +560,12 @@ export abstract class SessionManagerCore extends EventEmitter {
       stopOnEntry: false,
       justMyCode: true
     };
+
+    this.stateShadow = new StateShadow({
+      logger: () => this.logger,
+      rootOf: (session) => this.rootOf(session as ManagedSession),
+      descendantsOf: (session) => this.descendantsDeepestFirst(session.id).length
+    });
 
     this.fileSystem.ensureDirSync(this.logDirBase);
     this.logger.info(`[SessionManager] Initialized. Session logs will be stored in: ${this.logDirBase}`);
@@ -884,7 +899,20 @@ export abstract class SessionManagerCore extends EventEmitter {
     return this.sessionStore.getOrThrow(sessionId);
   }
 
-  protected _updateSessionState(session: ManagedSession, newState: SessionState): void {
+  /**
+   * The one gate for a session's public state. `write` names the site and the
+   * event of the transition (src/session/machine/transition-table.ts). The
+   * gate writes as it always has; the shadow check runs after all of it,
+   * observes, and refuses nothing (src/session/machine/shadow.ts). A write the
+   * gate itself refuses (its PAUSED-needs-a-stop invariant) never reaches it.
+   */
+  protected _updateSessionState(session: ManagedSession, newState: SessionState, write: StateWrite | TestSetupWrite): void {
+    const from = session.state;
+    this.writeSessionState(session, newState);
+    this.stateShadow.check(session, from, newState, write);
+  }
+
+  private writeSessionState(session: ManagedSession, newState: SessionState): void {
     if (newState === SessionState.PAUSED && !session.lastStop) {
       throw new Error(
         `Invariant violation: session ${session.id} cannot enter PAUSED without lastStop`
@@ -1330,8 +1358,9 @@ export abstract class SessionManagerCore extends EventEmitter {
         note: 'Released: detached with its parent; the process runs on undebugged.',
         data: { released: true }
       };
-      this._updateSessionState(descendant, SessionState.STOPPED);
+      this._updateSessionState(descendant, SessionState.STOPPED, { site: 'releaseDescendants', event: 'release' });
       this.sessionStore.update(descendant.id, { sessionLifecycle: SessionLifecycleState.TERMINATED });
+      this.stateShadow.lifecycle(descendant, SessionLifecycleState.TERMINATED, 'releaseDescendants');
       released += 1;
     }
     return released;
@@ -1456,12 +1485,13 @@ export abstract class SessionManagerCore extends EventEmitter {
       session.pendingProxyStop = undefined;
     }
 
-    this._updateSessionState(session, SessionState.STOPPED);
+    this._updateSessionState(session, SessionState.STOPPED, { site: 'closeSingleSession', event: 'close' });
 
     // Also update session lifecycle to TERMINATED
     this.sessionStore.update(sessionId, {
       sessionLifecycle: SessionLifecycleState.TERMINATED
     });
+    this.stateShadow.lifecycle(session, SessionLifecycleState.TERMINATED, 'closeSingleSession');
 
     this.logger.info(`Session ${sessionId} marked as STOPPED/TERMINATED.`);
     this.sessionStore.remove(sessionId);
@@ -1817,7 +1847,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       const view = parentProxy.createChildView(child.id);
       child.proxyManager = view;
       this.setupProxyEventHandlers(child, view, { stopOnEntry: false });
-      this._updateSessionState(child, SessionState.RUNNING);
+      this._updateSessionState(child, SessionState.RUNNING, { site: 'adoptReportedChild', event: 'adopt' });
       this.logger.info(
         `[SessionManager] Adopting child ${reported.name} (${reported.targetId}) of session ${parent.id} as session ${child.id}`
       );
@@ -2277,7 +2307,7 @@ export abstract class SessionManagerCore extends EventEmitter {
           ...(body?.text ? { text: body.text } : {})
         };
         session.lastStop = autoContinuedStop;
-        this._updateSessionState(session, SessionState.PAUSED);
+        this._updateSessionState(session, SessionState.PAUSED, { site: 'settleStop.hidden', event: 'stop-hidden' });
         // Erase the transient stop however the continue settles. The identity
         // check is what keeps it safe: a newer user-visible stop that raced
         // the continue replaced the record and must survive, and a continue
@@ -2348,7 +2378,7 @@ export abstract class SessionManagerCore extends EventEmitter {
           session.inFlightStep = undefined;
         }
         this.countStopOnAncestors(session);
-        this._updateSessionState(session, SessionState.PAUSED);
+        this._updateSessionState(session, SessionState.PAUSED, { site: 'settleStop.shown', event: 'stop-shown' });
 
         // Best-effort exceptionInfo enrichment (issue #243): fire-and-forget
         // after the synchronous PAUSED transition (step/continue barriers rely
@@ -2467,6 +2497,8 @@ export abstract class SessionManagerCore extends EventEmitter {
         this.logger.debug(
           `[SessionManager] Ignoring continued event for session ${sessionId} because state is already PAUSED`
         );
+        // No state is written; the table's stale-continued row is recorded.
+        this.stateShadow.note(session, { site: 'handleContinued', event: 'continued' });
         return;
       }
 
@@ -2475,7 +2507,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       // one for every resume, its own source-map pauses during module
       // loading included, and clearing the intent on those let the real
       // pause stop be auto-continued as an entry stop.
-      this._updateSessionState(session, SessionState.RUNNING);
+      this._updateSessionState(session, SessionState.RUNNING, { site: 'handleContinued', event: 'continued' });
     };
     proxyManager.on('continued', handleContinued);
     handlers.set('continued', handleContinued);
@@ -2667,7 +2699,7 @@ export abstract class SessionManagerCore extends EventEmitter {
 
       this.noteUnboundFunctionBreakpoints(session, outputBuffer);
       this.recordProgramEndExplanation(session, outputBuffer);
-      this._updateSessionState(session, SessionState.STOPPED);
+      this._updateSessionState(session, SessionState.STOPPED, { site: 'handleTerminated', event: 'terminated' });
 
       // Clean up listeners since proxy is gone
       this.cleanupProxyEventHandlers(session, proxyManager);
@@ -2698,7 +2730,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       }
       this.noteUnboundFunctionBreakpoints(session, outputBuffer);
       this.recordProgramEndExplanation(session, outputBuffer);
-      this._updateSessionState(session, SessionState.STOPPED);
+      this._updateSessionState(session, SessionState.STOPPED, { site: 'handleExited', event: 'exited' });
 
       // Clean up listeners since proxy is gone
       this.cleanupProxyEventHandlers(session, proxyManager);
@@ -2721,7 +2753,11 @@ export abstract class SessionManagerCore extends EventEmitter {
       // status. Preserve that observed pause; only project RUNNING when no
       // stop has already established the stronger state.
       if (!effectiveLaunchArgs.stopOnEntry && session.state !== SessionState.PAUSED) {
-        this._updateSessionState(session, SessionState.RUNNING);
+        this._updateSessionState(session, SessionState.RUNNING, {
+          site: 'handleAdapterConfigured',
+          event: 'adapter-configured',
+          facts: { stopOnEntry: Boolean(effectiveLaunchArgs.stopOnEntry) }
+        });
       }
     };
     proxyManager.on('adapter-configured', handleAdapterConfigured);
@@ -2959,7 +2995,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       session.lastProxyError = stderrLine && !quotesAdapterStderrLine(error.message, stderrLine)
         ? `${error.message}; adapter stderr: "${stderrLine}"`
         : error.message;
-      this._updateSessionState(session, SessionState.ERROR);
+      this._updateSessionState(session, SessionState.ERROR, { site: 'handleError', event: 'error' });
       this.recordProxyFailure(session, error);
 
       // Clean up listeners since proxy is in error state
@@ -2984,6 +3020,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       const stderrLine = lastAdapterStderrLine(proxyManager.getAdapterStderrTail?.());
       session.lastProxyExit = { code, signal, expected, ...(stderrLine ? { stderrLine } : {}) };
       const stateBeforeExit = session.state;
+      const exitFacts = { exit: { code, ...(signal !== undefined ? { signal } : {}), ...(expected !== undefined ? { expected } : {}) } };
       if (!isTerminalSessionState(session.state)) {
         if (expected === true) {
           // Orderly debuggee termination (issue #258): the worker saw a
@@ -2993,23 +3030,28 @@ export abstract class SessionManagerCore extends EventEmitter {
           if (typeof code === 'number' && session.exitCode === undefined) {
             session.exitCode = code;
           }
-          this._updateSessionState(session, SessionState.STOPPED);
+          this._updateSessionState(session, SessionState.STOPPED, { site: 'handleExit.expected', event: 'worker-exit', facts: exitFacts });
         } else if (expected === false) {
           // The adapter died or dropped the socket with no preceding
           // terminal DAP event. Only a clean code 0 counts as normal.
           this._updateSessionState(
             session,
-            code === 0 ? SessionState.STOPPED : SessionState.ERROR
+            code === 0 ? SessionState.STOPPED : SessionState.ERROR,
+            { site: 'handleExit.unexpected', event: 'worker-exit', facts: exitFacts }
           );
         } else {
           // Legacy path (real proxy-process exit): clean exit is code 0 or
           // null with no signal; anything else is an infrastructure error.
           if (code === 0 || (code === null && !signal)) {
-            this._updateSessionState(session, SessionState.STOPPED);
+            this._updateSessionState(session, SessionState.STOPPED, { site: 'handleExit.clean', event: 'worker-exit', facts: exitFacts });
           } else {
-            this._updateSessionState(session, SessionState.ERROR);
+            this._updateSessionState(session, SessionState.ERROR, { site: 'handleExit.crashed', event: 'worker-exit', facts: exitFacts });
           }
         }
+      } else {
+        // Already ended or failed: no state is written, and the exit is
+        // evidence for the ending the table records.
+        this.stateShadow.note(session, { site: 'handleExit.ended', event: 'worker-exit', facts: exitFacts });
       }
 
       if (stateBeforeExit !== SessionState.ERROR && session.state === SessionState.ERROR) {

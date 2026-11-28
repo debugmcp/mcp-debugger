@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ErrorMessages } from '../../src/utils/error-messages.js';
 import { DapResponseError } from '../../src/proxy/dap-response-error.js';
 import { markChildMirrorUnanswered } from '../../src/utils/child-origin-events.js';
+import { TEST_SETUP_WRITE } from '../../src/session/machine/transition-table.js';
 import path from 'path';
 import { SessionManagerOperations } from '../../src/session/session-manager-operations';
 import type { SessionManagerDependencies } from '../../src/session/session-manager-core';
@@ -208,7 +209,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     if (lastStop) {
       mockSession.lastStop = lastStop;
     }
-    internals(operations).opsContext.updateState(mockSession, state);
+    internals(operations).opsContext.updateState(mockSession, state, TEST_SETUP_WRITE);
   }
 
   describe('ProxyLauncher.start edge cases', () => {

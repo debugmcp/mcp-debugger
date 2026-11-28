@@ -104,7 +104,7 @@ export interface OperationsContext {
 
   getSession(sessionId: string): ManagedSession;
   updateSession(sessionId: string, updates: Partial<ManagedSession>): void;
-  updateState(session: ManagedSession, newState: SessionState): void;
+  updateState(session: ManagedSession, newState: SessionState, write: StateWrite | TestSetupWrite): void;
   selectPolicy(language: string | DebugLanguage): AdapterPolicy;
   // ... the rest of what collaborators are allowed to reach for
 }

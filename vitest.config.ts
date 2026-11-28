@@ -260,6 +260,10 @@ export default defineConfig({
           name: 'unit',
           include: UNIT_INCLUDE,
           exclude: UNIT_EXCLUDE,
+          // The session transition table's shadow fails a test on any state
+          // transition the table does not list (src/session/machine/shadow.ts;
+          // tests/vitest.setup.ts claims the failures a test's code swallowed).
+          env: { MCP_STATE_SHADOW: 'strict' },
           // Parallel pool. Kept on `forks` for full per-file process isolation
           // (robust against any future non-hermetic test) — and it is also the
           // FASTER pool here. Tier 3 fake-timered the proxy init-retry backoff
@@ -286,7 +290,9 @@ export default defineConfig({
           ...serialPool,
           name: 'integration',
           include: INTEGRATION_INCLUDE,
-          exclude: sharedExclude
+          exclude: sharedExclude,
+          // Recorded, never thrown: MCP_STATE_SHADOW_LOG=<dir> writes the verdicts out.
+          env: { MCP_STATE_SHADOW: 'record' }
         }
       },
       {
@@ -297,7 +303,9 @@ export default defineConfig({
           ...serialPool,
           name: 'e2e',
           include: E2E_INCLUDE,
-          exclude: sharedExclude
+          exclude: sharedExclude,
+          // Recorded, never thrown: MCP_STATE_SHADOW_LOG=<dir> writes the verdicts out.
+          env: { MCP_STATE_SHADOW: 'record' }
         }
       }
     ]
