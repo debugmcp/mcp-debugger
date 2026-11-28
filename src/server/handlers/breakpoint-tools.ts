@@ -3,6 +3,7 @@
  * list_breakpoints, remove_breakpoint, clear_breakpoints.
  */
 import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
+import { ContentAddressingNotSupportedError } from '../../errors/debug-errors.js';
 import { buildAttachBreakpointScopeWarning } from '../../session/breakpoints/launch-warnings.js';
 import { Breakpoint, FunctionBreakpoint, SessionState } from '@debugmcp/shared';
 import {
@@ -173,7 +174,7 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
       ? ctx.validateLogPointSupport(args.sessionId, args.logMessage, args.condition)
       : {};
 
-    const { breakpoint, warning: syncWarning } = await ctx.setBreakpoint({
+    const { breakpoint, warning: syncWarning, contentAddressable } = await ctx.setBreakpoint({
       sessionId: args.sessionId,
       // Non-function path: the entry guard above ensures file is set
       file: args.file!,
@@ -199,17 +200,19 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
     });
 
     // Try to get line context for the breakpoint — unless the session is an
-    // attach whose target is not on this host (issue #899): the host file is
-    // not the debuggee's source then, and an answer that refuses content
-    // addressing for that reason must not quote the file anyway.
+    // attach whose target is not on this host (issue #899) or the source was
+    // already determined to be non-addressable on this host (a class name, or
+    // a local attach whose file is absent or unusable here): quoting host file
+    // text would either read the wrong file or contradict the warning.
     const run = runFactsFor(ctx, args.sessionId);
     const hostFileIsForeign = run !== undefined && isForeignAttach(run);
+    const skipLineContext = hostFileIsForeign || contentAddressable === false;
     // The build behind the echo (issue #938): when the adapter binds this
     // file through a compiled one that is older than it, the content and the
     // line are the newer source's, not the running code's. Say so. Both are
     // independent reads of the same file, overlapped.
     const [context, staleBuild] = await Promise.all([
-      hostFileIsForeign ? undefined : readLineContext(ctx, breakpoint.file, breakpoint.line, 'breakpoint'),
+      skipLineContext ? undefined : readLineContext(ctx, breakpoint.file, breakpoint.line, 'breakpoint'),
       describeStaleBuild(ctx, args.sessionId, breakpoint.file, 'breakpoint')
     ]);
 
@@ -238,6 +241,8 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
       file: breakpoint.file,
       line: breakpoint.line,
       requestedLine: breakpoint.requestedLine,
+      boundFile: breakpoint.boundFile,
+      boundLine: breakpoint.boundLine,
       anchor: breakpoint.anchor,
       content: context?.lineContent,
       verified: breakpoint.verified,
@@ -275,6 +280,13 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
     });
     return result;
   } catch (error) {
+    if (error instanceof ContentAddressingNotSupportedError) {
+      const session = ctx.sessionManager.getSession(error.sessionId);
+      return failureResult(
+        error.detail,
+        session?.state !== undefined ? { state: session.state } : undefined
+      );
+    }
     return sessionErrorResultOrThrow(error);
   }
 }

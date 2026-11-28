@@ -9,11 +9,13 @@ import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import { buildServerInstructions } from './skill-content.js';
 import { getVersion } from './cli/version.js';
 import {
+  ContentAddressingNotSupportedError,
   SessionNotFoundError,
   SessionTerminatedError,
   UnsupportedFeatureError,
   ProxyNotRunningError
 } from './errors/debug-errors.js';
+import { ErrorMessages } from './utils/error-messages.js';
 import { SessionManager, SessionManagerConfig } from './session/session-manager.js';
 import type { CloseSessionOutcome, DebugResult, LaunchResultData, StepResultData, WaitForStopResultData } from './session/session-manager-core.js';
 import { LocalVariablesResult, StackTraceResult } from './session/session-manager-data.js';
@@ -424,7 +426,7 @@ export class DebugMcpServer implements ToolContext {
   }
 
   /** `refusal`: the adapter's own answer when the live re-send was refused, as stamped on the record (issue #754). */
-  public async setBreakpoint(req: SetBreakpointRequest): Promise<{ breakpoint: Breakpoint; warning?: string }> {
+  public async setBreakpoint(req: SetBreakpointRequest): Promise<{ breakpoint: Breakpoint; warning?: string; contentAddressable?: boolean }> {
     this.validateSessionExists(req.sessionId);
 
     // Addressing-parameter combinations (issue #271)
@@ -471,38 +473,18 @@ export class DebugMcpServer implements ToolContext {
     const resolved = await this.resolveBreakpointFile(req.sessionId, req.file, { requireExists: true });
     const mode = getBpAddressingMode(this.environment);
 
-    const readLinesForContentAddressing = async (
-      feature: 'statement addressing' | 'expectedContent'
-    ): Promise<string[]> => {
-      if (!resolved.contentAddressable) {
-        // Two distinct causes, two honest reasons (issue #497): an attach
-        // session's file may be perfectly readable here — the rule is that
-        // the debuggee's loaded source is the authority, not the host's copy.
-        // The remedy is feature-specific (issue #654): an expectedContent
-        // caller already passed line, so "use line addressing instead" read
-        // as a contradiction — tell them what to drop, not what to add.
-        const remedy =
-          feature === 'expectedContent'
-            ? 'drop expectedContent and keep line — the breakpoint is set by plain line addressing.'
-            : 'use line addressing instead.';
-        // Which attach (issue #903): a remote target's loaded source is the
-        // authority; a local target's file simply is not on this host.
+    const contentUncheckableSource = () => {
+      if (resolved.nonAddressableReason === 'attach') {
         const asked = this.sessionManager.getSession(req.sessionId);
         const locality = asked
           ? runFactsOf(asked, (id) => this.sessionManager.getSession(id)).targetLocality
           : undefined;
-        const attachWhy =
-          locality === 'remote'
-            ? `a remote attach session (the debuggee's loaded source may differ from the file on the mcp-debugger host)`
-            : locality === 'pid' || locality === 'loopback'
-              ? `this attach session ("${req.file}" is not usable on the mcp-debugger host${resolved.detail ? `: ${resolved.detail}` : ''}, so its content cannot be checked)`
-              : `an attach session whose target host is not known (the debuggee's loaded source may differ from the file on the mcp-debugger host)`;
-        const reason =
-          resolved.nonAddressableReason === 'attach'
-            ? `${feature} is not supported for ${attachWhy}; ${remedy}`
-            : `${feature} requires a source file readable by the mcp-debugger server; "${req.file}" is a class name or remote path — ${remedy}`;
-        throw new ProtocolError(ProtocolErrorCode.InvalidParams, reason);
+        return { reason: 'attach' as const, locality, file: req.file, detail: resolved.detail };
       }
+      return { reason: 'non-file-identifier' as const, file: req.file };
+    };
+
+    const readCheckedFileLines = async (): Promise<string[]> => {
       const lines = await this.lineReader.getFileLines(resolved.path);
       if (!lines) {
         throw new ProtocolError(
@@ -515,13 +497,26 @@ export class DebugMcpServer implements ToolContext {
 
     let line: number;
     let anchor: { statement: string; nearLine?: number } | undefined;
-    // Relaxed content matches succeed but must say so (issue #379): a
-    // substring or comment-stripped pass is indistinguishable from an exact
-    // one in the stored breakpoint, so the warning is the agent's only
-    // signal that its stated content only weakly pinned the line.
+    // Relaxed content matches succeed but must say so (issue #379), and so must
+    // a line + expectedContent fallback when the server cannot check the source
+    // (issue #1326): setting the breakpoint at `line` saves the caller a wasted
+    // turn while disclosing exactly what was and was not checked.
     let addressingWarning: string | undefined;
+    let skippedExpectedContent = false;
     if (req.statement !== undefined) {
-      const lines = await readLinesForContentAddressing('statement addressing');
+      if (!resolved.contentAddressable) {
+        // Two distinct causes, two honest reasons (issues #497, #903), and no
+        // line to fall back on: refused as a state-dependent tool failure
+        // naming file and line (issue #1326).
+        throw new ContentAddressingNotSupportedError(
+          req.sessionId,
+          ErrorMessages.statementAddressingNotSupported({
+            ...contentUncheckableSource(),
+            hasNearLine: req.nearLine !== undefined
+          })
+        );
+      }
+      const lines = await readCheckedFileLines();
       const resolution = resolveStatement(lines, req.statement, resolved.path, req.nearLine);
       if (!resolution.ok) {
         throw new ProtocolError(ProtocolErrorCode.InvalidParams, resolution.message);
@@ -539,21 +534,25 @@ export class DebugMcpServer implements ToolContext {
     } else {
       line = req.line!;
       if (req.expectedContent !== undefined) {
-        const lines = await readLinesForContentAddressing('expectedContent');
-        const check = assertLineContent(lines, line, req.expectedContent, resolved.path, {
-          statementHint: supportsStatementAnchors(mode)
-        });
-        if (!check.ok) {
-          throw new ProtocolError(ProtocolErrorCode.InvalidParams, check.message);
-        }
-        if (check.matchQuality === 'substring') {
-          addressingWarning =
-            `expectedContent matched line ${line} as a substring of "${check.actual}", ` +
-            `not the whole line — confirm this is the intended line.`;
-        } else if (check.matchQuality === 'comment-stripped') {
-          addressingWarning =
-            `expectedContent matched line ${line} only after ignoring text past a '//' or '#' comment marker, ` +
-            `even inside strings (actual: "${check.actual}") — confirm this is the intended line.`;
+        if (!resolved.contentAddressable) {
+          skippedExpectedContent = true;
+        } else {
+          const lines = await readCheckedFileLines();
+          const check = assertLineContent(lines, line, req.expectedContent, resolved.path, {
+            statementHint: supportsStatementAnchors(mode)
+          });
+          if (!check.ok) {
+            throw new ProtocolError(ProtocolErrorCode.InvalidParams, check.message);
+          }
+          if (check.matchQuality === 'substring') {
+            addressingWarning =
+              `expectedContent matched line ${line} as a substring of "${check.actual}", ` +
+              `not the whole line — confirm this is the intended line.`;
+          } else if (check.matchQuality === 'comment-stripped') {
+            addressingWarning =
+              `expectedContent matched line ${line} only after ignoring text past a '//' or '#' comment marker, ` +
+              `even inside strings (actual: "${check.actual}") — confirm this is the intended line.`;
+          }
         }
       }
     }
@@ -569,12 +568,18 @@ export class DebugMcpServer implements ToolContext {
       ...(supportsLoudSnapping(mode) ? { requestedLine: line } : {}),
       ...(anchor !== undefined ? { anchor } : {})
     });
-    if (addressingWarning === undefined) {
-      return result;
+    if (skippedExpectedContent) {
+      addressingWarning = ErrorMessages.expectedContentNotCheckedWarning({
+        ...contentUncheckableSource(),
+        requestedLine: line
+      });
     }
     return {
       ...result,
-      warning: result.warning ? `${result.warning}; ${addressingWarning}` : addressingWarning
+      contentAddressable: resolved.contentAddressable,
+      ...(addressingWarning !== undefined
+        ? { warning: result.warning ? `${result.warning}; ${addressingWarning}` : addressingWarning }
+        : {})
     };
   }
 

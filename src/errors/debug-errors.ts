@@ -132,6 +132,22 @@ export class UnsupportedFeatureError extends DebugError {
 }
 
 /**
+ * Content-addressed breakpoint resolution (`statement`) was requested where the
+ * server cannot read the debuggee's authoritative source (issue #1326).
+ * State-dependent — the same arguments succeed on a launch — so the breakpoint
+ * handler reports it as a `{success: false}` tool result rather than throwing a
+ * JSON-RPC protocol error.
+ */
+export class ContentAddressingNotSupportedError extends DebugError {
+  public readonly sessionId: string;
+
+  constructor(sessionId: string, detail: string) {
+    super(ProtocolErrorCode.InvalidParams, detail, { sessionId });
+    this.sessionId = sessionId;
+  }
+}
+
+/**
  * Proxy not running error
  */
 export class ProxyNotRunningError extends DebugError {
