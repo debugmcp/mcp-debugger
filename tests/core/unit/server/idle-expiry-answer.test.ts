@@ -107,8 +107,25 @@ describe('what an agent sees of the idle policy (issue #1025, step 2)', () => {
         expect(describeIdleExpiry(record({ outcome: 'released' }))).toContain(' The process it was attached to was released and keeps running. ');
         expect(describeIdleExpiry(record({ outcome: 'closed' }))).toContain(' It had no running program by then. ');
         // Issue #1148: an attached process whose detach nothing acknowledged is not called released, or ended.
+        // Issue #1325: and the connection to the adapter was closed, which can have closed the target's debug port.
         expect(describeIdleExpiry(record({ outcome: 'unconfirmed' }))).toContain(
-          ' The debug adapter did not confirm that it released the process it was attached to, so whether that process is still running is not known. '
+          ' The debug adapter did not confirm that it released the process it was attached to, so whether that process is still running is not known;' +
+          ' the connection to the adapter was closed, and if the adapter belonged to the target (it was listening before the session attached),' +
+          " the target's debug port may have closed with it. "
+        );
+      });
+
+      it('says the connection was closed only when stopping the worker succeeded (issue #1325)', () => {
+        const sentence = describeIdleExpiry(record({ outcome: 'unconfirmed', stopFailed: 'kill EPERM' }));
+        expect(sentence).toContain(
+          ' The debug adapter did not confirm that it released the process it was attached to, so whether that process is still running is not known;' +
+          ' stopping the debugger then failed (kill EPERM), so whether the connection to the adapter was closed, and with it a debug port' +
+          ' that belonged to the target, is not known either. '
+        );
+        expect(sentence).not.toContain('; the connection to the adapter was closed');
+        // Another outcome is not reworded by a stop failure.
+        expect(describeIdleExpiry(record({ outcome: 'released', stopFailed: 'kill EPERM' }))).toContain(
+          ' The process it was attached to was released and keeps running. '
         );
       });
 

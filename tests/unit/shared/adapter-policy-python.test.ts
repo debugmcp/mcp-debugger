@@ -95,6 +95,63 @@ describe('PythonAdapterPolicy', () => {
     expect(PythonAdapterPolicy.validateLogMessage!('{total:.2f}')).toContain("{format(total, '.2f')}");
   });
 
+  describe('describeStepInFilter (issue #1328)', () => {
+    it('explains debugpy justMyCode filtering conditionally on launch unless disabled', () => {
+      const defaultHint = PythonAdapterPolicy.describeStepInFilter({ attachMode: false });
+      expect(defaultHint).toMatch(/^If the line called into Python library or dependency code/);
+      expect(defaultHint).toContain('dapLaunchArgs: { justMyCode: false }');
+
+      expect(
+        PythonAdapterPolicy.describeStepInFilter({
+          attachMode: false,
+          launch: { dapLaunchArgs: { justMyCode: true } }
+        })
+      ).toBe(defaultHint);
+
+      expect(
+        PythonAdapterPolicy.describeStepInFilter({
+          attachMode: false,
+          launch: { dapLaunchArgs: { justMyCode: false } }
+        })
+      ).toBeUndefined();
+    });
+
+    it('lets adapterLaunchConfig win over dapLaunchArgs, names the config bag that decides, and stays silent on attach', () => {
+      expect(
+        PythonAdapterPolicy.describeStepInFilter({
+          attachMode: false,
+          launch: {
+            dapLaunchArgs: { justMyCode: true },
+            adapterLaunchConfig: { justMyCode: false }
+          }
+        })
+      ).toBeUndefined();
+
+      const adapterWon = PythonAdapterPolicy.describeStepInFilter({
+        attachMode: false,
+        launch: {
+          dapLaunchArgs: { justMyCode: false },
+          adapterLaunchConfig: { justMyCode: true }
+        }
+      });
+      expect(adapterWon).toContain('adapterLaunchConfig: { justMyCode: false }');
+      expect(adapterWon).not.toContain('dapLaunchArgs');
+
+      // Unrelated keys in adapterLaunchConfig keep the dapLaunchArgs remedy.
+      expect(
+        PythonAdapterPolicy.describeStepInFilter({
+          attachMode: false,
+          launch: {
+            dapLaunchArgs: { justMyCode: true },
+            adapterLaunchConfig: { subProcess: false }
+          }
+        })
+      ).toContain('dapLaunchArgs: { justMyCode: false }');
+
+      expect(PythonAdapterPolicy.describeStepInFilter({ attachMode: true })).toBeUndefined();
+    });
+  });
+
   describe('getAdapterSpawnConfig', () => {
     // scriptPath is required by AdapterSpawnPayload but never read by this
     // policy — the debuggee script reaches debugpy through the launch config.
@@ -278,5 +335,41 @@ describe('PythonAdapterPolicy child adoption (the session tree, issue #1081)', (
       context()
     );
     expect(result?.childReport).toMatchObject({ targetId: '37012', name: 'Subprocess 37012' });
+  });
+});
+
+describe('PythonAdapterPolicy.describeUnboundBreakpoint (issue #1320)', () => {
+  const EXACT = 'Breakpoint in file that does not exist.';
+
+  it('explains debugpy unverified missing-file answers on an attach session', () => {
+    expect(
+      PythonAdapterPolicy.describeUnboundBreakpoint({ outcome: 'unverified', message: EXACT, attachMode: true })
+    ).toBe(
+      "debugpy looked for this path, after any adapterConfig.pathMappings, on the target's file system. " +
+        'If the target runs in a container or on another machine, attach with a pathMappings entry whose ' +
+        'localRoot contains this file and whose remoteRoot is the same directory on the target, or set the ' +
+        "breakpoint by the target's own path when no pathMappings entry rewrites it."
+    );
+  });
+
+  it('returns undefined on a launch session or a failed sync outcome', () => {
+    expect(
+      PythonAdapterPolicy.describeUnboundBreakpoint({ outcome: 'unverified', message: EXACT, attachMode: false })
+    ).toBeUndefined();
+    expect(
+      PythonAdapterPolicy.describeUnboundBreakpoint({ outcome: 'syncFailed', message: EXACT, attachMode: true })
+    ).toBeUndefined();
+  });
+
+  it.each([
+    'Breakpoint in file excluded by filters.',
+    'Breakpoint in file that does not exist',
+    'Breakpoint in file that does not exist. ',
+    '/host/app.py is not available',
+    ''
+  ])('returns undefined when the message is not debugpy exact sentence (%j)', (message) => {
+    expect(
+      PythonAdapterPolicy.describeUnboundBreakpoint({ outcome: 'unverified', message, attachMode: true })
+    ).toBeUndefined();
   });
 });

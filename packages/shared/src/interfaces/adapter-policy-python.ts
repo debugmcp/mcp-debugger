@@ -4,7 +4,7 @@
  * Encodes debugpy specific behaviors and variable handling logic.
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction } from './adapter-policy.js';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, StepInFilterContext, UnboundBreakpointContext } from './adapter-policy.js';
 import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-policy.js';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
@@ -70,8 +70,21 @@ const PYDEVD_PAUSED_AT_NOTE = '(note: full exception trace is shown but executio
  */
 const PYDEVD_CURRENT_FRAME_MARK = ' (Current frame)';
 
+/** debugpy's unverified-breakpoint sentence when `pydevd_file_utils.exists` finds no file on the target (issue #1320). */
+const DEBUGPY_MISSING_FILE_MESSAGE = 'Breakpoint in file that does not exist.';
+
+const PYTHON_ATTACH_UNBOUND_FILE_HINT =
+  "debugpy looked for this path, after any adapterConfig.pathMappings, on the target's file system. " +
+  'If the target runs in a container or on another machine, attach with a pathMappings entry whose ' +
+  'localRoot contains this file and whose remoteRoot is the same directory on the target, or set the ' +
+  "breakpoint by the target's own path when no pathMappings entry rewrites it.";
+
 export const PythonAdapterPolicy = {
   name: 'python',
+  describeUnboundBreakpoint: ({ outcome, message, attachMode }: UnboundBreakpointContext): string | undefined =>
+    attachMode && outcome === 'unverified' && message === DEBUGPY_MISSING_FILE_MESSAGE
+      ? PYTHON_ATTACH_UNBOUND_FILE_HINT
+      : undefined,
   // Python prints `Traceback (most recent call last):` and debugpy/runpy launcher
   // frames first and the user's innermost frame + `<Exception>: <message>` last
   // (issue #1277), so the plain last 8 lines carry both the user frame and the cause.
@@ -119,6 +132,32 @@ export const PythonAdapterPolicy = {
   },
   isChildReadyEvent: (evt: DebugProtocol.Event): boolean => {
     return evt?.event === 'initialized';
+  },
+
+  /**
+   * debugpy defaults `justMyCode` to `true` on launch, running calls into
+   * Python library or dependency code without stopping on `stepIn` unless
+   * `justMyCode: false` is passed (issue #1328). Attach sessions do not carry
+   * their `justMyCode` argument on `StepInFilterContext`, and `dapLaunchArgs`
+   * is launch-only, so attach returns `undefined`.
+   */
+  describeStepInFilter: ({ attachMode, launch }: StepInFilterContext): string | undefined => {
+    if (attachMode) {
+      return undefined;
+    }
+    const adapterConfig = launch?.adapterLaunchConfig;
+    const merged = { ...(launch?.dapLaunchArgs ?? {}), ...(adapterConfig ?? {}) };
+    if (merged.justMyCode === false) {
+      return undefined;
+    }
+    const configBag =
+      adapterConfig !== undefined && Object.hasOwn(adapterConfig, 'justMyCode')
+        ? 'adapterLaunchConfig'
+        : 'dapLaunchArgs';
+    return (
+      'If the line called into Python library or dependency code, debugpy ran through it without stopping ' +
+      `(justMyCode is true by default); pass ${configBag}: { justMyCode: false } to step into it.`
+    );
   },
   
   /**

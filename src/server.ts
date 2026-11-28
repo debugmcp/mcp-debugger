@@ -49,6 +49,7 @@ import {
   supportsLoudSnapping
 } from './utils/bp-addressing.js';
 import { isRedactionEnabled } from './utils/redaction-mode.js';
+import { isSnapshotEnabled } from './utils/snapshot-mode.js';
 import { getVariableAccessMode } from './utils/variable-access.js';
 import { assertLineContent, resolveStatement, stripTrailingComment } from './utils/breakpoint-resolver.js';
 import { outputResourceUri } from './server/output-resources.js';
@@ -347,7 +348,9 @@ export class DebugMcpServer implements ToolContext {
   }
 
   public async closeDebugSession(sessionId: string): Promise<CloseSessionOutcome> {
-    return this.sessionManager.closeSessionReporting(sessionId);
+    // An attached target is released the way detach_from_process releases it,
+    // and an overlapping close or detach joins the one in flight (issue #1325).
+    return this.sessionManager.closeDebugSession(sessionId);
   }
 
   /**
@@ -764,7 +767,9 @@ export class DebugMcpServer implements ToolContext {
     this.instructions = buildServerInstructions(getBpAddressingMode(this.environment), {
       redactionEnabled: isRedactionEnabled(this.environment),
       variableAccessMode: getVariableAccessMode(this.environment),
-      ...(this.idlePolicy.idleMs > 0 ? { idleWindow: describeIdleWindow(this.idlePolicy.idleMs) } : {})
+      snapshotEnabled: isSnapshotEnabled(this.environment),
+      containerMode: isContainerMode(this.environment),
+      idleMs: this.idlePolicy.idleMs
     });
 
     const sessionManagerConfig: SessionManagerConfig = {

@@ -279,6 +279,20 @@ export interface StepInFilterContext {
   };
 }
 
+/** Context passed to AdapterPolicy.describeUnboundBreakpoint (issues #357, #1320). */
+export interface UnboundBreakpointContext {
+  /**
+   * How the adapter reported the problem: `unverified` when the breakpoint
+   * reply succeeded with `verified: false`, `syncFailed` when the breakpoint
+   * request itself was refused or failed.
+   */
+  outcome: 'unverified' | 'syncFailed';
+  /** The adapter's (or failed sync's) message. */
+  message: string;
+  /** True for attach sessions, where breakpoint paths are resolved on the target rather than launched locally. */
+  attachMode: boolean;
+}
+
 /** Context passed to AdapterPolicy.generatedFileCandidates (issues #938/#950). */
 export interface GeneratedFileContext {
   /** The source path as the breakpoint or stop names it (absolute, server-resolved). */
@@ -552,6 +566,19 @@ export interface AdapterPolicy {
   functionBreakpointsBindLate?: boolean;
 
   /**
+   * Explain what an adapter's unbound-breakpoint message (or breakpoint-sync
+   * refusal) means when the adapter's own sentence is about the target's file
+   * system rather than the caller's host (issues #357, #1320). Read by the
+   * breakpoint controller with `outcome: 'unverified'` on `set_breakpoint`
+   * when a line breakpoint comes back unverified with a message (joined to
+   * `warning` after the adapter's own words, which stay first and unchanged),
+   * and with `outcome: 'syncFailed'` on a failed/refused breakpoint sync
+   * (`buildLiveSyncWarning` and `resyncAll`). Return `undefined` unless the
+   * outcome, message and session mode match a known case.
+   */
+  describeUnboundBreakpoint?(info: UnboundBreakpointContext): string | undefined;
+
+  /**
    * True when the adapter honours DAP's `noDebug` launch flag by not enabling
    * the debugger, so breakpoints, exception filters and an entry stop are
    * inert on such a launch and the start_debugging response says so
@@ -720,12 +747,16 @@ export interface AdapterPolicy {
   explainRequestFailure?(command: string, message: string, context: { program?: string }): string | undefined;
 
   /**
-   * Explain an engine-side step filter that causes `step_into` to step over
-   * calls by default (issue #1184: netcoredbg's `enableStepFiltering` for
-   * properties and operators; CodeLLDB's Rust step-avoid regexp). Appended to
-   * the step landing's `note` when `step_into` completes in the starting
-   * function without entering a callee. Optional — absent or undefined adds
-   * nothing beyond the factual "No function was entered." disclosure.
+   * Conditionally explain an active step filter that causes `step_into` to run
+   * through library, dependency, or language-synthesized code without stopping
+   * (issues #1184, #1328: Python debugpy's `justMyCode`, JavaScript's
+   * `skipFiles` + `smartStep`, netcoredbg's `enableStepFiltering` for
+   * properties and operators, and CodeLLDB's Rust `std`/`core`/`alloc`
+   * step-avoid regexp). Appended at most once per run (keyed by hint text on
+   * `session.run`) to the step landing's `note` when `step_into` stops in the
+   * starting function at the same visible call-stack depth; worded conditionally
+   * so it remains true whether or not the line contained a call. Optional —
+   * absent or undefined adds nothing beyond the core positional sentence.
    */
   describeStepInFilter?(info: StepInFilterContext): string | undefined;
 

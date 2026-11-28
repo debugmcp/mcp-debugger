@@ -2322,8 +2322,9 @@ describe('SessionManager - DAP Operations', () => {
         await vi.runAllTimersAsync();
         const result = await answer;
         expect(result.state).toBe(SessionState.PAUSED);
-        expect(result.data?.note ?? '').not.toContain('different call stack');
-        expect(result.data?.note ?? '').not.toContain('No function was entered');
+        expect(result.data?.note ?? '').not.toContain('No starting function appears');
+        expect(result.data?.note ?? '').not.toContain('at the same visible call-stack depth as before step_into');
+        expect(result.data?.note ?? '').not.toContain('did not stop inside a called function');
         expect(sessionManager.getSession(session.id)?.lastStepProvenance).toBeUndefined();
       });
 
@@ -2353,9 +2354,521 @@ describe('SessionManager - DAP Operations', () => {
           attachMode: false,
           launch: expect.objectContaining({ dapLaunchArgs: expect.objectContaining({ stopOnEntry: true, justMyCode: true }) })
         }));
-        expect(result.data?.note).toContain('No function was entered');
+        expect(result.data?.note).toContain("The stop is in 'main' at the same visible call-stack depth as before step_into.");
         if (outcome === 'hint') expect(result.data?.note).toContain('Step filtering is enabled.');
         else expect(result.data?.note ?? '').not.toContain('Step filtering');
+      });
+
+      it('does not infer a returned call from Python (return) <fn> entries in snapshot.changedVariables (#1328)', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        let stepCompleted = false;
+        dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+          if (command === 'stackTrace') {
+            return {
+              success: true,
+              body: {
+                stackFrames: [{ id: 1, name: 'main', source: { path: '/proj/app.py' }, line: stepCompleted ? 11 : 10, column: 1 }],
+                totalFrames: 1
+              }
+            };
+          }
+          if (command === 'scopes') {
+            return {
+              success: true,
+              body: { scopes: [{ name: 'Locals', variablesReference: 100, expensive: false }] }
+            };
+          }
+          if (command === 'variables') {
+            return {
+              success: true,
+              body: {
+                variables: stepCompleted
+                  ? [
+                      { name: 'a', value: "'x'", type: 'str', variablesReference: 0 },
+                      { name: '(return) join', value: "'x/y'", type: 'str', variablesReference: 0 },
+                      { name: 'out', value: "'x/y'", type: 'str', variablesReference: 0 }
+                    ]
+                  : [{ name: 'a', value: "'x'", type: 'str', variablesReference: 0 }]
+              }
+            };
+          }
+          if (command === 'stepIn') {
+            stepCompleted = true;
+            process.nextTick(() => dependencies.mockProxyManager.simulateStopped(1, 'step'));
+          }
+          return { success: true };
+        });
+
+        // Move off the initial `entry` stop onto a breakpoint stop so waitForStop seeds snapshotDiffBase before step_into.
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+        const initialWait = sessionManager.waitForStop(session.id);
+        await vi.runAllTimersAsync();
+        await initialWait;
+
+        const step = sessionManager.stepInto(session.id);
+        await vi.runAllTimersAsync();
+        const result = await step;
+
+        expect(result.success).toBe(true);
+        expect(result.data?.snapshot?.changedVariables?.['(return) join']).toEqual({ after: "'x/y'", new: true });
+        expect(result.data?.note).toBe("The stop is in 'main' at the same visible call-stack depth as before step_into.");
+        expect(result.data?.note).not.toContain('returned)');
+        expect(result.data?.note).not.toContain('did not stop inside a called function');
+        expect(result.data?.note).not.toContain('No function was entered');
+      });
+
+      it('delivers each distinct step-in filter hint once per run across plain steps, callee entries, dry runs, and restarts (#1328)', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        let activeHint = 'Hint A: default filter.';
+        const hook = vi.fn(() => activeHint);
+        const policyOwner = sessionManager as unknown as { selectPolicy: (language: string) => AdapterPolicy };
+        const selectPolicy = policyOwner.selectPolicy.bind(sessionManager);
+        vi.spyOn(policyOwner, 'selectPolicy').mockImplementation((language) => ({
+          ...selectPolicy(language),
+          describeStepInFilter: hook
+        }));
+
+        let currentFrames = [
+          { id: 1, name: 'main', source: { path: '/proj/app.py' }, line: 10, column: 1 }
+        ];
+        let nextLandingFrames = currentFrames;
+        dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+          if (command === 'stackTrace') {
+            return { success: true, body: { stackFrames: currentFrames, totalFrames: currentFrames.length } };
+          }
+          if (command === 'stepIn') {
+            currentFrames = nextLandingFrames;
+            process.nextTick(() => dependencies.mockProxyManager.simulateStopped(1, 'step'));
+          }
+          return { success: true };
+        });
+
+        // 1. Entering a callee calls the policy hook at step start but returns no hint, so it must NOT consume Hint A.
+        nextLandingFrames = [
+          { id: 2, name: 'callee', source: { path: '/proj/app.py' }, line: 2, column: 1 },
+          { id: 1, name: 'main', source: { path: '/proj/app.py' }, line: 10, column: 1 }
+        ];
+        const intoCallee = sessionManager.stepInto(session.id);
+        await vi.runAllTimersAsync();
+        expect((await intoCallee).data?.note).toBeUndefined();
+        expect(hook).toHaveBeenCalledTimes(1);
+        expect(sessionManager.getSession(session.id)?.run.deliveredStepFilterHints).toBeUndefined();
+
+        // 2. First step_into that stays in the same function at the same visible depth delivers Hint A.
+        nextLandingFrames = [
+          { id: 2, name: 'callee', source: { path: '/proj/app.py' }, line: 3, column: 1 },
+          { id: 1, name: 'main', source: { path: '/proj/app.py' }, line: 10, column: 1 }
+        ];
+        const firstSameDepth = sessionManager.stepInto(session.id);
+        await vi.runAllTimersAsync();
+        expect((await firstSameDepth).data?.note).toBe(
+          "The stop is in 'callee' at the same visible call-stack depth as before step_into. Hint A: default filter."
+        );
+
+        // 3. Second step_into in the same run with the same hint carries only the positional sentence.
+        nextLandingFrames = [
+          { id: 2, name: 'callee', source: { path: '/proj/app.py' }, line: 4, column: 1 },
+          { id: 1, name: 'main', source: { path: '/proj/app.py' }, line: 10, column: 1 }
+        ];
+        const secondSameDepth = sessionManager.stepInto(session.id);
+        await vi.runAllTimersAsync();
+        expect((await secondSameDepth).data?.note).toBe(
+          "The stop is in 'callee' at the same visible call-stack depth as before step_into."
+        );
+
+        // 4. Dry run leaves the run's delivered set intact.
+        const dryRun = await sessionManager.startDebugging(session.id, 'test.py', [], undefined, true);
+        expect(dryRun.success).toBe(true);
+        nextLandingFrames = [
+          { id: 2, name: 'callee', source: { path: '/proj/app.py' }, line: 5, column: 1 },
+          { id: 1, name: 'main', source: { path: '/proj/app.py' }, line: 10, column: 1 }
+        ];
+        const afterDryRun = sessionManager.stepInto(session.id);
+        await vi.runAllTimersAsync();
+        expect((await afterDryRun).data?.note).toBe(
+          "The stop is in 'callee' at the same visible call-stack depth as before step_into."
+        );
+
+        // 5. A different hint text in the same run is still delivered once, then withheld.
+        activeHint = 'Hint B: alternate configuration.';
+        nextLandingFrames = [
+          { id: 2, name: 'callee', source: { path: '/proj/app.py' }, line: 6, column: 1 },
+          { id: 1, name: 'main', source: { path: '/proj/app.py' }, line: 10, column: 1 }
+        ];
+        const firstHintB = sessionManager.stepInto(session.id);
+        await vi.runAllTimersAsync();
+        expect((await firstHintB).data?.note).toBe(
+          "The stop is in 'callee' at the same visible call-stack depth as before step_into. Hint B: alternate configuration."
+        );
+
+        nextLandingFrames = [
+          { id: 2, name: 'callee', source: { path: '/proj/app.py' }, line: 7, column: 1 },
+          { id: 1, name: 'main', source: { path: '/proj/app.py' }, line: 10, column: 1 }
+        ];
+        const secondHintB = sessionManager.stepInto(session.id);
+        await vi.runAllTimersAsync();
+        expect((await secondHintB).data?.note).toBe(
+          "The stop is in 'callee' at the same visible call-stack depth as before step_into."
+        );
+
+        // 6. Restarting the session starts a fresh run with an empty delivered set, so Hint B is delivered again.
+        vi.spyOn(dependencies.mockProxyManager, 'stop').mockResolvedValue();
+        const restarting = sessionManager.restartDebugging(session.id);
+        await vi.runAllTimersAsync();
+        await restarting;
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+        currentFrames = [{ id: 1, name: 'main', source: { path: '/proj/app.py' }, line: 10, column: 1 }];
+        nextLandingFrames = [{ id: 1, name: 'main', source: { path: '/proj/app.py' }, line: 11, column: 1 }];
+        dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+          if (command === 'stackTrace') {
+            return { success: true, body: { stackFrames: currentFrames, totalFrames: currentFrames.length } };
+          }
+          if (command === 'stepIn') {
+            currentFrames = nextLandingFrames;
+            process.nextTick(() => dependencies.mockProxyManager.simulateStopped(1, 'step'));
+          }
+          return { success: true };
+        });
+
+        const afterRestart = sessionManager.stepInto(session.id);
+        await vi.runAllTimersAsync();
+        expect((await afterRestart).data?.note).toBe(
+          "The stop is in 'main' at the same visible call-stack depth as before step_into. Hint B: alternate configuration."
+        );
+      });
+
+      it('shares delivered step-in filter hints across sessions of one tree and keeps them across refused and accepted hot restarts (#1328)', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        const policyOwner = sessionManager as unknown as { selectPolicy: (language: string) => AdapterPolicy };
+        const selectPolicy = policyOwner.selectPolicy.bind(sessionManager);
+        vi.spyOn(policyOwner, 'selectPolicy').mockImplementation((language) => ({
+          ...selectPolicy(language),
+          restartViaDapRequest: true,
+          describeStepInFilter: () => 'Shared tree hint.'
+        }));
+
+        // Adopt a child session sharing `session.run`.
+        dependencies.mockProxyManager.simulateEvent('child-reported', {
+          reportId: 'r-step-hint',
+          targetId: '5150',
+          name: 'Subprocess 5150',
+          configuration: { type: 'python', subProcessId: 5150 }
+        });
+        await vi.advanceTimersByTimeAsync(10);
+        const childInfo = sessionManager.getAllSessions().find((s) => s.parentSessionId === session.id)!;
+        const childView = dependencies.mockProxyManager.childViews.get(childInfo.id)!;
+        childView.simulateStopped(1, 'breakpoint');
+
+        let rootLine = 10;
+        let refuseHotRestart = false;
+        dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+          if (command === 'stackTrace') {
+            return {
+              success: true,
+              body: { stackFrames: [{ id: 1, name: 'parent_main', source: { path: '/proj/parent.py' }, line: rootLine, column: 1 }], totalFrames: 1 }
+            };
+          }
+          if (command === 'stepIn') {
+            rootLine += 1;
+            process.nextTick(() => dependencies.mockProxyManager.simulateStopped(1, 'step'));
+          }
+          if (command === 'restart') {
+            if (refuseHotRestart) {
+              throw new Error('hot restart refused');
+            }
+            process.nextTick(() => dependencies.mockProxyManager.simulateStopped(1, 'breakpoint'));
+          }
+          return { success: true };
+        });
+
+        let childLine = 20;
+        childView.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+          if (command === 'stackTrace') {
+            return {
+              success: true,
+              body: { stackFrames: [{ id: 1, name: 'child_worker', source: { path: '/proj/worker.py' }, line: childLine, column: 1 }], totalFrames: 1 }
+            };
+          }
+          if (command === 'stepIn') {
+            childLine += 1;
+            process.nextTick(() => childView.simulateStopped(1, 'step'));
+          }
+          return { success: true };
+        });
+
+        // Root delivers the hint first.
+        const rootStep = sessionManager.stepInto(session.id);
+        await vi.runAllTimersAsync();
+        expect((await rootStep).data?.note).toBe(
+          "The stop is in 'parent_main' at the same visible call-stack depth as before step_into. Shared tree hint."
+        );
+
+        // Child shares `session.run`, so its step_into gets only the positional sentence.
+        const childStep = sessionManager.stepInto(childInfo.id);
+        await vi.runAllTimersAsync();
+        expect((await childStep).data?.note).toBe(
+          "The stop is in 'child_worker' at the same visible call-stack depth as before step_into."
+        );
+
+        sessionManager.getSession(session.id)!.adapterCapabilities = { supportsRestartRequest: true };
+
+        // A refused hot restart never reaches ProxyLauncher.start and keeps `deliveredStepFilterHints`.
+        refuseHotRestart = true;
+        const refusedRestart = await sessionManager.restartDebugging(session.id);
+        expect(refusedRestart.success).toBe(false);
+        expect(refusedRestart.error).toContain('The adapter refused the restart request: hot restart refused');
+        expect([...(sessionManager.getSession(session.id)?.run.deliveredStepFilterHints ?? [])]).toEqual(['Shared tree hint.']);
+
+        const rootAfterRefusedHotRestart = sessionManager.stepInto(session.id);
+        await vi.runAllTimersAsync();
+        expect((await rootAfterRefusedHotRestart).data?.note).toBe(
+          "The stop is in 'parent_main' at the same visible call-stack depth as before step_into."
+        );
+
+        // An accepted hot restart continues the same run in place and keeps `deliveredStepFilterHints`.
+        refuseHotRestart = false;
+        const hotRestarting = sessionManager.restartDebugging(session.id);
+        await vi.runAllTimersAsync();
+        expect((await hotRestarting).data?.hotRestart).toBe(true);
+        expect([...(sessionManager.getSession(session.id)?.run.deliveredStepFilterHints ?? [])]).toEqual(['Shared tree hint.']);
+
+        const rootAfterHotRestart = sessionManager.stepInto(session.id);
+        await vi.runAllTimersAsync();
+        expect((await rootAfterHotRestart).data?.note).toBe(
+          "The stop is in 'parent_main' at the same visible call-stack depth as before step_into."
+        );
+      });
+
+      it('clears deliveredStepFilterHints only in ProxyLauncher.start across launch, attach, relaunch, dry run, and pre-start refusals or failures (#1328)', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        const managed = sessionManager.getSession(session.id)!;
+        const policyOwner = sessionManager as unknown as { selectPolicy: (language: string) => AdapterPolicy };
+        const baseSelectPolicy = policyOwner.selectPolicy.bind(sessionManager);
+        let failNextSelectPolicy: string | undefined;
+        vi.spyOn(policyOwner, 'selectPolicy').mockImplementation((language) => {
+          if (failNextSelectPolicy) {
+            const msg = failNextSelectPolicy;
+            failNextSelectPolicy = undefined;
+            throw new Error(msg);
+          }
+          return {
+            ...baseSelectPolicy(language),
+            describeStepInFilter: () => 'Run hint.'
+          };
+        });
+
+        let line = 10;
+        const installStepAndAttachHandlers = () => {
+          dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+            if (command === 'stackTrace') {
+              return {
+                success: true,
+                body: {
+                  stackFrames: [{ id: 1, name: 'main', source: { path: '/proj/app.py' }, line, column: 1 }],
+                  totalFrames: 1
+                }
+              };
+            }
+            if (command === 'stepIn') {
+              line += 1;
+              process.nextTick(() => dependencies.mockProxyManager.simulateStopped(1, 'step'));
+            }
+            if (command === 'threads') {
+              return { success: true, body: { threads: [{ id: 1, name: 'main' }] } };
+            }
+            return { success: true };
+          });
+        };
+        installStepAndAttachHandlers();
+
+        const deliverHint = async () => {
+          const step = sessionManager.stepInto(session.id);
+          await vi.runAllTimersAsync();
+          expect((await step).data?.note).toBe(
+            "The stop is in 'main' at the same visible call-stack depth as before step_into. Run hint."
+          );
+          expect([...(managed.run.deliveredStepFilterHints ?? [])]).toEqual(['Run hint.']);
+        };
+
+        const proxyLauncher = (sessionManager as unknown as {
+          proxyLauncher: { start: (...args: unknown[]) => Promise<unknown> };
+        }).proxyLauncher;
+        const startSpy = vi.spyOn(proxyLauncher, 'start');
+
+        await deliverHint();
+
+        // 1. Kept across a dry run (never reaches ProxyLauncher.start).
+        const dryRun = await sessionManager.startDebugging(session.id, 'test.py', [], undefined, true);
+        expect(dryRun.success).toBe(true);
+        expect(startSpy).toHaveBeenCalledTimes(0);
+        expect([...(managed.run.deliveredStepFilterHints ?? [])]).toEqual(['Run hint.']);
+
+        // 2. Kept across refused launch, attach, and restart calls that never reach ProxyLauncher.start.
+        vi.spyOn(dependencies.adapterRegistry, 'getFactoryMetadata').mockResolvedValueOnce({
+          modes: { testRunners: [] }
+        } as never);
+        const refusedLaunch = await sessionManager.startDebugging(
+          session.id,
+          'test.py',
+          [],
+          undefined,
+          false,
+          { testRunner: 'pytest' }
+        );
+        expect(refusedLaunch.success).toBe(false);
+        expect(startSpy).toHaveBeenCalledTimes(0);
+        expect([...(managed.run.deliveredStepFilterHints ?? [])]).toEqual(['Run hint.']);
+
+        const refusedAttachTimeout = await sessionManager.attachToProcess(session.id, {
+          port: 9229,
+          verifyTimeout: -1
+        });
+        expect(refusedAttachTimeout.success).toBe(false);
+        expect(startSpy).toHaveBeenCalledTimes(0);
+        expect([...(managed.run.deliveredStepFilterHints ?? [])]).toEqual(['Run hint.']);
+
+        vi.spyOn(dependencies.adapterRegistry, 'getFactoryMetadata').mockResolvedValueOnce({
+          modes: { attach: 'none' }
+        } as never);
+        const refusedAttachMode = await sessionManager.attachToProcess(session.id, { port: 9229 });
+        expect(refusedAttachMode.success).toBe(false);
+        expect(startSpy).toHaveBeenCalledTimes(0);
+        expect([...(managed.run.deliveredStepFilterHints ?? [])]).toEqual(['Run hint.']);
+
+        managed.run.attachMode = true;
+        const refusedRestart = await sessionManager.restartDebugging(session.id);
+        managed.run.attachMode = false;
+        expect(refusedRestart.success).toBe(false);
+        expect(startSpy).toHaveBeenCalledTimes(0);
+        expect([...(managed.run.deliveredStepFilterHints ?? [])]).toEqual(['Run hint.']);
+
+        // 3. Kept across failed launch and attach calls that pass pre-checks and enter
+        //    DebugLauncher.launch / AttachController.attach, then fail before ProxyLauncher.start.
+        vi.spyOn(dependencies.mockProxyManager, 'stop').mockResolvedValue();
+        failNextSelectPolicy = 'launch failed before ProxyLauncher.start';
+        await expect(sessionManager.startDebugging(session.id, 'test.py')).rejects.toThrow(
+          'launch failed before ProxyLauncher.start'
+        );
+        expect(startSpy).toHaveBeenCalledTimes(0);
+        expect([...(managed.run.deliveredStepFilterHints ?? [])]).toEqual(['Run hint.']);
+
+        failNextSelectPolicy = 'attach failed before ProxyLauncher.start';
+        const failedAttach = await sessionManager.attachToProcess(session.id, {
+          port: 9229,
+          host: '127.0.0.1',
+          stopOnEntry: false
+        });
+        expect(failedAttach.success).toBe(false);
+        expect(failedAttach.error).toContain('attach failed before ProxyLauncher.start');
+        expect(startSpy).toHaveBeenCalledTimes(0);
+        expect([...(managed.run.deliveredStepFilterHints ?? [])]).toEqual(['Run hint.']);
+
+        // 4. Empty after a real launch on a session whose prior run had delivered hints.
+        const launched = sessionManager.startDebugging(session.id, 'test.py');
+        await vi.runAllTimersAsync();
+        expect((await launched).success).toBe(true);
+        expect(startSpy).toHaveBeenCalledTimes(1);
+        expect(managed.run.deliveredStepFilterHints).toBeUndefined();
+
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+        installStepAndAttachHandlers();
+        await deliverHint();
+
+        // 5. Empty after a restart_debugging that relaunches.
+        const relaunched = sessionManager.restartDebugging(session.id);
+        await vi.runAllTimersAsync();
+        const relaunchedResult = await relaunched;
+        expect(relaunchedResult.success).toBe(true);
+        expect(relaunchedResult.data?.hotRestart).toBeUndefined();
+        expect(startSpy).toHaveBeenCalledTimes(2);
+        expect(managed.run.deliveredStepFilterHints).toBeUndefined();
+
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+        installStepAndAttachHandlers();
+        await deliverHint();
+
+        // 6. Empty after an attach on a session that had a launch.
+        installStepAndAttachHandlers();
+        const attaching = sessionManager.attachToProcess(session.id, {
+          port: 9229,
+          host: '127.0.0.1',
+          stopOnEntry: false
+        });
+        await vi.runAllTimersAsync();
+        expect((await attaching).success).toBe(true);
+        expect(startSpy).toHaveBeenCalledTimes(3);
+        expect(managed.run.deliveredStepFilterHints).toBeUndefined();
+      });
+
+      it('does not record a step-in filter hint when the step answer is superseded before it is returned (#1328)', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        const policyOwner = sessionManager as unknown as { selectPolicy: (language: string) => AdapterPolicy };
+        const selectPolicy = policyOwner.selectPolicy.bind(sessionManager);
+        vi.spyOn(policyOwner, 'selectPolicy').mockImplementation((language) => ({
+          ...selectPolicy(language),
+          describeStepInFilter: () => 'Superseded hint.'
+        }));
+
+        let stackReads = 0;
+        let releaseSupersededLanding: ((value: unknown) => void) | undefined;
+        dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation((command: string) => {
+          if (command === 'stepIn') {
+            process.nextTick(() => dependencies.mockProxyManager.simulateStopped(1, 'step'));
+            return Promise.resolve({ success: true });
+          }
+          if (command === 'stackTrace') {
+            stackReads += 1;
+            if (stackReads === 1) {
+              return Promise.resolve({
+                success: true,
+                body: {
+                  stackFrames: [{ id: 1, name: 'main', source: { path: '/proj/app.py' }, line: 10, column: 1 }],
+                  totalFrames: 1
+                }
+              });
+            }
+            if (stackReads === 2) {
+              return new Promise((resolve) => {
+                releaseSupersededLanding = resolve;
+              });
+            }
+            return Promise.resolve({
+              success: true,
+              body: {
+                stackFrames: [
+                  { id: 2, name: 'callee', source: { path: '/proj/app.py' }, line: 2, column: 1 },
+                  { id: 1, name: 'main', source: { path: '/proj/app.py' }, line: 10, column: 1 }
+                ],
+                totalFrames: 2
+              }
+            });
+          }
+          return Promise.resolve({ success: true });
+        });
+
+        const stepPromise = sessionManager.stepInto(session.id);
+        await vi.advanceTimersByTimeAsync(20);
+        expect(releaseSupersededLanding).toBeDefined();
+
+        // A superseding stop completes its landing read first (entering `callee`, with no hint),
+        // settling `executeStep` before the first `onStopped` finishes its same-depth landing read.
+        dependencies.mockProxyManager.simulateStopped(1, 'step');
+        await vi.advanceTimersByTimeAsync(20);
+        const returned = await stepPromise;
+        expect(returned.success).toBe(true);
+        expect(returned.data?.location?.line).toBe(2);
+        expect(returned.data?.note).toBeUndefined();
+
+        releaseSupersededLanding!({
+          success: true,
+          body: {
+            stackFrames: [{ id: 1, name: 'main', source: { path: '/proj/app.py' }, line: 11, column: 1 }],
+            totalFrames: 1
+          }
+        });
+        await vi.runAllTimersAsync();
+
+        expect(sessionManager.getSession(session.id)?.run.deliveredStepFilterHints).toBeUndefined();
       });
 
       it('keeps the session PAUSED and usable when the adapter refuses a step with DapResponseError (issue #1179)', async () => {
@@ -2546,7 +3059,9 @@ describe('SessionManager - DAP Operations', () => {
 
         expect(stackReads).toBeGreaterThanOrEqual(2);
         expect(result.data?.note).toContain('returned from BUMP-PARA to VIA-TIMES (3 times through the performed range)');
-        expect(result.data?.note).toContain("still in 'global.key' at the same call-stack depth");
+        expect(result.data?.note).toContain(
+          "The stop is in 'global.key' at the same visible call-stack depth as before step_out (the same call, or another call of 'global.key')."
+        );
       });
     });
 

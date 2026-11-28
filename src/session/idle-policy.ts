@@ -79,14 +79,32 @@ export interface IdleExpiryRecord {
    * (issue #1148): the close did not see what became of the process.
    */
   readonly outcome: 'ended' | 'released' | 'closed' | 'unconfirmed';
+  /**
+   * Why stopping the session's worker failed, when it did (issue #1325): an
+   * `unconfirmed` outcome then cannot say the connection to the adapter was
+   * closed.
+   */
+  readonly stopFailed?: string;
 }
+
+const UNCONFIRMED_RELEASE =
+  'The debug adapter did not confirm that it released the process it was attached to, so whether that process is still running is not known';
 
 const OUTCOME_SENTENCE: Record<IdleExpiryRecord['outcome'], string> = {
   ended: 'Its program was ended.',
   released: 'The process it was attached to was released and keeps running.',
   closed: 'It had no running program by then.',
-  unconfirmed: 'The debug adapter did not confirm that it released the process it was attached to, so whether that process is still running is not known.'
+  unconfirmed: `${UNCONFIRMED_RELEASE}; the connection to the adapter was closed, and if the adapter belonged to the target (it was listening before the session attached), the target's debug port may have closed with it.`
 };
+
+/** The outcome sentence, said of what the close observed (issue #1325). */
+function outcomeSentence(record: IdleExpiryRecord): string {
+  if (record.outcome === 'unconfirmed' && record.stopFailed !== undefined) {
+    return `${UNCONFIRMED_RELEASE}; stopping the debugger then failed (${record.stopFailed}), so whether the connection ` +
+      'to the adapter was closed, and with it a debug port that belonged to the target, is not known either.';
+  }
+  return OUTCOME_SENTENCE[record.outcome];
+}
 
 /** How many expiry records the core keeps; the oldest go first. */
 export const IDLE_EXPIRY_RECORD_LIMIT = 200;
@@ -103,7 +121,7 @@ export function describeIdleExpiry(record: IdleExpiryRecord): string {
   return `${who} was closed by the idle policy at ${new Date(record.closedAt).toISOString()}: ` +
     `no tool call named it or its tree for ${idle} ` +
     `(the window is ${describeIdleWindow(record.windowMs)}, ${DEBUG_SESSION_IDLE_ENV}=${record.windowMs}). ` +
-    `${OUTCOME_SENTENCE[record.outcome]} Create a new session to continue.`;
+    `${outcomeSentence(record)} Create a new session to continue.`;
 }
 
 /** How long a window is, in the unit a reader thinks in. */

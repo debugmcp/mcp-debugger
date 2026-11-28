@@ -251,7 +251,7 @@ describe('Server Session Tools Tests', () => {
   describe('close_debug_session', () => {
 
     it('should close session successfully', async () => {
-      mockSessionManager.closeSessionReporting.mockResolvedValue({ closed: true, closedSessionIds: ['test-session'] });
+      mockSessionManager.closeDebugSession.mockResolvedValue({ closed: true, closedSessionIds: ['test-session'] });
       
       const result = await callToolHandler({
         method: 'tools/call',
@@ -266,7 +266,7 @@ describe('Server Session Tools Tests', () => {
     });
 
     it('answers the tree fields of a close and forgets every closed output resource (issue #1081)', async () => {
-      mockSessionManager.closeSessionReporting.mockImplementation(async () => {
+      mockSessionManager.closeDebugSession.mockImplementation(async () => {
         const closedSessionIds = ['grandchild', 'child', 'test-session'];
         closedSessionIds.forEach(sessionRemovedListener);
         return { closed: true, closedSessionIds, childrenClosed: 2, released: true };
@@ -292,7 +292,7 @@ describe('Server Session Tools Tests', () => {
 
     it('says what is seen of what the closed root\'s attach left in its target, the field detach carries (issue #1261)', async () => {
       const atEnd = vi.fn(async () => 'not listening: 127.0.0.1:9229 no longer accepts connections');
-      mockSessionManager.closeSessionReporting.mockResolvedValue({
+      mockSessionManager.closeDebugSession.mockResolvedValue({
         closed: true,
         closedSessionIds: ['test-session'],
         released: true,
@@ -313,9 +313,9 @@ describe('Server Session Tools Tests', () => {
       expect(atEnd).toHaveBeenCalledTimes(1);
     });
 
-    it('says the release was not confirmed, and why, when nothing acknowledged the detach (issue #1148)', async () => {
-      mockSessionManager.closeSessionReporting.mockResolvedValue({
-        closed: true, closedSessionIds: ['test-session'], releaseUnconfirmed: 'DAP disconnect request timed out after 1000ms'
+    it('says the release was not confirmed, why, and what closing the connection can have done (issues #1148, #1325)', async () => {
+      mockSessionManager.closeDebugSession.mockResolvedValue({
+        closed: true, closedSessionIds: ['test-session'], releaseUnconfirmed: 'no answer within 10000 ms'
       });
 
       const result = await callToolHandler({
@@ -326,13 +326,87 @@ describe('Server Session Tools Tests', () => {
       expect(JSON.parse(result.content[0].text)).toEqual({
         success: true,
         message: 'Closed debug session: test-session',
-        warning: 'The debug adapter did not confirm that it released the process (DAP disconnect request timed out after 1000ms); ' +
-          'whether the process is still running is not known'
+        warning: 'The debug adapter did not confirm that it released the process (no answer within 10000 ms). ' +
+          'The connection to the adapter was closed: if the adapter belongs to the target (it was listening before this ' +
+          "session attached), the target's debug port may have closed with it. Whether the process is still running is not known"
       });
     });
 
+    it("does not say the connection was closed when stopping the worker failed: it says that, and why (issue #1325)", async () => {
+      mockSessionManager.closeDebugSession.mockResolvedValue({
+        closed: true, closedSessionIds: ['test-session'], releaseUnconfirmed: 'no answer within 10000 ms', stopFailed: 'kill EPERM'
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'close_debug_session', arguments: { sessionId: 'test-session' } }
+      });
+
+      const warning = JSON.parse(result.content[0].text).warning as string;
+      expect(warning).toBe(
+        'The debug adapter did not confirm that it released the process (no answer within 10000 ms). Stopping the debugger ' +
+        'then failed (kill EPERM), so whether its connection to the adapter was closed, and with it a debug port that belongs ' +
+        'to the target, is not known. Whether the process is still running is not known'
+      );
+      expect(warning).not.toContain('The connection to the adapter was closed');
+    });
+
+    it.each([
+      ['a confirmed release', { releasedSessionIds: ['test-session'], released: true as const }, { released: true }],
+      ["the program's reported exit", { processEnded: true as const }, { processEnded: true }]
+    ])('says stopping the worker failed beside %s too (issue #1325)', async (_fate, fate, fields) => {
+      // A close that joined a detach whose stop failed, and whose own stop then failed as well.
+      mockSessionManager.closeDebugSession.mockResolvedValue({
+        closed: true, closedSessionIds: ['test-session'], ...fate, stopFailed: 'kill EPERM'
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'close_debug_session', arguments: { sessionId: 'test-session' } }
+      });
+
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        success: true,
+        message: 'Closed debug session: test-session',
+        ...fields,
+        warning: 'Stopping the debugger failed (kill EPERM): the session was removed all the same, and whether its ' +
+          'connection to the adapter was closed is not known'
+      });
+    });
+
+    it('says stopping the worker failed when that is all the close can say, as for a child whose stop failed (issue #1325)', async () => {
+      // A child's close whose stop failed claims neither processEnded nor released.
+      mockSessionManager.closeDebugSession.mockResolvedValue({
+        closed: true, closedSessionIds: ['test-session'], stopFailed: 'child close failed before forwarding'
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'close_debug_session', arguments: { sessionId: 'test-session' } }
+      });
+
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        success: true,
+        message: 'Closed debug session: test-session',
+        warning: 'Stopping the debugger failed (child close failed before forwarding): the session was removed all the ' +
+          'same, and whether its connection to the adapter was closed is not known'
+      });
+    });
+
+    it("closes through the session manager's close_debug_session ending, which an overlapping close or detach joins (issue #1325)", async () => {
+      mockSessionManager.closeDebugSession.mockResolvedValue({ closed: true, closedSessionIds: ['test-session'] });
+
+      await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'close_debug_session', arguments: { sessionId: 'test-session' } }
+      });
+
+      expect(mockSessionManager.closeDebugSession).toHaveBeenCalledWith('test-session');
+      expect(mockSessionManager.closeSessionReporting).not.toHaveBeenCalled();
+    });
+
     it('says processEnded when the close ended a child process', async () => {
-      mockSessionManager.closeSessionReporting.mockResolvedValue({ closed: true, closedSessionIds: ['child'], processEnded: true });
+      mockSessionManager.closeDebugSession.mockResolvedValue({ closed: true, closedSessionIds: ['child'], processEnded: true });
 
       const result = await callToolHandler({
         method: 'tools/call',
@@ -343,7 +417,7 @@ describe('Server Session Tools Tests', () => {
     });
 
     it('should handle session not found', async () => {
-      mockSessionManager.closeSessionReporting.mockResolvedValue({ closed: false, closedSessionIds: [] });
+      mockSessionManager.closeDebugSession.mockResolvedValue({ closed: false, closedSessionIds: [] });
       
       const result = await callToolHandler({
         method: 'tools/call',
@@ -359,7 +433,7 @@ describe('Server Session Tools Tests', () => {
     });
 
     it('should handle SessionManager errors', async () => {
-      mockSessionManager.closeSessionReporting.mockRejectedValue(new Error('Close failed'));
+      mockSessionManager.closeDebugSession.mockRejectedValue(new Error('Close failed'));
       
       await expect(callToolHandler({
         method: 'tools/call',

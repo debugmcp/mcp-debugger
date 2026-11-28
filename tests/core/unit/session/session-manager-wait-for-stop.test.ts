@@ -329,9 +329,86 @@ describe('SessionManager - waitForStop (issue #849)', () => {
     await afterStop();
 
     expect(wait.result()?.state).toBe(SessionState.PAUSED);
-    expect(wait.result()?.data?.note).toContain("still in 'callback' at the same call-stack depth");
+    expect(wait.result()?.data?.note).toContain(
+      "The stop is in 'callback' at the same visible call-stack depth as before step_out (the same call, or another call of 'callback')."
+    );
     expect(wait.result()?.data?.location).toMatchObject({ file: '/app/callback.py', line: 3 });
     expect(sessionManager.getSession(sessionId)?.inFlightStep).toBeUndefined();
+  });
+
+  it('delivers the step_into filter hint once when wait_for_stop collects a delayed step_into, and not when it entered a callee (#1328)', async () => {
+    const sessionId = await runningSession();
+    const policyOwner = sessionManager as unknown as { selectPolicy: (language: string) => Record<string, unknown> };
+    const baseSelect = policyOwner.selectPolicy.bind(sessionManager);
+    vi.spyOn(policyOwner, 'selectPolicy').mockImplementation((language: string) => ({
+      ...baseSelect(language),
+      isInternalFrame: (frame: { file?: string }) => (frame.file ?? '').startsWith('/internal/'),
+      filterStackFrames: (frames: Array<{ file?: string }>, includeInternals: boolean) =>
+        includeInternals ? frames : frames.filter((f) => !(f.file ?? '').startsWith('/internal/')),
+      describeStepInFilter: () => 'Delayed step filter hint.'
+    }));
+
+    let landingFrames = [
+      { id: 1, name: 'callee', source: { path: '/app/work.py' }, line: 2, column: 1 },
+      { id: 2, name: 'work', source: { path: '/app/work.py' }, line: 10, column: 1 }
+    ];
+    let originFrames = [
+      { id: 2, name: 'work', source: { path: '/app/work.py' }, line: 10, column: 1 }
+    ];
+    let useLanding = false;
+    const originalRequest = dependencies.mockProxyManager.sendDapRequest.bind(dependencies.mockProxyManager);
+    dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation((command: string, args?: unknown) => {
+      if (command === 'stepIn') return new Promise<never>(() => {});
+      if (command === 'stackTrace') {
+        const frames = useLanding ? landingFrames : originFrames;
+        return Promise.resolve({ success: true, body: { stackFrames: frames, totalFrames: frames.length } });
+      }
+      return originalRequest(command, args);
+    });
+
+    // 1. Delayed step_into that enters a callee: provenanceNote is undefined and the hint is NOT consumed.
+    dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+    await afterStop();
+    const stepIntoCallee = sessionManager.stepInto(sessionId);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect((await stepIntoCallee).data?.pending).toBe(true);
+    expect(sessionManager.getSession(sessionId)?.run.deliveredStepFilterHints).toBeUndefined();
+
+    useLanding = true;
+    const waitCallee = track(sessionManager.waitForStop(sessionId, 10_000));
+    dependencies.mockProxyManager.simulateStopped(1, 'step');
+    await afterStop();
+    expect(waitCallee.result()?.data?.note).toBeUndefined();
+    expect(sessionManager.getSession(sessionId)?.run.deliveredStepFilterHints).toBeUndefined();
+
+    // 2. Delayed step_into that stops at the same visible depth (with an internal top frame kept by #672 so landing.note is also present):
+    //    first wait_for_stop appends the hint; a second wait_for_stop on the same stop gets only the positional sentence.
+    originFrames = [
+      { id: 0, name: '_internal', source: { path: '/internal/lib.py' }, line: 1, column: 1 },
+      { id: 2, name: 'work', source: { path: '/app/work.py' }, line: 11, column: 1 }
+    ];
+    landingFrames = [
+      { id: 0, name: '_internal', source: { path: '/internal/lib.py' }, line: 2, column: 1 },
+      { id: 2, name: 'work', source: { path: '/app/work.py' }, line: 11, column: 1 }
+    ];
+    useLanding = false;
+    const stepSameDepth = sessionManager.stepInto(sessionId);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect((await stepSameDepth).data?.pending).toBe(true);
+    expect(sessionManager.getSession(sessionId)?.run.deliveredStepFilterHints).toBeUndefined();
+
+    useLanding = true;
+    const firstWait = track(sessionManager.waitForStop(sessionId, 10_000));
+    dependencies.mockProxyManager.simulateStopped(1, 'step');
+    await afterStop();
+    expect(firstWait.result()?.data?.note).toContain('Paused inside an internal frame');
+    expect(firstWait.result()?.data?.note).toContain(
+      "The stop is in '_internal' at the same visible call-stack depth as before step_into. Delayed step filter hint."
+    );
+
+    const secondWait = await sessionManager.waitForStop(sessionId, 10_000);
+    expect(secondWait.data?.note).toContain("The stop is in '_internal' at the same visible call-stack depth as before step_into.");
+    expect(secondWait.data?.note).not.toContain('Delayed step filter hint.');
   });
 
   it('waits 30 s by default', async () => {

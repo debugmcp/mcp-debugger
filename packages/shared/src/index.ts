@@ -207,6 +207,7 @@ export type {
   QueuedDapCommand,
   PendingStopContext,
   StepInFilterContext,
+  UnboundBreakpointContext,
   StopTopFrameLine,
   GeneratedFileContext,
   GeneratedFileCandidate

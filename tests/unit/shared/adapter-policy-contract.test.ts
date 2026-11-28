@@ -30,6 +30,7 @@ import {
   type GeneratedFileContext,
   type LocalVariableExtraction,
   type StackFrame,
+  type UnboundBreakpointContext,
   type Variable
 } from '@debugmcp/shared';
 import { createChildSafePolicy } from '../../../src/proxy/child-safe-policy.js';
@@ -147,6 +148,8 @@ interface PinnedCapabilities {
   functionBreakpointsVia: 'dap' | 'cdp' | undefined;
   /** Whether verified:false at launch is by design rather than a warning. */
   functionBreakpointsBindLate: boolean | undefined;
+  /** Whether the policy explains an attach-time unbound breakpoint whose message is about the target's file system (issues #357, #1320). */
+  describeUnboundBreakpoint: boolean;
   /** Whether a `noDebug` launch actually turns the debugger off (issue #710). */
   honoursNoDebug: boolean | undefined;
   /** Whether shutdown sends DAP `terminate` ahead of the launch-mode `disconnect` (issue #885). */
@@ -204,7 +207,7 @@ interface PinnedCapabilities {
  * request, #636) and the only one declining a default exception mode; cobol's function breakpoints
  * are paragraph and section names its shim resolves, and its logpoints are `{WS-NAME}` messages the
  * shim interpolates (#759); ruby/java/dotnet are the three that reject logpoints; js, java and cobol are the three
- * that bind function breakpoints late; js, python, go, cpp, cobol and dart are the six whose debugger a
+ * that bind function breakpoints late; python and ruby are the two that explain an attach-time unbound breakpoint whose message is about the target's file system (#357, #1320); js, python, go, cpp, cobol and dart are the six whose debugger a
  * `noDebug` launch turns off (#710); dart is the one whose close sends DAP `terminate` ahead of the
  * disconnect (#885), and the one whose `restart_debugging` is the adapter's own hot restart (#876); dotnet is the one whose adapter reads its entry stop as `stopAtEntry` (#973); dart is the one whose `next` stops per token position (#879); js is the one whose pause is preceded by a wake evaluation and whose breakpoint requests wait for an armed pause (#1146); python is the one whose launch target may be `module` or `code` instead of `program`, and the one whose exception filters read the launch config — a pytest module launch arms `userUnhandled` (#985).
  */
@@ -216,6 +219,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     validatesLogMessage: true,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
+    describeUnboundBreakpoint: true,
     honoursNoDebug: true,
     terminateBeforeDisconnect: undefined,
     restartViaDapRequest: undefined,
@@ -238,6 +242,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     validatesLogMessage: false,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
+    describeUnboundBreakpoint: true,
     honoursNoDebug: undefined,
     terminateBeforeDisconnect: undefined,
     restartViaDapRequest: undefined,
@@ -260,6 +265,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     validatesLogMessage: true,
     functionBreakpointsVia: 'cdp',
     functionBreakpointsBindLate: true,
+    describeUnboundBreakpoint: false,
     honoursNoDebug: true,
     terminateBeforeDisconnect: undefined,
     restartViaDapRequest: undefined,
@@ -282,6 +288,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     validatesLogMessage: false,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
+    describeUnboundBreakpoint: false,
     honoursNoDebug: undefined,
     terminateBeforeDisconnect: undefined,
     restartViaDapRequest: undefined,
@@ -304,6 +311,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     validatesLogMessage: false,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
+    describeUnboundBreakpoint: false,
     honoursNoDebug: true,
     terminateBeforeDisconnect: undefined,
     restartViaDapRequest: undefined,
@@ -326,6 +334,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     validatesLogMessage: false,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: true,
+    describeUnboundBreakpoint: false,
     honoursNoDebug: undefined,
     terminateBeforeDisconnect: undefined,
     restartViaDapRequest: undefined,
@@ -348,6 +357,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     validatesLogMessage: false,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
+    describeUnboundBreakpoint: false,
     honoursNoDebug: undefined,
     terminateBeforeDisconnect: undefined,
     restartViaDapRequest: undefined,
@@ -370,6 +380,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     validatesLogMessage: false,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
+    describeUnboundBreakpoint: false,
     honoursNoDebug: true,
     terminateBeforeDisconnect: undefined,
     restartViaDapRequest: undefined,
@@ -392,6 +403,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     validatesLogMessage: false,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: true,
+    describeUnboundBreakpoint: false,
     honoursNoDebug: true,
     terminateBeforeDisconnect: undefined,
     restartViaDapRequest: undefined,
@@ -414,6 +426,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     validatesLogMessage: false,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
+    describeUnboundBreakpoint: false,
     honoursNoDebug: true,
     terminateBeforeDisconnect: true,
     restartViaDapRequest: true,
@@ -436,6 +449,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     validatesLogMessage: false,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
+    describeUnboundBreakpoint: false,
     honoursNoDebug: undefined,
     terminateBeforeDisconnect: undefined,
     restartViaDapRequest: undefined,
@@ -627,6 +641,39 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
 
   it('pins whether the policy undecorates the exception name its adapter reports (issue #985)', () => {
     expect(typeof policy.normalizeExceptionTypeName === 'function').toBe(pinned.normalizeExceptionTypeName);
+  });
+
+  it('pins whether the policy explains an attach-time unbound breakpoint message (issues #357, #1320)', () => {
+    expect(typeof policy.describeUnboundBreakpoint === 'function').toBe(pinned.describeUnboundBreakpoint);
+    if (!policy.describeUnboundBreakpoint) {
+      return;
+    }
+    const ownOutcome: UnboundBreakpointContext['outcome'] =
+      language === DebugLanguage.PYTHON ? 'unverified' : 'syncFailed';
+    const otherOutcome: UnboundBreakpointContext['outcome'] =
+      language === DebugLanguage.PYTHON ? 'syncFailed' : 'unverified';
+    const ownMessage =
+      language === DebugLanguage.PYTHON
+        ? 'Breakpoint in file that does not exist.'
+        : '/host/app.rb is not available';
+    const otherMessage =
+      language === DebugLanguage.PYTHON
+        ? '/host/app.rb is not available'
+        : 'Breakpoint in file that does not exist.';
+
+    const matchingContext: UnboundBreakpointContext = {
+      outcome: ownOutcome,
+      message: ownMessage,
+      attachMode: true
+    };
+    const hint = policy.describeUnboundBreakpoint(matchingContext);
+    expect(typeof hint).toBe('string');
+    expect(hint!.length).toBeGreaterThan(0);
+    expect(policy.describeUnboundBreakpoint({ outcome: otherOutcome, message: ownMessage, attachMode: true })).toBeUndefined();
+    expect(policy.describeUnboundBreakpoint({ outcome: ownOutcome, message: ownMessage, attachMode: false })).toBeUndefined();
+    expect(policy.describeUnboundBreakpoint({ outcome: ownOutcome, message: otherMessage, attachMode: true })).toBeUndefined();
+    expect(policy.describeUnboundBreakpoint({ outcome: ownOutcome, message: 'Unbound breakpoint', attachMode: true })).toBeUndefined();
+    expect(policy.describeUnboundBreakpoint({ outcome: ownOutcome, message: '', attachMode: true })).toBeUndefined();
   });
 
   it('pins whether step_over repeats a token-position step on the same line (issue #879)', () => {
@@ -862,6 +909,60 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
     expect(answer!.length).toBeGreaterThan(0);
     expect(answer!.every(candidate => candidate.linkedBy === expected.linkedBy), JSON.stringify(answer)).toBe(true);
     expect(answer!.some(candidate => expected.candidate.test(candidate.path)), JSON.stringify(answer)).toBe(true);
+  });
+
+  it('pins step-in filter hints to the engines that filter step_into by default, worded conditionally (issues #1184, #1328)', () => {
+    const launchOptOuts: Partial<Record<DebugLanguage, Record<string, unknown>>> = {
+      [DebugLanguage.PYTHON]: { justMyCode: false },
+      [DebugLanguage.JAVASCRIPT]: { justMyCode: false },
+      [DebugLanguage.DOTNET]: { enableStepFiltering: false }
+    };
+    const policiesWithStepInFilter = new Set<DebugLanguage>([
+      DebugLanguage.PYTHON,
+      DebugLanguage.JAVASCRIPT,
+      DebugLanguage.DOTNET,
+      DebugLanguage.RUST
+    ]);
+    const hook = policy.describeStepInFilter;
+    if (!policiesWithStepInFilter.has(language)) {
+      expect(hook).toBeUndefined();
+      return;
+    }
+    expect(typeof hook).toBe('function');
+    const bound = hook!.bind(policy);
+    const defaultHint = bound({ attachMode: false, launch: { dapLaunchArgs: { stopOnEntry: false, justMyCode: true } } });
+    expect(defaultHint, policy.name).toBeTypeOf('string');
+    expect(defaultHint!.length, policy.name).toBeGreaterThan(0);
+    // Conditional wording so the hint stays true even when the stepped line had no call (#1281, #1328).
+    expect(defaultHint).toMatch(/^If the line /);
+    expect(defaultHint).toMatch(/\.$/);
+    expect(defaultHint).not.toContain('No function was entered');
+
+    const optOut = launchOptOuts[language];
+    if (optOut) {
+      expect(bound({ attachMode: false, launch: { dapLaunchArgs: optOut } }), policy.name).toBeUndefined();
+      expect(
+        bound({ attachMode: false, launch: { dapLaunchArgs: { justMyCode: true, enableStepFiltering: true }, adapterLaunchConfig: optOut } }),
+        policy.name
+      ).toBeUndefined();
+
+      const adapterOptIn: Record<string, unknown> = Object.fromEntries(
+        Object.keys(optOut).map((key) => [key, true])
+      );
+      expect(defaultHint, policy.name).toContain('dapLaunchArgs:');
+      const overriddenByAdapter = bound({
+        attachMode: false,
+        launch: { dapLaunchArgs: optOut, adapterLaunchConfig: adapterOptIn }
+      });
+      expect(overriddenByAdapter, policy.name).toContain('adapterLaunchConfig:');
+      expect(overriddenByAdapter, policy.name).not.toContain('dapLaunchArgs:');
+    }
+
+    const attachHint = bound({ attachMode: true });
+    if (attachHint !== undefined) {
+      expect(attachHint).toMatch(/^If the line /);
+      expect(attachHint).not.toContain('dapLaunchArgs');
+    }
   });
 
   // ===== 8. State lifecycle =====
