@@ -358,7 +358,7 @@ describe('set_breakpoint statement anchors (#271)', () => {
     expect(content.warning).toBe(
       "expectedContent was not checked: the attach target's host is not known. " +
       'The breakpoint was requested at /path/to/test.py:6 by line addressing; ' +
-      'verified, line, boundFile and message say whether and where it is bound.'
+      'verified, line, boundFile, boundLine and message say whether and where it is bound.'
     );
     expect(content.note).toBe(
       "content and context omitted: the target host of this attach is not known, so the host file may not be the debuggee's source"
@@ -373,7 +373,7 @@ describe('set_breakpoint statement anchors (#271)', () => {
     const REMOTE_EXPECTED_CONTENT_WARNING =
       "expectedContent was not checked: this is a remote attach, and the file on this host may differ from the target's source. " +
       'The breakpoint was requested at /path/to/test.py:6 by line addressing; ' +
-      'verified, line, boundFile and message say whether and where it is bound.';
+      'verified, line, boundFile, boundLine and message say whether and where it is bound.';
 
     function attachSession(attachLocality: 'pid' | 'loopback' | 'remote' | 'unknown', state = 'paused'): void {
       mockSessionManager.getSession.mockReturnValue({
@@ -440,7 +440,7 @@ describe('set_breakpoint statement anchors (#271)', () => {
       expect(content.warning).toBe(
         "expectedContent was not checked: this attach's path is not usable on this host. " +
         'The breakpoint was requested at /path/to/test.py:6 by line addressing; ' +
-        'verified, line, boundFile and message say whether and where it is bound.'
+        'verified, line, boundFile, boundLine and message say whether and where it is bound.'
       );
     });
 
@@ -455,7 +455,7 @@ describe('set_breakpoint statement anchors (#271)', () => {
       expect(content.warning).toBe(
         'expectedContent was not checked: this attach\'s path is not usable on this host (Path must be absolute. Received: "relative/test.py"). ' +
         'The breakpoint was requested at relative/test.py:6 by line addressing; ' +
-        'verified, line, boundFile and message say whether and where it is bound.'
+        'verified, line, boundFile, boundLine and message say whether and where it is bound.'
       );
     });
 

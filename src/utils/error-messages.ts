@@ -1028,7 +1028,7 @@ export const ErrorMessages = {
   ) =>
     `expectedContent was not checked: ${describeUncheckedExpectedContentReason(source)}. ` +
     `The breakpoint was requested at ${source.file}:${source.requestedLine} by line addressing; ` +
-    `verified, line, boundFile and message say whether and where it is bound.`,
+    `verified, line, boundFile, boundLine and message say whether and where it is bound.`,
 
   /**
    * State-dependent refusal when `set_breakpoint` receives `statement` (with no

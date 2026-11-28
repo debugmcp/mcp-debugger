@@ -333,7 +333,7 @@ describe('Python attach breakpoint addressing — local vs remote locality (#132
       expect(lineWithExpected.warning).toBe(
         "expectedContent was not checked: this is a remote attach, and the file on this host may differ from the target's source. " +
         `The breakpoint was requested at ${serviceScript}:${TOTAL_LINE} by line addressing; ` +
-        'verified, line, boundFile and message say whether and where it is bound.'
+        'verified, line, boundFile, boundLine and message say whether and where it is bound.'
       );
       expect(lineWithExpected.note).toBe(
         "content and context omitted: the target of this attach is not on the mcp-debugger host, so the host file is not the debuggee's source"

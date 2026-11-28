@@ -252,7 +252,7 @@ describe('set_breakpoint expectedContent (#271)', () => {
     expect(content.warning).toBe(
       "expectedContent was not checked: this is a remote attach, and the file on this host may differ from the target's source. " +
       'The breakpoint was requested at /path/to/test.py:3 by line addressing; ' +
-      'verified, line, boundFile and message say whether and where it is bound.'
+      'verified, line, boundFile, boundLine and message say whether and where it is bound.'
     );
     expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
       'test-session',
@@ -297,7 +297,7 @@ describe('set_breakpoint expectedContent (#271)', () => {
     expect(content.warning).toBe(
       'expectedContent was not checked: "com.example.MyClass" is a source identifier, not a file this server can read. ' +
       'The breakpoint was requested at com.example.MyClass:3 by line addressing; ' +
-      'verified, line, boundFile and message say whether and where it is bound.'
+      'verified, line, boundFile, boundLine and message say whether and where it is bound.'
     );
     expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
       'test-session',
