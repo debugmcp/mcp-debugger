@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import { markChildOrigin } from '../../../../src/utils/child-origin-events.js';
+import { TEST_SETUP_WRITE } from '../../../../src/session/machine/transition-table.js';
 import {
   type AdapterPolicy,
   CppAdapterPolicy,
@@ -5282,8 +5283,8 @@ describe('SessionManager - DAP Operations', () => {
     // _updateSessionState.
     function forceRunning(sessionId: string) {
       const managed = sessionManager.getSession(sessionId);
-      (sessionManager as unknown as { _updateSessionState: (s: unknown, st: SessionState) => void })
-        ._updateSessionState(managed, SessionState.RUNNING);
+      (sessionManager as unknown as { _updateSessionState: (s: unknown, st: SessionState, w: typeof TEST_SETUP_WRITE) => void })
+        ._updateSessionState(managed, SessionState.RUNNING, TEST_SETUP_WRITE);
     }
 
     it('rejects any PAUSED transition that has no recorded stop (#598)', async () => {
@@ -5294,8 +5295,8 @@ describe('SessionManager - DAP Operations', () => {
       const managed = sessionManager.getSession(session.id)!;
       const updateState = () =>
         (sessionManager as unknown as {
-          _updateSessionState: (s: unknown, st: SessionState) => void;
-        })._updateSessionState(managed, SessionState.PAUSED);
+          _updateSessionState: (s: unknown, st: SessionState, w: typeof TEST_SETUP_WRITE) => void;
+        })._updateSessionState(managed, SessionState.PAUSED, TEST_SETUP_WRITE);
 
       expect(updateState).toThrow(/cannot enter PAUSED without lastStop/);
       expect(managed.state).not.toBe(SessionState.PAUSED);

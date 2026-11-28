@@ -28,6 +28,7 @@ import {
 import { isTerminalSessionState } from '@debugmcp/shared';
 import { ProtocolError } from '@modelcontextprotocol/server';
 import { ErrorMessages } from '../../utils/error-messages.js';
+import { DapResponseError } from '../../proxy/dap-response-error.js';
 import { checkLaunchToolchain } from '../../utils/language-availability.js';
 import { setCuratedMessage } from '../breakpoints/hit-verification.js';
 import type { CustomLaunchRequestArguments, DebugResult, LaunchResultData, PausedChildSummary } from '../session-manager-core.js';
@@ -478,10 +479,15 @@ export class DebugLauncher {
         `[SessionManager] Session ${sessionId} already has an active proxy. Terminating before starting new.`
       );
     }
+    // A live run or a child is replaced here; no state is written for it.
+    // Its children are counted before the teardown closes them, and the
+    // replacement is noted once the teardown has detached the run's listeners.
+    const replacing = this.ctx.stateShadow.replacementFacts(session);
     const childrenClosed = await this.ctx.stopProxyPreservingSession(session);
+    this.ctx.stateShadow.noteReplacement(session, 'launch.replace', replacing);
 
     // Update to INITIALIZING state and set lifecycle to ACTIVE
-    this.ctx.updateState(session, SessionState.INITIALIZING);
+    this.ctx.updateState(session, SessionState.INITIALIZING, { site: 'launch', event: 'start' });
 
     // Explicitly set lifecycle state to ACTIVE when starting debugging.
     // attachMode is cleared: a launch supersedes any prior attach, and a
@@ -491,6 +497,7 @@ export class DebugLauncher {
     this.ctx.updateSession(sessionId, {
       sessionLifecycle: SessionLifecycleState.ACTIVE,
     });
+    this.ctx.stateShadow.lifecycle(session, SessionLifecycleState.ACTIVE, 'launch');
     // Per-attempt terminal evidence. A prior program/proxy exit must not
     // influence whether this launch is reported as successful. lastStop is
     // part of that evidence: a launch that dies before a proxy exists emits no
@@ -959,12 +966,13 @@ export class DebugLauncher {
         Boolean(toolchainValidation) && toolchainValidation?.compatible === false;
 
       if (incompatibleToolchain) {
-        this.ctx.updateState(session, SessionState.CREATED);
+        this.ctx.updateState(session, SessionState.CREATED, { site: 'launch.refused', event: 'start-refused' });
         this.ctx.updateSession(sessionId, {
           sessionLifecycle: SessionLifecycleState.CREATED,
         });
+        this.ctx.stateShadow.lifecycle(session, SessionLifecycleState.CREATED, 'launch.refused');
       } else {
-        this.ctx.updateState(session, SessionState.ERROR);
+        this.ctx.updateState(session, SessionState.ERROR, { site: 'launch.failed', event: 'start-failed' });
       }
 
       if (incompatibleToolchain && toolchainValidation) {
@@ -1138,14 +1146,24 @@ export class DebugLauncher {
     // resumes), so the adapter's own resume of the paused thread would not
     // move it, and the hold below would read the stop the restart replaces.
     const wasPaused = session.state === SessionState.PAUSED;
+    // Where the restart started, for the shadow's judgement of a refusal.
+    const resumeToken = this.ctx.stateShadow.token(session);
     if (wasPaused) {
-      this.ctx.updateState(session, SessionState.RUNNING);
+      this.ctx.updateState(session, SessionState.RUNNING, { site: 'hotRestart.sent', event: 'hot-restart' });
+    } else {
+      // From a running program no state is written; the table's row is recorded.
+      this.ctx.stateShadow.note(session, { site: 'hotRestart.sent', event: 'hot-restart' });
     }
     try {
       await proxyManager.sendDapRequest('restart', {});
     } catch (error) {
       if (wasPaused && !isTerminalSessionState(session.state)) {
-        this.ctx.updateState(session, SessionState.PAUSED);
+        // Refused by the adapter, or no answer at all (see continue's catch).
+        this.ctx.updateState(session, SessionState.PAUSED, {
+          site: 'hotRestart.rejected',
+          event: error instanceof DapResponseError ? 'resume-refused' : 'resume-unanswered',
+          facts: { since: resumeToken }
+        });
       }
       const message = error instanceof Error ? error.message : String(error);
       return {

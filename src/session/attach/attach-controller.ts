@@ -190,15 +190,21 @@ export class AttachController {
         `[SessionManager] Session ${sessionId} already has an active proxy. Terminating before attaching.`
       );
     }
+    // A live run or a child is replaced here; no state is written for it.
+    // Its children are counted before the teardown closes them, and the
+    // replacement is noted once the teardown has detached the run's listeners.
+    const replacing = this.ctx.stateShadow.replacementFacts(session);
     await this.ctx.stopProxyPreservingSession(session);
+    this.ctx.stateShadow.noteReplacement(session, 'attach.replace', replacing);
 
     // Update to INITIALIZING state and set lifecycle to ACTIVE
-    this.ctx.updateState(session, SessionState.INITIALIZING);
+    this.ctx.updateState(session, SessionState.INITIALIZING, { site: 'attach', event: 'start' });
     session.run.attachMode = true;
     session.run.attachLocality = attachLocality;
     this.ctx.updateSession(sessionId, {
       sessionLifecycle: SessionLifecycleState.ACTIVE,
     });
+    this.ctx.stateShadow.lifecycle(session, SessionLifecycleState.ACTIVE, 'attach');
     session.failureDiagnostics = undefined;
     // Same per-attempt reset as startDebugging: an attach that fails before a
     // proxy exists emits no stop, so a stop left over from a prior run would
@@ -371,7 +377,7 @@ export class AttachController {
       // stopOnEntry controls our pause request, not stops the target itself
       // produced while verification was in flight (e.g. a queued breakpoint).
       if (session.state !== SessionState.PAUSED || !session.lastStop) {
-        this.ctx.updateState(session, SessionState.RUNNING);
+        this.ctx.updateState(session, SessionState.RUNNING, { site: 'attach.verified', event: 'attach-verified' });
       }
 
       // Attach parity with the post-launch belt-and-braces re-sync (issues
@@ -568,7 +574,7 @@ export class AttachController {
         ? SessionState.STOPPED
         : isTerminalSessionState(session.state) ? session.state : SessionState.ERROR;
       if (state === SessionState.ERROR) {
-        this.ctx.updateState(session, SessionState.ERROR);
+        this.ctx.updateState(session, SessionState.ERROR, { site: 'attach.failed', event: 'start-failed' });
       }
       // What the attach left in the target before it failed (issue #1261).
       const data: AttachResultData = {
@@ -854,10 +860,11 @@ export class AttachController {
           await proxyManager.stop();
         }
 
-        this.ctx.updateState(session, SessionState.STOPPED);
+        this.ctx.updateState(session, SessionState.STOPPED, { site: 'detach', event: 'release' });
         this.ctx.updateSession(sessionId, {
           sessionLifecycle: SessionLifecycleState.TERMINATED
         });
+        this.ctx.stateShadow.lifecycle(session, SessionLifecycleState.TERMINATED, 'detach');
       }
 
       return answered({

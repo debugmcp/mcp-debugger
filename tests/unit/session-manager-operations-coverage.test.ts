@@ -7,6 +7,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ErrorMessages } from '../../src/utils/error-messages.js';
 import { DapResponseError } from '../../src/proxy/dap-response-error.js';
 import { markChildMirrorUnanswered } from '../../src/utils/child-origin-events.js';
+import { TEST_SETUP_WRITE } from '../../src/session/machine/transition-table.js';
+import { StateShadowError, takeStrictFailures } from '../../src/session/machine/shadow.js';
 import path from 'path';
 import { SessionManagerOperations } from '../../src/session/session-manager-operations';
 import type { SessionManagerDependencies } from '../../src/session/session-manager-core';
@@ -208,7 +210,7 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
     if (lastStop) {
       mockSession.lastStop = lastStop;
     }
-    internals(operations).opsContext.updateState(mockSession, state);
+    internals(operations).opsContext.updateState(mockSession, state, TEST_SETUP_WRITE);
   }
 
   describe('ProxyLauncher.start edge cases', () => {
@@ -669,11 +671,24 @@ describe('Session Manager Operations Coverage - Error Paths and Edge Cases', () 
       mockSession.state = SessionState.PAUSED;
       const execSpy = vi.spyOn(internals(operations).execution, 'executeStep').mockRejectedValue(new Error('internal failure'));
 
+      // Only this spy makes a step fail while paused, before any request: the
+      // transition table has no row for it (paused -> failed on resume-failed),
+      // so the unit project's strict mode fails the write after the gate made it.
+      await expect(operations.stepOut('test-session')).rejects.toBeInstanceOf(StateShadowError);
+      expect(mockSession.state).toBe(SessionState.ERROR);
+      expect(takeStrictFailures()).toEqual([
+        expect.objectContaining({ outcome: 'no-row', site: 'step.failed', event: 'resume-failed', from: 'paused', actual: 'failed' })
+      ]);
+
+      // Recorded, never thrown, as a server runs: today's answer.
+      vi.stubEnv('MCP_STATE_SHADOW', 'record');
+      mockSession.state = SessionState.PAUSED;
       const result = await operations.stepOut('test-session');
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('internal failure');
       expect(mockSession.state).toBe(SessionState.ERROR);
+      expect(takeStrictFailures()).toEqual([]);
       execSpy.mockRestore();
     });
   });
