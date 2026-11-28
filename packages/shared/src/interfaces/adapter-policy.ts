@@ -279,6 +279,14 @@ export interface StepInFilterContext {
   };
 }
 
+/** Context passed to AdapterPolicy.describeUnboundBreakpoint (issue #1320). */
+export interface UnboundBreakpointContext {
+  /** The adapter's own message for the unbound breakpoint or refused sync. */
+  message: string;
+  /** True when the session attached to its target rather than launching it. */
+  attached: boolean;
+}
+
 /** Context passed to AdapterPolicy.generatedFileCandidates (issues #938/#950). */
 export interface GeneratedFileContext {
   /** The source path as the breakpoint or stop names it (absolute, server-resolved). */
@@ -548,6 +556,18 @@ export interface AdapterPolicy {
    * never-bound-at-exit note applies regardless.
    */
   functionBreakpointsBindLate?: boolean;
+
+  /**
+   * Explain what an adapter's unbound-breakpoint message (or breakpoint-sync
+   * refusal) means when the adapter's own sentence is about the target's file
+   * system rather than the caller's host (issues #357, #1320). Read by the
+   * breakpoint controller: on `set_breakpoint` when a line breakpoint comes
+   * back unverified with a message (joined to `warning` after the adapter's
+   * own words, which stay first and unchanged), and on a failed/refused
+   * breakpoint sync (`buildLiveSyncWarning` and `resyncAll`). Return
+   * `undefined` unless the message and session mode match a known case.
+   */
+  describeUnboundBreakpoint?(info: UnboundBreakpointContext): string | undefined;
 
   /**
    * True when the adapter honours DAP's `noDebug` launch flag by not enabling

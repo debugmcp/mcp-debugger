@@ -1,11 +1,19 @@
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction } from './adapter-policy.js';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, UnboundBreakpointContext } from './adapter-policy.js';
 import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-policy.js';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
 
+const RDBG_UNAVAILABLE_PATH_HINT =
+  "Hint: attach sessions send breakpoint paths to the remote debugger verbatim; the path must be valid on the debug target's filesystem. Use target-side paths, or pass localfsMap in the attach config to map local paths to remote ones.";
+
 export const RubyAdapterPolicy = {
   name: 'ruby',
+  // Topology guidance for a Ruby attach session whose breakpoint path rdbg
+  // rejects with "<path> is not available" on the target's filesystem
+  // (issues #357, #1320).
+  describeUnboundBreakpoint: ({ message, attached }: UnboundBreakpointContext): string | undefined =>
+    attached && /is not available/.test(message) ? RDBG_UNAVAILABLE_PATH_HINT : undefined,
   // rdbg does not advertise supportsLogPoints and its setBreakpoints ignores
   // logMessage, silently downgrading a logpoint into a pausing breakpoint —
   // the inverse of what a logpoint promises. Reject up front (issue #469).

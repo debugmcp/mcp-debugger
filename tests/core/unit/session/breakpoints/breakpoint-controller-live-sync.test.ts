@@ -24,7 +24,7 @@ import { BreakpointController } from '../../../../../src/session/breakpoints/bre
 import type { BreakpointContext } from '../../../../../src/session/operations-context.js';
 import type { ManagedSession } from '../../../../../src/session/session-store.js';
 import { DapResponseError } from '../../../../../src/proxy/dap-response-error.js';
-import type { Breakpoint, FunctionBreakpoint } from '@debugmcp/shared';
+import { getPolicyForLanguage, type AdapterPolicy, type Breakpoint, type FunctionBreakpoint } from '@debugmcp/shared';
 import { createMockLogger } from '../../../../test-utils/helpers/test-dependencies.js';
 
 const REFUSAL = 'Server is not available';
@@ -36,11 +36,11 @@ function refusalOf(command: string, message = REFUSAL): DapResponseError {
   return new DapResponseError({ seq: 1, type: 'response', request_seq: 1, success: false, command, message });
 }
 
-function makeController(policy: unknown = {}): { controller: BreakpointController; ctx: BreakpointContext } {
+function makeController(policy?: unknown): { controller: BreakpointController; ctx: BreakpointContext } {
   const ctx: BreakpointContext = {
     logger: createMockLogger(),
     getSession: vi.fn(),
-    selectPolicy: vi.fn().mockReturnValue(policy),
+    selectPolicy: vi.fn((language) => (policy !== undefined ? (policy as AdapterPolicy) : getPolicyForLanguage(language))),
     clientBehaviorOf: (s) => connectionBehaviorOf(s, ctx.selectPolicy(s.language)),
     selectStorePolicy: vi.fn(),
     onStateChange: vi.fn().mockReturnValue(() => undefined)
