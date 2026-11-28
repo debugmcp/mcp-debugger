@@ -35,7 +35,7 @@ section for the merge checks.
 Tags-only pushes probe Docker buildx (exporting `SKIP_DOCKER_TESTS=true` if unavailable), run
 lint, the committed-baseline guard and `typecheck:all`, then a clean build and the reduced
 `npm run test:ci-no-python` suite. Both push paths source `~/.cargo/env` when present so
-cargo-installed tools such as Docstar are available.
+tools installed through cargo are on PATH for the steps that follow.
 
 After either push path succeeds, advisory `docstar shadow .` and `docstar check` run if
 Docstar is installed. Neither command blocks the push.
@@ -163,6 +163,6 @@ ls -la .husky/
 
 ## Push Paths
 
-Branch pushes run static checks. Tags-only pushes also run a clean build and a reduced unit
+Branch pushes run static checks. Tags-only pushes run a clean build and a reduced unit
 suite. Both paths run advisory Docstar checks when installed. See the
 [Dev-Loop Gate](../../CONTRIBUTING.md#dev-loop-gate) for CI triggers and merge checks.

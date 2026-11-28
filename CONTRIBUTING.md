@@ -145,7 +145,8 @@ See [the fragment guide](changelog.d/README.md).
 
 CI runs on pull requests to `main`, pushes to `main` and `develop`, and manual dispatch;
 another branch without a pull request to `main` gets no automatic suite run, so open a draft
-pull request, run `gh workflow run ci.yml --ref <branch>`, or run the suites locally.
+pull request, run `gh workflow run ci.yml --ref <branch>` (requires repository write access),
+or run the suites locally; from a fork, open a pull request.
 For first-time contributors from forks, CI waits for a maintainer's approval; run the suites
 locally if you want a result before that approval.
 
@@ -164,8 +165,8 @@ For an answer before CI, build first with `pnpm run build`, then run `pnpm run t
 and `pnpm run test:integration`, or target a file with
 `npx vitest run tests/core/unit/session/session-manager-state.test.ts`.
 
-For every push, the hook sources `~/.cargo/env` when present so cargo-installed tools such as
-Docstar are available. A **tags-only push** probes Docker buildx, then runs lint, the
+For every push, the hook sources `~/.cargo/env` when present so tools installed through cargo
+are on PATH for the steps that follow. A **tags-only push** probes Docker buildx, then runs lint, the
 committed-baseline guard, `typecheck:all`,
 `npm run clean && npm run build`, then `npm run test:ci-no-python` (which builds again and runs
 the unit project). It omits the documentation, changelog and full personal-path audits.
@@ -175,7 +176,9 @@ if Docstar is installed. Neither command blocks the push.
 
 The **pre-commit** hook checks the working copies of files staged as added, copied or modified
 for personal paths and refuses the commit if the checker fails, preserving its exit status
-and output. It reads working copies, not staged content, and skips renames: an unstaged
+and output. Only the file types and directories covered by [the script](scripts/check-personal-paths.cjs)
+are checked, so files under `.husky/` are not checked at commit. It reads working copies, not staged
+content, and skips renames: an unstaged
 personal path can block clean staged content, while cleaning a working copy can let a
 personal path in the staged content pass. It also blocks accidentally staged build
 artifacts (`.js`/`.d.ts`/`.js.map` under `src/` or

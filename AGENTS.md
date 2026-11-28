@@ -15,7 +15,7 @@
 - Targeted runs: `pnpm test:unit`, `pnpm test:integration`, `pnpm test:e2e`, `pnpm test:coverage`.
 - `pnpm lint` runs ESLint over `src/**/*.ts`, `packages/*/src/**/*.ts`, `scripts/**/*.{js,mjs,cjs}`, and `tools/**/*.{js,mjs,cjs}` (the dev-proxy supervisor is production tooling; experimental probes go in `scripts/experiments/`, which is ignored). `pnpm lint:fix` runs the same globs with `--fix`.
 - `pnpm typecheck` type-checks the shipped sources via `tsconfig.typecheck.json` (no build needed; the root `tsc -p tsconfig.json` checks nothing). `pnpm typecheck:tests` runs the per-file ratchet over the test trees against `tests/typecheck-baseline.json`; `pnpm typecheck:tests:update` re-records that baseline and `pnpm typecheck:tests:raw` emits unfiltered `tsc` output. `pnpm typecheck:all` runs both, and is the exact command pre-push and CI run.
-- **Follow the dev-loop gate before pushing.** Branch pushes run fast static checks; tags-only pushes also run a clean build and a reduced unit suite. See [CONTRIBUTING.md — Dev-Loop Gate](CONTRIBUTING.md#dev-loop-gate) for the canonical commands, CI triggers, merge checks and optional local suite runs.
+- **Follow the dev-loop gate before pushing.** Branch pushes run fast static checks; tags-only pushes run a clean build and a reduced unit suite. See [CONTRIBUTING.md — Dev-Loop Gate](CONTRIBUTING.md#dev-loop-gate) for the canonical commands, CI triggers, merge checks and optional local suite runs.
 
 ## Coding Style & Naming Conventions
 - Source files use ES modules, TypeScript strict mode, and two-space indentation; prefer `PascalCase` for classes, `camelCase` for functions, and `SCREAMING_SNAKE_CASE` for constants.

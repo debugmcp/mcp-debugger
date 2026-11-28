@@ -9,10 +9,10 @@ set +e
 exec 1>&2
 
 echo "🔎 Running pre-push checks to ensure code quality..."
-echo "💡 Branch pushes run static checks; tags-only pushes also build and test."
+echo "💡 Branch pushes run static checks; tags-only pushes build and test."
 echo ""
 
-# Source cargo environment for Rust tools and cargo-installed Docstar on either path.
+# Source cargo environment on every push so tools installed through cargo are on PATH.
 if [ -f "$HOME/.cargo/env" ]; then
     . "$HOME/.cargo/env"
 fi
