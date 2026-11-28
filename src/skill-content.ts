@@ -18,50 +18,116 @@ import {
   supportsStatementAnchors
 } from './utils/bp-addressing.js';
 
+/**
+ * The most characters of `instructions` a client is known to show the model
+ * (issue #1331). Claude Code puts the first 4,096 characters of a server's
+ * instructions in front of the model and drops the rest, and lists the tools
+ * by name only until the agent searches for one: measured on 2026-11-28 in
+ * the first model request of 20 agent trials against the published 0.27.0.
+ * This is another product's limit, not a protocol one; other clients were
+ * not measured.
+ */
+export const SERVER_INSTRUCTIONS_LIMIT = 4096;
+
+/** What the server's settings change in the instructions; each defaults to the shipped default. */
+export interface ServerInstructionsOptions {
+  /** Secret redaction (issue #237): on unless the server runs with DEBUG_MCP_NO_REDACT=1. */
+  redactionEnabled?: boolean;
+  /** Least-privilege variable access (issue #237): DEBUG_MCP_VARIABLE_ACCESS. */
+  variableAccessMode?: 'open' | 'explicit';
+  /** The idle policy's window in words (describeIdleWindow); absent = the policy is off (issue #1025). */
+  idleWindow?: string;
+  /** The stop snapshot (issue #982): on unless the server runs with DEBUG_MCP_NO_SNAPSHOT=1. */
+  snapshotEnabled?: boolean;
+  /** Container mode (MCP_CONTAINER=true): paths are relative to the workspace mount, not absolute. */
+  containerMode?: boolean;
+}
+
+/**
+ * The instructions, ordered by what an agent needs before its first call
+ * (issue #1331): what the server is; the rules an operator's setting adds,
+ * because they change which calls work or what happens to the program; the
+ * shortest path for a launch, a failing test and an attach; what a stop
+ * answer already carries; waiting; logpoints; how a session ends; and where
+ * the rest is. A rule about one tool's details lives in that tool's
+ * description (src/server/tool-schemas.ts), which the agent reads when it
+ * loads the tool. The whole text must fit in SERVER_INSTRUCTIONS_LIMIT for
+ * every option combination (tests/core/unit/server/server-instructions.test.ts),
+ * and it is ASCII so that characters, UTF-16 units and bytes agree, whichever
+ * a client counts.
+ */
 export function buildServerInstructions(
   mode: BpAddressingMode = DEFAULT_BP_ADDRESSING,
-  opts: { redactionEnabled?: boolean; variableAccessMode?: 'open' | 'explicit'; idleWindow?: string } = {}
+  opts: ServerInstructionsOptions = {}
 ): string {
-  // Only when the operator turned the idle policy on (MCP_DEBUG_SESSION_IDLE_MS;
-  // off by default, issue #1025): it ends programs, so the agent must know.
-  const idleRule = opts.idleWindow
-    ? `
-- This server closes a debug session tree that no tool call has named for ${opts.idleWindow} (a launched program is ended, an attached one released and left running); list_debug_sessions shows each session's expiresInMs, any tool call naming the session resets it, and holds it for as long as the call runs.`
-    : '';
-  // Default matches the runtime default: redaction is on unless the server
-  // was started with DEBUG_MCP_NO_REDACT=1 (issue #237).
-  const redactionRule = (opts.redactionEnabled ?? true)
-    ? `\n- Credential-shaped values (API keys, tokens, private keys) and values of sensitive variable names (password, api_key, ...) render as <redacted:rule-id> placeholders in variable/evaluate/output results — the program's real state is unchanged, only the display is masked. A "redaction" field reports what was masked; the user can disable this by restarting the server with DEBUG_MCP_NO_REDACT=1.`
-    : '';
-  const variableAccessRule = opts.variableAccessMode === 'explicit'
-    ? `\n- This server runs in least-privilege variable access mode (DEBUG_MCP_VARIABLE_ACCESS=explicit): get_variables and get_local_variables require names:["..."] — request only the variables you need (names are exact and case-sensitive; missing ones are listed in notFound). evaluate_expression remains available for targeted reads.`
-    : '';
-  const expectedContentRule = supportsExpectedContent(mode)
-    ? `\n- set_breakpoint accepts expectedContent — pass the text of the target line or a distinctive substring of it (whitespace-trimmed, trailing //- or #-comments ignored); a mismatch fails fast and shows the actual nearby lines, catching off-by-one line numbers before they cause a confusing session. A response reporting "requested line N, bound to line M" means the adapter moved your breakpoint — trust the bound line.`
-    : '';
-  const statementRule = supportsStatementAnchors(mode)
-    ? `\n- Prefer set_breakpoint {statement: "<line text>"} over line numbers: it matches like an Edit-tool old_string (whole line or a distinctive substring — whitespace-trimmed, trailing comments ignored, exact matches win), only lands on a line containing your text (inexact or multi-candidate matches are flagged in the response warning), lists every occurrence on ambiguity (disambiguate with nearLine), and re-resolves across restart_debugging after you edit the file.\n- set_breakpoint {function: "name"} breaks on entry to a symbol with no file or line at all — names survive edits best (Python/Go/Rust/.NET/Java/JavaScript; JS names are dotted runtime paths and functions in lazily-loaded modules bind at the next pause).`
+  const redactionEnabled = opts.redactionEnabled ?? true;
+  const explicitNames = opts.variableAccessMode === 'explicit';
+  const snapshotEnabled = opts.snapshotEnabled ?? true;
+
+  // The rules an operator's setting adds come before the general ones: each
+  // changes which calls work or what happens to the program.
+  const operatorRules: string[] = [];
+  if (opts.idleWindow) {
+    // Off by default (MCP_DEBUG_SESSION_IDLE_MS, issue #1025): it ends
+    // programs, so the agent must know. The sweep skips the whole process
+    // while a client holds a notification stream open (the attended check).
+    operatorRules.push(
+      `- This server closes a debug session tree that no tool call has named for ${opts.idleWindow} (idle policy, MCP_DEBUG_SESSION_IDLE_MS; not while a client holds a notification stream open): a launched program is ended, an attached one released. A tool call naming any session of the tree restarts the clock and holds the tree while the call runs; list_debug_sessions shows each session's expiresInMs.`
+    );
+  }
+  if (explicitNames) {
+    operatorRules.push(
+      '- This server runs in least-privilege variable access mode (DEBUG_MCP_VARIABLE_ACCESS=explicit): get_variables and get_local_variables require names: ["..."] (exact and case-sensitive; missing ones are listed in notFound), and stop snapshots carry no locals. evaluate_expression remains available for targeted reads.'
+    );
+  }
+  if (!snapshotEnabled) {
+    operatorRules.push(
+      '- Stop snapshots are off on this server (DEBUG_MCP_NO_SNAPSHOT): an answer at a stop carries its location but no snapshot of frames and locals; read them with get_stack_trace and get_local_variables.'
+    );
+  }
+  const operatorBlock = operatorRules.length > 0 ? `\n\n${operatorRules.join('\n')}` : '';
+
+  // Host mode refuses a relative path (SimpleFileChecker); container mode
+  // resolves every path under the workspace mount (resolvePathForRuntime), so
+  // a host's absolute path does not reach the file there.
+  const pathRule = opts.containerMode
+    ? 'file and scriptPath are relative to the project root; the server resolves them under its workspace mount.'
+    : 'file and scriptPath must be ABSOLUTE paths.';
+  const testFile = opts.containerMode ? 'the test file' : 'ABSOLUTE test file';
+  // Content addressing is named only where the mode serves it (issue #271).
+  const breakpointStep = supportsStatementAnchors(mode)
+    ? 'set_breakpoint {sessionId, file, line} (or statement: "<text of the line>" in place of line, re-resolved at restart_debugging after an edit)'
+    : supportsExpectedContent(mode)
+      ? 'set_breakpoint {sessionId, file, line} (add expectedContent: "<text of the line>" to catch a wrong line number)'
+      : 'set_breakpoint {sessionId, file, line}';
+  const attachPathForms = supportsStatementAnchors(mode)
+    ? 'give the paths the target sees, a mapping (see attach_to_process) or a function breakpoint (not Ruby or Dart), which needs no path'
+    : 'give the paths the target sees or a mapping (see attach_to_process)';
+
+  // Explicit-names mode withholds the snapshot's locals (stop-snapshot.ts),
+  // so the snapshot rule says only what that mode's answers carry.
+  // wait_for_stop carries an exception's message in lastStop, not in the
+  // snapshot, so the message is the answer's, not the snapshot's.
+  const snapshotCarries = explicitNames
+    ? 'the top frames; an entry stop carries none. At an exception the answer also carries its message. Read it before calling get_stack_trace; get_scopes -> get_variables with a variablesReference (and names) reads nested values.'
+    : `the top frames and the top frame's locals (${redactionEnabled ? 'redacted and capped' : 'capped'}); an entry stop carries none. At an exception the answer also carries its message. A repeated stop in the same frame carries changedVariables (what changed) instead of locals. Read it before calling get_stack_trace or get_local_variables; call those, and get_scopes -> get_variables with a variablesReference, only for more frames, the full list or nested values.`;
+  const snapshotRule = snapshotEnabled
+    ? `\n\nAn answer that reports a stop (launch, restart, wait_for_stop, pause, attach, steps) carries snapshot: ${snapshotCarries}`
     : '';
 
-  return `mcp-debugger drives real step-through debuggers (Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET, C/C++, COBOL, Dart/Flutter) as MCP tools.
+  return `mcp-debugger drives real step-through debuggers (Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET, C/C++, COBOL, Dart/Flutter) as MCP tools.${operatorBlock}
 
-Golden path: create_debug_session -> set_breakpoint (ABSOLUTE file path) -> start_debugging (ABSOLUTE scriptPath; answers paused at a breakpoint reached as the program starts, otherwise pending:true -> wait_for_stop) -> read the answer's snapshot -> step_* or continue_execution (+ wait_for_stop) -> get_output -> close_debug_session (always, even on failure).
+Launch: create_debug_session {language} -> ${breakpointStep} -> start_debugging {sessionId, scriptPath}. ${pathRule} start_debugging answers paused when a breakpoint is reached as the program starts, stopped when the program ends first, otherwise running with pending:true; wait_for_stop {sessionId} then blocks until the stop.
 
-Failing test (Python): start_debugging {sessionId, scriptPath: ABSOLUTE test file, testRunner: "pytest", testTarget: "test_name"} — no breakpoint needed; the answer is paused at the failing assert (or the raise site of an exception that escapes the test) with snapshot.exception, frames and locals, and a passing test runs to completion (exit code 0). list_supported_languages shows testRunners per language.
+Failing test (Python): start_debugging {sessionId, scriptPath: ${testFile}, testRunner: "pytest", testTarget: "test_name"} needs no breakpoint: it pauses at the failing assert (or the raise site of an exception that escapes the test), and a passing test runs to completion (exit code 0).
 
-Key rules:
-- Every paused answer (start/restart/wait_for_stop/pause/attach and the steps) already carries snapshot {exception?, frames, locals | changedVariables} — the exception message, top frames and the top frame's locals, redacted and capped. A repeated stop in the same frame (stepping, a continue+wait loop over one breakpoint) carries changedVariables instead of locals — {name: {before, after}} for a changed value, {after, new: true} for a variable that appeared, {before, gone: true} for one that left scope ({after} with no flag when the earlier list was cut at its cap, so "new" is not known); an empty {} means the line changed nothing visible. Read it before calling get_stack_trace/get_local_variables; call those (and get_scopes -> get_variables with a variablesReference) only to expand structures, see more frames, or fetch the full list (snapshot.truncation says when there is more). Entry stops carry no snapshot.
-- Stepping/evaluation/variable reads require the session to be PAUSED; the stop reason on each pause tells you why it stopped.
-- continue_execution returns at once, and a launch, step, pause or attach may answer pending:true when its stop has not arrived yet. Nothing is cancelled — breakpoints stay armed. Call wait_for_stop {sessionId} to block until the session pauses or ends (reports the stop or exitCode, plus outputTail if non-zero with output); a wait that runs out answers pending:true again, so call it again. A session whose program spawned child sessions (Python and JavaScript launches, on by default: dapLaunchArgs subProcess: false or autoAttachChildProcesses: false opts a launch out; a JavaScript attach needs adapterConfig: { autoAttachChildProcesses: true }, whose costs the attach_to_process description states) is waited on as a tree: the answer's sessionId names the session that stopped — use it to inspect — and children lists the rest with their states.
-- If a variable entry has a variablesReference, call get_variables with it to expand children.
-- Breakpoints may report unverified until the module/class loads — that is normal.
-- list_breakpoints shows every breakpoint with its verified state; remove_breakpoint (by id or file+line) and clear_breakpoints take effect immediately, even mid-run — use them to move a bisection window without restarting.${statementRule}${expectedContentRule}
-- Logpoints: set_breakpoint with logMessage ("order={orderId}") logs interpolated values to get_output WITHOUT pausing, but each hit costs time (engine-dependent: suits hundreds to low thousands of hits/s, not tight loops; slows the whole function in Python/JS/Dart). Supported: Python, JS/TS, Go, Rust, C/C++, COBOL, Dart/Flutter; refused: Java, .NET, Ruby.
-- restart_debugging {sessionId} relaunches with the same config in one call — breakpoints re-apply automatically, output buffer resets (read get_output from since=0). Works after the program exits; not for attach sessions.
-- get_output returns buffered debuggee stdout/stderr with a cursor; pass the returned nextSince back as since to read only new output.
-- attach_to_process connects to running/remote targets (debugpy --listen, rdbg --open, JVM JDWP), including pods via port-forward. Breakpoint paths resolve on the TARGET's filesystem: use debuggee-side paths, function breakpoints, or a mapping (python: adapterConfig.pathMappings; ruby: localfsMap). Kubernetes recipe + per-language attach presets: docs/kubernetes.md in the repo.
-- expose_session {sessionId} returns host/port/token for a read-only IDE mirror of the live session (VS Code launch.json: "debugServer": port + "mirrorToken"); relay these to the human, unexpose_session when done. The IDE observes — execution control stays with you.
-- Launch sessions pause at uncaught exceptions by default (breakOnExceptions "uncaught"; Ruby excepted — rdbg has no uncaught filter). Pass "none" to let crashing scripts run to termination; attach applies no default.${redactionRule}${variableAccessRule}${idleRule}
+Attach: create_debug_session {language, host, port} (or processId) attaches in the same call; attach_to_process attaches an existing session. The target is a program started under its debugger (python -m debugpy --listen, rdbg --open, node --inspect, a JVM with JDWP, a Dart VM service at adapterConfig.vmServiceUri) or, for C/C++, COBOL, .NET and a local Node.js process, a processId. Attaching pauses the target unless stopOnEntry is false. Breakpoint paths are resolved on the target's filesystem: ${attachPathForms}; a remote attach takes file and line. list_supported_languages shows each language's attach forms and test runners.${snapshotRule}
+
+Steps, evaluation and variable reads need a paused session; each pause says why it stopped. continue_execution returns at once; wait_for_stop blocks until the session pauses or ends. A launch, restart, step, pause or attach may answer pending:true: nothing was cancelled and breakpoints stay armed, so call wait_for_stop, and again if it answers pending:true. wait_for_stop on a session whose program started child sessions (Python, JavaScript) waits on the whole tree, and its answer's sessionId names the session that stopped: inspect with that id.
+
+A logpoint (set_breakpoint with logMessage: "total={total}") writes values to get_output without pausing; each hit costs time, so keep it out of tight loops. Java, .NET and Ruby refuse logpoints. A launch pauses at an uncaught exception by default (not Ruby, nor C/C++ on Windows); an attach does not.
+
+End every session with close_debug_session, even after a failure: a launched program is ended, an attached one released and left running.
 
 For the full debugging workflow (root-cause discipline, per-language quirks), request the "debugging-workflow" prompt or install the agent skill from skills/debugging/ in the repo.`;
 }

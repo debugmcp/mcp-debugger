@@ -137,20 +137,51 @@ describe('DEBUG_MCP_BP_ADDRESSING gating (#271)', () => {
     expect(mockSessionManager.setBreakpoint).not.toHaveBeenCalled();
   });
 
-  it('mentions expectedContent in server instructions only outside line mode', () => {
-    vi.stubEnv('DEBUG_MCP_BP_ADDRESSING', 'line');
-    createDebugServerWithFacade();
-    const lineInstructions = (vi.mocked(Server).mock.calls.at(-1)![1] as {
-      instructions?: string;
-    }).instructions;
-    expect(lineInstructions).toBeDefined();
-    expect(lineInstructions).not.toContain('expectedContent');
+  // The sentences issue #1331 moved into the descriptions keep the same gates:
+  // the attach path forms name function breakpoints only in content mode, and
+  // the loud-snap sentence appears only where snapping is reported.
+  it('gates the descriptions moved from the instructions by mode', async () => {
+    const descriptionOf = async (mode: string, tool: string): Promise<string> => {
+      vi.stubEnv('DEBUG_MCP_BP_ADDRESSING', mode);
+      const { listToolsHandler } = buildServer();
+      return (await findTool(listToolsHandler, tool)).description ?? '';
+    };
 
-    vi.stubEnv('DEBUG_MCP_BP_ADDRESSING', 'content');
-    createDebugServerWithFacade();
-    const contentInstructions = (vi.mocked(Server).mock.calls.at(-1)![1] as {
-      instructions?: string;
-    }).instructions;
-    expect(contentInstructions).toContain('expectedContent');
+    for (const mode of ['line', 'assert']) {
+      expect(await descriptionOf(mode, 'attach_to_process'), mode).not.toContain('function breakpoint');
+    }
+    expect(await descriptionOf('content', 'attach_to_process')).toContain('function breakpoints, or a mapping');
+
+    expect(await descriptionOf('line', 'set_breakpoint')).not.toContain('requested line N, bound to line M');
+    for (const mode of ['assert', 'content']) {
+      expect(await descriptionOf(mode, 'set_breakpoint'), mode).toContain('requested line N, bound to line M');
+    }
+  });
+
+  // The server instructions name each content-addressing feature only in a
+  // mode that serves it (issue #1331 moved the details to the schema, so each
+  // mode's text names just the form its launch path uses).
+  it('names content addressing in server instructions only in the modes that serve it', () => {
+    const instructionsFor = (mode: string): string | undefined => {
+      vi.stubEnv('DEBUG_MCP_BP_ADDRESSING', mode);
+      createDebugServerWithFacade();
+      return (vi.mocked(Server).mock.calls.at(-1)![1] as { instructions?: string }).instructions;
+    };
+
+    const lineInstructions = instructionsFor('line');
+    expect(lineInstructions).toBeDefined();
+    for (const token of ['expectedContent', 'statement', 'nearLine', 'function breakpoint']) {
+      expect(lineInstructions).not.toContain(token);
+    }
+
+    const assertInstructions = instructionsFor('assert');
+    expect(assertInstructions).toContain('expectedContent');
+    for (const token of ['statement', 'nearLine', 'function breakpoint']) {
+      expect(assertInstructions).not.toContain(token);
+    }
+
+    const contentInstructions = instructionsFor('content');
+    expect(contentInstructions).toContain('statement: "<text of the line>"');
+    expect(contentInstructions).toContain('function breakpoint');
   });
 });

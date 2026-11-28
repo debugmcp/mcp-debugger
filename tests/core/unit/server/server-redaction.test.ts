@@ -4,7 +4,9 @@
  * Masking itself happens in the session layer (see
  * session-manager-redaction.test.ts); the server's job is to surface a
  * top-level `redaction` notice object whenever a returned item carries the
- * `redacted` flag, and to mention redaction in the initialize instructions.
+ * `redacted` flag, to say in the initialize instructions that the snapshot's
+ * locals are redacted, and to describe the placeholders in the descriptions
+ * of the tools that return program values (issue #1331).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
@@ -13,6 +15,7 @@ import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { createProductionDependencies, type Dependencies } from '../../../../src/container/dependencies.js';
 import { buildServerInstructions } from '../../../../src/skill-content.js';
+import { buildToolDefinitions } from '../../../../src/server/tool-schemas.js';
 import {
   createMockDependencies,
   createMockServer,
@@ -171,15 +174,29 @@ describe('Server redaction notices (issue #237)', () => {
   });
 
   describe('server instructions', () => {
-    it('mentions redaction when enabled (the default)', () => {
+    it('say the snapshot locals are redacted when redaction is on (the default)', () => {
       const instructions = buildServerInstructions();
-      expect(instructions).toContain('<redacted:');
-      expect(instructions).toContain('DEBUG_MCP_NO_REDACT');
+      expect(instructions).toContain("the top frame's locals (redacted and capped)");
     });
 
-    it('drops the redaction rule when the server opted out', () => {
+    it('say nothing of redaction when the server opted out', () => {
       const instructions = buildServerInstructions(undefined, { redactionEnabled: false });
-      expect(instructions).not.toContain('<redacted:');
+      expect(instructions).not.toMatch(/redact/i);
+    });
+  });
+
+  // The placeholder format and the opt-out moved from the instructions to the
+  // descriptions of the tools that return program values (issue #1331),
+  // worded to stay true when the server runs with DEBUG_MCP_NO_REDACT=1.
+  describe('tool descriptions', () => {
+    it('describe the placeholder, the redaction field and the opt-out on every tool that returns program values', () => {
+      const tools = buildToolDefinitions({ supportedLanguages: ['python'], environment: mockDependencies.environment });
+      for (const name of ['get_variables', 'get_local_variables', 'evaluate_expression', 'get_output']) {
+        const description = tools.find((tool) => tool.name === name)?.description ?? '';
+        expect(description, name).toContain('<redacted:rule-id>');
+        expect(description, name).toContain('redaction field');
+        expect(description, name).toContain('Unless the server runs with DEBUG_MCP_NO_REDACT=1');
+      }
     });
   });
 });

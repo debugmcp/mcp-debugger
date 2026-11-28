@@ -99,7 +99,7 @@
       },
       {
         "name": "set_breakpoint",
-        "description": "Set a breakpoint. Setting breakpoints on non-executable lines (structural, declarative) may lead to unexpected behavior",
+        "description": "Set a breakpoint. Setting breakpoints on non-executable lines (structural, declarative) may lead to unexpected behavior. A breakpoint can answer verified: false before the launch, or until the module or class holding its line is loaded; that is normal.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -120,7 +120,7 @@
             },
             "logMessage": {
               "type": "string",
-              "description": "Create a logpoint: instead of pausing, log this message when the line is hit. Expressions in {curly braces} are interpolated (e.g. \"order={orderId} total={total}\"). Messages arrive in get_output without pausing, but each hit costs time (24.7 µs in Python to 4.9 ms in Dart), so logpoints are not for tight loops. Supported by the Python, JavaScript, Go, Rust, C/C++, COBOL ({WS-NAME} data references), Dart and mock adapters; not by Java, .NET, or Ruby"
+              "description": "Create a logpoint: instead of pausing, log this message when the line is hit. Expressions in {curly braces} are interpolated (e.g. \"order={orderId} total={total}\"). Messages arrive in get_output without pausing, but each hit costs time (24.7 µs in Python to 4.9 ms in Dart), so logpoints are not for tight loops; and in Python, JavaScript and Dart a function that holds a line breakpoint of any kind, a logpoint included, runs slower as a whole while it holds it. Supported by the Python, JavaScript, Go, Rust, C/C++, COBOL ({WS-NAME} data references), Dart and mock adapters; not by Java, .NET, or Ruby"
             },
             "suspendPolicy": {
               "type": "string",
@@ -256,7 +256,7 @@
                 "all",
                 "none"
               ],
-              "description": "Break when exceptions are thrown: \"uncaught\" pauses at uncaught exceptions at the crash site instead of terminating the session; \"all\" also pauses on caught/raised exceptions (language-dependent). Launch sessions default to \"uncaught\" (Ruby is the exception — rdbg has no uncaught-only filter, so it stays \"none\"); pass \"none\" to opt out and let crashing scripts run to termination"
+              "description": "Break when exceptions are thrown: \"uncaught\" pauses at uncaught exceptions at the crash site instead of terminating the session; \"all\" also pauses on caught/raised exceptions (language-dependent). Launch sessions default to \"uncaught\" (Ruby is the exception — rdbg has no uncaught-only filter, so it stays \"none\"); pass \"none\" to opt out and let crashing scripts run to termination. On Windows a C/C++ program still ends at an uncaught exception: CodeLLDB reports no stop there"
             },
             "testRunner": {
               "type": "string",
@@ -295,7 +295,7 @@
       },
       {
         "name": "attach_to_process",
-        "description": "Attach to a running process for debugging. After the handshake the target is verified by polling for threads; if none are reported within verifyTimeout (~20s default) the attach fails and the proxy is torn down. When a requested post-attach pause is accepted but no stopped event arrives within its bounded wait, returns state \"running\" with pending:true; the late event alone changes the session to \"paused\" — call wait_for_stop to block until it does",
+        "description": "Attach to a running process for debugging. After the handshake the target is verified by polling for threads; if none are reported within verifyTimeout (~20s default) the attach fails and the proxy is torn down. When a requested post-attach pause is accepted but no stopped event arrives within its bounded wait, returns state \"running\" with pending:true; the late event alone changes the session to \"paused\" — call wait_for_stop to block until it does. The target is started under its debugger or named by processId: Python python -m debugpy --listen <host:port>; Ruby rdbg --open --port <N>; Node.js node --inspect (host, port), or a local node process by processId; Java -agentlib:jdwp=transport=dt_socket,server=y,address=*:<port>; C/C++, COBOL and .NET by processId; Dart and Flutter a VM service (adapterConfig.vmServiceUri or vmServiceInfoFile; a Flutter app on an Android device: adapterConfig.deviceId). list_supported_languages shows each language's forms (attachBy). Breakpoint paths are resolved on the target's filesystem: use the paths the target sees (get_stack_trace shows them) or a mapping (Python: adapterConfig.pathMappings [{localRoot, remoteRoot}]; Ruby: adapterConfig.localfsMap \"<target dir>:<local dir>\"). Kubernetes pods (port-forward or an ephemeral sidecar, per-language presets): docs/kubernetes.md in the mcp-debugger repo",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -383,7 +383,7 @@
       },
       {
         "name": "expose_session",
-        "description": "Expose a debug session as a read-only DAP mirror endpoint on 127.0.0.1 so an IDE (e.g. VS Code) can attach as a second debug client and inspect live state: threads, stack, scopes, variables, evaluate. Returns host, port, and a session token the IDE must include as \"mirrorToken\" in its attach configuration. The mirror never drives execution — continue/step/pause and breakpoint changes are rejected; control stays with this MCP session. Requires an active session (launched or attached); works while running or paused. Calling it again returns the same endpoint. The endpoint closes on unexpose_session, close_debug_session, restart, or debuggee exit",
+        "description": "Expose a debug session as a read-only DAP mirror endpoint on 127.0.0.1 so an IDE (e.g. VS Code) can attach as a second debug client and inspect live state: threads, stack, scopes, variables, evaluate. Returns host, port, and a session token the IDE must include as \"mirrorToken\" in its attach configuration. The mirror never drives execution — continue/step/pause and breakpoint changes are rejected; control stays with this MCP session. Requires an active session (launched or attached); works while running or paused. Calling it again returns the same endpoint. The endpoint closes on unexpose_session, close_debug_session, restart, or debuggee exit. Relay host, port and token to the person who will look: in VS Code, a launch.json attach configuration with \"debugServer\": <port>, \"mirrorToken\": \"<token>\" and the language's debug type. Call unexpose_session when they are done",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -413,7 +413,7 @@
       },
       {
         "name": "close_debug_session",
-        "description": "Close a debugging session",
+        "description": "Close a debugging session, with its child sessions. A program the session launched is ended; a process it attached to is released and keeps running; the answer says which (processEnded, released). Close every session when done, even after a failure",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -428,7 +428,7 @@
       },
       {
         "name": "step_over",
-        "description": "Step over the current line. Waits briefly for the program to stop; if the step is still executing after ~5s (e.g. stepping over a long-running call), returns success with state \"running\" and pending:true — the step is still in effect and the session becomes \"paused\" when it completes (call wait_for_stop to block until then, or pause_execution to interrupt)",
+        "description": "Step over the current line. Waits briefly for the program to stop; if the step is still executing after ~5s (e.g. stepping over a long-running call), returns success with state \"running\" and pending:true — the step is still in effect and the session becomes \"paused\" when it completes (call wait_for_stop to block until then, or pause_execution to interrupt). Unless the server runs with DEBUG_MCP_NO_SNAPSHOT=1, an answer at a stop (not an entry stop) carries snapshot: the top 3 frames and the top frame's locals (capped; see snapshot.truncation). At an exception the answer also carries its type and message, in snapshot.exception. A repeated stop in the same frame carries changedVariables instead of locals: {before, after} changed, {after, new: true} appeared, {before, gone: true} left scope, {after} alone when the earlier list was capped (so not known to be new); {} nothing visible changed.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -443,7 +443,7 @@
       },
       {
         "name": "step_into",
-        "description": "Step into the current call. Waits briefly for the program to stop; if the step is still executing after ~5s, returns success with state \"running\" and pending:true — the session becomes \"paused\" when the step completes (call wait_for_stop to block until then)",
+        "description": "Step into the current call. Waits briefly for the program to stop; if the step is still executing after ~5s, returns success with state \"running\" and pending:true — the session becomes \"paused\" when the step completes (call wait_for_stop to block until then). Unless the server runs with DEBUG_MCP_NO_SNAPSHOT=1, an answer at a stop (not an entry stop) carries snapshot: the top 3 frames and the top frame's locals (capped; see snapshot.truncation). At an exception the answer also carries its type and message, in snapshot.exception. A repeated stop in the same frame carries changedVariables instead of locals: {before, after} changed, {after, new: true} appeared, {before, gone: true} left scope, {after} alone when the earlier list was capped (so not known to be new); {} nothing visible changed.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -458,7 +458,7 @@
       },
       {
         "name": "step_out",
-        "description": "Step out of the current function. Waits briefly for the program to stop; if the step is still executing after ~5s (e.g. the rest of the function is long-running), returns success with state \"running\" and pending:true — the session becomes \"paused\" when the step completes (call wait_for_stop to block until then)",
+        "description": "Step out of the current function. Waits briefly for the program to stop; if the step is still executing after ~5s (e.g. the rest of the function is long-running), returns success with state \"running\" and pending:true — the session becomes \"paused\" when the step completes (call wait_for_stop to block until then). Unless the server runs with DEBUG_MCP_NO_SNAPSHOT=1, an answer at a stop (not an entry stop) carries snapshot: the top 3 frames and the top frame's locals (capped; see snapshot.truncation). At an exception the answer also carries its type and message, in snapshot.exception. A repeated stop in the same frame carries changedVariables instead of locals: {before, after} changed, {after, new: true} appeared, {before, gone: true} left scope, {after} alone when the earlier list was capped (so not known to be new); {} nothing visible changed.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -488,7 +488,7 @@
       },
       {
         "name": "wait_for_stop",
-        "description": "Block until the session next pauses or ends, then say why and where. Call it after continue_execution (which does not wait) and whenever a tool answers pending:true, instead of polling list_debug_sessions. Answers at once when the session is already paused (state \"paused\" with lastStop — the same record list_debug_sessions shows — and the top frame as location) or already over (the terminal state, with exitCode when the debuggee reported one); note says when the answer is anchored on a thread other than the one the stop was reported on, or when no frame of the shown stack is program code. If neither happens within the timeout it answers state \"running\" with pending:true: nothing was cancelled, breakpoints and exception filters stay armed — call it again to keep waiting, or pause_execution to interrupt. A session whose program spawned child sessions (Python and JavaScript launches, on by default: dapLaunchArgs subProcess: false or autoAttachChildProcesses: false opts a launch out; a JavaScript attach needs adapterConfig: { autoAttachChildProcesses: true }, whose costs the attach_to_process description states) is waited on as a tree: sessionId names the session the answer is about — the session itself when it is paused, else the first paused descendant, else the session itself when it has ended — and children lists every descendant with its state; an ended child alone never completes the parent's wait",
+        "description": "Block until the session next pauses or ends, then say why and where. Call it after continue_execution (which does not wait) and whenever a tool answers pending:true, instead of polling list_debug_sessions. Answers at once when the session is already paused (state \"paused\" with lastStop — the same record list_debug_sessions shows — and the top frame as location) or already over (the terminal state, with exitCode when the debuggee reported one); note says when the answer is anchored on a thread other than the one the stop was reported on, or when no frame of the shown stack is program code. If neither happens within the timeout it answers state \"running\" with pending:true: nothing was cancelled, breakpoints and exception filters stay armed — call it again to keep waiting, or pause_execution to interrupt. A session whose program spawned child sessions (Python and JavaScript launches, on by default: dapLaunchArgs subProcess: false or autoAttachChildProcesses: false opts a launch out; a JavaScript attach needs adapterConfig: { autoAttachChildProcesses: true }, whose costs the attach_to_process description states) is waited on as a tree: sessionId names the session the answer is about — the session itself when it is paused, else the first paused descendant, else the session itself when it has ended — and children lists every descendant with its state; an ended child alone never completes the parent's wait. A non-zero exit with program output also carries outputTail. Unless the server runs with DEBUG_MCP_NO_SNAPSHOT=1, an answer at a stop (not an entry stop) carries snapshot: the top 3 frames and the top frame's locals (capped; see snapshot.truncation). At an exception the answer also carries its type and message, in lastStop. A repeated stop in the same frame carries changedVariables instead of locals: {before, after} changed, {after, new: true} appeared, {before, gone: true} left scope, {after} alone when the earlier list was capped (so not known to be new); {} nothing visible changed.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -507,7 +507,7 @@
       },
       {
         "name": "pause_execution",
-        "description": "Pause a running program. Waits briefly for the stop; if the program cannot stop within ~5s (e.g. blocked in native code, or an idle server waiting for input), returns success with pending:true and the session reports \"paused\" the next time the program runs code (call wait_for_stop to block until then). An observed stop answers with stopReason, the first visible frame as location (with its source context), and note when the stop was reported on a thread with no program frame — a sibling thread in program code is shown instead, or, when none has one, the note says no program frame is active. Fails with an actionable error if the session has no debuggable target to pause (e.g. a js attach whose target session was never adopted or has ended)",
+        "description": "Pause a running program. Waits briefly for the stop; if the program cannot stop within ~5s (e.g. blocked in native code, or an idle server waiting for input), returns success with pending:true and the session reports \"paused\" the next time the program runs code (call wait_for_stop to block until then). An observed stop answers with stopReason, the first visible frame as location (with its source context), and note when the stop was reported on a thread with no program frame — a sibling thread in program code is shown instead, or, when none has one, the note says no program frame is active. Fails with an actionable error if the session has no debuggable target to pause (e.g. a js attach whose target session was never adopted or has ended). Unless the server runs with DEBUG_MCP_NO_SNAPSHOT=1, an answer at a stop (not an entry stop) carries snapshot: the top 3 frames and the top frame's locals (capped; see snapshot.truncation). At an exception the answer also carries its type and message, in snapshot.exception. A repeated stop in the same frame carries changedVariables instead of locals: {before, after} changed, {after, new: true} appeared, {before, gone: true} left scope, {after} alone when the earlier list was capped (so not known to be new); {} nothing visible changed.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -541,7 +541,7 @@
       },
       {
         "name": "get_variables",
-        "description": "Get variables (scope is variablesReference: number). Responses are size-guarded: oversized values are cut (truncated:true) and very large scopes return a capped list with a truncation notice — pass names:[...] to fetch specific variables in full",
+        "description": "Get variables (scope is variablesReference: number). Responses are size-guarded: oversized values are cut (truncated:true) and very large scopes return a capped list with a truncation notice — pass names:[...] to fetch specific variables in full. Unless the server runs with DEBUG_MCP_NO_REDACT=1, credential-shaped values (API keys, tokens, private keys) and the values of sensitive names (password, api_key, ...) are shown as <redacted:rule-id>: the program's state is unchanged, only the display is masked, and the answer's redaction field says what was masked.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -568,7 +568,7 @@
       },
       {
         "name": "get_local_variables",
-        "description": "Get local variables for the shared inspection anchor. If the stopped thread is frameless, a sibling with policy-recognized user frames is preferred, adopted, and disclosed in note. At a breakpoint or step inside a frame the stack display hides as internal (a node_modules dependency), the anchor is that frame — the one the program stopped in — and note says so. A JavaScript frame with no Local/block scope returns empty with guidance instead of mislabeling Global bindings. Responses are size-guarded; pass names:[...] to fetch specific variables in full",
+        "description": "Get local variables for the shared inspection anchor. If the stopped thread is frameless, a sibling with policy-recognized user frames is preferred, adopted, and disclosed in note. At a breakpoint or step inside a frame the stack display hides as internal (a node_modules dependency), the anchor is that frame — the one the program stopped in — and note says so. A JavaScript frame with no Local/block scope returns empty with guidance instead of mislabeling Global bindings. Responses are size-guarded; pass names:[...] to fetch specific variables in full. Unless the server runs with DEBUG_MCP_NO_REDACT=1, credential-shaped values (API keys, tokens, private keys) and the values of sensitive names (password, api_key, ...) are shown as <redacted:rule-id>: the program's state is unchanged, only the display is masked, and the answer's redaction field says what was masked.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -637,7 +637,7 @@
       },
       {
         "name": "evaluate_expression",
-        "description": "Evaluate expression in the current debug context. Without frameId, uses the same adopted top frame as stack and locals — at a breakpoint or step that is the frame the program stopped in even when the stack display would hide it — and discloses an automatic thread switch or a hidden paused frame in anchorNote; frame names the frame that was used, on success and on failure. Expressions can read and modify program state. Waits up to 30s by default",
+        "description": "Evaluate expression in the current debug context. Without frameId, uses the same adopted top frame as stack and locals — at a breakpoint or step that is the frame the program stopped in even when the stack display would hide it — and discloses an automatic thread switch or a hidden paused frame in anchorNote; frame names the frame that was used, on success and on failure. Expressions can read and modify program state. Waits up to 30s by default. Unless the server runs with DEBUG_MCP_NO_REDACT=1, credential-shaped values (API keys, tokens, private keys) and the values of sensitive names (password, api_key, ...) are shown as <redacted:rule-id>: the program's state is unchanged, only the display is masked, and the answer's redaction field says what was masked.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -693,7 +693,7 @@
       },
       {
         "name": "get_output",
-        "description": "Get debuggee output (stdout/stderr/console) captured for a session. Buffered per launch (last 1000 entries; adapter telemetry and known adapter-internal diagnostics — e.g. LLDB DWARF-parser noise — filtered out). Works while the program is running and after it finishes, until the session is closed. Pass since=nextSince from the previous response to fetch only new output. A session with child sessions lists them in children: the lines of a logpoint are on the session of the process that hit it, read with get_output on that sessionId",
+        "description": "Get debuggee output (stdout/stderr/console) captured for a session. Buffered per launch (last 1000 entries; adapter telemetry and known adapter-internal diagnostics — e.g. LLDB DWARF-parser noise — filtered out). Works while the program is running and after it finishes, until the session is closed. Pass since=nextSince from the previous response to fetch only new output. A session with child sessions lists them in children: the lines of a logpoint are on the session of the process that hit it, read with get_output on that sessionId. Unless the server runs with DEBUG_MCP_NO_REDACT=1, credential-shaped values (API keys, tokens, private keys) and the values of sensitive names (password, api_key, ...) are shown as <redacted:rule-id>: the program's state is unchanged, only the display is masked, and the answer's redaction field says what was masked.",
         "inputSchema": {
           "type": "object",
           "properties": {
