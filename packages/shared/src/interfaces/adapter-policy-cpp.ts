@@ -31,14 +31,27 @@ import {
   isLldbInternalFrame,
   filterLldbStackFrames,
   describeLldbUnresolvedSource,
-  lldbShouldSuppressOutputEvent
+  lldbShouldSuppressOutputEvent,
+  isLldbAdapterOutputLine
 } from './lldb-policy-shared.js';
 
 /** The sources CodeLLDB binds through the binary's DWARF (issue #950): headers included. */
 const CPP_SOURCE_EXTENSIONS: ReadonlySet<string> = new Set(['.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.hxx']);
 
+/**
+ * GCC `libstdc++` (`libsupc++/vterminate.cc` `__verbose_terminate_handler`)
+ * fatal-error header on `std::terminate` (measured on Windows and Linux, issue
+ * #1277; on Linux/macOS CodeLLDB merges pty `stderr` into `stdout`).
+ */
+const CPP_TERMINATE_LINE =
+  /^terminate called (?:after throwing (?:an instance of '[^']+'(?:  what\(\): .+)?|a foreign exception)|without an active exception|recursively)$/;
+
 export const CppAdapterPolicy = {
   name: 'cpp',
+  programOutput: {
+    isAdapterLine: isLldbAdapterOutputLine,
+    isFatalErrorLine: (line: string): boolean => CPP_TERMINATE_LINE.test(line),
+  },
   // CodeLLDB honours noDebug by refusing debugger requests ("Not supported in
   // noDebug mode") while still opening a configuration phase — it withholds
   // the launch response until configurationDone; the worker tolerates the
