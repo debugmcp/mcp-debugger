@@ -49,6 +49,36 @@ const PYTHON_NON_PROGRAM_TARGETS = launchTargetKeysOf(PythonAdapterPolicy).filte
 const LAUNCH_TARGET_FLAGS: Record<string, string> = { module: 'python -m', code: 'python -c' };
 
 /**
+ * The `clientOS` an attach sends by default (issue #1304): the operating
+ * system of the machine this server runs on, which is the DAP client, spelled
+ * as pydevd compares it. `pydevd_file_utils.set_ide_os` asserts `WINDOWS` or
+ * `UNIX` and maps PyCharm's `WIN`; debugpy 1.8 upper-cases the key first
+ * (`pydevd_json_debug_options.py`), so `windows`, `unix` and `win` pass in any
+ * case, an empty string skips `set_ide_os` and so leaves pydevd's current
+ * client-system setting unchanged, and any other value fails the attach in
+ * the target. That setting starts as the TARGET's own system (`_ide_os =
+ * "WINDOWS" if IS_WINDOWS else "UNIX"`) and is kept between attaches to the
+ * same process, so without a value the target's own system is assumed unless
+ * an earlier attach set another. The value decides which separator pydevd
+ * expects in the client's paths, `localRoot` included, and writes in the paths
+ * it translates back. When a Linux target took a Windows client for Linux, roots without
+ * a trailing separator went wrong: `C:\…\app\service.py` matched `localRoot`
+ * `C:\…\app`, but the rest of the path kept its `\` (`/srv/app\service.py`,
+ * no such file on the target, so "Breakpoint in file that does not exist."),
+ * and a stop reached through the target's path came back as
+ * `C:\…\app/service.py`. Roots that both ended in a separator already
+ * translated. A launch needs none of this: its debuggee runs on this machine.
+ */
+function hostClientOS(): 'WINDOWS' | 'UNIX' {
+  return process.platform === 'win32' ? 'WINDOWS' : 'UNIX';
+}
+
+/** A key the caller passed: present with a value other than null or undefined. */
+function isPassed(value: unknown): boolean {
+  return value !== undefined && value !== null;
+}
+
+/**
  * Cache entry for Python executable paths
  */
 interface PythonPathCacheEntry {
@@ -87,6 +117,8 @@ interface PythonAttachConfig extends LanguageSpecificAttachConfig {
   cwd?: string;
   env?: Record<string, string>;
   pathMappings?: Array<{ localRoot: string; remoteRoot: string }>;
+  /** The style of the paths this client sends: this machine's unless the caller named one (issue #1304). */
+  clientOS?: unknown;
 }
 
 /**
@@ -630,6 +662,7 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
       cwd,
       env,
       subProcess,
+      clientOS,
       ...rest
     } = config as Record<string, unknown>;
     void _request; void _attachMode; void _host; void _port; void _console;
@@ -656,6 +689,15 @@ export class PythonDebugAdapter extends EventEmitter implements IDebugAdapter {
       // a note, since it changes nothing.
       subProcess: (subProcess as boolean | undefined) ?? true
     };
+
+    // The adapter adds clientOS only when the caller passed none of clientOS,
+    // debugOptions and options, pydevd's client options (issue #1304); a
+    // clientOS the caller passed is forwarded as given.
+    if (isPassed(clientOS)) {
+      attachConfig.clientOS = clientOS;
+    } else if (!isPassed(rest.debugOptions) && !isPassed(rest.options)) {
+      attachConfig.clientOS = hostClientOS();
+    }
     if (subProcess === false) {
       this.launchDiagnostics.push({
         key: 'subProcess',
