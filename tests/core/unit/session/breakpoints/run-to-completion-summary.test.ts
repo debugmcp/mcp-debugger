@@ -260,13 +260,14 @@ describe('buildRunToCompletionSummary', () => {
       expect(whitespaceOnly.summary).toBe('The program exited with code 1.');
     });
 
-    it('bounds outputTail to the last 8 non-empty lines and 300 characters per line, splitting per entry', () => {
+    it('bounds outputTail to the last 8 non-empty program lines and 300 characters per line without gluing cross-stream entries', () => {
       const longLine = 'x'.repeat(340);
       const outputBuffer = bufferOf(
-        ...Array.from({ length: 10 }, (_, idx) => ({ output: `line ${idx + 1}\n` })),
-        // No trailing newline: must not run into the following entry.
-        { output: 'entry without newline' },
-        { output: `${longLine}\n` }
+        ...Array.from({ length: 10 }, (_, idx) => ({ category: 'stdout', output: `line ${idx + 1}\n` })),
+        // No trailing newline on stdout ahead of console + stderr: must stay separate from stderr.
+        { category: 'stdout', output: 'entry without newline' },
+        { category: 'console', output: 'adapter console note\n' },
+        { category: 'stderr', output: `${longLine}\n` }
       );
       const result = build({ exitCode: 1, breakpoints: new Map(), outputBuffer });
       const tail = (result.data as { outputTail?: string[] }).outputTail;

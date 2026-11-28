@@ -505,6 +505,18 @@ export function lldbShouldSuppressOutputEvent(category: string, text: string): b
   return lines.every((line) => patterns.some((pattern) => pattern.test(line)));
 }
 
+const LLDB_STDERR_STOP_REASON_LINE = /^Stop reason: .+$/;
+
+/**
+ * CodeLLDB writes `Stop reason: signal SIGABRT` (and similar stop summaries) to
+ * `stderr` as the process ends on POSIX (measured on Linux, issue #1277). Kept
+ * in `get_output` (see `lldbShouldSuppressOutputEvent`), excluded from a
+ * non-zero exit's `outputTail` by all three CodeLLDB-backed policies.
+ */
+export function isLldbAdapterOutputLine(category: 'stdout' | 'stderr', line: string): boolean {
+  return category === 'stderr' && LLDB_STDERR_STOP_REASON_LINE.test(line);
+}
+
 /**
  * CodeLLDB's lang_support/__init__.py prints this when a language module's
  * init throws — for Rust, typically because `rustc --print=sysroot` is not

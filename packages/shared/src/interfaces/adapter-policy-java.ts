@@ -52,6 +52,12 @@ function classpathDirectories(launchConfig: Record<string, unknown>): string[] {
 
 export const JavaAdapterPolicy = {
   name: 'java',
+  // JdiDapServer launches the target JVM with `-agentlib:jdwp=transport=dt_socket,server=y,...`,
+  // whose transport banner lands on the target's stdout ahead of any program output (issue #1277).
+  programOutput: {
+    isAdapterLine: (category: 'stdout' | 'stderr', line: string): boolean =>
+      category === 'stdout' && /^Listening for transport dt_socket at address: \S+$/.test(line),
+  },
   supportsLogPoints: false,
   // JdiDapServer implements setFunctionBreakpoints natively: BreakpointRequests
   // at each concrete overload's entry location, with ClassPrepareRequest

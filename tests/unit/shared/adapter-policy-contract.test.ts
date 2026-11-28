@@ -709,6 +709,48 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
     expect(policy.debuggeeExitCodeFromOutput?.('stdout', 'Process 1 has exited with status 7\n')).toBeUndefined();
     expect(policy.debuggeeExitCodeFromOutput?.('console', 'Hello, World!\n')).toBeUndefined();
 
+    // Program-output contract for non-zero exit `outputTail` (issue #1277):
+    // single optional `programOutput` object, with each member pinned to the
+    // exact adapters whose engine/runtime requires it.
+    const policiesWithProgramOutput = new Set<DebugLanguage>([
+      DebugLanguage.JAVASCRIPT,
+      DebugLanguage.JAVA,
+      DebugLanguage.PYTHON,
+      DebugLanguage.DART,
+      DebugLanguage.COBOL,
+      DebugLanguage.CPP,
+      DebugLanguage.RUST
+    ]);
+    const policiesWithAdapterLine = new Set<DebugLanguage>([
+      DebugLanguage.JAVASCRIPT,
+      DebugLanguage.JAVA,
+      DebugLanguage.COBOL,
+      DebugLanguage.CPP,
+      DebugLanguage.RUST
+    ]);
+    const policiesWithFatalErrorLine = new Set<DebugLanguage>([
+      DebugLanguage.COBOL,
+      DebugLanguage.CPP,
+      DebugLanguage.RUST
+    ]);
+
+    expect(policy.programOutput !== undefined).toBe(policiesWithProgramOutput.has(language));
+    expect(typeof policy.programOutput?.isAdapterLine === 'function').toBe(policiesWithAdapterLine.has(language));
+    expect(policy.programOutput?.explicitConsoleIsProgram === true).toBe(language === DebugLanguage.DART);
+    if (language !== DebugLanguage.DART) {
+      expect(policy.programOutput?.explicitConsoleIsProgram).toBeUndefined();
+    }
+    expect(policy.programOutput?.causeLast === true).toBe(language === DebugLanguage.PYTHON);
+    if (language !== DebugLanguage.PYTHON) {
+      expect(policy.programOutput?.causeLast).toBeUndefined();
+    }
+    expect(typeof policy.programOutput?.isFatalErrorLine === 'function').toBe(policiesWithFatalErrorLine.has(language));
+
+    // Ordinary program lines never false-match any hook.
+    expect(policy.programOutput?.isAdapterLine?.('stdout', 'Hello, World!') ?? false).toBe(false);
+    expect(policy.programOutput?.isAdapterLine?.('stderr', 'Error: uncaught on purpose') ?? false).toBe(false);
+    expect(policy.programOutput?.isFatalErrorLine?.('Hello, World!') ?? false).toBe(false);
+
     const clientBehavior = policy.getDapClientBehavior();
     expect(clientBehavior).toBeTypeOf('object');
     if (clientBehavior.childInitTimeout !== undefined) {
