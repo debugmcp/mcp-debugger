@@ -29,7 +29,7 @@ Two rationales, one per side of the split:
 - **The serial projects** keep the original trade-off: slower, but they eliminate a class of non-deterministic failure that is nearly impossible to debug in CI. Their 30 s ceiling is a safety net for hung processes.
 - **The parallel `unit` project** got there by removing the reason to be serial rather than by accepting the risk. The proxy init-retry and timeout paths were moved onto fake timers (`advanceTimersByTimeAsync`), so no unit test burns real backoff; the config records the unit suite dropping from ~110 s to ~10 s. `forks` is kept over `threads` for full per-file process isolation *and* because a clean re-measure put it ahead on speed (~10.5 s vs ~12.3 s). With the wall clock down to ~10 s, the 15 s ceiling fails a genuine hang far sooner than the old 30 s would.
 
-Selection is by `--project`, never by `--exclude` — Vitest silently ignores exclude globs once `projects` is set. `--project unit --project integration` is therefore the modern spelling of "everything except `tests/e2e/**`" — used directly by `test:strict` and `test:ci-coverage`, and reached the long way round by `.husky/pre-push`, which runs `test:unit` and `test:integration` back to back over the same set.
+Selection is by `--project`, never by `--exclude` — Vitest silently ignores exclude globs once `projects` is set. `--project unit --project integration` is therefore the modern spelling of "everything except `tests/e2e/**`" — used directly by `test:strict` and `test:ci-coverage`. CI's `Build and Test` job runs the latter on Ubuntu and Windows; branch-push hooks run static checks. See the [Dev-Loop Gate](../../CONTRIBUTING.md#dev-loop-gate).
 
 ### Test Ordering and the Flake Hunt
 
@@ -334,8 +334,8 @@ Three defenses around the gate itself:
 
 `pnpm run typecheck:all` = `typecheck` + `typecheck:tests`, and it is deliberately the *same command* in all three places, so a green working tree cannot mean a red required check:
 
-1. **`.husky/pre-push`** — lint, then a guard that `tests/typecheck-baseline.json` is not modified-but-uncommitted (the ratchet validates the working tree; CI validates the pushed commit, so an uncommitted refresh would pass here and fail there), then `typecheck:all`, then a clean build, then `test:unit` + `test:integration`. The e2e project is not part of the gate; CI runs its Docker container tests and the COBOL/Dart/Flutter host lanes, and the rest is on demand (`npm run test:e2e`).
-2. **The `Lint Code` CI job** — ESLint, then `typecheck:all` (or the split dependabot form), then the personal-path and changelog gates. No build needed: ~3 s for the sources, ~11 s for the ratchet.
+1. **`.husky/pre-push`** — the [Dev-Loop Gate](../../CONTRIBUTING.md#dev-loop-gate) lists the static checks for branch pushes, including the committed-baseline guard and `typecheck:all`, the tags-only clean build and unit suite, and the pull request's CI checks. CI builds and runs the suites.
+2. **The `Lint Code` CI job** — ESLint, then `typecheck:all` (or the split dependabot form), then the personal-path, documentation consistency (`check:docs`) and changelog gates. No build needed: ~3 s for the sources, ~11 s for the ratchet.
 3. **Locally**, whenever you want the fast type-only answer without a build.
 
-`.husky/pre-commit` deliberately runs none of this — only the personal-paths check, the build-artifact/tarball guards, and an optional docstar check. Commits stay cheap; the gate is at push.
+`.husky/pre-commit` checks working copies of files staged as added, copied or modified for personal paths, runs the build-artifact/tarball guards, and runs an optional docstar check. Commits stay cheap; branch pushes run static checks and CI runs the pull request's checks, as described in the [Dev-Loop Gate](../../CONTRIBUTING.md#dev-loop-gate).

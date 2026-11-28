@@ -24,7 +24,7 @@ Please delete options that are not relevant.
 - [ ] I have made corresponding changes to the documentation
 - [ ] My changes generate no new warnings
 - [ ] I have added tests that prove my fix is effective or that my feature works
-- [ ] New and existing unit tests pass locally with my changes
+- [ ] I have run the tests my change touches; CI runs the suites (see the [Dev-Loop Gate](https://github.com/debugmcp/mcp-debugger/blob/main/CONTRIBUTING.md#dev-loop-gate))
 - [ ] Any dependent changes have been merged and published in downstream modules
 
 ## 🧪 Testing

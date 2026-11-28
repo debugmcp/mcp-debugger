@@ -19,7 +19,7 @@ echo "✅ Personal information check passed!"
 
 # Check if user wants to skip other checks
 if [ "$1" = "--skip-tests" ] || [ "$SKIP_TESTS" = "true" ]; then
-    echo "⚡ Skipping other pre-commit checks (tests, build artifacts)"
+    echo "⚡ Skipping other pre-commit checks (build artifacts, tarballs, docstar)"
     echo "   Use this only when you need to commit quickly!"
     # Commit with --no-verify to skip the normal pre-commit hook
     if [ "$1" = "--skip-tests" ]; then
