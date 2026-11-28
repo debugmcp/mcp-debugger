@@ -279,6 +279,20 @@ export interface StepInFilterContext {
   };
 }
 
+/** Context passed to AdapterPolicy.describeUnboundBreakpoint (issues #357, #1320). */
+export interface UnboundBreakpointContext {
+  /**
+   * How the adapter reported the problem: `unverified` when the breakpoint
+   * reply succeeded with `verified: false`, `syncFailed` when the breakpoint
+   * request itself was refused or failed.
+   */
+  outcome: 'unverified' | 'syncFailed';
+  /** The adapter's (or failed sync's) message. */
+  message: string;
+  /** True for attach sessions, where breakpoint paths are resolved on the target rather than launched locally. */
+  attachMode: boolean;
+}
+
 /** Context passed to AdapterPolicy.generatedFileCandidates (issues #938/#950). */
 export interface GeneratedFileContext {
   /** The source path as the breakpoint or stop names it (absolute, server-resolved). */
@@ -548,6 +562,19 @@ export interface AdapterPolicy {
    * never-bound-at-exit note applies regardless.
    */
   functionBreakpointsBindLate?: boolean;
+
+  /**
+   * Explain what an adapter's unbound-breakpoint message (or breakpoint-sync
+   * refusal) means when the adapter's own sentence is about the target's file
+   * system rather than the caller's host (issues #357, #1320). Read by the
+   * breakpoint controller with `outcome: 'unverified'` on `set_breakpoint`
+   * when a line breakpoint comes back unverified with a message (joined to
+   * `warning` after the adapter's own words, which stay first and unchanged),
+   * and with `outcome: 'syncFailed'` on a failed/refused breakpoint sync
+   * (`buildLiveSyncWarning` and `resyncAll`). Return `undefined` unless the
+   * outcome, message and session mode match a known case.
+   */
+  describeUnboundBreakpoint?(info: UnboundBreakpointContext): string | undefined;
 
   /**
    * True when the adapter honours DAP's `noDebug` launch flag by not enabling
