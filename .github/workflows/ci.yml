@@ -27,6 +27,12 @@ jobs:
         python-version: ['3.11']
     
     steps:
+    # Hosted runners already have Node; native path.join avoids mixed Windows
+    # separators under the default PowerShell shell (Bash on Ubuntu).
+    - name: Set the CodeLLDB cache directory
+      run: |
+        node -e "require('node:fs').appendFileSync(process.env.GITHUB_ENV, 'CODELLDB_CACHE_DIR=' + require('node:path').join(process.env.RUNNER_TEMP, 'codelldb-cache') + '\n')"
+
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
     
@@ -81,11 +87,34 @@ jobs:
     - name: Audit dependencies
       run: pnpm audit --prod --audit-level=high
 
+    - name: Read pinned CodeLLDB version
+      id: codelldb-version
+      run: |
+        node -e "require('node:fs').appendFileSync(process.env.GITHUB_OUTPUT, 'version=' + require('./packages/codelldb-common/vendor-manifest.json').codelldb.version + '\n')"
+
+    # Key: pinned version + manifest hash + runner OS/architecture.
+    # Script cache-layout changes are not hashed; bump v1 when the layout changes.
+    - name: Restore CodeLLDB release artifacts
+      id: codelldb-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      with:
+        path: ${{ env.CODELLDB_CACHE_DIR }}
+        key: codelldb-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.codelldb-version.outputs.version }}-${{ hashFiles('packages/codelldb-common/vendor-manifest.json') }}
+
+    # Exercise host vendoring on both systems and resolve a real CodeLLDB payload.
     - name: Vendor adapter binaries
+      id: vendor
       run: pnpm run vendor:adapters
-      continue-on-error: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    # Save immediately so later build/test failures do not discard a good download.
+    - name: Save CodeLLDB release artifacts
+      if: steps.vendor.outcome == 'success' && steps.codelldb-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      with:
+        path: ${{ env.CODELLDB_CACHE_DIR }}
+        key: ${{ steps.codelldb-cache.outputs.cache-primary-key }}
 
     - name: Build project
       run: pnpm run build:ci
@@ -104,6 +133,8 @@ jobs:
       run: pnpm run test:ci-coverage
       env:
         CI: true
+        # test:ci-coverage invokes build -> prebuild -> vendor:adapters again.
+        SKIP_ADAPTER_VENDOR: 'true'
         # Hard-fail on process-listener leaks (issues #159/#183)
         LEAK_GUARD_STRICT: '1'
     
@@ -321,6 +352,10 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+    - name: Set the CodeLLDB cache directory
+      shell: bash
+      run: echo "CODELLDB_CACHE_DIR=${RUNNER_TEMP}/codelldb-cache" >> "$GITHUB_ENV"
+
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
     
@@ -345,11 +380,36 @@ jobs:
       env:
         SKIP_ADAPTER_VENDOR: 'true'
 
+    - name: Read pinned CodeLLDB version
+      id: codelldb-version
+      run: |
+        node -e "require('node:fs').appendFileSync(process.env.GITHUB_OUTPUT, 'version=' + require('./packages/codelldb-common/vendor-manifest.json').codelldb.version + '\n')"
+
+    # Key: pinned version + manifest hash + runner OS/architecture.
+    # Script cache-layout changes are not hashed; bump v1 when the layout changes.
+    - name: Restore CodeLLDB release artifacts
+      id: codelldb-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      with:
+        path: ${{ env.CODELLDB_CACHE_DIR }}
+        key: codelldb-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.codelldb-version.outputs.version }}-${{ hashFiles('packages/codelldb-common/vendor-manifest.json') }}
+
+    # Both runtimes are copied into the Docker context. A refused cold-cache
+    # download now fails this step; previously Docker could fetch CodeLLDB
+    # itself as a fallback.
     - name: Vendor adapter binaries
+      id: vendor
       run: pnpm run vendor:adapters
-      continue-on-error: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    # Save immediately so later build/test failures do not discard a good download.
+    - name: Save CodeLLDB release artifacts
+      if: steps.vendor.outcome == 'success' && steps.codelldb-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      with:
+        path: ${{ env.CODELLDB_CACHE_DIR }}
+        key: ${{ steps.codelldb-cache.outputs.cache-primary-key }}
 
     - name: Run linting
       run: pnpm run lint
@@ -432,7 +492,13 @@ jobs:
     name: COBOL Host (GnuCOBOL 3.1.2)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      SKIP_ADAPTER_VENDOR: 'true'
     steps:
+    - name: Set the CodeLLDB cache directory
+      shell: bash
+      run: echo "CODELLDB_CACHE_DIR=${RUNNER_TEMP}/codelldb-cache" >> "$GITHUB_ENV"
+
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
     - name: Setup pnpm
@@ -450,12 +516,36 @@ jobs:
         head -1 /tmp/cobc-version.txt | grep -E '^cobc \(GnuCOBOL\) 3\.1\.2([. ]|$)'
     - name: Install dependencies
       run: pnpm install --frozen-lockfile
-      # This job vendors in postinstall (it needs CodeLLDB and js-debug for
-      # the smoke); the pinned js-debug asset downloads without the API, but
-      # the token keeps a 'latest'/override build off the unauthenticated
-      # quota like the other jobs' vendor step (issue #813).
+
+    - name: Read pinned CodeLLDB version
+      id: codelldb-version
+      run: |
+        node -e "require('node:fs').appendFileSync(process.env.GITHUB_OUTPUT, 'version=' + require('./packages/codelldb-common/vendor-manifest.json').codelldb.version + '\n')"
+
+    # Key: pinned version + manifest hash + runner OS/architecture.
+    # Script cache-layout changes are not hashed; bump v1 when the layout changes.
+    - name: Restore CodeLLDB release artifacts
+      id: codelldb-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      with:
+        path: ${{ env.CODELLDB_CACHE_DIR }}
+        key: codelldb-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.codelldb-version.outputs.version }}-${{ hashFiles('packages/codelldb-common/vendor-manifest.json') }}
+
+    # The title filter runs only COBOL logpoints, so js-debug is unnecessary.
+    - name: Vendor CodeLLDB
+      id: vendor
+      run: pnpm --filter @debugmcp/codelldb-common run build:adapter
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SKIP_ADAPTER_VENDOR: 'false'
+
+    # Save immediately so later build/test failures do not discard a good download.
+    - name: Save CodeLLDB release artifacts
+      if: steps.vendor.outcome == 'success' && steps.codelldb-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      with:
+        path: ${{ env.CODELLDB_CACHE_DIR }}
+        key: ${{ steps.codelldb-cache.outputs.cache-primary-key }}
+
     - name: Build project
       run: pnpm build
     - name: Run COBOL host smoke and logpoints
@@ -476,6 +566,9 @@ jobs:
     name: Dart Host (stable SDK)
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    env:
+      # Covers postinstall, prebuild and the JavaScript package's postbuild.
+      SKIP_ADAPTER_VENDOR: 'true'
     steps:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -496,10 +589,6 @@ jobs:
         dart --version 2>&1 | tee artifacts/dart/dart-version.txt
     - name: Install dependencies
       run: pnpm install --frozen-lockfile
-      # Vendors CodeLLDB/js-debug in postinstall like the other jobs; the token
-      # keeps a 'latest'/override build off the unauthenticated quota (issue #813).
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     - name: Build project
       run: pnpm build
     - name: Run Dart host smoke, attach and logpoints
@@ -520,6 +609,8 @@ jobs:
     name: Java Host (JDK 21)
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    env:
+      SKIP_ADAPTER_VENDOR: 'true'
     defaults:
       run:
         shell: bash
@@ -547,8 +638,13 @@ jobs:
         javac -version 2>&1 | tee artifacts/java/javac-version.txt
     - name: Install dependencies
       run: pnpm install --frozen-lockfile
+
+    # The shared skip switch also suppresses local JDI compilation. Restore
+    # that work explicitly without invoking either download script.
+    - name: Compile Java bridge
+      run: pnpm --filter @debugmcp/adapter-java run build:adapter
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SKIP_ADAPTER_VENDOR: 'false'
     - name: Build project
       run: pnpm build
     - name: Run all eight Java host smokes
@@ -571,6 +667,7 @@ jobs:
       run:
         shell: bash
     env:
+      SKIP_ADAPTER_VENDOR: 'true'
       NETCOREDBG_VERSION: '3.2.0-1092'
       # GitHub release asset 457716187 digest (Samsung/netcoredbg, Linux amd64).
       # https://github.com/Samsung/netcoredbg/releases/tag/3.2.0-1092
@@ -603,8 +700,6 @@ jobs:
         "$NETCOREDBG_PATH" --version 2>&1 | tee artifacts/dotnet/netcoredbg-version.txt
     - name: Install dependencies
       run: pnpm install --frozen-lockfile
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     - name: Build project
       run: pnpm build
     - name: Build .NET smoke fixtures
@@ -632,6 +727,8 @@ jobs:
     name: Flutter Host (stable SDK, widget tests + web)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      SKIP_ADAPTER_VENDOR: 'true'
     steps:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -653,8 +750,6 @@ jobs:
         flutter --version 2>&1 | tee artifacts/flutter/flutter-version.txt
     - name: Install dependencies
       run: pnpm install --frozen-lockfile
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     - name: Build project
       run: pnpm build
     - name: Run Flutter host smoke (widget tests)
