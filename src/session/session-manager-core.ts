@@ -1918,7 +1918,7 @@ export abstract class SessionManagerCore extends EventEmitter {
         'console',
         `[mcp-debugger] Warning: ${note}\n`,
         undefined,
-        redacted ? { redacted: true } : undefined
+        { ...(redacted ? { redacted: true } : {}), categoryOmitted: true }
       );
       if (noteEntry) {
         this.emit('output-captured', sessionId, noteEntry);
@@ -2951,11 +2951,17 @@ export abstract class SessionManagerCore extends EventEmitter {
       const { text, redacted } = this.redactForBuffer(body.output);
       // Push to the closure-captured buffer, NOT session.outputBuffer — see
       // the buffer construction above (issue #358).
+      const categoryOmitted = body.category === undefined;
       const entry: SessionOutputEntry | undefined = outputBuffer.push(
         category,
         text,
         undefined,
-        redacted ? { redacted: true } : undefined
+        redacted || categoryOmitted
+          ? {
+              ...(redacted ? { redacted: true } : {}),
+              ...(categoryOmitted ? { categoryOmitted: true } : {})
+            }
+          : undefined
       );
       if (entry) {
         this.emit('output-captured', sessionId, entry);
@@ -3065,7 +3071,9 @@ export abstract class SessionManagerCore extends EventEmitter {
       // restart may already have installed a fresh session.outputBuffer.
       const entry = (outputBuffer ?? session.outputBuffer)?.push(
         'console',
-        `[mcp-debugger] Warning: function breakpoint(s) never bound during this run: ${names}. The program never stopped there — check the symbol name(s).\n`
+        `[mcp-debugger] Warning: function breakpoint(s) never bound during this run: ${names}. The program never stopped there — check the symbol name(s).\n`,
+        undefined,
+        { categoryOmitted: true }
       );
       if (entry) {
         this.emit('output-captured', session.id, entry);

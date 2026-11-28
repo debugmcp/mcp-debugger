@@ -718,24 +718,37 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
       DebugLanguage.PYTHON,
       DebugLanguage.DART,
       DebugLanguage.COBOL,
-      DebugLanguage.CPP
+      DebugLanguage.CPP,
+      DebugLanguage.RUST
     ]);
-    const policiesWithAdapterLine = new Set<DebugLanguage>([DebugLanguage.JAVASCRIPT, DebugLanguage.JAVA]);
-    const policiesWithFatalErrorLine = new Set<DebugLanguage>([DebugLanguage.COBOL, DebugLanguage.CPP]);
+    const policiesWithAdapterLine = new Set<DebugLanguage>([
+      DebugLanguage.JAVASCRIPT,
+      DebugLanguage.JAVA,
+      DebugLanguage.COBOL,
+      DebugLanguage.CPP,
+      DebugLanguage.RUST
+    ]);
+    const policiesWithFatalErrorLine = new Set<DebugLanguage>([
+      DebugLanguage.COBOL,
+      DebugLanguage.CPP,
+      DebugLanguage.RUST
+    ]);
 
     expect(policy.programOutput !== undefined).toBe(policiesWithProgramOutput.has(language));
     expect(typeof policy.programOutput?.isAdapterLine === 'function').toBe(policiesWithAdapterLine.has(language));
-    expect(typeof policy.programOutput?.isProgramConsoleLine === 'function').toBe(language === DebugLanguage.DART);
+    expect(policy.programOutput?.explicitConsoleIsProgram === true).toBe(language === DebugLanguage.DART);
+    if (language !== DebugLanguage.DART) {
+      expect(policy.programOutput?.explicitConsoleIsProgram).toBeUndefined();
+    }
     expect(policy.programOutput?.causeLast === true).toBe(language === DebugLanguage.PYTHON);
     if (language !== DebugLanguage.PYTHON) {
       expect(policy.programOutput?.causeLast).toBeUndefined();
     }
     expect(typeof policy.programOutput?.isFatalErrorLine === 'function').toBe(policiesWithFatalErrorLine.has(language));
 
-    // Ordinary program lines and server notices never false-match any hook.
+    // Ordinary program lines never false-match any hook.
     expect(policy.programOutput?.isAdapterLine?.('stdout', 'Hello, World!') ?? false).toBe(false);
     expect(policy.programOutput?.isAdapterLine?.('stderr', 'Error: uncaught on purpose') ?? false).toBe(false);
-    expect(policy.programOutput?.isProgramConsoleLine?.('[mcp-debugger] Warning: note') ?? false).toBe(false);
     expect(policy.programOutput?.isFatalErrorLine?.('Hello, World!') ?? false).toBe(false);
 
     const clientBehavior = policy.getDapClientBehavior();

@@ -165,26 +165,16 @@ interface DartLiveUpdateState {
   flutterApp?: { started: boolean; launchMode?: string; supportsRestart?: boolean };
 }
 
-/**
- * Program output the Dart/Flutter SDK debug adapters (`package:dds`) deliver on
- * DAP `console` rather than `stdout`/`stderr` (measured live, issue #1277):
- * - `dart:developer` `log()` events arrive as `[<name>] <message>` (`[log] ...`
- *   when `name` is omitted; `[<name>]` when the message line is empty). Server
- *   notices (`[mcp-debugger] ...`) also sit on `console` and must stay excluded.
- * - `dart test` / `flutter test` (`DartTestDebugAdapter`) sends per-test result
- *   lines `✓ <name>`, `✖ <name>`, and `! <name>` (skipped) on `console`.
- * Adapter lifecycle lines (`Connecting to VM Service...`, `Connected to the VM
- * Service.`, `Exited (N).`, `Detached.`, `Application finished.`) and plain
- * logpoints stay excluded.
- */
-const DART_DEV_LOG_LINE = /^\[(?!mcp-debugger\])[^\]]+\](?: .+)?$/;
-const DART_TEST_RESULT_LINE = /^(?:\u2713|\u2716|!) .+$/;
-
 export const DartAdapterPolicy = {
   name: 'dart',
+  // Measured with DAP_TRACE=1 (`package:dds`, issue #1277): the Dart/Flutter SDK
+  // adapters send `dart:developer` `log()` records (including indented multi-line
+  // continuations) and `dart test` / `flutter test` per-test result lines (`✓`,
+  // `✖`, `!`) with an explicit `"category": "console"`, while lifecycle lines
+  // (`Connecting to VM Service...`, `Connected to the VM Service.`, `Exited (N).`,
+  // `Detached.`) and user logpoints omit `category` altogether.
   programOutput: {
-    isProgramConsoleLine: (line: string): boolean =>
-      DART_DEV_LOG_LINE.test(line) || DART_TEST_RESULT_LINE.test(line),
+    explicitConsoleIsProgram: true,
   },
   supportsLogPoints: true,
   supportsFunctionBreakpoints: false,

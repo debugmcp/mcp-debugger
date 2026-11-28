@@ -12,6 +12,15 @@ export const OUTPUT_BUFFER_CAP = 1000;
 /** Per-entry size cap; longer chunks are cut and flagged `truncated`. */
 export const MAX_OUTPUT_ENTRY_CHARS = 8192;
 
+/**
+ * Internal buffered record: extends the public wire entry with whether the
+ * source omitted an explicit DAP `category` (issue #1277). Stripped by `read()`
+ * and `push()` so it never appears in `get_output`, events, or resources.
+ */
+export interface BufferedOutputEntry extends SessionOutputEntry {
+  categoryOmitted?: boolean;
+}
+
 export interface OutputReadResult {
   entries: SessionOutputEntry[];
   /** Cursor for the next read: seq of the last returned entry, or the request's `since` when nothing matched */
@@ -23,7 +32,7 @@ export interface OutputReadResult {
 }
 
 export class OutputRingBuffer {
-  private entries: SessionOutputEntry[] = [];
+  private entries: BufferedOutputEntry[] = [];
   private nextSeq = 1;
   private droppedCount = 0;
 
@@ -33,10 +42,10 @@ export class OutputRingBuffer {
     category: string,
     output: string,
     timestamp: number = Date.now(),
-    flags?: { redacted?: boolean }
+    flags?: { redacted?: boolean; categoryOmitted?: boolean }
   ): SessionOutputEntry {
     const truncated = output.length > MAX_OUTPUT_ENTRY_CHARS;
-    const entry: SessionOutputEntry = {
+    const publicEntry: SessionOutputEntry = {
       seq: this.nextSeq++,
       category,
       output: truncated ? output.slice(0, MAX_OUTPUT_ENTRY_CHARS) : output,
@@ -44,23 +53,31 @@ export class OutputRingBuffer {
       ...(truncated ? { truncated: true } : {}),
       ...(flags?.redacted ? { redacted: true } : {})
     };
-    this.entries.push(entry);
+    const stored: BufferedOutputEntry = flags?.categoryOmitted
+      ? { ...publicEntry, categoryOmitted: true }
+      : publicEntry;
+    this.entries.push(stored);
     if (this.entries.length > this.cap) {
       this.entries.shift();
       this.droppedCount++;
     }
-    return entry;
+    return publicEntry;
   }
 
   read(since: number, limit: number): OutputReadResult {
     const matched = this.entries.filter(e => e.seq > since);
-    const page = matched.slice(0, limit);
+    const page = matched.slice(0, limit).map(({ categoryOmitted: _omitted, ...entry }) => entry);
     return {
       entries: page,
       nextSince: page.length > 0 ? page[page.length - 1].seq : since,
       hasMore: matched.length > page.length,
       dropped: this.droppedCount
     };
+  }
+
+  /** Internal snapshot retaining `categoryOmitted` for `outputTail` / `outputBeforeFailure` (#1277). */
+  readBuffered(): readonly BufferedOutputEntry[] {
+    return this.entries;
   }
 
   /**

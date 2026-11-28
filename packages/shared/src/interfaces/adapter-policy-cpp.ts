@@ -31,7 +31,8 @@ import {
   isLldbInternalFrame,
   filterLldbStackFrames,
   describeLldbUnresolvedSource,
-  lldbShouldSuppressOutputEvent
+  lldbShouldSuppressOutputEvent,
+  isLldbAdapterOutputLine
 } from './lldb-policy-shared.js';
 
 /** The sources CodeLLDB binds through the binary's DWARF (issue #950): headers included. */
@@ -48,6 +49,7 @@ const CPP_TERMINATE_LINE =
 export const CppAdapterPolicy = {
   name: 'cpp',
   programOutput: {
+    isAdapterLine: isLldbAdapterOutputLine,
     isFatalErrorLine: (line: string): boolean => CPP_TERMINATE_LINE.test(line),
   },
   // CodeLLDB honours noDebug by refusing debugger requests ("Not supported in

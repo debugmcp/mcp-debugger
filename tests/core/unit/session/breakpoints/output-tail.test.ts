@@ -1,9 +1,10 @@
 /**
  * Issue #1277: `exitOutputTail` quotes the program's own last output lines
- * across streams (preserving cause lines at the head of long stderr traces or
- * native fatal-error headers, reclaiming Dart program console lines, and
- * keeping Python's end-of-trace frames), while `readOutputTailLines` keeps
- * serving a failed launch's all-category output quote.
+ * across streams (preserving cause lines at native fatal-error headers or the
+ * head of long stderr traces, reclaiming Dart's explicit-category console
+ * output while excluding category-less logpoints/lifecycle lines, and keeping
+ * Python's end-of-trace frames), while `readOutputTailLines` keeps serving a
+ * failed launch's all-category output quote.
  */
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -14,6 +15,7 @@ import {
   JavaAdapterPolicy,
   JsDebugAdapterPolicy,
   PythonAdapterPolicy,
+  RustAdapterPolicy,
   getPolicyForLanguage
 } from '@debugmcp/shared';
 import {
@@ -24,16 +26,23 @@ import {
 } from '../../../../../src/session/breakpoints/launch-warnings.js';
 import { MAX_OUTPUT_ENTRY_CHARS, OutputRingBuffer } from '../../../../../src/session/output-buffer.js';
 
-function bufferOf(...entries: Array<{ category: string; output: string }>): OutputRingBuffer {
+function bufferOf(
+  ...entries: Array<{ category: string; output: string; categoryOmitted?: boolean }>
+): OutputRingBuffer {
   const buf = new OutputRingBuffer();
   for (const entry of entries) {
-    buf.push(entry.category, entry.output);
+    buf.push(
+      entry.category,
+      entry.output,
+      undefined,
+      entry.categoryOmitted ? { categoryOmitted: true } : undefined
+    );
   }
   return buf;
 }
 
 describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
-  describe('the three cases from issue #1277 (Windows and Linux)', () => {
+  describe('the issue #1277 cases and recorded Linux pty buffers', () => {
     it('JavaScript crash: keeps Error: uncaught on purpose above Node CJS loader frames and drops inspector banners', () => {
       const outputBuffer = bufferOf(
         { category: 'console', output: '/home/user/.nvm/versions/node/v22.22.3/bin/node ./crash.cjs\n' },
@@ -90,15 +99,15 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
     it('COBOL runtime error on Windows (separate stderr): keeps libcob subscript error above the storage dump', () => {
       const outputBuffer = bufferOf(
         { category: 'stdout', output: 'about to index 0005\n' },
-        { category: 'stderr', output: "libcob: C:\\work\\examples\\cobol\\rterror.cob:13: error: subscript of 'WS-CELL' out of bounds: 5\n" },
+        { category: 'stderr', output: "libcob: C:\\path\\to\\examples\\cobol\\rterror.cob:13: error: subscript of 'WS-CELL' out of bounds: 5\n" },
         { category: 'stderr', output: "note: maximum subscript for 'WS-CELL': 3\n" },
         { category: 'stderr', output: '\n' },
         { category: 'stderr', output: ' Last statement of "RTERROR" was ADD\n' },
-        { category: 'stderr', output: '\t0000-MAIN at C:\\work\\examples\\cobol\\rterror.cob:13\n' },
-        { category: 'stderr', output: '\tENTRY RTERROR at C:\\work\\examples\\cobol\\rterror.cob:10\n' },
-        { category: 'stderr', output: ' Started by C:\\work\\examples\\cobol\\rterror.exe\n' },
+        { category: 'stderr', output: '\t0000-MAIN at C:\\path\\to\\examples\\cobol\\rterror.cob:13\n' },
+        { category: 'stderr', output: '\tENTRY RTERROR at C:\\path\\to\\examples\\cobol\\rterror.cob:10\n' },
+        { category: 'stderr', output: ' Started by C:\\path\\to\\examples\\cobol\\rterror.exe\n' },
         { category: 'stderr', output: '\n' },
-        { category: 'stderr', output: 'Dump Program-Id RTERROR from C:\\work\\examples\\cobol\\rterror.cob compiled Nov 27 2026 16:01:48\n' },
+        { category: 'stderr', output: 'Dump Program-Id RTERROR from C:\\path\\to\\examples\\cobol\\rterror.cob compiled Nov 27 2026 16:01:48\n' },
         { category: 'stderr', output: '\n' },
         { category: 'stderr', output: 'WORKING-STORAGE\n' },
         { category: 'stderr', output: '**********************\n' },
@@ -116,10 +125,10 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
       );
 
       expect(exitOutputTail({ exitCode: 1, language: DebugLanguage.COBOL, outputBuffer })).toEqual([
-        "libcob: C:\\work\\examples\\cobol\\rterror.cob:13: error: subscript of 'WS-CELL' out of bounds: 5",
+        "libcob: C:\\path\\to\\examples\\cobol\\rterror.cob:13: error: subscript of 'WS-CELL' out of bounds: 5",
         "note: maximum subscript for 'WS-CELL': 3",
         'Last statement of "RTERROR" was ADD',
-        '0000-MAIN at C:\\work\\examples\\cobol\\rterror.cob:13',
+        '0000-MAIN at C:\\path\\to\\examples\\cobol\\rterror.cob:13',
         '... (10 lines omitted)',
         '01        WS-SUM                          000000',
         'END OF DUMP - RTERROR',
@@ -127,8 +136,37 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
       ]);
     });
 
+    it('COBOL runtime error on Windows with DISPLAY UPON SYSERR lines ahead of libcob: fatal line wins over stderr block start (N21)', () => {
+      const outputBuffer = bufferOf(
+        { category: 'stderr', output: 'syserr pre-check 1\n' },
+        { category: 'stderr', output: 'syserr pre-check 2\n' },
+        { category: 'stderr', output: 'syserr pre-check 3\n' },
+        { category: 'stderr', output: 'syserr pre-check 4\n' },
+        { category: 'stderr', output: 'syserr pre-check 5\n' },
+        { category: 'stderr', output: "libcob: C:\\path\\to\\rterror.cob:18: error: subscript of 'WS-CELL' out of bounds: 5\n" },
+        { category: 'stderr', output: "note: maximum subscript for 'WS-CELL': 3\n" },
+        { category: 'stderr', output: ' Last statement of "RTERRORSYS" was ADD\n' },
+        { category: 'stderr', output: '\t0000-MAIN at C:\\path\\to\\rterror.cob:18\n' },
+        ...Array.from({ length: 10 }, (_, i) => ({ category: 'stderr', output: `dump body line ${i + 1}\n` })),
+        { category: 'stderr', output: '01        WS-SUM                          000000\n' },
+        { category: 'stderr', output: 'END OF DUMP - RTERRORSYS\n' },
+        { category: 'stderr', output: '**********************\n' },
+        { category: 'console', output: 'Process exited with code 1.\n' }
+      );
+
+      expect(exitOutputTail({ exitCode: 1, language: DebugLanguage.COBOL, outputBuffer })).toEqual([
+        "libcob: C:\\path\\to\\rterror.cob:18: error: subscript of 'WS-CELL' out of bounds: 5",
+        "note: maximum subscript for 'WS-CELL': 3",
+        'Last statement of "RTERRORSYS" was ADD',
+        '0000-MAIN at C:\\path\\to\\rterror.cob:18',
+        '... (10 lines omitted)',
+        '01        WS-SUM                          000000',
+        'END OF DUMP - RTERRORSYS',
+        '**********************'
+      ]);
+    });
+
     it('COBOL runtime error on Linux (pty-merged stdout with CRLF and split CRLF chunks): recognises libcob fatal error', () => {
-      // Measured on Ubuntu (CodeLLDB 1.12.3, GnuCOBOL 3.1.2): 2 stdout entries (CRLF), 1 console entry, 0 stderr entries.
       const linuxCobolBuffer = bufferOf(
         {
           category: 'stdout',
@@ -174,12 +212,84 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
         '**********************'
       ]);
     });
+
+    it('C++ crash on Linux (pty-merged stdout chunks + CodeLLDB Stop reason: signal SIGABRT on stderr): keeps terminate header and drops Stop reason', () => {
+      const linuxCppBuffer = bufferOf(
+        { category: 'stdout', output: 'caught: caught error\r\n' },
+        { category: 'stdout', output: "terminate called after throwing an instance of '" },
+        { category: 'stdout', output: 'std::runtime_error' },
+        { category: 'stdout', output: "'\r\n" },
+        { category: 'stdout', output: '  what():  ' },
+        { category: 'stdout', output: 'uncaught error\r\n' },
+        { category: 'stderr', output: 'Stop reason: signal SIGABRT\n' },
+        { category: 'console', output: 'Process exited with code 134.\n' }
+      );
+
+      expect(exitOutputTail({ exitCode: 134, language: DebugLanguage.CPP, outputBuffer: linuxCppBuffer })).toEqual([
+        'caught: caught error',
+        "terminate called after throwing an instance of 'std::runtime_error'",
+        'what():  uncaught error'
+      ]);
+    });
+
+    it('Rust panic on Linux (pty-merged stdout with RUST_BACKTRACE=1, exit 101): keeps thread panicked header above backtrace and drops Stop reason', () => {
+      const linuxRustBuffer = bufferOf(
+        {
+          category: 'stdout',
+          output:
+            'panic_example: starting\r\n' +
+            'panic_example: validating ticket 42 at pre-flight (3 attempts)\r\n' +
+            "thread 'main' panicked at src/main.rs:18:5:\r\n" +
+            'intentional panic for mcp-debugger tests (ticket 42)\r\n' +
+            'stack backtrace:\r\n' +
+            '   0: rust_begin_unwind\r\n' +
+            '             at /rustc/hash/library/std/src/panicking.rs:665:5\r\n' +
+            '   1: core::panicking::panic_fmt\r\n' +
+            '             at /rustc/hash/library/core/src/panicking.rs:76:14\r\n' +
+            '   2: panic_example::validate\r\n' +
+            '             at ./src/main.rs:18:5\r\n' +
+            '   3: panic_example::main\r\n' +
+            '             at ./src/main.rs:10:19\r\n' +
+            '   4: core::ops::function::FnOnce::call_once\r\n' +
+            '             at /rustc/hash/library/core/src/ops/function.rs:250:5\r\n' +
+            'note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.\r\n'
+        },
+        { category: 'stderr', output: 'Stop reason: signal SIGABRT\n' },
+        { category: 'console', output: 'Process exited with code 101.\n' }
+      );
+
+      expect(exitOutputTail({ exitCode: 101, language: DebugLanguage.RUST, outputBuffer: linuxRustBuffer })).toEqual([
+        "thread 'main' panicked at src/main.rs:18:5:",
+        'intentional panic for mcp-debugger tests (ticket 42)',
+        'stack backtrace:',
+        '0: rust_begin_unwind',
+        '... (7 lines omitted)',
+        '4: core::ops::function::FnOnce::call_once',
+        'at /rustc/hash/library/core/src/ops/function.rs:250:5',
+        'note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.'
+      ]);
+    });
+
+    it('Go debug launch (examples/go/exit_code): does not glue Delve newline-less Building stdout chunk across console onto program stdout', () => {
+      const goDebugBuffer = bufferOf(
+        { category: 'stdout', output: 'Building C:\\path\\to\\examples\\go\\exit_code' },
+        { category: 'console', output: "Type 'dlv help' for list of commands.\n" },
+        { category: 'stdout', output: 'exit_code fixture: exiting with status 7\n' },
+        { category: 'console', output: 'Process 32200 has exited with status 7\n' },
+        { category: 'console', output: 'Detaching\n' }
+      );
+
+      expect(exitOutputTail({ exitCode: 7, language: DebugLanguage.GO, outputBuffer: goDebugBuffer })).toEqual([
+        'Building C:\\path\\to\\examples\\go\\exit_code',
+        'exit_code fixture: exiting with status 7'
+      ]);
+    });
   });
 
-  describe('Rule A selection cases from the review', () => {
+  describe('Rule A selection cases and Dart explicit-category console handling', () => {
     it('keeps a stdout failure report that follows an unrelated stderr deprecation warning', () => {
       const jsWarnThenFail = bufferOf(
-        { category: 'console', output: '/usr/bin/node ./run-tests.cjs\n' },
+        { category: 'console', output: '/home/user/bin/node ./run-tests.cjs\n' },
         { category: 'stderr', output: 'Debugger attached.\r\n' },
         {
           category: 'stderr',
@@ -237,43 +347,89 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
       ]);
     });
 
-    it('reclaims Dart developer.log and dart test result lines from console while excluding adapter console and mcp-debugger warnings', () => {
-      const dartDevLogBuffer = bufferOf(
-        { category: 'console', output: '[mcp-debugger] Warning: runner: dart (no pubspec.yaml above the program or cwd; plain dart)\n' },
-        { category: 'console', output: 'Connecting to VM Service at ws://127.0.0.1:56871/Cmr4cD_0T2c=/ws\n' },
-        { category: 'console', output: 'Connected to the VM Service.\n' },
+    it('Dart: excludes category-less logpoints shaped like [loop] ..., keeps multi-line developer.log continuations and dart test results, and never leaks categoryOmitted', () => {
+      const dartBuffer = bufferOf(
+        { category: 'console', categoryOmitted: true, output: '[mcp-debugger] Warning: runner: dart\n' },
+        { category: 'console', categoryOmitted: true, output: 'Connecting to VM Service at ws://127.0.0.1:56871/tok=/ws\n' },
+        { category: 'console', categoryOmitted: true, output: 'Connected to the VM Service.' },
         { category: 'stdout', output: 'loading settings\r\n' },
-        { category: 'console', output: '[log] default-channel check\n' },
-        { category: 'console', output: '[config] settings file is missing a required key: db.url\n' },
-        { category: 'console', output: 'plain logpoint value=42\n' },
+        // Logpoint with bracketed text — omitted category in DAP, so excluded.
+        { category: 'console', categoryOmitted: true, output: '[loop] i=1 total=0\n' },
+        { category: 'console', categoryOmitted: true, output: '! logpoint starting with bang\n' },
+        // Multi-line developer.log record — explicit category: 'console', indented continuation lines have no [name] prefix.
+        {
+          category: 'console',
+          output: '[config] settings file is missing required keys:\n  - db.url\n  - db.password\n'
+        },
         { category: 'important', output: '[config] non-console category is ignored\n' },
-        { category: 'console', output: '\nExited (2).\n' }
+        { category: 'console', categoryOmitted: true, output: '\nExited (2).\n' }
       );
 
-      expect(exitOutputTail({ exitCode: 2, language: DebugLanguage.DART, outputBuffer: dartDevLogBuffer })).toEqual([
+      expect(exitOutputTail({ exitCode: 2, language: DebugLanguage.DART, outputBuffer: dartBuffer })).toEqual([
         'loading settings',
-        '[log] default-channel check',
-        '[config] settings file is missing a required key: db.url'
+        '[config] settings file is missing required keys:',
+        '- db.url',
+        '- db.password'
       ]);
 
-      const dartTestBuffer = bufferOf(
-        { category: 'console', output: '[mcp-debugger] Warning: runner: dart-test\n' },
-        { category: 'console', output: 'Connecting to VM Service at ws://127.0.0.1:56908/tok=/ws\n' },
-        { category: 'console', output: 'Connected to the VM Service.\n' },
-        { category: 'console', output: '! skipped case\n' },
-        { category: 'console', output: '✓ adds numbers\n' },
-        { category: 'stderr', output: 'Expected: <3>\n  Actual: <2>\npackage:matcher           expect\ntest\\math_test.dart 13:5  main.<fn>\n' },
-        { category: 'console', output: '✖ fails on purpose\n' },
-        { category: 'console', output: '\nExited (1).\n' }
+      // Verify internal `categoryOmitted` never appears on push() or read().entries (`get_output`).
+      const ring = new OutputRingBuffer();
+      const pushedOmitted = ring.push('console', '[loop] i=1\n', 1234, { categoryOmitted: true });
+      const pushedExplicit = ring.push('console', '✓ adds numbers\n', 1235);
+      expect('categoryOmitted' in pushedOmitted).toBe(false);
+      expect('categoryOmitted' in pushedExplicit).toBe(false);
+      expect(Object.keys(pushedOmitted).sort()).toEqual(['category', 'output', 'seq', 'timestamp']);
+      const page = ring.read(0, 10).entries;
+      expect(page).toHaveLength(2);
+      expect('categoryOmitted' in page[0]).toBe(false);
+      expect('categoryOmitted' in page[1]).toBe(false);
+      expect(JSON.stringify(page)).not.toContain('categoryOmitted');
+
+      // Also verify omitted console followed immediately by explicit console never merges into one run.
+      const adjacentConsoleOrigins = bufferOf(
+        { category: 'console', categoryOmitted: true, output: 'omitted without newline' },
+        { category: 'console', output: '[log] explicit line\n' }
+      );
+      expect(exitOutputTail({ exitCode: 1, language: DebugLanguage.DART, outputBuffer: adjacentConsoleOrigins })).toEqual([
+        '[log] explicit line'
+      ]);
+    });
+
+    it('Dart: a reclaimed explicit console line interrupts a stderr block (kills N08 and N18)', () => {
+      // 5 stderr lines, then 1 reclaimed console line, then 8 stderr lines:
+      // trailing stderr block is 8 lines (not > 8), so plain last 8 lines are returned without a gap marker.
+      const interruptedStderr = bufferOf(
+        ...Array.from({ length: 5 }, (_, i) => ({ category: 'stderr', output: `early_err_${i + 1}\n` })),
+        { category: 'console', output: '[log] checkpoint between stderr batches\n' },
+        ...Array.from({ length: 8 }, (_, i) => ({ category: 'stderr', output: `late_err_${i + 1}\n` }))
       );
 
-      expect(exitOutputTail({ exitCode: 1, language: DebugLanguage.DART, outputBuffer: dartTestBuffer })).toEqual([
-        '! skipped case',
-        '✓ adds numbers',
-        'Expected: <3>',
-        'Actual: <2>',
-        'package:matcher           expect',
-        'test\\math_test.dart 13:5  main.<fn>',
+      expect(exitOutputTail({ exitCode: 1, language: DebugLanguage.DART, outputBuffer: interruptedStderr })).toEqual([
+        'late_err_1',
+        'late_err_2',
+        'late_err_3',
+        'late_err_4',
+        'late_err_5',
+        'late_err_6',
+        'late_err_7',
+        'late_err_8'
+      ]);
+
+      // 10 stderr lines followed by a trailing explicit console line (`✖ fails on purpose`):
+      // last 8 lines end with `console`, so plain last 8 lines are returned without a gap marker.
+      const stderrThenTestFailConsole = bufferOf(
+        ...Array.from({ length: 10 }, (_, i) => ({ category: 'stderr', output: `frame_${i + 1}\n` })),
+        { category: 'console', output: '✖ fails on purpose\n' }
+      );
+
+      expect(exitOutputTail({ exitCode: 1, language: DebugLanguage.DART, outputBuffer: stderrThenTestFailConsole })).toEqual([
+        'frame_4',
+        'frame_5',
+        'frame_6',
+        'frame_7',
+        'frame_8',
+        'frame_9',
+        'frame_10',
         '✖ fails on purpose'
       ]);
     });
@@ -322,9 +478,7 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
     });
 
     it('keeps a program line that is literally "..." distinct from the counted gap marker', () => {
-      const literalDots = bufferOf(
-        { category: 'stdout', output: 'waiting\n...\nfailed to connect\n' }
-      );
+      const literalDots = bufferOf({ category: 'stdout', output: 'waiting\n...\nfailed to connect\n' });
 
       expect(exitOutputTail({ exitCode: 1, language: DebugLanguage.JAVASCRIPT, outputBuffer: literalDots })).toEqual([
         'waiting',
@@ -335,17 +489,16 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
     });
   });
 
-  describe('chunk joining, truncated entries, and boundary conditions', () => {
-    it('joins a line split across chunks even when a console entry arrives between them', () => {
-      const outputBuffer = bufferOf(
+  describe('consecutive chunk joining, truncated entries, and boundary conditions', () => {
+    it('joins consecutive chunks of the same category, while keeping chunks separated by a console entry as two lines', () => {
+      const consecutiveChunks = bufferOf(
         { category: 'stderr', output: 'FatalError: connection to ' },
-        { category: 'console', output: 'logpoint probe=1\n' },
         { category: 'stderr', output: 'database refused on 127.0.0.1:5432\n' },
         ...Array.from({ length: 7 }, (_, i) => ({ category: 'stderr', output: `  at frame_${i + 1} (app.js:${i + 10})\n` }))
       );
 
-      // 1 joined line + 7 frames = exactly 8 stderr lines: fits verbatim with no gap marker.
-      expect(exitOutputTail({ exitCode: 1, language: DebugLanguage.JAVASCRIPT, outputBuffer })).toEqual([
+      // 1 joined line + 7 frames = 8 stderr lines verbatim.
+      expect(exitOutputTail({ exitCode: 1, language: DebugLanguage.JAVASCRIPT, outputBuffer: consecutiveChunks })).toEqual([
         'FatalError: connection to database refused on 127.0.0.1:5432',
         'at frame_1 (app.js:10)',
         'at frame_2 (app.js:11)',
@@ -355,14 +508,26 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
         'at frame_6 (app.js:15)',
         'at frame_7 (app.js:16)'
       ]);
+
+      // Documented limit: a console entry between two chunks ends the first run.
+      const separatedByConsole = bufferOf(
+        { category: 'stderr', output: 'FatalError: connection to' },
+        { category: 'console', output: 'logpoint probe=1\n' },
+        { category: 'stderr', output: 'database refused\n' }
+      );
+      expect(exitOutputTail({ exitCode: 1, language: DebugLanguage.JAVASCRIPT, outputBuffer: separatedByConsole })).toEqual([
+        'FatalError: connection to',
+        'database refused'
+      ]);
     });
 
-    it('ends the line after a ring-buffer-truncated entry (8,192 chars) instead of gluing the next chunk onto it', () => {
+    it('ends the line after a ring-buffer-truncated entry (8,192 chars) while still joining non-truncated chunks after it', () => {
       const buf = new OutputRingBuffer();
       buf.push('stderr', 'prefix: ');
       const pushed = buf.push('stderr', 'X'.repeat(MAX_OUTPUT_ENTRY_CHARS + 50));
       expect(pushed.truncated).toBe(true);
-      buf.push('stderr', 'actual cause on next entry\n');
+      buf.push('stderr', 'actual cause ');
+      buf.push('stderr', 'on next entry\n');
 
       const expectedTruncatedLine = `${'prefix: '}${'X'.repeat(300 - 'prefix: '.length)}…`;
       expect(exitOutputTail({ exitCode: 1, language: DebugLanguage.GO, outputBuffer: buf })).toEqual([
@@ -402,7 +567,6 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
         }
       );
 
-      // Total 10 stderr lines, uninterrupted by program stdout: quotes first 4 + "... (3 lines omitted)" + last 3.
       expect(exitOutputTail({ exitCode: 1, language: DebugLanguage.JAVA, outputBuffer })).toEqual([
         'Exception in thread "main" java.lang.IllegalStateException: bad config',
         'at com.acme.App.load(App.java:14)',
@@ -455,7 +619,7 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
       expect(exitOutputTail({ exitCode: 1, outputBuffer: nonEmpty })).toEqual(['boom']);
 
       const jsBannersOnly = bufferOf(
-        { category: 'console', output: '/usr/bin/node ./silent_exit.js\n' },
+        { category: 'console', output: '/home/user/bin/node ./silent_exit.js\n' },
         { category: 'stderr', output: 'Debugger attached.\r\n' },
         { category: 'stderr', output: 'Waiting for the debugger to disconnect...\r\n' }
       );
@@ -465,6 +629,12 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
         { category: 'stdout', output: 'Listening for transport dt_socket at address: 57378\n' }
       );
       expect(exitOutputTail({ exitCode: 1, language: DebugLanguage.JAVA, outputBuffer: javaBannerOnly })).toBeUndefined();
+
+      const lldbStopReasonOnly = bufferOf(
+        { category: 'stderr', output: 'Stop reason: signal SIGABRT\n' },
+        { category: 'console', output: 'Process exited with code 134.\n' }
+      );
+      expect(exitOutputTail({ exitCode: 134, language: DebugLanguage.CPP, outputBuffer: lldbStopReasonOnly })).toBeUndefined();
     });
 
     it('readOutputTailLines still quotes console and cross-category lines for failed launches without gluing categories', () => {
@@ -506,7 +676,6 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
         expect(isJsAdapter('stderr', `${line} trailing`), `trailing: ${line}`).toBe(line.startsWith('Syntax error '));
       }
 
-      // Specific negative cases for syntax-error and inspector shapes.
       expect(isJsAdapter('stderr', 'Debugger attached. Connection lost')).toBe(false);
       expect(isJsAdapter('stderr', 'Waiting for the debugger to disconnect... timed out')).toBe(false);
       expect(isJsAdapter('stderr', 'Debugger listening on ws://127.0.0.1:9229/id extra')).toBe(false);
@@ -519,45 +688,33 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
       expect(isJsAdapter('stderr', 'Syntax error setting breakpoint with condition "x" on line six: bad')).toBe(false);
     });
 
-    it('pins Java stdout JDWP banner and both start and end anchors', () => {
+    it('pins Java stdout JDWP banner and CodeLLDB stderr Stop reason banner with both anchors', () => {
       const isJavaAdapter = JavaAdapterPolicy.programOutput.isAdapterLine!;
-
       expect(isJavaAdapter('stdout', 'Listening for transport dt_socket at address: 5005')).toBe(true);
       expect(isJavaAdapter('stdout', 'Listening for transport dt_socket at address: 127.0.0.1:5005')).toBe(true);
       expect(isJavaAdapter('stderr', 'Listening for transport dt_socket at address: 5005')).toBe(false);
       expect(isJavaAdapter('stdout', 'INFO: Listening for transport dt_socket at address: 5005')).toBe(false);
       expect(isJavaAdapter('stdout', 'Listening for transport dt_socket at address: 5005 ready')).toBe(false);
       expect(isJavaAdapter('stdout', 'Listening for transport dt_socket at address:')).toBe(false);
+
+      for (const policy of [CobolAdapterPolicy, CppAdapterPolicy, RustAdapterPolicy]) {
+        const isLldbAdapter = policy.programOutput.isAdapterLine!;
+        expect(isLldbAdapter('stderr', 'Stop reason: signal SIGABRT')).toBe(true);
+        expect(isLldbAdapter('stderr', 'Stop reason: Exception 0xc0000005')).toBe(true);
+        expect(isLldbAdapter('stdout', 'Stop reason: signal SIGABRT')).toBe(false);
+        expect(isLldbAdapter('stderr', 'prefix Stop reason: signal SIGABRT')).toBe(false);
+        expect(isLldbAdapter('stderr', 'Stop reason:')).toBe(false);
+        expect(isLldbAdapter('stderr', 'Stop reason: ')).toBe(false);
+      }
+
+      expect(DartAdapterPolicy.programOutput.explicitConsoleIsProgram).toBe(true);
+      expect(PythonAdapterPolicy.programOutput.causeLast).toBe(true);
     });
 
-    it('pins Dart console reclamation patterns and anchors', () => {
-      const isDartProgramConsole = DartAdapterPolicy.programOutput.isProgramConsoleLine!;
-
-      expect(isDartProgramConsole('[log] hello')).toBe(true);
-      expect(isDartProgramConsole('[my.service:db] missing url')).toBe(true);
-      expect(isDartProgramConsole('[db]')).toBe(true);
-      expect(isDartProgramConsole('✓ adds numbers')).toBe(true);
-      expect(isDartProgramConsole('✖ fails on purpose')).toBe(true);
-      expect(isDartProgramConsole('! skipped test')).toBe(true);
-
-      expect(isDartProgramConsole('[mcp-debugger] Warning: runner: dart')).toBe(false);
-      expect(isDartProgramConsole('[mcp-debugger]')).toBe(false);
-      expect(isDartProgramConsole('prefix [log] hello')).toBe(false);
-      expect(isDartProgramConsole('[tag]nospace')).toBe(false);
-      expect(isDartProgramConsole('[] empty logger')).toBe(false);
-      expect(isDartProgramConsole('[unclosed')).toBe(false);
-      expect(isDartProgramConsole('✓')).toBe(false);
-      expect(isDartProgramConsole('✖')).toBe(false);
-      expect(isDartProgramConsole('!')).toBe(false);
-      expect(isDartProgramConsole('prefix ✓ adds numbers')).toBe(false);
-      expect(isDartProgramConsole('Connecting to VM Service at ws://127.0.0.1:8181/ws')).toBe(false);
-      expect(isDartProgramConsole('Exited (2).')).toBe(false);
-    });
-
-    it('pins COBOL and C++ fatal-error recognisers and Linux pty fatal-error selection boundaries', () => {
+    it('pins COBOL, C++, and Rust fatal-error recognisers and fatal-vs-stderr-block boundaries', () => {
       const isCobolFatal = CobolAdapterPolicy.programOutput.isFatalErrorLine!;
       expect(isCobolFatal("libcob: /work/rterror.cob:13: error: subscript of 'WS-CELL' out of bounds: 5")).toBe(true);
-      expect(isCobolFatal("libcob: C:\\work\\rterror.cob:13: error: subscript of 'WS-CELL' out of bounds: 5")).toBe(true);
+      expect(isCobolFatal("libcob: C:\\path\\to\\rterror.cob:13: error: subscript of 'WS-CELL' out of bounds: 5")).toBe(true);
       expect(isCobolFatal("libcob: error: module 'MISSING' not found")).toBe(true);
       expect(isCobolFatal('libcob: error: ')).toBe(false);
       expect(isCobolFatal('libcob: /work/rterror.cob:13: error: ')).toBe(false);
@@ -577,39 +734,62 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
       expect(isCppFatal('terminate called without an active exception trailing')).toBe(false);
       expect(isCppFatal('terminate called my cleanup handler')).toBe(false);
 
-      expect(PythonAdapterPolicy.programOutput.causeLast).toBe(true);
+      const isRustFatal = RustAdapterPolicy.programOutput.isFatalErrorLine!;
+      expect(isRustFatal("thread 'main' panicked at src/main.rs:18:5:")).toBe(true);
+      expect(isRustFatal("thread 'main' panicked at 'intentional panic', src/main.rs:18:5")).toBe(true);
+      expect(isRustFatal("thread '' panicked at src/lib.rs:1:1:")).toBe(true);
+      expect(isRustFatal("thread 'worker-1' has overflowed its stack")).toBe(true);
+      expect(isRustFatal('fatal runtime error: stack overflow')).toBe(false);
+      expect(isRustFatal("prefix thread 'main' panicked at src/main.rs:18:5:")).toBe(false);
+      expect(isRustFatal("thread 'main' has overflowed its stack extra")).toBe(false);
+      expect(isRustFatal("thread 'main' exited normally")).toBe(false);
 
-      // Linux C++ pty buffer: 5 chunks without newline between instance pieces, followed by 9 dump lines on stdout.
-      const linuxCppPty = bufferOf(
-        { category: 'stdout', output: "terminate called after throwing an instance of '" },
-        { category: 'stdout', output: 'std::runtime_error' },
-        { category: 'stdout', output: "'\r\n" },
-        { category: 'stdout', output: '  what():  ' },
-        { category: 'stdout', output: 'uncaught error\r\n' },
-        ...Array.from({ length: 8 }, (_, i) => ({ category: 'stdout', output: `frame #${i}: 0x0040${i}\r\n` }))
+      // Rust stack overflow: `fatal runtime error: stack overflow` follows `has overflowed its stack`
+      // and must NOT steal the anchor away from `thread 'main' has overflowed its stack`.
+      const rustStackOverflow = bufferOf(
+        { category: 'stdout', output: "thread 'main' has overflowed its stack\r\n" },
+        { category: 'stdout', output: 'fatal runtime error: stack overflow, aborting\r\n' },
+        ...Array.from({ length: 9 }, (_, i) => ({ category: 'stdout', output: `frame ${i + 1}\r\n` }))
       );
-      // Fatal error is at index 0 (< 10 - 8 = 2): quotes index 0..3 + "... (3 lines omitted)" + last 3.
-      expect(exitOutputTail({ exitCode: 134, language: DebugLanguage.CPP, outputBuffer: linuxCppPty })).toEqual([
-        "terminate called after throwing an instance of 'std::runtime_error'",
-        'what():  uncaught error',
-        'frame #0: 0x00400',
-        'frame #1: 0x00401',
-        '... (3 lines omitted)',
-        'frame #5: 0x00405',
-        'frame #6: 0x00406',
-        'frame #7: 0x00407'
+      expect(exitOutputTail({ exitCode: 134, language: DebugLanguage.RUST, outputBuffer: rustStackOverflow })).toEqual([
+        "thread 'main' has overflowed its stack",
+        'fatal runtime error: stack overflow, aborting',
+        'frame 1',
+        'frame 2',
+        '... (4 lines omitted)',
+        'frame 7',
+        'frame 8',
+        'frame 9'
       ]);
 
-      // Boundary: when the LAST fatal-error line is ALREADY among the last 8 (index === length - 8),
-      // plain last 8 lines are returned with NO gap marker (even if an earlier fatal-looking line existed at index 0).
-      const fatalAlreadyInLast8 = bufferOf(
-        { category: 'stdout', output: "libcob: error: earlier handled message\r\n" },
+      // When a recognised fatal line IS already among the last 8 (even on a >8-line stderr stream!),
+      // plain last 8 lines are returned rather than falling back to stderrBlockStart = 0 and dropping the fatal line.
+      const fatalInLast8OnLongStderr = bufferOf(
+        ...Array.from({ length: 6 }, (_, i) => ({ category: 'stderr', output: `syserr warn ${i + 1}\n` })),
+        { category: 'stderr', output: 'libcob: /work/rterror.cob:13: error: final crash\n' },
+        { category: 'stderr', output: 'dump line 1\n' },
+        { category: 'stderr', output: 'dump line 2\n' },
+        { category: 'stderr', output: 'dump line 3\n' }
+      );
+      expect(exitOutputTail({ exitCode: 1, language: DebugLanguage.COBOL, outputBuffer: fatalInLast8OnLongStderr })).toEqual([
+        'syserr warn 3',
+        'syserr warn 4',
+        'syserr warn 5',
+        'syserr warn 6',
+        'libcob: /work/rterror.cob:13: error: final crash',
+        'dump line 1',
+        'dump line 2',
+        'dump line 3'
+      ]);
+
+      // Boundary: fatal line at exact index === length - 8 on stdout (also already in last 8).
+      const fatalAtExactCutoff = bufferOf(
+        { category: 'stdout', output: 'libcob: error: earlier handled message\r\n' },
         { category: 'stdout', output: 'step 1\r\n' },
-        { category: 'stdout', output: "libcob: /work/rterror.cob:13: error: final crash\r\n" },
+        { category: 'stdout', output: 'libcob: /work/rterror.cob:13: error: final crash\r\n' },
         ...Array.from({ length: 7 }, (_, i) => ({ category: 'stdout', output: `dump line ${i + 1}\r\n` }))
       );
-      // Total 10 lines; last fatal line is at index 2 === 10 - 8, so it is the first line of the plain last 8.
-      expect(exitOutputTail({ exitCode: 1, language: DebugLanguage.COBOL, outputBuffer: fatalAlreadyInLast8 })).toEqual([
+      expect(exitOutputTail({ exitCode: 1, language: DebugLanguage.COBOL, outputBuffer: fatalAtExactCutoff })).toEqual([
         'libcob: /work/rterror.cob:13: error: final crash',
         'dump line 1',
         'dump line 2',
@@ -620,7 +800,7 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
         'dump line 7'
       ]);
 
-      // Two fatal lines both above the last 8 (indices 0 and 2 of 12): anchors on the LAST one (index 2).
+      // Two fatal lines both above the last 8: anchors on the LAST one.
       const twoFatalAboveCut = bufferOf(
         { category: 'stdout', output: 'libcob: error: first\r\n' },
         { category: 'stdout', output: 'between\r\n' },
@@ -637,6 +817,23 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
         'dump 8',
         'dump 9'
       ]);
+
+      // C assert on separate stderr (CppAdapterPolicy has isFatalErrorLine, which returns false):
+      // falls through to the trailing long stderr block rule.
+      const cAssertOnStderr = bufferOf(
+        { category: 'stderr', output: 'Assertion failed: idx < len, file check.c, line 9\n' },
+        ...Array.from({ length: 9 }, (_, i) => ({ category: 'stderr', output: `backtrace #${i + 1}\n` }))
+      );
+      expect(exitOutputTail({ exitCode: 3, language: DebugLanguage.CPP, outputBuffer: cAssertOnStderr })).toEqual([
+        'Assertion failed: idx < len, file check.c, line 9',
+        'backtrace #1',
+        'backtrace #2',
+        'backtrace #3',
+        '... (3 lines omitted)',
+        'backtrace #7',
+        'backtrace #8',
+        'backtrace #9'
+      ]);
     });
 
     it('keeps real output when a policy hook throws', () => {
@@ -644,11 +841,6 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
         .spyOn(JsDebugAdapterPolicy.programOutput, 'isAdapterLine')
         .mockImplementationOnce(() => {
           throw new Error('policy bug');
-        });
-      const spyConsole = vi
-        .spyOn(DartAdapterPolicy.programOutput, 'isProgramConsoleLine')
-        .mockImplementationOnce(() => {
-          throw new Error('console policy bug');
         });
       const spyFatal = vi
         .spyOn(CobolAdapterPolicy.programOutput, 'isFatalErrorLine')
@@ -659,13 +851,6 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
         const buf = bufferOf({ category: 'stderr', output: 'real error\n' });
         expect(exitOutputTail({ exitCode: 1, language: DebugLanguage.JAVASCRIPT, outputBuffer: buf })).toEqual([
           'real error'
-        ]);
-        const dartBuf = bufferOf(
-          { category: 'console', output: '[config] broken hook\n' },
-          { category: 'stdout', output: 'still keeps stdout\n' }
-        );
-        expect(exitOutputTail({ exitCode: 1, language: DebugLanguage.DART, outputBuffer: dartBuf })).toEqual([
-          'still keeps stdout'
         ]);
         const cobolBuf = bufferOf(
           ...Array.from({ length: 10 }, (_, i) => ({ category: 'stdout', output: `line ${i + 1}\n` }))
@@ -682,7 +867,6 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
         ]);
       } finally {
         spyAdapter.mockRestore();
-        spyConsole.mockRestore();
         spyFatal.mockRestore();
       }
     });
@@ -698,9 +882,10 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
         DebugLanguage.DART,
         DebugLanguage.RUBY,
         DebugLanguage.COBOL,
-        DebugLanguage.CPP
+        DebugLanguage.CPP,
+        DebugLanguage.RUST
       ];
-      const corpora: Array<Array<{ category: string; output: string }>> = [
+      const corpora: Array<Array<{ category: string; output: string; categoryOmitted?: boolean }>> = [
         [{ category: 'stderr', output: 'warn 1\n' }, { category: 'stdout', output: 'fail 1\nfail 2\n' }],
         [
           ...Array.from({ length: 6 }, (_, i) => ({ category: 'stdout', output: `out ${i}\n` })),
@@ -721,6 +906,7 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
         ],
         [
           { category: 'console', output: '[config] bad key\n' },
+          { category: 'console', categoryOmitted: true, output: '[loop] logpoint\n' },
           { category: 'stdout', output: 'exiting\n' }
         ]
       ];
@@ -731,20 +917,19 @@ describe('exitOutputTail and readOutputTailLines (issue #1277)', () => {
           const outputBuffer = bufferOf(...entries);
           const actual = exitOutputTail({ exitCode: 1, language, outputBuffer }) ?? [];
 
-          // Compute the naive last-8 program lines in arrival order.
           const programLines = entries
             .flatMap(e =>
               e.output
                 .split('\n')
                 .map(s => s.trim())
                 .filter(Boolean)
-                .map(text => ({ category: e.category, text }))
+                .map(text => ({ category: e.category, categoryOmitted: e.categoryOmitted === true, text }))
             )
             .filter(line => {
               if (line.category === 'stdout' || line.category === 'stderr') {
                 return !contract?.isAdapterLine?.(line.category, line.text);
               }
-              return line.category === 'console' && contract?.isProgramConsoleLine?.(line.text) === true;
+              return line.category === 'console' && contract?.explicitConsoleIsProgram === true && !line.categoryOmitted;
             });
           const naiveLast8 = programLines.slice(-OUTPUT_TAIL_LINES).map(l => l.text);
 

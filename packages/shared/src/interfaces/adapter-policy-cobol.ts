@@ -33,7 +33,8 @@ import {
   getLldbAttachBehavior,
   isLldbInternalFrame,
   describeLldbUnresolvedSource,
-  lldbShouldSuppressOutputEvent
+  lldbShouldSuppressOutputEvent,
+  isLldbAdapterOutputLine
 } from './lldb-policy-shared.js';
 
 /**
@@ -195,6 +196,7 @@ function isCobolFatalErrorLine(line: string): boolean {
 export const CobolAdapterPolicy = {
   name: 'cobol',
   programOutput: {
+    isAdapterLine: isLldbAdapterOutputLine,
     isFatalErrorLine: isCobolFatalErrorLine,
   },
   // The shim forwards `noDebug` to CodeLLDB untouched, so the measured

@@ -365,18 +365,19 @@ export interface ProgramOutputContract {
    * or runtime inspector's own banner rather than a line the program printed
    * (Node's V8 inspector banners and js-debug's breakpoint syntax error on
    * `stderr`; a launched JVM's JDWP `Listening for transport dt_socket ...`
-   * banner on `stdout`). Anchored at both ends so a program line that merely
-   * begins or ends with the banner text stays; an exact match cannot be told
-   * apart.
+   * banner on `stdout`; CodeLLDB's `Stop reason: ...` line on `stderr`).
+   * Anchored at both ends so a program line that merely begins or ends with
+   * the banner text stays; an exact match cannot be told apart.
    */
   isAdapterLine?(category: 'stdout' | 'stderr', line: string): boolean;
   /**
-   * True when a trimmed non-empty `console` line is the program's own output
-   * delivered on DAP `console` by the adapter (Dart's `dart:developer` `log()`
-   * `[<name>] ...` lines and `dart test` / `flutter test` per-test result lines
-   * `✓ ...`, `✖ ...`, `! ...`). `[mcp-debugger]` server notices never match.
+   * True when DAP `output` events that carried an explicit `"category": "console"`
+   * are the program's own output, while events that omitted `category` (defaulted
+   * to `'console'`) are the adapter's lifecycle and logpoint lines (Dart/Flutter
+   * SDK adapters: `dart:developer` `log()` records including indented continuation
+   * lines, plus `dart test` / `flutter test` `✓` / `✖` / `!` result lines).
    */
-  isProgramConsoleLine?(line: string): boolean;
+  explicitConsoleIsProgram?: boolean;
   /**
    * True when the runtime prints the exception type and message at the end of
    * its traceback rather than the start (Python), so the plain last 8 program
@@ -384,11 +385,16 @@ export interface ProgramOutputContract {
    */
   causeLast?: boolean;
   /**
-   * True when a trimmed non-empty program line (`stdout` or `stderr`) is the
-   * runtime's own fatal-error header (GnuCOBOL `libcob: ... error: ...`, C++
-   * `terminate called ...`). Used when the native engine merges the debuggee's
-   * `stderr` into `stdout` on a pseudo-terminal (CodeLLDB on Linux/macOS) so
-   * the `stderr`-block rule cannot see a separate `stderr` stream.
+   * True when a trimmed non-empty program line is the runtime's own fatal-error
+   * header (GnuCOBOL `libcob: ... error: ...`, `libstdc++` `terminate called ...`,
+   * Rust `thread '...' panicked at ...` / `has overflowed its stack`). Applies
+   * everywhere — both when streams are separate (such as `SYSERR` output ahead
+   * of `libcob:` on Windows) and on Linux/macOS where CodeLLDB merges pty
+   * streams into `stdout`. Uses the last matching line when that line is not
+   * among the last 8. Implementations must match only a line the runtime prints
+   * as it ends the process; if an earlier child process sharing the buffer
+   * printed such a line and the parent later printed >8 lines and exited
+   * non-zero without one, that earlier line will be quoted as the head.
    */
   isFatalErrorLine?(line: string): boolean;
 }
@@ -838,10 +844,10 @@ export interface AdapterPolicy {
 
   /**
    * Engine facts for building `outputTail` on a non-zero exit (issue #1277):
-   * stdio banners to drop (`isAdapterLine`), `console` lines that are the
-   * program's own (`isProgramConsoleLine`), end-of-trace causes (`causeLast`),
-   * and runtime fatal-error headers (`isFatalErrorLine`). Kept in `get_output`
-   * as captured; only `outputTail` selection consults this contract.
+   * stdio banners to drop (`isAdapterLine`), explicit `console` events that are
+   * the program's own (`explicitConsoleIsProgram`), end-of-trace causes
+   * (`causeLast`), and runtime fatal-error headers (`isFatalErrorLine`). Kept
+   * in `get_output` as captured; only `outputTail` selection consults this contract.
    */
   programOutput?: ProgramOutputContract;
 

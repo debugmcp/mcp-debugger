@@ -11,11 +11,10 @@ import {
   getPolicyForLanguage,
   type AdapterPolicy,
   type ExceptionBreakMode,
-  type ProgramOutputContract,
-  type SessionOutputEntry
+  type ProgramOutputContract
 } from '@debugmcp/shared';
 import { normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
-import { OUTPUT_BUFFER_CAP, type OutputRingBuffer } from '../output-buffer.js';
+import type { BufferedOutputEntry, OutputRingBuffer } from '../output-buffer.js';
 import type { ManagedSession } from '../session-store.js';
 
 const DEFAULT_ATTACH_CHILD_DEBUGGING_NOTE = "on an attach, processes the target starts afterwards are not debugged unless requested, so a breakpoint in code only such a process runs is never hit; adapterConfig: { autoAttachChildProcesses: true } on the attach requests it for a target reached through a local endpoint, but it changes the target: each process it starts from then on is made to load a file from this server (through NODE_OPTIONS) and to wait at startup for the debugger, so it can fail to start if the target cannot load this server's file, starts late when the target forks fast, and can be left waiting if it is forked during a detach (#1286)";
@@ -29,9 +28,11 @@ export function formatOutputTailGapMarker(omittedLines: number): string {
   return `... (${omittedLines} lines omitted)`;
 }
 
-interface AssembledLine {
+interface CategoryRun {
   category: string;
+  categoryOmitted: boolean;
   text: string;
+  closedByTruncation: boolean;
 }
 
 interface ProgramLine {
@@ -40,42 +41,44 @@ interface ProgramLine {
 }
 
 /**
- * Assemble trimmed non-empty lines per category in arrival order (issue #1277):
- * - partial chunks on the same category join even when another category (such as
- *   a `console` logpoint or notice) lands between them;
- * - `\r\n` endings (including a `\r` and `\n` split across two chunks on a pty)
- *   join and trim cleanly;
- * - a chunk the ring buffer cut at 8,192 characters (`truncated: true`) ends
- *   its line instead of gluing onto the next chunk;
- * - a newline-less final chunk on one category stays at its own arrival position
- *   without running into another category (#1036).
+ * Join consecutive buffer entries of the same category (and same explicit vs
+ * omitted category origin) before splitting on `\n` (issues #1036, #1277):
+ * - consecutive stream chunks (including `\r` and `\n` split across two chunks
+ *   on a pty) join into one line;
+ * - an entry of another category between two chunks (such as Delve's `console`
+ *   line between its newline-less `Building <pkg>` `stdout` chunk and the Go
+ *   program's first `stdout` line) keeps the two runs separate;
+ * - an entry the ring buffer cut at 8,192 characters (`truncated: true`) ends
+ *   its run so the next chunk is never glued onto it.
  */
-function assembleLinesByCategory(
-  entries: readonly Pick<SessionOutputEntry, 'category' | 'output' | 'truncated'>[]
-): AssembledLine[] {
-  const lastIndexByCategory = new Map<string, number>();
-  for (let i = 0; i < entries.length; i++) {
-    lastIndexByCategory.set(entries[i].category, i);
-  }
-  const pending = new Map<string, string>();
-  const lines: AssembledLine[] = [];
-  for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i];
-    const combined = (pending.get(entry.category) ?? '') + entry.output;
-    const parts = combined.split('\n');
-    if (entry.truncated === true || i === lastIndexByCategory.get(entry.category)) {
-      pending.delete(entry.category);
+function joinConsecutiveRuns(
+  entries: readonly Pick<BufferedOutputEntry, 'category' | 'output' | 'truncated' | 'categoryOmitted'>[]
+): CategoryRun[] {
+  const runs: CategoryRun[] = [];
+  for (const entry of entries) {
+    const omitted = entry.categoryOmitted === true;
+    const truncated = entry.truncated === true;
+    const last = runs[runs.length - 1];
+    if (last && !last.closedByTruncation && last.category === entry.category && last.categoryOmitted === omitted) {
+      last.text += entry.output;
+      last.closedByTruncation = truncated;
     } else {
-      pending.set(entry.category, parts.pop()!);
-    }
-    for (const raw of parts) {
-      const text = raw.trim();
-      if (text.length > 0) {
-        lines.push({ category: entry.category, text });
-      }
+      runs.push({
+        category: entry.category,
+        categoryOmitted: omitted,
+        text: entry.output,
+        closedByTruncation: truncated
+      });
     }
   }
-  return lines;
+  return runs;
+}
+
+function splitTrimmedNonEmptyLines(text: string): string[] {
+  return text
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line.length > 0);
 }
 
 function boundOutputTailLine(line: string): string {
@@ -98,46 +101,47 @@ function findTrailingLongStderrBlockStart(lines: readonly ProgramLine[]): number
   return lines.length - start > OUTPUT_TAIL_LINES ? start : undefined;
 }
 
-function findFatalErrorQuoteStart(
+function findLastFatalErrorIndex(
   lines: readonly ProgramLine[],
   isFatalErrorLine: ProgramOutputContract['isFatalErrorLine']
-): number | undefined {
+): number {
   if (!isFatalErrorLine) {
-    return undefined;
+    return -1;
   }
-  const cutoff = lines.length - OUTPUT_TAIL_LINES;
   for (let i = lines.length - 1; i >= 0; i--) {
     if (safePredicate(() => isFatalErrorLine(lines[i].text))) {
-      return i < cutoff ? i : undefined;
+      return i;
     }
   }
-  return undefined;
+  return -1;
 }
 
 /**
  * The last non-empty lines captured on `buffer` across all categories, for a
- * failed launch's adapter-output quote (issue #1036): partial chunks joined per
- * category, trimmed, up to 8 lines of 300 characters each. Undefined when
- * nothing was captured.
+ * failed launch's adapter-output quote (issue #1036): consecutive chunks of
+ * the same category joined (ending after a truncated chunk), trimmed, up to 8
+ * lines of 300 characters each. Undefined when nothing was captured.
  */
 export function readOutputTailLines(
-  buffer: Pick<OutputRingBuffer, 'read'> | undefined
+  buffer: Pick<OutputRingBuffer, 'readBuffered'> | undefined
 ): string[] | undefined {
-  const lines = assembleLinesByCategory(buffer?.read(0, OUTPUT_BUFFER_CAP).entries ?? [])
+  const lines = joinConsecutiveRuns(buffer?.readBuffered() ?? [])
+    .flatMap(run => splitTrimmedNonEmptyLines(run.text))
     .slice(-OUTPUT_TAIL_LINES)
-    .map(line => boundOutputTailLine(line.text));
+    .map(boundOutputTailLine);
   return lines.length > 0 ? lines : undefined;
 }
 
 /**
- * The tail is the last 8 non-empty lines of the program's own output (300
- * characters each) in arrival order across streams — except when the runtime
- * does not put its cause last and either all 8 fall inside one `stderr` block
- * longer than 8 lines or the policy recognises a runtime fatal-error line above
- * the last 8, in which case it quotes that head line and the 3 after it,
- * `"... (N lines omitted)"`, and the last 3 lines (issues #1254, #1136, #1277).
- * Reads only `session`'s own buffer and never walks the session tree; undefined
- * when `exitCode` is 0, unreported, or no program output was captured.
+ * The tail is the last 8 non-empty lines of the program's own output (up to 300
+ * characters plus `"…"` each) in arrival order across streams — except when the
+ * runtime does not put its cause last (`causeLast !== true`) and either the
+ * last policy-recognised runtime fatal-error line sits above the last 8 or
+ * (with no fatal-error line recognised) all 8 fall inside one `stderr` block
+ * longer than 8 lines, in which case it quotes that head line and the 3 after
+ * it, `"... (N lines omitted)"`, and the last 3 lines (issues #1254, #1136,
+ * #1277). Reads only `session`'s own buffer and never walks the session tree;
+ * undefined when `exitCode` is 0, unreported, or no program output was captured.
  */
 export function exitOutputTail(
   session: Pick<ManagedSession, 'exitCode'> & Partial<Pick<ManagedSession, 'outputBuffer' | 'language'>>
@@ -146,20 +150,21 @@ export function exitOutputTail(
     return undefined;
   }
   const contract = session.language ? getPolicyForLanguage(session.language).programOutput : undefined;
-  const entries = session.outputBuffer?.read(0, OUTPUT_BUFFER_CAP).entries ?? [];
+  const runs = joinConsecutiveRuns(session.outputBuffer?.readBuffered() ?? []);
   const programLines: ProgramLine[] = [];
 
-  for (const line of assembleLinesByCategory(entries)) {
-    if (line.category === 'stdout' || line.category === 'stderr') {
-      const category = line.category;
-      if (!safePredicate(() => contract?.isAdapterLine?.(category, line.text) === true)) {
-        programLines.push({ category, text: line.text });
+  for (const run of runs) {
+    if (run.category === 'stdout' || run.category === 'stderr') {
+      const category = run.category;
+      for (const line of splitTrimmedNonEmptyLines(run.text)) {
+        if (!safePredicate(() => contract?.isAdapterLine?.(category, line) === true)) {
+          programLines.push({ category, text: line });
+        }
       }
-    } else if (
-      line.category === 'console' &&
-      safePredicate(() => contract?.isProgramConsoleLine?.(line.text) === true)
-    ) {
-      programLines.push({ category: 'console', text: line.text });
+    } else if (run.category === 'console' && contract?.explicitConsoleIsProgram === true && !run.categoryOmitted) {
+      for (const line of splitTrimmedNonEmptyLines(run.text)) {
+        programLines.push({ category: 'console', text: line });
+      }
     }
   }
 
@@ -167,11 +172,15 @@ export function exitOutputTail(
     return undefined;
   }
 
-  const quoteStart =
-    contract?.causeLast === true
-      ? undefined
-      : (findTrailingLongStderrBlockStart(programLines) ??
-         findFatalErrorQuoteStart(programLines, contract?.isFatalErrorLine));
+  let quoteStart: number | undefined;
+  if (contract?.causeLast !== true) {
+    const fatalIdx = findLastFatalErrorIndex(programLines, contract?.isFatalErrorLine);
+    if (fatalIdx >= 0) {
+      quoteStart = fatalIdx < programLines.length - OUTPUT_TAIL_LINES ? fatalIdx : undefined;
+    } else {
+      quoteStart = findTrailingLongStderrBlockStart(programLines);
+    }
+  }
 
   if (quoteStart !== undefined) {
     const omitted = programLines.length - quoteStart - (OUTPUT_TAIL_STDERR_HEAD_LINES + OUTPUT_TAIL_STDERR_TAIL_LINES);
