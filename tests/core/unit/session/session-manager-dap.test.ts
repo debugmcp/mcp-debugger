@@ -2322,8 +2322,8 @@ describe('SessionManager - DAP Operations', () => {
         await vi.runAllTimersAsync();
         const result = await answer;
         expect(result.state).toBe(SessionState.PAUSED);
-        expect(result.data?.note ?? '').not.toContain('different call stack');
-        expect(result.data?.note ?? '').not.toContain('No function was entered');
+        expect(result.data?.note ?? '').not.toContain('shares no frame');
+        expect(result.data?.note ?? '').not.toContain('did not stop inside a called function');
         expect(sessionManager.getSession(session.id)?.lastStepProvenance).toBeUndefined();
       });
 
@@ -2353,9 +2353,66 @@ describe('SessionManager - DAP Operations', () => {
           attachMode: false,
           launch: expect.objectContaining({ dapLaunchArgs: expect.objectContaining({ stopOnEntry: true, justMyCode: true }) })
         }));
-        expect(result.data?.note).toContain('No function was entered');
+        expect(result.data?.note).toContain('The step did not stop inside a called function');
         if (outcome === 'hint') expect(result.data?.note).toContain('Step filtering is enabled.');
         else expect(result.data?.note ?? '').not.toContain('Step filtering');
+      });
+
+      it('names a Python (return) <fn> entry in step_into note when snapshot.changedVariables shows a call returned (#1328)', async () => {
+        const session = await createPausedSession(sessionManager, dependencies);
+        let stepCompleted = false;
+        dependencies.mockProxyManager.sendDapRequest = vi.fn().mockImplementation(async (command: string) => {
+          if (command === 'stackTrace') {
+            return {
+              success: true,
+              body: {
+                stackFrames: [{ id: 1, name: 'main', source: { path: '/proj/app.py' }, line: stepCompleted ? 11 : 10, column: 1 }],
+                totalFrames: 1
+              }
+            };
+          }
+          if (command === 'scopes') {
+            return {
+              success: true,
+              body: { scopes: [{ name: 'Locals', variablesReference: 100, expensive: false }] }
+            };
+          }
+          if (command === 'variables') {
+            return {
+              success: true,
+              body: {
+                variables: stepCompleted
+                  ? [
+                      { name: 'a', value: "'x'", type: 'str', variablesReference: 0 },
+                      { name: '(return) join', value: "'x/y'", type: 'str', variablesReference: 0 },
+                      { name: 'out', value: "'x/y'", type: 'str', variablesReference: 0 }
+                    ]
+                  : [{ name: 'a', value: "'x'", type: 'str', variablesReference: 0 }]
+              }
+            };
+          }
+          if (command === 'stepIn') {
+            stepCompleted = true;
+            process.nextTick(() => dependencies.mockProxyManager.simulateStopped(1, 'step'));
+          }
+          return { success: true };
+        });
+
+        // Move off the initial `entry` stop (which intentionally skips snapshot composition)
+        // onto a breakpoint stop so waitForStop seeds snapshotDiffBase before step_into.
+        dependencies.mockProxyManager.simulateStopped(1, 'breakpoint');
+        const initialWait = sessionManager.waitForStop(session.id);
+        await vi.runAllTimersAsync();
+        await initialWait;
+
+        const step = sessionManager.stepInto(session.id);
+        await vi.runAllTimersAsync();
+        const result = await step;
+
+        expect(result.success).toBe(true);
+        expect(result.data?.snapshot?.changedVariables?.['(return) join']).toEqual({ after: "'x/y'", new: true });
+        expect(result.data?.note).toContain("The step did not stop inside a called function ('join' returned).");
+        expect(result.data?.note).not.toContain('No function was entered');
       });
 
       it('keeps the session PAUSED and usable when the adapter refuses a step with DapResponseError (issue #1179)', async () => {
@@ -2546,7 +2603,7 @@ describe('SessionManager - DAP Operations', () => {
 
         expect(stackReads).toBeGreaterThanOrEqual(2);
         expect(result.data?.note).toContain('returned from BUMP-PARA to VIA-TIMES (3 times through the performed range)');
-        expect(result.data?.note).toContain("still in 'global.key' at the same call-stack depth");
+        expect(result.data?.note).toContain("The stop is in 'global.key' at the same call-stack depth as before step_out");
       });
     });
 

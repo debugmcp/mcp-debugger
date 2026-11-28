@@ -329,7 +329,7 @@ describe('SessionManager - waitForStop (issue #849)', () => {
     await afterStop();
 
     expect(wait.result()?.state).toBe(SessionState.PAUSED);
-    expect(wait.result()?.data?.note).toContain("still in 'callback' at the same call-stack depth");
+    expect(wait.result()?.data?.note).toContain("The stop is in 'callback' at the same call-stack depth as before step_out");
     expect(wait.result()?.data?.location).toMatchObject({ file: '/app/callback.py', line: 3 });
     expect(sessionManager.getSession(sessionId)?.inFlightStep).toBeUndefined();
   });

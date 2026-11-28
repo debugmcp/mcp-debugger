@@ -4,7 +4,7 @@
  * Encodes debugpy specific behaviors and variable handling logic.
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction } from './adapter-policy.js';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, StepInFilterContext } from './adapter-policy.js';
 import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-policy.js';
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
@@ -114,6 +114,27 @@ export const PythonAdapterPolicy = {
   },
   isChildReadyEvent: (evt: DebugProtocol.Event): boolean => {
     return evt?.event === 'initialized';
+  },
+
+  /**
+   * debugpy defaults `justMyCode` to `true` on launch, running calls into
+   * Python library or dependency code without stopping on `stepIn` unless
+   * `justMyCode: false` is passed (issue #1328). Attach sessions do not carry
+   * their `justMyCode` argument on `StepInFilterContext`, and `dapLaunchArgs`
+   * is launch-only, so attach returns `undefined`.
+   */
+  describeStepInFilter: ({ attachMode, launch }: StepInFilterContext): string | undefined => {
+    if (attachMode) {
+      return undefined;
+    }
+    const merged = { ...(launch?.dapLaunchArgs ?? {}), ...(launch?.adapterLaunchConfig ?? {}) };
+    if (merged.justMyCode === false) {
+      return undefined;
+    }
+    return (
+      'If the line called into Python library or dependency code, debugpy ran through it without stopping ' +
+      '(justMyCode is true by default); pass dapLaunchArgs: { justMyCode: false } to step into it.'
+    );
   },
   
   /**

@@ -108,19 +108,22 @@ export const DotnetAdapterPolicy = {
   /**
    * netcoredbg enables `enableStepFiltering` by default on launch (matching
    * vsdbg / Visual Studio), skipping property accessors and operators on
-   * `stepIn`; its attach handler ignores the key (issue #1184).
+   * `stepIn`; its attach handler ignores the key (issues #1184, #1281, #1328).
    */
   describeStepInFilter: ({ attachMode, launch }: StepInFilterContext): string | undefined => {
     if (attachMode) {
-      return 'On a .NET attach, netcoredbg steps over property accessors and operators (enableStepFiltering cannot be turned off on attach).';
+      return (
+        'If the line invoked a property accessor or operator, netcoredbg steps over property accessors and operators ' +
+        'on a .NET attach (enableStepFiltering cannot be turned off on attach).'
+      );
     }
     const merged = { ...(launch?.dapLaunchArgs ?? {}), ...(launch?.adapterLaunchConfig ?? {}) };
     if (merged.enableStepFiltering === false) {
       return undefined;
     }
     return (
-      'On a .NET launch, netcoredbg steps over property accessors and operators by default; ' +
-      'pass dapLaunchArgs: { enableStepFiltering: false } to step into them.'
+      'If the line invoked a property accessor or operator, netcoredbg steps over property accessors and operators ' +
+      'by default on a .NET launch; pass dapLaunchArgs: { enableStepFiltering: false } to step into them.'
     );
   },
 

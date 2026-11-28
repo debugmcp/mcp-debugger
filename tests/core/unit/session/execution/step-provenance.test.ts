@@ -92,7 +92,9 @@ describe('step-provenance (issues #1180, #1182, #1183, #1184)', () => {
       ], {}, 1);
       expect(compareStepOriginAndLanding('stepOver', origin, [
         frame(4, 'other_leaf', '/proj/app.rb', 15), frame(5, 'other_caller', '/proj/app.rb', 20), main
-      ])).toContain('different call stack');
+      ])).toBe(
+        "The stack at the stop shares only '<main>' with the stack where the step started (from 'fiber_leaf', now in 'other_leaf')."
+      );
       expect(compareStepOriginAndLanding('stepOut', origin, [
         frame(2, 'fiber_caller', '/proj/app.rb', 11), main
       ])).toBeUndefined();
@@ -149,7 +151,7 @@ describe('step-provenance (issues #1180, #1182, #1183, #1184)', () => {
       expect(compareStepOriginAndLanding('stepOut', origin, landing)).toBeUndefined();
     });
 
-    it('discloses when step_out lands back in the function stepped out of at the same depth (issue #1180 / #1196)', () => {
+    it('discloses when step_out lands back in the function stepped out of at the same depth (issues #1180, #1196, #1328)', () => {
       const stack = [
         frame(1, 'global.key', '/proj/cb.cjs', 3),
         frame(2, 'global.viaMap', '/proj/cb.cjs', 7),
@@ -157,11 +159,12 @@ describe('step-provenance (issues #1180, #1182, #1183, #1184)', () => {
       ];
       const origin = captureStepOrigin(stack, {}, 1);
       const note = compareStepOriginAndLanding('stepOut', origin, stack);
-      expect(note).toContain("still in 'global.key' at the same call-stack depth");
-      expect(note).toContain('has not returned');
+      expect(note).toBe(
+        "The stop is in 'global.key' at the same call-stack depth as before step_out (either that call has not returned or 'global.key' was called again)."
+      );
     });
 
-    it('discloses when step_out lands in a frame above the still-active origin function (Go deferred recover)', () => {
+    it('discloses when step_out lands in a frame above the origin function slot without assuming the same activation (Go deferred recover / loop re-entry)', () => {
       const origin = captureStepOrigin(
         [frame(1, 'main.work', '/proj/main.go', 15), frame(2, 'main.main', '/proj/main.go', 30)],
         {},
@@ -173,7 +176,9 @@ describe('step-provenance (issues #1180, #1182, #1183, #1184)', () => {
         frame(2, 'main.main', '/proj/main.go', 30)
       ];
       const note = compareStepOriginAndLanding('stepOut', origin, landing);
-      expect(note).toBe("The function stepped out of ('main.work') has not returned; it is 1 frame(s) below the stop.");
+      expect(note).toBe(
+        "'main.work' (where step_out was issued) is on the stack 1 frame(s) below the stop (either that call has not returned or 'main.work' was called again)."
+      );
     });
 
     it('discloses when step_out drops more than one frame on the same call stack (issues #1180, #1191, #1195)', () => {
@@ -193,30 +198,68 @@ describe('step-provenance (issues #1180, #1182, #1183, #1184)', () => {
       );
     });
 
-    it('discloses when step_into stays on the starting line or skips callees in the same frame (issues #1180, #1184)', () => {
+    it('discloses when step_into does not stop inside a called function, and names returned calls from changedVariables (issues #1180, #1184, #1328)', () => {
       const origin = captureStepOrigin(
         [frame(1, 'Leave.ViaProp', '/proj/Leave.cs', 41), frame(2, 'Leave.Main', '/proj/Leave.cs', 88)],
         {},
         1
       );
 
-      // Same line (e.g. Dart `var x = f();`, #1200)
+      // Same line (e.g. Dart `var x = f();` #1200, or JS multi-statement line after a skipped call)
       expect(
         compareStepOriginAndLanding('stepInto', origin, [
           frame(1, 'Leave.ViaProp', '/proj/Leave.cs', 41),
           frame(2, 'Leave.Main', '/proj/Leave.cs', 88)
         ])
-      ).toBe('No function was entered; execution is still on the starting line.');
+      ).toBe('The step did not stop inside a called function; execution is still on the starting line.');
 
-      // Next line with policy step-filter hint (#1184)
+      // Next line with policy step-filter hint (#1184, #1328)
       expect(
         compareStepOriginAndLanding(
           'stepInto',
           origin,
           [frame(1, 'Leave.ViaProp', '/proj/Leave.cs', 42), frame(2, 'Leave.Main', '/proj/Leave.cs', 88)],
-          { stepFilterHint: 'netcoredbg skips properties by default.' }
+          { stepFilterHint: 'If the line invoked a property accessor or operator, netcoredbg steps over it.' }
         )
-      ).toBe('No function was entered. netcoredbg skips properties by default.');
+      ).toBe(
+        'The step did not stop inside a called function. If the line invoked a property accessor or operator, netcoredbg steps over it.'
+      );
+
+      // Python `(return) <name>` in changedVariables (#1328): names returned call(s) without contradicting them
+      expect(
+        compareStepOriginAndLanding(
+          'stepInto',
+          origin,
+          [frame(1, 'Leave.ViaProp', '/proj/Leave.cs', 42), frame(2, 'Leave.Main', '/proj/Leave.cs', 88)],
+          {
+            stepFilterHint: 'If the line called into Python library or dependency code, debugpy ran through it without stopping.',
+            changedVariables: {
+              '(return) join': { after: "'a/b'", new: true },
+              joined: { after: "'a/b'", new: true }
+            }
+          }
+        )
+      ).toBe(
+        "The step did not stop inside a called function ('join' returned). If the line called into Python library or dependency code, debugpy ran through it without stopping."
+      );
+
+      // Updated `(return) <name>` from a second call on a later step (`before` + `after`) counts,
+      // while `gone: true` and truncation-shifted `{ after }` (neither `new` nor `before`) do not.
+      expect(
+        compareStepOriginAndLanding(
+          'stepInto',
+          origin,
+          [frame(1, 'Leave.ViaProp', '/proj/Leave.cs', 41), frame(2, 'Leave.Main', '/proj/Leave.cs', 88)],
+          {
+            changedVariables: {
+              '(return) join': { before: "'a/b'", after: "'c/d'" },
+              '(return) dirname': { after: "'c'", new: true },
+              '(return) old': { before: "'x'", gone: true },
+              '(return) shifted': { after: "'y'" }
+            }
+          }
+        )
+      ).toBe("The step did not stop inside a called function ('join', 'dirname' returned); execution is still on the starting line.");
 
       // Suppressed when JS stepper already provided a walk-limit note
       expect(
@@ -229,7 +272,7 @@ describe('step-provenance (issues #1180, #1182, #1183, #1184)', () => {
       ).toBeUndefined();
     });
 
-    it('discloses a disjoint call stack (Ruby fiber switch #1198) while allowing step_into bar(foo()) on main', () => {
+    it('discloses stacks sharing no frame (Ruby fiber switch #1198) while allowing step_into bar(foo()) on main', () => {
       const fiberOrigin = captureStepOrigin([frame(1, 'block in Object#gen_enum', '/proj/enum.rb', 13)], {}, 1);
       const mainLanding = [
         frame(2, 'Object#consume_enum', '/proj/enum.rb', 24),
@@ -237,17 +280,23 @@ describe('step-provenance (issues #1180, #1182, #1183, #1184)', () => {
         frame(4, '<main>', '/proj/enum.rb', 93)
       ];
       expect(compareStepOriginAndLanding('stepOut', fiberOrigin, mainLanding)).toBe(
-        "The stop is on a different call stack from the one the step was taken on (from 'block in Object#gen_enum', now in 'Object#consume_enum')."
+        "The stack at the stop shares no frame with the stack where the step started (from 'block in Object#gen_enum', now in 'Object#consume_enum')."
       );
 
-      // Normal step_into from `return x` inside `foo` into `bar` on `bar(foo())` in `main` at line 10
+      // Normal step_into from `return x` inside `foo` (or a tail-return leaf inside `foo`) into `bar` on `bar(foo())` in `main` at line 10
       const fooUnderMain = captureStepOrigin(
         [frame(1, 'foo', '/proj/app.py', 4), frame(2, 'main', '/proj/app.py', 10)],
         {},
         1
       );
+      const leafUnderFooUnderMain = captureStepOrigin(
+        [frame(0, 'leaf', '/proj/app.py', 2), frame(1, 'foo', '/proj/app.py', 4), frame(2, 'main', '/proj/app.py', 10)],
+        {},
+        1
+      );
       const barUnderMain = [frame(3, 'bar', '/proj/app.py', 8), frame(2, 'main', '/proj/app.py', 10)];
       expect(compareStepOriginAndLanding('stepInto', fooUnderMain, barUnderMain)).toBeUndefined();
+      expect(compareStepOriginAndLanding('stepInto', leafUnderFooUnderMain, barUnderMain)).toBeUndefined();
     });
   });
 

@@ -89,6 +89,52 @@ describe('PythonAdapterPolicy', () => {
     expect(PythonAdapterPolicy.getAttachBehavior?.()).toEqual({ pauseAfterAttach: true });
   });
 
+  describe('describeStepInFilter (issue #1328)', () => {
+    it('explains debugpy justMyCode filtering conditionally on launch unless disabled', () => {
+      const defaultHint = PythonAdapterPolicy.describeStepInFilter({ attachMode: false });
+      expect(defaultHint).toMatch(/^If the line called into Python library or dependency code/);
+      expect(defaultHint).toContain('dapLaunchArgs: { justMyCode: false }');
+
+      expect(
+        PythonAdapterPolicy.describeStepInFilter({
+          attachMode: false,
+          launch: { dapLaunchArgs: { justMyCode: true } }
+        })
+      ).toBe(defaultHint);
+
+      expect(
+        PythonAdapterPolicy.describeStepInFilter({
+          attachMode: false,
+          launch: { dapLaunchArgs: { justMyCode: false } }
+        })
+      ).toBeUndefined();
+    });
+
+    it('lets adapterLaunchConfig win over dapLaunchArgs and stays silent on attach', () => {
+      expect(
+        PythonAdapterPolicy.describeStepInFilter({
+          attachMode: false,
+          launch: {
+            dapLaunchArgs: { justMyCode: true },
+            adapterLaunchConfig: { justMyCode: false }
+          }
+        })
+      ).toBeUndefined();
+
+      expect(
+        PythonAdapterPolicy.describeStepInFilter({
+          attachMode: false,
+          launch: {
+            dapLaunchArgs: { justMyCode: false },
+            adapterLaunchConfig: { justMyCode: true }
+          }
+        })
+      ).toContain('justMyCode: false');
+
+      expect(PythonAdapterPolicy.describeStepInFilter({ attachMode: true })).toBeUndefined();
+    });
+  });
+
   describe('getAdapterSpawnConfig', () => {
     // scriptPath is required by AdapterSpawnPayload but never read by this
     // policy — the debuggee script reaches debugpy through the launch config.

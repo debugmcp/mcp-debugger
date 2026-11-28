@@ -846,6 +846,49 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
     expect(answer!.some(candidate => expected.candidate.test(candidate.path)), JSON.stringify(answer)).toBe(true);
   });
 
+  it('pins step-in filter hints to the engines that filter step_into by default, worded conditionally (issues #1184, #1328)', () => {
+    const launchOptOuts: Partial<Record<DebugLanguage, Record<string, unknown>>> = {
+      [DebugLanguage.PYTHON]: { justMyCode: false },
+      [DebugLanguage.JAVASCRIPT]: { justMyCode: false },
+      [DebugLanguage.DOTNET]: { enableStepFiltering: false }
+    };
+    const policiesWithStepInFilter = new Set<DebugLanguage>([
+      DebugLanguage.PYTHON,
+      DebugLanguage.JAVASCRIPT,
+      DebugLanguage.DOTNET,
+      DebugLanguage.RUST
+    ]);
+    const hook = policy.describeStepInFilter;
+    if (!policiesWithStepInFilter.has(language)) {
+      expect(hook).toBeUndefined();
+      return;
+    }
+    expect(typeof hook).toBe('function');
+    const bound = hook!.bind(policy);
+    const defaultHint = bound({ attachMode: false, launch: { dapLaunchArgs: { stopOnEntry: false, justMyCode: true } } });
+    expect(defaultHint, policy.name).toBeTypeOf('string');
+    expect(defaultHint!.length, policy.name).toBeGreaterThan(0);
+    // Conditional wording so the hint stays true even when the stepped line had no call (#1281, #1328).
+    expect(defaultHint).toMatch(/^If the line /);
+    expect(defaultHint).toMatch(/\.$/);
+    expect(defaultHint).not.toContain('No function was entered');
+
+    const optOut = launchOptOuts[language];
+    if (optOut) {
+      expect(bound({ attachMode: false, launch: { dapLaunchArgs: optOut } }), policy.name).toBeUndefined();
+      expect(
+        bound({ attachMode: false, launch: { dapLaunchArgs: { justMyCode: true, enableStepFiltering: true }, adapterLaunchConfig: optOut } }),
+        policy.name
+      ).toBeUndefined();
+    }
+
+    const attachHint = bound({ attachMode: true });
+    if (attachHint !== undefined) {
+      expect(attachHint).toMatch(/^If the line /);
+      expect(attachHint).not.toContain('dapLaunchArgs');
+    }
+  });
+
   // ===== 8. State lifecycle =====
 
   it('creates a fresh, uninitialized state on every call', () => {

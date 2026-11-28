@@ -334,7 +334,47 @@ export class ExecutionController {
           this.ctx, sessionId, finalLanding?.stackResult, logTag
         );
         if (snapshot) {
-          return { ...result, data: { ...result.data, snapshot } };
+          let updatedNote = result.data.note;
+          if (
+            snapshot.changedVariables &&
+            session.lastStop?.reason === 'step' &&
+            session.lastStepProvenance?.stopRef === session.lastStop
+          ) {
+            const prov = session.lastStepProvenance;
+            const landedOnOriginThread =
+              finalLanding?.stackResult?.threadId === undefined ||
+              finalLanding.stackResult.threadId === prov.origin?.threadId;
+            const provOrigin = landedOnOriginThread ? prov.origin : undefined;
+            const landingFrames = finalLanding?.stackResult?.frames ?? [];
+            const baseOpts = {
+              stepFilterHint,
+              hasStepperWalkNote: session.lastStop.text !== undefined,
+              noProgramFrame: finalLanding?.noProgramFrame === true
+            };
+            const withoutVars = compareStepOriginAndLanding(prov.flavor, provOrigin, landingFrames, baseOpts);
+            const withVars = compareStepOriginAndLanding(prov.flavor, provOrigin, landingFrames, {
+              ...baseOpts,
+              changedVariables: snapshot.changedVariables
+            });
+            if (withVars !== withoutVars) {
+              if (withoutVars && updatedNote === withoutVars) {
+                updatedNote = withVars;
+              } else if (withoutVars && updatedNote?.endsWith(` ${withoutVars}`)) {
+                const prefix = updatedNote.slice(0, -(withoutVars.length + 1));
+                updatedNote = withVars ? `${prefix} ${withVars}` : prefix;
+              } else if (!withoutVars && withVars) {
+                updatedNote = updatedNote ? `${updatedNote} ${withVars}` : withVars;
+              }
+            }
+          }
+          return {
+            ...result,
+            data: {
+              ...result.data,
+              ...(updatedNote !== undefined ? { note: updatedNote } : {}),
+              snapshot
+            }
+          };
         }
       }
       return result;
@@ -1115,7 +1155,8 @@ export class ExecutionController {
           {
             stepFilterHint: prov.flavor === 'stepInto' ? this.describeStepInFilter(target, target.id) : undefined,
             hasStepperWalkNote: stopAtLanding.text !== undefined,
-            noProgramFrame: landing.noProgramFrame === true
+            noProgramFrame: landing.noProgramFrame === true,
+            changedVariables: snapshot?.changedVariables
           }
         );
         if (provenanceNote) {

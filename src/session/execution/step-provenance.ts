@@ -7,9 +7,10 @@
  * starting stack from one `stackTrace` read and computes:
  *
  * 1. Factual disclosures when a `step` landing contradicts the requested step's
- *    stack motion (`step_out` still in the origin function, `step_out` dropping
- *    multiple frames, `step_into` entering no function, or a stack switch that
- *    shares no active frame with the origin);
+ *    stack motion (`step_out` landing at or above the origin function's stack
+ *    slot, `step_out` dropping multiple frames, `step_into` not stopping inside
+ *    a called function, or a landing stack that shares no frame — or only the
+ *    outermost entry — with the origin);
  * 2. Meaningful adapter-supplied step descriptions (e.g. COBOL PERFORM summaries),
  *    filtering generic boilerplate ("Paused", "Paused on step", "step");
  * 3. Call-stack-aware frame identity for `StopSnapshot.changedVariables`, so
@@ -69,6 +70,45 @@ const TOP_LEVEL_ENTRY_NAMES: ReadonlySet<string> = new Set([
   '(anonymous)',
   'main'
 ]);
+
+/** Synthetic local variable prefix debugpy adds when `showReturnValue` is on (`(return) <fn>`). */
+const PYTHON_RETURN_VAR_PREFIX = '(return) ';
+
+export interface ChangedVariableSummary {
+  before?: string;
+  after?: string;
+  new?: true;
+  gone?: true;
+}
+
+function returnedCallNames(
+  changedVariables: Readonly<Record<string, ChangedVariableSummary>> | undefined
+): string[] {
+  if (!changedVariables) {
+    return [];
+  }
+  const names: string[] = [];
+  for (const key of Object.keys(changedVariables)) {
+    if (!key.startsWith(PYTHON_RETURN_VAR_PREFIX)) {
+      continue;
+    }
+    const entry = changedVariables[key];
+    if (!entry || entry.gone || entry.after === undefined) {
+      continue;
+    }
+    // Count only an entry that newly appeared on a complete base (`new: true`)
+    // or changed value on this step (`before !== undefined`), never one that
+    // merely shifted into view under truncation (`{ after }` alone).
+    if (entry.new !== true && entry.before === undefined) {
+      continue;
+    }
+    const fnName = key.slice(PYTHON_RETURN_VAR_PREFIX.length).trim();
+    if (fnName.length > 0) {
+      names.push(fnName);
+    }
+  }
+  return names;
+}
 
 export function canonicalFrameName(name: string): string {
   return name.replace(COBOL_PERFORM_CALLSITE_SUFFIX, '');
@@ -131,7 +171,7 @@ export function captureStepOrigin(
 }
 
 export interface CompareStepLandingOptions {
-  /** Optional policy explanation for why `step_into` skipped callees (issue #1184). */
+  /** Optional conditional policy explanation for active engine step filtering (issues #1184, #1328). */
   stepFilterHint?: string;
   /**
    * True when the proxy's own stepper already supplied a walk-limit explanation
@@ -141,12 +181,18 @@ export interface CompareStepLandingOptions {
   hasStepperWalkNote?: boolean;
   /** True when the landing stack has no program frame at all (`stopWithoutProgramFrame` already speaks). */
   noProgramFrame?: boolean;
+  /**
+   * The landing snapshot's `changedVariables` when already composed (issue #1328):
+   * lets `step_into` name a call whose return value debugpy recorded (`(return) <fn>`)
+   * without an extra DAP round trip or policy hook.
+   */
+  changedVariables?: Readonly<Record<string, ChangedVariableSummary>>;
 }
 
 /**
  * Compare a step's starting stack with its `reason: 'step'` landing stack and
  * return a neutral, factual disclosure when the two stacks prove something the
- * fixed `"Stepped ..."` message hides (issues #1180, #1184).
+ * fixed `"Stepped ..."` message hides (issues #1180, #1184, #1328).
  */
 export function compareStepOriginAndLanding(
   kind: StepFlavor,
@@ -166,21 +212,21 @@ export function compareStepOriginAndLanding(
   const originTop = originLive[0];
   const landingTop = landingLive[0];
 
-  // 1. Disjoint call stacks (e.g. Ruby Fiber/Enumerator switch, #1198):
-  //    First check whether the two stacks share any function at all.
+  // 1. Stacks sharing no frame, or only an outermost entry (e.g. Ruby Fiber /
+  //    Enumerator switch #1198, or every starting frame having returned):
   const anySharedFrame = landingLive.some((lf) =>
     originLive.some((of) => sameFrameFunction(lf, of))
   );
   if (!anySharedFrame) {
     return (
-      `The stop is on a different call stack from the one the step was taken on ` +
+      `The stack at the stop shares no frame with the stack where the step started ` +
       `(from '${originTop.name}', now in '${landingTop.name}').`
     );
   }
   //    Also catch two multi-frame stacks that share ONLY an outermost module/main
-  //    entry while every call above it differs — except `stepInto` from a
-  //    depth-2 frame (`foo < main` -> `bar < main` on `bar(foo())`), which is a
-  //    normal return-and-enter on the caller's line.
+  //    entry while every call above it differs — except `stepInto` returning to
+  //    the outermost line and entering a sibling call (`foo < main` -> `bar < main`
+  //    on `bar(foo())`).
   if (originLive.length >= 2 && landingLive.length >= 2) {
     const originBottom = originLive[originLive.length - 1];
     const landingBottom = landingLive[landingLive.length - 1];
@@ -189,18 +235,19 @@ export function compareStepOriginAndLanding(
     const sharesAboveOutermost = landingAboveBottom.some((lf) =>
       originAboveBottom.some((of) => sameFrameFunction(lf, of))
     );
-    const isStepIntoSiblingFromDepth2 =
+    const isStepIntoSiblingAtOutermost =
       kind === 'stepInto' &&
-      originLive.length === 2 &&
+      landingLive.length === 2 &&
       sameFrameFunction(originBottom, landingBottom) &&
       originBottom.line === landingBottom.line;
     if (
       !sharesAboveOutermost &&
-      !isStepIntoSiblingFromDepth2 &&
+      !isStepIntoSiblingAtOutermost &&
+      sameFrameFunction(originBottom, landingBottom) &&
       TOP_LEVEL_ENTRY_NAMES.has(canonicalFrameName(originBottom.name))
     ) {
       return (
-        `The stop is on a different call stack from the one the step was taken on ` +
+        `The stack at the stop shares only '${originBottom.name}' with the stack where the step started ` +
         `(from '${originTop.name}', now in '${landingTop.name}').`
       );
     }
@@ -217,13 +264,13 @@ export function compareStepOriginAndLanding(
     ) {
       if (landingIdxAtOriginSlot === 0) {
         return (
-          `The stop is still in '${originTop.name}' at the same call-stack depth; ` +
-          `'${originTop.name}' has not returned (or this is a later call to it).`
+          `The stop is in '${originTop.name}' at the same call-stack depth as before step_out ` +
+          `(either that call has not returned or '${originTop.name}' was called again).`
         );
       }
       return (
-        `The function stepped out of ('${originTop.name}') has not returned; ` +
-        `it is ${landingIdxAtOriginSlot} frame(s) below the stop.`
+        `'${originTop.name}' (where step_out was issued) is on the stack ${landingIdxAtOriginSlot} frame(s) below the stop ` +
+        `(either that call has not returned or '${originTop.name}' was called again).`
       );
     }
 
@@ -237,17 +284,20 @@ export function compareStepOriginAndLanding(
     return undefined;
   }
 
-  // 3. step_into comparisons (#1180, #1184):
+  // 3. step_into comparisons (#1180, #1184, #1328):
   if (kind === 'stepInto' && !opts.hasStepperWalkNote) {
     if (
       landingLive.length === originLive.length &&
       sameFrameFunction(landingTop, originTop)
     ) {
+      const returned = returnedCallNames(opts.changedVariables);
+      const returnedClause =
+        returned.length > 0 ? ` (${returned.map((fn) => `'${fn}'`).join(', ')} returned)` : '';
       const onStartingLine =
         landingTop.line === originTop.line && samePath(landingTop.file, originTop.file);
       const base = onStartingLine
-        ? 'No function was entered; execution is still on the starting line.'
-        : 'No function was entered.';
+        ? `The step did not stop inside a called function${returnedClause}; execution is still on the starting line.`
+        : `The step did not stop inside a called function${returnedClause}.`;
       return opts.stepFilterHint ? `${base} ${opts.stepFilterHint}` : base;
     }
   }

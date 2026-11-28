@@ -77,8 +77,8 @@ reports a `Local variables` scope), `get_local_variables`, `evaluate_expression`
 stepping caveats (see [Known Issues](../KNOWN_ISSUES.md#steps-the-debug-engines-lose-or-stop-in-another-call)):
 stepping across a line that carries a false-condition breakpoint can cancel the step in
 `rdbg` (#1197), and `step_over` / `step_out` across a `Fiber` or external `Enumerator`
-boundary compares stack depths across fibers (#1198; mcp-debugger notes the call-stack
-change in `note`, #1180).
+boundary compares stack depths across fibers (#1198; mcp-debugger notes in `note` when the
+landing stack shares no frame, or only `<main>`, with the starting stack, #1180, #1328).
 
 ### Program output
 

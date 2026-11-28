@@ -32,8 +32,9 @@ describe('RustAdapterPolicy', () => {
     spawnMock.mockReset();
   });
 
-  it('explains standard-library step filtering with a breakpoint workaround', () => {
+  it('explains standard-library step filtering conditionally with a breakpoint workaround', () => {
     const hint = RustAdapterPolicy.describeStepInFilter();
+    expect(hint).toMatch(/^If the line /);
     expect(hint).toContain('std/core/alloc');
     expect(hint).toContain('Drop::drop');
     expect(hint).toContain('set a breakpoint inside the target function');

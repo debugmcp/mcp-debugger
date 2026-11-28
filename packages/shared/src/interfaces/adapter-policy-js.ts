@@ -6,11 +6,12 @@
  */
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import * as path from 'path';
-import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, QueuedDapCommand, StopReasonContext, PendingStopContext, UnresolvedSourceContext, GeneratedFileCandidate, GeneratedFileContext } from './adapter-policy.js';
+import type { AdapterPolicy, AdapterSpecificState, CommandHandling, LocalVariableExtraction, QueuedDapCommand, StopReasonContext, PendingStopContext, StepInFilterContext, UnresolvedSourceContext, GeneratedFileCandidate, GeneratedFileContext } from './adapter-policy.js';
 import { generatedFileCandidatesFrom } from './adapter-policy.js';
 import {
   jsLaunchBlackboxesNodeModules,
   jsLaunchSkipsNodeInternals,
+  resolveJsLaunchSkipFiles,
   resolveJsLaunchSmartStep,
   resolveJsLaunchWorkspaceFolder,
   resolveJsPauseForSourceMap,
@@ -556,6 +557,49 @@ export const JsDebugAdapterPolicy = {
     (info.attachMode
       ? 'attach with adapterConfig.sourceMaps: false to see the generated .js paths instead.'
       : 'relaunch with adapterLaunchConfig.sourceMaps: false to see the generated .js paths instead.'),
+
+  /**
+   * On launch, `justMyCode: true` (the default) populates `skipFiles` for
+   * `<node_internals>` and `node_modules` and sets `smartStep: true`,
+   * enabling the server's stepper through skipped code (`justMyCode: false`
+   * drops `node_modules` from `skipFiles` and sets `smartStep: false`,
+   * unless `skipFiles` or `smartStep` was overridden explicitly; issue #1328).
+   * Attach defaults `smartStep` to `false` and sets no `skipFiles` (#513).
+   */
+  describeStepInFilter: ({ attachMode, launch }: StepInFilterContext): string | undefined => {
+    if (attachMode) {
+      return undefined;
+    }
+    const merged = { ...(launch?.dapLaunchArgs ?? {}), ...(launch?.adapterLaunchConfig ?? {}) };
+    const skipFiles = resolveJsLaunchSkipFiles(merged);
+    const smartStep = resolveJsLaunchSmartStep(merged);
+    if (!smartStep || skipFiles.length === 0) {
+      return undefined;
+    }
+    const skipsInternals = jsLaunchSkipsNodeInternals(merged);
+    const skipsNodeModules = jsLaunchBlackboxesNodeModules(merged);
+    const skippedWhat =
+      skipsInternals && skipsNodeModules
+        ? 'Node internals or node_modules'
+        : skipsInternals
+          ? 'Node internals'
+          : skipsNodeModules
+            ? 'node_modules'
+            : 'files matching skipFiles';
+    const hasExplicitSkipFiles = Array.isArray(merged.skipFiles);
+    const hasExplicitSmartStep = merged.smartStep === true;
+    const remedy = hasExplicitSkipFiles && hasExplicitSmartStep
+      ? 'remove the pattern from skipFiles and set smartStep: false'
+      : hasExplicitSkipFiles
+        ? 'pass dapLaunchArgs: { justMyCode: false } (and remove the pattern from skipFiles)'
+        : hasExplicitSmartStep
+          ? 'pass adapterLaunchConfig: { smartStep: false } (with dapLaunchArgs: { justMyCode: false })'
+          : 'pass dapLaunchArgs: { justMyCode: false }';
+    return (
+      `If the line called into ${skippedWhat}, the debugger ran through that skipped code without stopping; ` +
+      `${remedy} to step into it.`
+    );
+  },
 
   /**
    * Where tsc would have emitted the file a TypeScript source binds through
