@@ -25,7 +25,8 @@ import {
   toFunctionBreakpoint,
   toWireSourceBreakpoint,
   type AdapterPolicy,
-  type DebugLanguage
+  type DebugLanguage,
+  type UnboundBreakpointContext
 } from '@debugmcp/shared';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { consumeChildMirrorUnanswered, consumeChildSourced } from '../../utils/child-origin-events.js';
@@ -212,9 +213,14 @@ export class BreakpointController {
     );
 
     const sync = await this.syncBreakpointsForFile(session, bp.file);
+    const warning =
+      sync.warning ??
+      (!newBreakpoint.verified && newBreakpoint.message !== undefined
+        ? this.unboundBreakpointHint(session, 'unverified', newBreakpoint.message) || undefined
+        : undefined);
     // A refused re-send has marked the new record (messageOrigin 'refusal');
     // the handler reads that to say the adapter's words once.
-    return { breakpoint: newBreakpoint, warning: sync.warning };
+    return { breakpoint: newBreakpoint, warning };
   }
 
   /**
@@ -652,18 +658,25 @@ export class BreakpointController {
   }
 
   /**
-   * Topology guidance for a ruby attach session whose refusal is rdbg's
-   * "<path> is not available" (issue #357): the path was rejected on the
-   * debug TARGET's filesystem (e.g. container server + host rdbg, or vice
-   * versa) — expected behavior, not a debugger fault. Appended to the live
-   * warning and the resync report alike.
+   * Policy guidance for an unbound breakpoint (`unverified`) or a failed
+   * breakpoint sync (`syncFailed`) whose adapter message is about the target's
+   * filesystem (issues #357, #1320). Never throws.
    */
-  private liveSyncHint(session: ManagedSession, message: string): string {
-    const attached = runFactsOf(session, (sessionId) => this.ctx.getSession(sessionId)).attached;
-    if (attached && session.language === 'ruby' && /is not available/.test(message)) {
-      return "Hint: attach sessions send breakpoint paths to the remote debugger verbatim; the path must be valid on the debug target's filesystem. Use target-side paths, or pass localfsMap in the attach config to map local paths to remote ones.";
+  private unboundBreakpointHint(
+    session: ManagedSession,
+    outcome: UnboundBreakpointContext['outcome'],
+    message: string
+  ): string {
+    try {
+      const policy = this.ctx.selectPolicy(session.language);
+      if (!policy.describeUnboundBreakpoint) {
+        return '';
+      }
+      const attachMode = runFactsOf(session, (sessionId) => this.ctx.getSession(sessionId)).attached;
+      return policy.describeUnboundBreakpoint({ outcome, message, attachMode }) ?? '';
+    } catch {
+      return '';
     }
-    return '';
   }
 
   /**
@@ -671,7 +684,7 @@ export class BreakpointController {
    * netcoredbg no-symbols guidance above.
    */
   private buildLiveSyncWarning(session: ManagedSession, message: string): string {
-    const hint = this.liveSyncHint(session, message);
+    const hint = this.unboundBreakpointHint(session, 'syncFailed', message);
     return `Breakpoint state updated, but live sync failed: ${message}${hint ? ` (${hint})` : ''}`;
   }
 
@@ -800,7 +813,7 @@ export class BreakpointController {
         const entry = lineFailures.get(key(outcome.failure)) ?? { failure: outcome.failure, files: [] };
         entry.files.push(file);
         lineFailures.set(key(outcome.failure), entry);
-        hint ||= this.liveSyncHint(session, outcome.failure.message);
+        hint ||= this.unboundBreakpointHint(session, 'syncFailed', outcome.failure.message);
       }
     }
     const warnings = [...lineFailures.values()].map(({ failure, files }) =>
@@ -815,7 +828,7 @@ export class BreakpointController {
       held ||= outcome.held === true;
       if (outcome.failure !== undefined) {
         functionBreakpointsFailed = true;
-        hint ||= this.liveSyncHint(session, outcome.failure.message);
+        hint ||= this.unboundBreakpointHint(session, 'syncFailed', outcome.failure.message);
         // The curated notes the records carry (capability drift, say) used to
         // reach the launch result through the symptom warning this failure
         // now withholds; they ride along with the cause instead.
