@@ -108,6 +108,19 @@ type ContentUncheckableSource =
   | { reason: 'attach'; locality: AttachTargetLocality; file: string; detail?: string }
   | { reason: 'non-file-identifier'; file: string };
 
+function describeUncheckedExpectedContentReason(source: ContentUncheckableSource): string {
+  if (source.reason === 'non-file-identifier') {
+    return `"${source.file}" is a source identifier, not a file this server can read`;
+  }
+  if (source.locality === 'remote') {
+    return `this is a remote attach, and the file on this host may differ from the target's source`;
+  }
+  if (source.locality === 'pid' || source.locality === 'loopback') {
+    return `this attach's path is not usable on this host${source.detail ? ` (${source.detail})` : ''}`;
+  }
+  return `the attach target's host is not known`;
+}
+
 function describeAttachContentUncheckableTarget(
   locality: AttachTargetLocality,
   file: string,
@@ -1004,35 +1017,32 @@ export const ErrorMessages = {
 
   /**
    * Warning when `set_breakpoint` receives `line` + `expectedContent` on a
-   * session or file whose content cannot be checked by the server (issue #1326):
-   * the breakpoint is set at `line` by plain line addressing and the warning
-   * discloses that `expectedContent` was not checked, why, and where it bound.
+   * session or source identifier whose content is not checked on this host
+   * (issue #1326): states only what was requested and why `expectedContent` was
+   * skipped, leaving binding outcomes (queued, refused, unverified, moved,
+   * cross-file `boundFile`/`boundLine`, verified) to the response fields that
+   * carry them.
    */
   expectedContentNotCheckedWarning: (
-    source: ContentUncheckableSource & { requestedLine: number; boundLine: number }
-  ) => {
-    const why =
-      source.reason === 'attach'
-        ? `not supported for ${describeAttachContentUncheckableTarget(source.locality, source.file, source.detail)}`
-        : `expectedContent requires a source file readable by the mcp-debugger server ("${source.file}" is a class name or remote path)`;
-    const where =
-      source.boundLine === source.requestedLine
-        ? `the breakpoint is set at line ${source.requestedLine} by plain line addressing.`
-        : `the breakpoint was requested at line ${source.requestedLine} by plain line addressing and bound to line ${source.boundLine}.`;
-    return `expectedContent was not checked: ${why} — ${where}`;
-  },
+    source: ContentUncheckableSource & { requestedLine: number }
+  ) =>
+    `expectedContent was not checked: ${describeUncheckedExpectedContentReason(source)}. ` +
+    `The breakpoint was requested at ${source.file}:${source.requestedLine} by line addressing; ` +
+    `verified, line, boundFile and message say whether and where it is bound.`,
 
   /**
    * State-dependent refusal when `set_breakpoint` receives `statement` (with no
    * fallback `line`) where the server cannot read the authoritative source
    * (issues #497, #903, #1326). Returned as `{success: false, error, state}`.
    */
-  statementAddressingNotSupported: (source: ContentUncheckableSource) =>
-    source.reason === 'attach'
+  statementAddressingNotSupported: (source: ContentUncheckableSource & { hasNearLine?: boolean }) => {
+    const omitWhat = source.hasNearLine ? 'without statement or nearLine' : 'without statement';
+    return source.reason === 'attach'
       ? `statement addressing is not supported for ${describeAttachContentUncheckableTarget(source.locality, source.file, source.detail)}; ` +
-        `use line addressing (file and line, without statement) instead.`
+        `use line addressing (file and line, ${omitWhat}) instead.`
       : `statement addressing requires a source file readable by the mcp-debugger server; ` +
-        `"${source.file}" is a class name or remote path — use line addressing (file and line, without statement) instead.`,
+        `"${source.file}" is a class name or remote path — use line addressing (file and line, ${omitWhat}) instead.`;
+  },
 
   /**
    * A function breakpoint on a child session of an adapter that arms them

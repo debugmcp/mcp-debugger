@@ -240,6 +240,8 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
       file: breakpoint.file,
       line: breakpoint.line,
       requestedLine: breakpoint.requestedLine,
+      boundFile: breakpoint.boundFile,
+      boundLine: breakpoint.boundLine,
       anchor: breakpoint.anchor,
       content: context?.lineContent,
       verified: breakpoint.verified,

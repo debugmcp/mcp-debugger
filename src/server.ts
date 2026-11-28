@@ -506,7 +506,10 @@ export class DebugMcpServer implements ToolContext {
         // naming file and line (issue #1326).
         throw new ContentAddressingNotSupportedError(
           req.sessionId,
-          ErrorMessages.statementAddressingNotSupported(contentUncheckableSource())
+          ErrorMessages.statementAddressingNotSupported({
+            ...contentUncheckableSource(),
+            hasNearLine: req.nearLine !== undefined
+          })
         );
       }
       const lines = await readCheckedFileLines();
@@ -564,8 +567,7 @@ export class DebugMcpServer implements ToolContext {
     if (skippedExpectedContent) {
       addressingWarning = ErrorMessages.expectedContentNotCheckedWarning({
         ...contentUncheckableSource(),
-        requestedLine: line,
-        boundLine: result.breakpoint.line
+        requestedLine: line
       });
     }
     return {

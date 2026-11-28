@@ -235,7 +235,7 @@ describe('set_breakpoint expectedContent (#271)', () => {
     });
   });
 
-  it('sets the breakpoint at line with a warning when expectedContent cannot be checked on an attach session (#1326)', async () => {
+  it('requests the breakpoint at line with a warning when expectedContent cannot be checked on a remote attach (#1326)', async () => {
     mockSessionManager.getSession.mockReturnValue({
       id: 'test-session',
       state: 'paused',
@@ -248,10 +248,11 @@ describe('set_breakpoint expectedContent (#271)', () => {
 
     expect(content.success).toBe(true);
     expect(content.line).toBe(3);
+    expect(content.verified).toBe(false);
     expect(content.warning).toBe(
-      "expectedContent was not checked: not supported for a remote attach session " +
-      "(the debuggee's loaded source may differ from the file on the mcp-debugger host) — " +
-      'the breakpoint is set at line 3 by plain line addressing.'
+      "expectedContent was not checked: this is a remote attach, and the file on this host may differ from the target's source. " +
+      'The breakpoint was requested at /path/to/test.py:3 by line addressing; ' +
+      'verified, line, boundFile and message say whether and where it is bound.'
     );
     expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
       'test-session',
@@ -259,7 +260,7 @@ describe('set_breakpoint expectedContent (#271)', () => {
     );
   });
 
-  it('sets the breakpoint at line with the class-name warning for non-file source identifiers (Java FQCN, #1326)', async () => {
+  it('requests the breakpoint at line with the source-identifier warning for non-file source identifiers (Java FQCN, #1326)', async () => {
     mockSessionManager.getSessionPolicy.mockReturnValue({
       isNonFileSourceIdentifier: (f: string) => !f.includes('/')
     });
@@ -290,11 +291,13 @@ describe('set_breakpoint expectedContent (#271)', () => {
     expect(content.success).toBe(true);
     expect(content.file).toBe('com.example.MyClass');
     expect(content.line).toBe(3);
+    expect(content.verified).toBe(false);
     expect(content.content).toBeUndefined();
     expect(content.context).toBeUndefined();
     expect(content.warning).toBe(
-      'expectedContent was not checked: expectedContent requires a source file readable by the mcp-debugger server ("com.example.MyClass" is a class name or remote path) — ' +
-      'the breakpoint is set at line 3 by plain line addressing.'
+      'expectedContent was not checked: "com.example.MyClass" is a source identifier, not a file this server can read. ' +
+      'The breakpoint was requested at com.example.MyClass:3 by line addressing; ' +
+      'verified, line, boundFile and message say whether and where it is bound.'
     );
     expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
       'test-session',

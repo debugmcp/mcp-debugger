@@ -165,13 +165,13 @@ export function buildToolDefinitions(options: BuildToolDefinitionsOptions): Tool
   if (supportsExpectedContent(bpMode)) {
     setBreakpointExtraProps.expectedContent = {
       type: 'string',
-      description: 'Optional assertion: text you expect on the target line — a distinctive substring is enough (leading/trailing whitespace and trailing //- or #-comments are ignored). If it does not match, the breakpoint is NOT set and the error shows the actual content of that line and its neighbors — use this to catch stale or off-by-one line numbers before they cause confusing behavior. Checked on launches and on attaches whose source file is readable on this host. A remote attach takes file and line, with line numbers from the file as the target has it; where the source cannot be checked here, the breakpoint is set at line with a warning that expectedContent was not checked'
+      description: 'Optional assertion: text you expect on the target line — a distinctive substring is enough (leading/trailing whitespace and trailing //- or #-comments are ignored). If it does not match, the breakpoint is NOT set and the error shows the actual content of that line and its neighbors — use this to catch stale or off-by-one line numbers before they cause confusing behavior'
     };
   }
   if (supportsStatementAnchors(bpMode)) {
     setBreakpointExtraProps.statement = {
       type: 'string',
-      description: 'Address by content instead of line number: the text of the target line, like an Edit-tool match — a distinctive substring is enough (leading/trailing whitespace and trailing //- or #-comments are ignored; an exact whole-line match always wins over substring matches). Preferred over line on launches and on attaches whose source file is readable on this host — it can only land on a line containing your text (an inexact or multi-candidate match adds a warning to the response) and survives file edits across restart_debugging; a remote attach (or a Java class name) takes file and line instead, with line numbers from the file as the target has it. If the text appears on multiple lines, the error lists every match; add nearLine to pick one. Provide statement OR line, not both'
+      description: 'Address by content instead of line number: the text of the target line, like an Edit-tool match — a distinctive substring is enough (leading/trailing whitespace and trailing //- or #-comments are ignored; an exact whole-line match always wins over substring matches). Preferred over line — it can only land on a line containing your text (an inexact or multi-candidate match adds a warning to the response) and survives file edits across restart_debugging. If the text appears on multiple lines, the error lists every match; add nearLine to pick one. Provide statement OR line, not both'
     };
     setBreakpointExtraProps.nearLine = {
       type: 'number',
@@ -205,9 +205,9 @@ export function buildToolDefinitions(options: BuildToolDefinitionsOptions): Tool
   // (issue #1326); gated by bpMode (#271) so restricted modes hide features
   // they do not serve.
   const addressingScopeSentence = supportsStatementAnchors(bpMode)
-    ? ' Content addressing (statement, expectedContent) applies on launches and on attaches whose source file is readable on this host; a remote attach takes file and line, with line numbers from the file as the target has it.'
+    ? ' statement and expectedContent are checked against readable launch and local-attach files. On a remote or unknown-host attach, an attach path this host cannot resolve, or a class name, pass file and the target\'s own line: expectedContent is then skipped with a warning, and statement is refused.'
     : supportsExpectedContent(bpMode)
-      ? ' expectedContent applies on launches and on attaches whose source file is readable on this host; a remote attach takes file and line, with line numbers from the file as the target has it.'
+      ? ' expectedContent is checked against readable launch and local-attach files. On a remote or unknown-host attach, an attach path this host cannot resolve, or a class name, pass file and the target\'s own line: expectedContent is then skipped with a warning.'
       : '';
   // Breakpoints resolve on the target's filesystem in an attach; a function
   // breakpoint needs no path, but it is named only where the mode serves it.

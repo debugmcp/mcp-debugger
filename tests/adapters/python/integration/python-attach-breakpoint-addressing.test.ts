@@ -4,11 +4,12 @@
  * - Local attach (`host: "127.0.0.1"` -> `attachLocality: 'loopback'`):
  *   both `line` + `expectedContent` and `statement` check/resolve against the
  *   host file and bind on debugpy.
- * - Remote attach (`host: "127.1"` -> `isLoopbackHost("127.1") === false` so
- *   `attachLocality: 'remote'`, while OS loopback routing still reaches the
- *   local `127.0.0.1` listener on one machine):
- *   1. `line` + `expectedContent` sets the breakpoint at `line` in one call
- *      with debugpy's own verdict and a `warning` disclosing that
+ * - Remote attach (`host: "localhost."` -> `isLoopbackHost("localhost.") === false`
+ *   so `attachLocality: 'remote'`, while OS loopback resolution connects to the
+ *   local `127.0.0.1` listener on one machine; skipped if the runner's resolver
+ *   does not map `localhost.` to IPv4 loopback):
+ *   1. `line` + `expectedContent` requests the breakpoint at `file:line` in one
+ *      call with debugpy's own verdict and a `warning` disclosing that
  *      `expectedContent` was not checked and why.
  *   2. `statement` (no `line` to fall back on) answers `{success: false, error,
  *      state}` naming `file` and `line`, not a JSON-RPC protocol error.
@@ -17,6 +18,7 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'node:path';
 import os from 'node:os';
 import net from 'node:net';
+import dns from 'node:dns';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
@@ -78,9 +80,50 @@ interface Target {
 
 const PORT_IN_USE_PATTERN = /Address already in use|EADDRINUSE|10048/i;
 
+async function resolveIpv4Loopback(hostname: string): Promise<{ ok: true; address: string } | { ok: false; reason: string }> {
+  try {
+    const result = await dns.promises.lookup(hostname, { family: 4 });
+    if (result.family === 4 && isLoopbackHost(result.address)) {
+      return { ok: true, address: result.address };
+    }
+    return { ok: false, reason: `resolved to ${result.address} (family ${result.family})` };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 describe('Python attach breakpoint addressing — local vs remote locality (#1326) @requires-python', () => {
   let client: Client | null = null;
   let targets: Target[] = [];
+
+  async function stopAllTargets(): Promise<void> {
+    const toStop = targets;
+    targets = [];
+    for (const target of toStop) {
+      if (target.proc.pid !== undefined && target.proc.exitCode === null) {
+        try {
+          process.kill(target.proc.pid);
+        } catch {
+          // already exited
+        }
+      }
+      const exited = await Promise.race([
+        target.exited.then(() => true),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 3000))
+      ]);
+      if (!exited && target.proc.pid !== undefined && target.proc.exitCode === null) {
+        try {
+          target.proc.kill('SIGKILL');
+        } catch {
+          // already exited
+        }
+        await Promise.race([
+          target.exited,
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000))
+        ]);
+      }
+    }
+  }
 
   beforeAll(async () => {
     const serverScriptPath = path.resolve(currentDirName, '../../../../dist/index.js');
@@ -101,7 +144,12 @@ describe('Python attach breakpoint addressing — local vs remote locality (#132
     await client.connect(transport);
   }, 30000);
 
+  afterEach(async () => {
+    await stopAllTargets();
+  });
+
   afterAll(async () => {
+    await stopAllTargets();
     if (client) {
       try {
         await client.close();
@@ -109,24 +157,6 @@ describe('Python attach breakpoint addressing — local vs remote locality (#132
         // best effort
       }
       client = null;
-    }
-  });
-
-  afterEach(async () => {
-    const toStop = targets;
-    targets = [];
-    for (const target of toStop) {
-      if (target.proc.pid !== undefined && target.proc.exitCode === null) {
-        try {
-          process.kill(target.proc.pid);
-        } catch {
-          // already exited
-        }
-      }
-      await Promise.race([
-        target.exited,
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000))
-      ]);
     }
   });
 
@@ -138,6 +168,20 @@ describe('Python attach breakpoint addressing — local vs remote locality (#132
       throw new Error(`Unexpected tool result: ${JSON.stringify(raw)}`);
     }
     return JSON.parse(content[0].text) as Record<string, unknown>;
+  }
+
+  async function stopOneTarget(target: Target): Promise<void> {
+    if (target.proc.pid !== undefined && target.proc.exitCode === null) {
+      try {
+        process.kill(target.proc.pid);
+      } catch {
+        // already exited
+      }
+    }
+    await Promise.race([
+      target.exited,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000))
+    ]);
   }
 
   async function startTargetOnce(): Promise<Target> {
@@ -154,6 +198,7 @@ describe('Python attach breakpoint addressing — local vs remote locality (#132
     let buffer = '';
     const exited = new Promise<number | null>((resolve) => proc.on('close', (code) => resolve(code)));
     const target: Target = { proc, port, exited };
+    // Register before awaiting readiness so afterEach/afterAll always cleans it up.
     targets.push(target);
 
     await new Promise<void>((resolve, reject) => {
@@ -191,12 +236,8 @@ describe('Python attach breakpoint addressing — local vs remote locality (#132
         const message = error instanceof Error ? error.message : String(error);
         if (attempt < 4 && PORT_IN_USE_PATTERN.test(message)) {
           const failed = targets.pop();
-          if (failed?.proc.pid !== undefined && failed.proc.exitCode === null) {
-            try {
-              process.kill(failed.proc.pid);
-            } catch {
-              // ignore
-            }
+          if (failed) {
+            await stopOneTarget(failed);
           }
           continue;
         }
@@ -250,12 +291,17 @@ describe('Python attach breakpoint addressing — local vs remote locality (#132
     }
   }, 60000);
 
-  it('sets line+expectedContent with warning and refuses statement as a tool answer on a remote attach (#1326)', async () => {
-    const target = await startTarget();
-    // Trailing-dot FQDN `localhost.` resolves to 127.0.0.1 on the loopback
-    // interface while `isLoopbackHost("localhost.") === false` classifies the
-    // attach locality as `'remote'`.
+  it('requests line+expectedContent with warning and refuses statement as a tool answer on a remote attach (#1326)', async (ctx) => {
     const remoteHost = 'localhost.';
+    const resolution = await resolveIpv4Loopback(remoteHost);
+    if (!resolution.ok) {
+      ctx.skip(
+        `Skipping remote-locality loopback attach: "${remoteHost}" did not resolve to IPv4 loopback (${resolution.reason})`
+      );
+      return;
+    }
+
+    const target = await startTarget();
     expect(isLoopbackHost(remoteHost)).toBe(false);
     expect(attachLocalityOf({ host: remoteHost, port: target.port })).toBe('remote');
 
@@ -285,9 +331,9 @@ describe('Python attach breakpoint addressing — local vs remote locality (#132
       expect(lineWithExpected.content).toBeUndefined();
       expect(lineWithExpected.context).toBeUndefined();
       expect(lineWithExpected.warning).toBe(
-        "expectedContent was not checked: not supported for a remote attach session " +
-        "(the debuggee's loaded source may differ from the file on the mcp-debugger host) — " +
-        `the breakpoint is set at line ${TOTAL_LINE} by plain line addressing.`
+        "expectedContent was not checked: this is a remote attach, and the file on this host may differ from the target's source. " +
+        `The breakpoint was requested at ${serviceScript}:${TOTAL_LINE} by line addressing; ` +
+        'verified, line, boundFile and message say whether and where it is bound.'
       );
       expect(lineWithExpected.note).toBe(
         "content and context omitted: the target of this attach is not on the mcp-debugger host, so the host file is not the debuggee's source"
@@ -307,7 +353,7 @@ describe('Python attach breakpoint addressing — local vs remote locality (#132
         state: 'paused'
       });
 
-      // Confirm the plain-line breakpoint set on the first call actually hits.
+      // Confirm the plain-line breakpoint requested on the first call actually hits.
       const resumed = await call('continue_execution', { sessionId });
       expect(resumed.success, JSON.stringify(resumed)).toBe(true);
       const hit = await call('wait_for_stop', { sessionId, timeout: 10000 });
