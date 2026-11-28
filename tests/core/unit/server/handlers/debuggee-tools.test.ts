@@ -204,6 +204,60 @@ describe('debuggee lifecycle tool handlers', () => {
     });
   });
 
+  describe('what the attach left in the target, on the attach and detach answers (issue #1261)', () => {
+    const footprint = (field = 'inspector') => ({
+      field,
+      atAttach: 'signalled: an inspector answers on 127.0.0.1:9229 now; this server leaves it open when this session ends',
+      atEnd: vi.fn(async () => 'listening: an inspector answers on 127.0.0.1:9229')
+    });
+
+    it('attach says what the attach did, in one top-level field named for it, and a failed attach the same', async () => {
+      const left = footprint();
+      ctx.sessionManager.attachToProcess.mockResolvedValueOnce({
+        success: true,
+        state: 'running',
+        data: { message: 'Attached to process PID 4242', attachFootprint: left }
+      });
+      let payload = JSON.parse((await attachToProcessTool(ctx, { sessionId: 'test-session', processId: 4242 }, 'attach_to_process')).content[0].text);
+      expect(payload).toMatchObject({ success: true, inspector: left.atAttach });
+      expect(payload.data).toEqual({ message: 'Attached to process PID 4242' });
+      expect(left.atEnd).not.toHaveBeenCalled();
+
+      ctx.sessionManager.attachToProcess.mockResolvedValueOnce({
+        success: false,
+        state: 'error',
+        error: 'Failed to attach: no threads',
+        data: { attachFootprint: left }
+      });
+      payload = JSON.parse((await attachToProcessTool(ctx, { sessionId: 'test-session', processId: 4242 }, 'attach_to_process')).content[0].text);
+      expect(payload).toEqual({ success: false, state: 'error', message: 'Failed to attach: no threads', inspector: left.atAttach });
+    });
+
+    it('detach says what one look at it sees now', async () => {
+      const left = footprint();
+      ctx.sessionManager.detachFromProcess.mockResolvedValueOnce({
+        success: true,
+        state: 'stopped',
+        data: { message: 'released', released: true, attachFootprint: left }
+      });
+      const payload = JSON.parse((await detachFromProcessTool(ctx, { sessionId: 'test-session' }, 'detach_from_process')).content[0].text);
+
+      expect(payload).toMatchObject({ success: true, released: true, inspector: 'listening: an inspector answers on 127.0.0.1:9229' });
+      expect(payload.data).not.toHaveProperty('attachFootprint');
+      expect(left.atEnd).toHaveBeenCalledTimes(1);
+    });
+
+    it('a field name that is not a plain word, or that the answer already uses, falls back to attachFootprint', async () => {
+      for (const field of ['message', 'not a word']) {
+        ctx.sessionManager.detachFromProcess.mockResolvedValueOnce({
+          success: true, state: 'stopped', data: { message: 'released', attachFootprint: footprint(field) }
+        });
+        const payload = JSON.parse((await detachFromProcessTool(ctx, { sessionId: 'test-session' }, 'detach_from_process')).content[0].text);
+        expect(payload).toMatchObject({ message: 'released', attachFootprint: 'listening: an inspector answers on 127.0.0.1:9229' });
+      }
+    });
+  });
+
   describe('the tree fields on the detach_from_process answer (issue #1081)', () => {
     it('hoists childrenReleased (a plain detach) and childrenClosed (a terminating one) beside the message', async () => {
       ctx.sessionManager.detachFromProcess.mockResolvedValueOnce({
