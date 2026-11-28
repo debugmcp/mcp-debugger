@@ -4,7 +4,9 @@
  * Masking itself happens in the session layer (see
  * session-manager-redaction.test.ts); the server's job is to surface a
  * top-level `redaction` notice object whenever a returned item carries the
- * `redacted` flag, and to mention redaction in the initialize instructions.
+ * `redacted` flag, to say in the initialize instructions that the snapshot's
+ * locals are redacted, and to describe the placeholders in the descriptions
+ * of the tools that return program values (issue #1331).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
@@ -13,6 +15,8 @@ import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { createProductionDependencies, type Dependencies } from '../../../../src/container/dependencies.js';
 import { buildServerInstructions } from '../../../../src/skill-content.js';
+import { buildToolDefinitions } from '../../../../src/server/tool-schemas.js';
+import { isRedactionEnabled } from '../../../../src/utils/redaction-mode.js';
 import {
   createMockDependencies,
   createMockServer,
@@ -171,15 +175,50 @@ describe('Server redaction notices (issue #237)', () => {
   });
 
   describe('server instructions', () => {
-    it('mentions redaction when enabled (the default)', () => {
+    it('say the snapshot locals are redacted when redaction is on (the default)', () => {
       const instructions = buildServerInstructions();
-      expect(instructions).toContain('<redacted:');
-      expect(instructions).toContain('DEBUG_MCP_NO_REDACT');
+      expect(instructions).toContain('the locals of the first of them that has any (redacted and capped)');
     });
 
-    it('drops the redaction rule when the server opted out', () => {
+    it('say nothing of redaction when the server opted out', () => {
       const instructions = buildServerInstructions(undefined, { redactionEnabled: false });
-      expect(instructions).not.toContain('<redacted:');
+      expect(instructions).not.toMatch(/redact/i);
+    });
+  });
+
+  // The placeholder format and the opt-out moved from the instructions to the
+  // descriptions of the tools that return program values (issue #1331). The
+  // rule is stated once, in get_variables, and worded to stay true whatever
+  // the switch is: it accepts true as well as 1 (isRedactionEnabled), and it
+  // is read once, at server construction, so a change takes a restart. The
+  // other tools point at it.
+  describe('tool descriptions', () => {
+    const tools = (): ReturnType<typeof buildToolDefinitions> =>
+      buildToolDefinitions({ supportedLanguages: ['python'], environment: mockDependencies.environment });
+    const descriptionOf = (name: string): string => tools().find((tool) => tool.name === name)?.description ?? '';
+
+    it('state the redaction rule once, in get_variables: placeholder, redaction field, both opt-out values and the restart', () => {
+      const description = descriptionOf('get_variables');
+      expect(description).toContain('<redacted:rule-id>');
+      expect(description).toContain("the answer's redaction field says what was masked");
+      expect(description).toContain('When redaction is on (the default; starting the server with DEBUG_MCP_NO_REDACT=1 or true turns it off, and a change takes a restart)');
+      expect(description).not.toContain('Unless the server runs with DEBUG_MCP_NO_REDACT=1');
+    });
+
+    it('point at it from the other tools that return program values', () => {
+      for (const name of ['get_local_variables', 'evaluate_expression', 'get_output']) {
+        const description = descriptionOf(name);
+        expect(description, name).toContain('Values may show as <redacted:rule-id>: see get_variables for the redaction rule.');
+        expect(description, name).not.toContain('credential-shaped');
+      }
+    });
+
+    // The switch's own parser: the descriptions name 1 and true because both
+    // turn redaction off.
+    it('name the values the switch accepts', () => {
+      for (const value of ['1', 'true', ' TRUE ']) {
+        expect(isRedactionEnabled({ get: (key) => (key === 'DEBUG_MCP_NO_REDACT' ? value : undefined) }), value).toBe(false);
+      }
     });
   });
 });
