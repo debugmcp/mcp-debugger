@@ -51,6 +51,7 @@ describe('Server Initialization Tests', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     vi.clearAllMocks();
   });
 
@@ -67,6 +68,40 @@ describe('Server Initialization Tests', () => {
         logFile: undefined,
         sessionLogDirBase: undefined
       });
+    });
+
+    // Every setting the instructions depend on reaches the builder (issue #1331):
+    // each one changes a rule an agent acts on before its first call.
+    it('builds the instructions from the settings in the environment', () => {
+      const defaults = new DebugMcpServer({ logLevel: 'debug' }).instructions;
+      expect(defaults).toContain('file and scriptPath must be ABSOLUTE paths');
+      expect(defaults).toContain('may carry snapshot:');
+      expect(defaults).toContain('(redacted and capped)');
+
+      vi.stubEnv('DEBUG_MCP_NO_SNAPSHOT', '1');
+      vi.stubEnv('DEBUG_MCP_NO_REDACT', '1');
+      vi.stubEnv('DEBUG_MCP_VARIABLE_ACCESS', 'explicit');
+      vi.stubEnv('MCP_DEBUG_SESSION_IDLE_MS', '300000');
+      vi.stubEnv('MCP_CONTAINER', 'true');
+      vi.stubEnv('MCP_WORKSPACE_ROOT', '/workspace');
+      const configured = new DebugMcpServer({ logLevel: 'debug' }).instructions;
+      expect(configured).toContain('Stop snapshots are off on this server (DEBUG_MCP_NO_SNAPSHOT)');
+      expect(configured).not.toContain('may carry snapshot:');
+      expect(configured).not.toMatch(/redact/i);
+      expect(configured).toContain('DEBUG_MCP_VARIABLE_ACCESS=explicit');
+      expect(configured).toContain('no tool call has named for 5 min');
+      expect(configured).toContain('relative to the project root');
+      expect(configured).not.toContain('ABSOLUTE');
+    });
+
+    // The switches accept true as well as 1, trimmed and in any case
+    // (isSnapshotEnabled, isRedactionEnabled): the instructions follow them.
+    it('reads true as well as 1 for the snapshot and redaction switches', () => {
+      vi.stubEnv('DEBUG_MCP_NO_SNAPSHOT', ' TRUE ');
+      vi.stubEnv('DEBUG_MCP_NO_REDACT', 'true');
+      const instructions = new DebugMcpServer({ logLevel: 'debug' }).instructions;
+      expect(instructions).toContain('Stop snapshots are off on this server (DEBUG_MCP_NO_SNAPSHOT)');
+      expect(instructions).not.toMatch(/redact/i);
     });
 
     it('should initialize with log file configuration', () => {
