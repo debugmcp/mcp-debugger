@@ -1,7 +1,7 @@
 # Commit Workflow Guide
 
 ## Overview
-This project uses Git hooks to maintain code quality. We've implemented a special workflow that **always** checks for personal information in commits while allowing you to skip the remaining pre-commit checks when needed. For the full dev loop — what runs on commit, on push, and in CI — see [`CONTRIBUTING.md`](../CONTRIBUTING.md) and the [Git Hooks Guide](./development/git-hooks-guide.md).
+The pre-commit hook checks staged files for personal paths and refuses the commit on failure. The safe-commit wrapper runs the same check before invoking Git, including when it skips commit verification. For the full dev loop — what runs on commit, on push, and in CI — see the [Dev-Loop Gate](../CONTRIBUTING.md#dev-loop-gate) and the [Git Hooks Guide](./development/git-hooks-guide.md).
 
 ## Quick Start
 
@@ -12,26 +12,27 @@ git commit -m "feat: add new feature"
 npm run commit:safe -- -m "feat: add new feature"
 ```
 Runs every pre-commit check — all of them fast:
-- ✅ Personal information check
+- ✅ Personal information check; failure refuses the commit with the checker's own output
 - ✅ Build artifact check (staged `.js` / `.d.ts` / `.js.map` under `src/` or `packages/*/src/`)
 - ✅ Package tarball (`.tgz`) check
+- 📝 Advisory `docstar check` if Docstar is installed
 
-The pre-commit hook runs **no tests and no build**. Branch pushes run fast static checks; CI builds and runs the suites that gate a merge. See the [Dev-Loop Gate](../CONTRIBUTING.md#dev-loop-gate).
+The pre-commit hook runs **no tests and no build**. Branch pushes run fast static checks; CI builds and runs the pull request's suites. See the [Dev-Loop Gate](../CONTRIBUTING.md#dev-loop-gate) for merge checks.
 
-### Fast Commit (Skip Git Hooks)
+### Fast Commit (Skip Commit Verification)
 ```bash
 npm run commit:fast -- -m "feat: add new feature"
 ```
-Manually runs the personal information check first, then uses `git commit --no-verify` internally, which bypasses **all** Git hooks (pre-commit, commit-msg, etc.):
+Manually runs the personal information check first and refuses to commit if it fails, then uses `git commit --no-verify` internally, which bypasses the pre-commit and commit-msg hooks:
 - ✅ Personal information check runs FIRST (fast)
-- ⚡ Then commits with `--no-verify`, skipping the rest of the pre-commit hook (build-artifact and tarball checks) and any other hook that would fire on commit
+- ⚡ Then commits with `--no-verify`, skipping the pre-commit hook (including build-artifact and tarball guards and advisory Docstar) and commit-msg verification; other Git hooks are unaffected
 
 The flag is spelled `--skip-tests` for historical reasons; no tests run on commit either way.
 
 ## Why This Exists
 
 ### The Problem
-- `git commit --no-verify` skips **all** checks, including critical security checks for personal information
+- `git commit --no-verify` bypasses pre-commit and commit-msg verification, including the pre-commit personal-paths check
 - Personal information (usernames, paths) should **never** be committed to the repository
 - But sometimes you need to commit quickly without waiting for the rest of the checks
 
@@ -59,7 +60,7 @@ Detects and blocks:
 
 #### Pre-Push Checks (Run Before Push)
 See the [Dev-Loop Gate](../CONTRIBUTING.md#dev-loop-gate) for the ordered static checks on branch
-pushes, the unchanged tags-only release gate, and the CI jobs that decide merges.
+pushes, the unchanged tags-only release gate, and the pull request's CI checks.
 
 ### Commands Reference
 
@@ -147,15 +148,15 @@ chmod +x scripts/safe-commit.sh
   - Good: `~/workspace/mcp-debugger`
   - Good: `./relative/path`
 
-### Need to Bypass Everything (Emergency Only!)
+### Need to Bypass Commit Verification (Emergency Only!)
 ```bash
-# This skips ALL checks - use with extreme caution!
+# This skips pre-commit and commit-msg verification - use with extreme caution!
 git commit --no-verify -m "emergency: critical fix"
 ```
 
 ## Benefits
 
-- 🔒 **Security**: Personal information never accidentally committed
+- 🔒 **Security**: Staged checks block detected personal paths before commit
 - ⚡ **Speed**: Skip the remaining pre-commit checks for WIP commits
 - 🛡️ **Safety Net**: CI/CD will catch issues before merge
 - 🎯 **Flexibility**: Choose the right level of checking for your situation

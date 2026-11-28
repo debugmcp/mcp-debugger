@@ -9,7 +9,7 @@ set +e
 exec 1>&2
 
 echo "🔎 Running pre-push checks to ensure code quality..."
-echo "💡 Fast feedback here; pull request checks in CI gate merges."
+echo "💡 Fast feedback here; CI builds and tests your pull request."
 echo ""
 
 # Detect if this push contains only tags (read refs from stdin)
@@ -137,50 +137,49 @@ if [ "$TAGS_ONLY" != true ]; then
     echo ""
     echo "✅ All static checks passed! Push will proceed."
     echo "🚀 CI will build and run the suites for your pull request."
-    exit 0
-fi
-
-# Clean build to ensure no stale artifacts
-echo "🔨 Running clean build to ensure fresh compilation..."
-if ! (npm run clean > "$PRE_PUSH_LOG" 2>&1 && npm run build >> "$PRE_PUSH_LOG" 2>&1); then
-    echo ""
-    echo "❌ Build failed! Push blocked to prevent broken code on GitHub."
-    echo "💡 Fix build errors before pushing."
-    echo ""
-    tail -20 "$PRE_PUSH_LOG"
-    exit 1
-fi
-
-echo "✅ Build successful!"
-echo ""
-
-# Tag-only pushes keep the existing clean build, reduced release-CI suite and
-# optional Docstar steps. A tag push is a release step, so this path stays separate.
-echo "🔖 Tag-only push detected. Running reduced CI tests..."
-npm run test:ci-no-python > "$PRE_PUSH_LOG" 2>&1
-
-TEST_EXIT=$?
-
-# Show the test summary (last few lines contain pass/fail counts)
-grep -E "Test Files|Tests |Duration" "$PRE_PUSH_LOG" || true
-
-if [ $TEST_EXIT -eq 0 ]; then
-    echo ""
-    echo "✅ All tests passed! Push will proceed."
-    echo "🚀 Code quality maintained for GitHub repository."
 else
+    # Clean build to ensure no stale artifacts
+    echo "🔨 Running clean build to ensure fresh compilation..."
+    if ! (npm run clean > "$PRE_PUSH_LOG" 2>&1 && npm run build >> "$PRE_PUSH_LOG" 2>&1); then
+        echo ""
+        echo "❌ Build failed! Push blocked to prevent broken code on GitHub."
+        echo "💡 Fix build errors before pushing."
+        echo ""
+        tail -20 "$PRE_PUSH_LOG"
+        exit 1
+    fi
+
+    echo "✅ Build successful!"
     echo ""
-    echo "❌ Tests failed! Push blocked to prevent broken code on GitHub."
-    echo "💡 Fix failing tests or use 'git push --no-verify' for emergency pushes."
-    echo "🔧 You can still make local commits for WIP - tests only run on push."
-    echo ""
-    echo "Failed test details:"
-    grep -E "FAIL|Error|AssertionError" "$PRE_PUSH_LOG" | head -20 || true
-    echo ""
-    echo "Full log: $PRE_PUSH_LOG"
-    # Keep log on failure so user can inspect
-    trap - EXIT
-    exit 1
+
+    # Tag-only pushes keep the existing clean build and reduced release-CI suite.
+    # A tag push is a release step, so this path stays separate.
+    echo "🔖 Tag-only push detected. Running reduced CI tests..."
+    npm run test:ci-no-python > "$PRE_PUSH_LOG" 2>&1
+
+    TEST_EXIT=$?
+
+    # Show the test summary (last few lines contain pass/fail counts)
+    grep -E "Test Files|Tests |Duration" "$PRE_PUSH_LOG" || true
+
+    if [ $TEST_EXIT -eq 0 ]; then
+        echo ""
+        echo "✅ All tests passed! Push will proceed."
+        echo "🚀 Code quality maintained for GitHub repository."
+    else
+        echo ""
+        echo "❌ Tests failed! Push blocked to prevent broken code on GitHub."
+        echo "💡 Fix failing tests or use 'git push --no-verify' for emergency pushes."
+        echo "🔧 You can still make local commits for WIP - tests only run on push."
+        echo ""
+        echo "Failed test details:"
+        grep -E "FAIL|Error|AssertionError" "$PRE_PUSH_LOG" | head -20 || true
+        echo ""
+        echo "Full log: $PRE_PUSH_LOG"
+        # Keep log on failure so user can inspect
+        trap - EXIT
+        exit 1
+    fi
 fi
 
 # Docstar full shadow + check (optional — runs only if docstar is installed)

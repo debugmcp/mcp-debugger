@@ -13,7 +13,7 @@ top); this page just documents the hooks themselves.
 **Purpose**: Runs before each commit to keep personal data and build artifacts out of the repository. It runs **no tests and no build**.
 
 **What it does**:
-- ✅ Personal information check over staged files (`scripts/check-personal-paths.cjs`)
+- ✅ Personal information check over staged files (`scripts/check-personal-paths.cjs`); a failure refuses the commit and shows the checker's own output
 - ✅ Blocks staged build artifacts — `.js`, `.d.ts`, `.js.map` under `src/` or `packages/*/src/`; the one exception is `src/proxy/proxy-bootstrap.js`, which is a legitimate JavaScript source file
 - ✅ Blocks staged `.tgz` package tarballs (local-testing artifacts)
 - ✅ Runs `docstar check` if — and only if — `docstar` is on your PATH; its result never blocks the commit
@@ -29,13 +29,15 @@ top); this page just documents the hooks themselves.
 
 **What it does**: Branch pushes run the fast static checks listed in the
 [Dev-Loop Gate](../../CONTRIBUTING.md#dev-loop-gate), stopping at the first failure. There is
-no build or test run on that path. CI builds and runs the suites; the PR's required checks
-decide whether it can merge.
+no build or test run on that path. CI builds and runs the pull request's suites; see that
+section for the merge checks.
 
 Tags-only pushes retain the release gate described there, including the clean build and
-reduced `npm run test:ci-no-python` suite. Only that path sources the cargo environment,
-probes Docker buildx (exporting `SKIP_DOCKER_TESTS=true` if unavailable), and runs advisory
-`docstar shadow .` and `docstar check` when installed.
+reduced `npm run test:ci-no-python` suite. Only that path sources the cargo environment
+and probes Docker buildx (exporting `SKIP_DOCKER_TESTS=true` if unavailable).
+
+After either push path succeeds, advisory `docstar shadow .` and `docstar check` run if
+Docstar is installed. Neither command blocks the push.
 
 **Developer Experience**:
 - **Fast feedback** - Catches static errors before a CI round
@@ -47,12 +49,12 @@ probes Docker buildx (exporting `SKIP_DOCKER_TESTS=true` if unavailable), and ru
 ### For Daily Development
 1. **Make incremental commits** - Tests don't run on commit, so you can save progress frequently
 2. **Personal info protection** - Automatic scanning prevents accidental exposure
-3. **Quality assurance** - Required PR checks run the suites before merge
+3. **Quality assurance** - CI runs the pull request's suites; see the [Dev-Loop Gate](../../CONTRIBUTING.md#dev-loop-gate) for merge checks
 
 ### For Refactoring Projects
 - **Perfect for WIP commits** during large refactoring efforts
 - **Safe experimentation** - Commit often without test pressure
-- **Merge checks** - Required CI checks decide whether changes can merge
+- **Merge checks** - The pull request's checks are described in the [Dev-Loop Gate](../../CONTRIBUTING.md#dev-loop-gate)
 
 ## Usage Examples
 
@@ -60,7 +62,7 @@ probes Docker buildx (exporting `SKIP_DOCKER_TESTS=true` if unavailable), and ru
 ```bash
 # Make changes
 git add .
-git commit -m "WIP: refactoring session manager"  # ✅ Fast commit, only personal info check
+git commit -m "WIP: refactoring session manager"  # ✅ Fast staged checks; optional advisory Docstar
 
 # Continue working...
 git add .
@@ -158,6 +160,6 @@ ls -la .husky/
 ## Migration Notes
 
 **Previous Setup**: Branch pushes ran a clean build and the unit + integration suites
-**New Setup**: Branch pushes run static checks; CI runs the suites that gate merges. Tags-only release checks are unchanged.
+**New Setup**: Branch pushes run static checks; CI runs the pull request's suites. Tags-only release checks are unchanged. See the [Dev-Loop Gate](../../CONTRIBUTING.md#dev-loop-gate) for merge checks.
 
 This change improves developer experience during refactoring and feature development while maintaining code quality standards for shared code.

@@ -143,10 +143,13 @@ test-only changes are exempt automatically, and contributor-process changes use 
 CI's **Build and Test** job (`build-and-test`) runs on Ubuntu and Windows. It runs
 `pnpm run build:ci`, lint, the PyPI launcher unit tests, then `pnpm run test:ci-coverage`
 (which itself builds and runs `vitest run --coverage --project unit --project integration`).
-Other required CI jobs cover container tests, host adapter lanes and MCP conformance; see
-[the workflow](.github/workflows/ci.yml) for their exact selections. The pull request's required
-checks gate the merge, and branch protection requires the branch to be up to date with `main`.
-A local hook result does not replace those checks.
+Branch protection requires the Linux **Build and Test** job and **Lint Code** to pass, and
+the branch to be up to date with `main`. The Linux job includes both the unit and integration
+suites. The project's merge bar additionally asks for every other CI job in the pull request's
+run to pass, including the Windows build, container tests, per-language host lanes and MCP
+conformance. See [GOVERNANCE.md — How changes land](GOVERNANCE.md#how-changes-land) for the full
+bar and its Dependabot exception, and [the workflow](.github/workflows/ci.yml) for job selections.
+A local hook result does not replace the pull request's checks.
 
 For an answer before CI, build first with `pnpm run build`, then run `pnpm run test:unit`
 and `pnpm run test:integration`, or target a file with
@@ -155,10 +158,14 @@ and `pnpm run test:integration`, or target a file with
 A **tags-only push** is a release step and retains its existing gate: cargo environment setup
 when available and the Docker buildx probe, lint, the committed-baseline guard, `typecheck:all`,
 `npm run clean && npm run build`, then `npm run test:ci-no-python` (which builds again and runs
-the unit project), followed by advisory `docstar shadow .` and `docstar check` if installed.
+the unit project).
 It does not run the three added branch-push audits.
 
-The **pre-commit** hook runs the staged personal-paths check, blocks accidentally staged build
+After either push path succeeds, the hook runs advisory `docstar shadow .` and `docstar check`
+if Docstar is installed. Neither command blocks the push.
+
+The **pre-commit** hook runs the staged personal-paths check and refuses the commit if it fails,
+showing the checker's own output. It also blocks accidentally staged build
 artifacts (`.js`/`.d.ts`/`.js.map` under `src/` or
 `packages/*/src/`) and `.tgz` tarballs, and runs an optional docstar check if docstar is installed.
 No tests, no build.
