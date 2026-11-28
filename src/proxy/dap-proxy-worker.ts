@@ -63,7 +63,8 @@ import {
   MockAdapterPolicy,
   getPolicyForLanguage,
   resolveExceptionFilters,
-  sanitizePayloadForLogging
+  sanitizePayloadForLogging,
+  deadline
 } from '@debugmcp/shared';
 
 export type DapProxyWorkerHooks = {
@@ -2459,39 +2460,48 @@ export class DapProxyWorker {
    * Ensure initial stop for JavaScript debugging
    */
   private async ensureInitialStop(timeoutMs: number = 12000): Promise<void> {
-    if (!this.dapClient) return;
-    const start = Date.now();
-
-    while (Date.now() - start < timeoutMs) {
-      try {
-        const threadsResp = await this.dapClient.sendRequest<DebugProtocol.ThreadsResponse>('threads', {});
-        const first = threadsResp?.body?.threads?.[0]?.id;
-        if (typeof first === 'number') {
-          if (first > 0) {
-            const pauseTid = first;
-            this.logger?.info(`[Worker] ensureInitialStop: pausing threadId=${pauseTid}`);
-            try {
-              await this.dapClient.sendRequest('pause', { threadId: pauseTid });
-            } catch {
-              // ignore pause errors
+    const dapClient = this.dapClient;
+    if (!dapClient) return;
+    // The budget is a Deadline: each request is given what
+    // remains of it and is abandoned PARENT_GRACE_MS after it if the adapter
+    // never answers, each poll interval ends at it, and nothing is sent once
+    // it has passed. The timer goes with the wait, early or late.
+    const budget = deadline(timeoutMs, { label: 'ensureInitialStop' });
+    try {
+      do {
+        try {
+          const threadsResp = await budget.request((remainingMs) =>
+            dapClient.sendRequest<DebugProtocol.ThreadsResponse>('threads', {}, remainingMs)
+          );
+          const first = threadsResp?.body?.threads?.[0]?.id;
+          if (typeof first === 'number') {
+            if (first > 0) {
+              const pauseTid = first;
+              this.logger?.info(`[Worker] ensureInitialStop: pausing threadId=${pauseTid}`);
+              try {
+                await budget.request((remainingMs) => dapClient.sendRequest('pause', { threadId: pauseTid }, remainingMs));
+              } catch {
+                // ignore pause errors
+              }
+              return;
             }
+            // js-debug reports its sole thread as id 0 — a real thread, but DAP
+            // pause with threadId 0 means "pause all" on some adapters, so it is
+            // not a safe explicit pause target. Threads WERE discovered; say so
+            // instead of polling to a false 'no threads' warning (issue #520).
+            this.logger?.info(
+              `[Worker] ensureInitialStop: threads reported (first id=${first}) — treating as discovered; skipping pause (id ${first} is not a safe pause target)`
+            );
             return;
           }
-          // js-debug reports its sole thread as id 0 — a real thread, but DAP
-          // pause with threadId 0 means "pause all" on some adapters, so it is
-          // not a safe explicit pause target. Threads WERE discovered; say so
-          // instead of polling to a false 'no threads' warning (issue #520).
-          this.logger?.info(
-            `[Worker] ensureInitialStop: threads reported (first id=${first}) — treating as discovered; skipping pause (id ${first} is not a safe pause target)`
-          );
-          return;
+        } catch {
+          // ignore threads errors
         }
-      } catch {
-        // ignore threads errors
-      }
-      await new Promise((r) => setTimeout(r, 100));
+      } while ((await budget.sleep(100)) === 'slept');
+    } finally {
+      budget.dispose();
     }
-    this.logger?.warn('[Worker] ensureInitialStop: no threads discovered within timeout');
+    this.logger?.warn(`[Worker] ensureInitialStop: no threads discovered within timeout (${budget.budgetMs} ms)`);
   }
 
   /**

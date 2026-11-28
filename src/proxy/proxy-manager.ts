@@ -41,9 +41,28 @@ import {
   describeDapEventBodyForLog,
   sanitizeStderr,
   getPolicyForLanguage,
-  LineBuffer
+  LineBuffer,
+  DeadlineExpired,
+  PARENT_GRACE_MS
 } from '@debugmcp/shared';
-import type { HandshakeProxy } from '@debugmcp/shared';
+import type { Deadline, HandshakeProxy } from '@debugmcp/shared';
+
+/**
+ * How one DAP request is bounded. `timeoutMs` alone is today's contract: the
+ * worker's own timeout, and a parent backstop 5 s after it. With `deadline`
+ * (`@debugmcp/shared`): the worker is given the time that remains (or `timeoutMs`,
+ * whichever is less); nothing is sent once the deadline has passed; the
+ * request keeps its pending entry until the deadline's backstop (the
+ * deadline plus PARENT_GRACE_MS), so a worker answer inside the grace wins,
+ * its timeout diagnostics included; at the backstop, or at once on a
+ * cancellation from outside, the entry is removed and a later answer is
+ * dropped. A child view's wait for its adoption is bounded by the same
+ * deadline before the request is sent.
+ */
+export interface DapRequestOptions {
+  timeoutMs?: number;
+  deadline?: Deadline;
+}
 
 /**
  * A child the debuggee started, as the worker reported it (the session tree,
@@ -141,7 +160,7 @@ export interface IProxyManager extends EventEmitter {
   sendDapRequest<T extends DebugProtocol.Response>(
     command: string,
     args?: unknown,
-    options?: { timeoutMs?: number }
+    options?: DapRequestOptions
   ): Promise<T>;
   isRunning(): boolean;
   /**
@@ -291,6 +310,12 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     sessionId: string | null;
     /** Parent-side backstop timer; must be cleared wherever the entry settles (issue #420). */
     timer?: NodeJS.Timeout;
+    /**
+     * Under a deadline: removes the listener on the request's `abandoned`
+     * signal (the deadline's backstop stands in for `timer`). Called wherever
+     * the entry settles, beside clearing `timer`.
+     */
+    detach?: () => void;
   }>();
   /** The child sessions this worker also serves, by session id (the session tree, issue #1081). */
   private readonly childViews = new Map<string, IChildProxyView>();
@@ -693,7 +718,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
   async sendDapRequest<T extends DebugProtocol.Response>(
     command: string,
     args?: unknown,
-    options?: { timeoutMs?: number }
+    options?: DapRequestOptions
   ): Promise<T> {
     return this.sendDapRequestAs<T>(this.sessionId, command, args, options);
   }
@@ -708,12 +733,52 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     sessionId: string | null,
     command: string,
     args?: unknown,
-    options?: { timeoutMs?: number }
+    options?: DapRequestOptions
   ): Promise<T> {
     if (!this.proxyProcess || !this.isInitialized) {
       throw new Error('Proxy not initialized');
     }
+    const deadline = options?.deadline;
+    if (!deadline) {
+      return this.dispatchDapRequest<T>(sessionId, command, args, options?.timeoutMs);
+    }
+    // Under a deadline: the deadline decides whether the command
+    // goes out at all, gives the worker the time that remains, and abandons
+    // the entry at its backstop or on a cancellation from outside.
+    const requestedTimeoutMs = options?.timeoutMs;
+    try {
+      return await deadline.request<T>((remainingMs, abandoned) =>
+        this.dispatchDapRequest<T>(
+          sessionId,
+          command,
+          args,
+          requestedTimeoutMs !== undefined ? Math.min(requestedTimeoutMs, remainingMs) : remainingMs,
+          abandoned
+        )
+      );
+    } catch (error) {
+      if (error instanceof DeadlineExpired && error.why === 'backstop') {
+        throw new Error(ErrorMessages.dapRequestNoAnswerWithin(command, deadline.budgetMs, PARENT_GRACE_MS), { cause: error });
+      }
+      throw error;
+    }
+  }
 
+  /**
+   * One DAP command to the worker. Without `abandoned` it is bounded as it
+   * always was: the worker's timeout, and a parent timer `dapParentMarginMs`
+   * after it. With `abandoned` (a deadline's request), the deadline's
+   * backstop stands in for the parent timer: the signal's abort removes the
+   * pending entry, or ends the launch barrier's wait, and rejects.
+   */
+  private async dispatchDapRequest<T extends DebugProtocol.Response>(
+    sessionId: string | null,
+    command: string,
+    args: unknown,
+    timeoutMs: number | undefined,
+    abandoned?: AbortSignal
+  ): Promise<T> {
+    const options = timeoutMs !== undefined ? { timeoutMs } : undefined;
     const forRoot = sessionId === this.sessionId;
     const barrier = forRoot ? this.adapter?.createLaunchBarrier?.(command, args) : undefined;
     const requestId = uuidv4();
@@ -741,10 +806,17 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
         throw error;
       }
 
+      // The barrier's readiness is this command's answer. Under a deadline its
+      // wait ends where a pending entry's would: at the backstop, or at once
+      // on a cancellation. Disposing the barrier settles the wait (its
+      // contract), and the deadline has answered the caller already.
+      const onAbandoned = (): void => this.clearActiveLaunchBarrier(barrier);
+      abandoned?.addEventListener('abort', onAbandoned, { once: true });
       try {
         await barrier.waitUntilReady();
         return {} as T;
       } finally {
+        abandoned?.removeEventListener('abort', onAbandoned);
         this.clearActiveLaunchBarrier(barrier);
       }
     }
@@ -756,34 +828,53 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     }
 
     return new Promise<T>((resolve, reject) => {
-      // Timeout handler. The worker/socket timeout (timeoutMs, default 30s)
-      // fires first and produces the actionable error; this parent timer is a
-      // backstop that only fires if the worker never responds at all. The
-      // handle is stored on the pending entry and cleared wherever the entry
-      // settles — a fired-but-uncleared backstop would otherwise reject with
-      // nobody listening long after the caller has moved on (issue #420).
-      const effectiveTimeoutMs =
-        (options?.timeoutMs ?? this.defaultDapRequestTimeoutMs) + this.dapParentMarginMs;
-      const timer = setTimeout(() => {
-        if (this.pendingDapRequests.has(requestId)) {
-          this.pendingDapRequests.delete(requestId);
-          if (this.dapState) {
-            this.dapState = removePendingRequest(this.dapState, requestId);
-          }
-          if (this.activeLaunchBarrier && this.activeLaunchBarrierRequestId === requestId) {
-            this.clearActiveLaunchBarrier();
-          }
-          reject(new Error(ErrorMessages.dapRequestTimeout(command, Math.round(effectiveTimeoutMs / 1000))));
+      const removeEntry = (): void => {
+        this.pendingDapRequests.delete(requestId);
+        if (this.dapState) {
+          this.dapState = removePendingRequest(this.dapState, requestId);
         }
-      }, effectiveTimeoutMs);
-      timer.unref?.();
+        if (this.activeLaunchBarrier && this.activeLaunchBarrierRequestId === requestId) {
+          this.clearActiveLaunchBarrier();
+        }
+      };
+      let timer: NodeJS.Timeout | undefined;
+      let detach: (() => void) | undefined;
+      if (abandoned) {
+        // A deadline's request: its backstop (or a cancellation) abandons the
+        // entry; the deadline has already answered the caller by then.
+        const onAbandoned = (): void => {
+          if (this.pendingDapRequests.has(requestId)) {
+            removeEntry();
+            reject(abandoned.reason instanceof Error ? abandoned.reason : new Error(String(abandoned.reason)));
+          }
+        };
+        abandoned.addEventListener('abort', onAbandoned, { once: true });
+        detach = () => abandoned.removeEventListener('abort', onAbandoned);
+      } else {
+        // Timeout handler. The worker/socket timeout (timeoutMs, default 30s)
+        // fires first and produces the actionable error; this parent timer is a
+        // backstop that only fires if the worker never responds at all. The
+        // handle is stored on the pending entry and cleared wherever the entry
+        // settles — a fired-but-uncleared backstop would otherwise reject with
+        // nobody listening long after the caller has moved on (issue #420).
+        const effectiveTimeoutMs =
+          (options?.timeoutMs ?? this.defaultDapRequestTimeoutMs) + this.dapParentMarginMs;
+        timer = setTimeout(() => {
+          if (this.pendingDapRequests.has(requestId)) {
+            removeEntry();
+            reject(new Error(ErrorMessages.dapRequestTimeout(command, Math.round(effectiveTimeoutMs / 1000))));
+          }
+        }, effectiveTimeoutMs);
+        timer.unref?.();
+      }
 
       this.pendingDapRequests.set(requestId, {
         resolve: resolve as (value: DebugProtocol.Response) => void,
         reject,
         command,
         sessionId,
-        timer
+        timer,
+        detach
       });
 
       // Mirror into functional core for observability (seq is placeholder; ProxyManager remains authoritative)
@@ -799,7 +890,8 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       try {
         this.sendCommand(commandToSend);
       } catch (error) {
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
+        detach?.();
         this.pendingDapRequests.delete(requestId);
         if (barrier) {
           this.clearActiveLaunchBarrier(barrier);
@@ -1535,6 +1627,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
 
     this.pendingDapRequests.delete(message.requestId);
     if (pending.timer) clearTimeout(pending.timer);
+    pending.detach?.();
     // Mirror completion into functional core
     if (this.dapState) {
       this.dapState = removePendingRequest(this.dapState, message.requestId);
@@ -1754,6 +1847,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
     // Clean up pending requests
     this.pendingDapRequests.forEach(pending => {
       if (pending.timer) clearTimeout(pending.timer);
+      pending.detach?.();
       pending.reject(new Error('Proxy exited'));
     });
     this.pendingDapRequests.clear();
@@ -1777,6 +1871,7 @@ export class ProxyManager extends EventEmitter implements IProxyManager {
       this.logger.debug(`[ProxyManager] Clearing ${this.pendingDapRequests.size} pending DAP requests during cleanup`);
       for (const pending of this.pendingDapRequests.values()) {
         if (pending.timer) clearTimeout(pending.timer);
+        pending.detach?.();
         pending.reject(new Error(`Request cancelled during proxy shutdown: ${pending.command}`));
       }
       this.pendingDapRequests.clear();

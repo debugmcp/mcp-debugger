@@ -9,7 +9,7 @@ import { describe, it, expect, vi } from 'vitest';
 import * as http from 'node:http';
 import { spawn } from 'node:child_process';
 import type { AddressInfo } from 'node:net';
-import { AdapterError, AdapterErrorCode } from '@debugmcp/shared';
+import { AdapterError, AdapterErrorCode, type MonotonicClock } from '@debugmcp/shared';
 import {
   activateInspector,
   inspectorSignalDisabledByPid,
@@ -34,10 +34,50 @@ const pidFromTitle = async (target: InspectorTarget): Promise<number | undefined
   return match ? Number(match[1]) : undefined;
 };
 
-/** A fake clock and a scripted sequence of probe answers (the last one repeats). */
+/**
+ * A clock on which no real time passes: whenever nothing but its timers is
+ * left to run (a macrotask after the microtasks drain), it jumps to the
+ * earliest timer and fires it. The wait's sleeps and deadline run on it, so
+ * a 500 ms wait costs no wall-clock time.
+ */
+function virtualClock(): MonotonicClock {
+  let now = 0;
+  let nextId = 1;
+  let pumping = false;
+  const timers = new Map<number, { at: number; callback: () => void }>();
+  const pump = (): void => {
+    pumping = false;
+    let earliest: [number, { at: number; callback: () => void }] | undefined;
+    for (const entry of timers) {
+      if (!earliest || entry[1].at < earliest[1].at) earliest = entry;
+    }
+    if (!earliest) return;
+    timers.delete(earliest[0]);
+    now = Math.max(now, earliest[1].at);
+    earliest[1].callback();
+    schedule();
+  };
+  const schedule = (): void => {
+    if (!pumping && timers.size > 0) {
+      pumping = true;
+      setImmediate(pump);
+    }
+  };
+  return {
+    now: () => now,
+    setTimeout: (callback, ms) => {
+      const id = nextId++;
+      timers.set(id, { at: now + ms, callback });
+      schedule();
+      return id;
+    },
+    clearTimeout: (handle) => { timers.delete(handle as number); }
+  };
+}
+
+/** A virtual clock and a scripted sequence of probe answers (the last one repeats). */
 function harness(overrides: Partial<InspectorActivationOptions> & { probes?: InspectorProbe[] } = {}) {
   const { probes = [closed, inspector('node[4242]')], ...rest } = overrides;
-  let clock = 0;
   const listTargets = vi.fn(async () => (probes.length > 1 ? probes.shift()! : probes[0]));
   const signal = vi.fn();
   const options: InspectorActivationOptions = {
@@ -51,8 +91,7 @@ function harness(overrides: Partial<InspectorActivationOptions> & { probes?: Ins
     signal,
     listTargets,
     pidOf: pidFromTitle,
-    sleep: async (ms) => { clock += ms; },
-    now: () => clock,
+    clock: virtualClock(),
     deadlineMs: 500,
     pollMs: 100,
     ...rest
