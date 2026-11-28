@@ -493,7 +493,7 @@ export interface AdapterPolicy {
    * Up-front check of a logMessage (and its optional condition) for a policy
    * that compiles logpoints itself (issue #853) or rejects forms its engine
    * evaluates as syntax errors only when the line is hit (Python f-string
-   * conversions and format specs, issue #1334): the returned text refuses
+   * conversions, format specs and the `=` form, issue #1334): the returned text refuses
    * set_breakpoint the way an expectedContent mismatch does, instead of the
    * adapter reporting the syntax error only in its output stream. Undefined
    * means the message is acceptable (or the policy does not pre-validate).

@@ -99,9 +99,9 @@ export const PythonAdapterPolicy = {
   // correctly, sends no `initialized`: the worker does not wait for one (#746).
   honoursNoDebug: true,
   supportsLogPoints: true,
-  // debugpy splices each `{...}` group into `'...' % (expr,)` and eval()s it at
-  // hit time, so f-string conversions (`{entry!r}`) and format specs
-  // (`{total:.2f}`) log `invalid syntax` only when hit (issue #1334).
+  // debugpy joins every `{...}` group into one `'...' % (g1, g2, ...,)` and
+  // eval()s it at each hit, so an f-string conversion (`{entry!r}`), format spec
+  // (`{total:.2f}`) or `=` (`{x=}`) logs `invalid syntax` only when hit (issue #1334).
   validateLogMessage: (logMessage: string, _condition?: string): string | undefined => validatePythonLogMessage(logMessage),
   supportsFunctionBreakpoints: true,
   supportsReverseStartDebugging: false,

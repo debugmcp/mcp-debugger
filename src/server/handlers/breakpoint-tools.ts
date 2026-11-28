@@ -167,7 +167,8 @@ async function setLineBreakpointBranch(ctx: ToolContext, args: WithSessionId): P
   try {
     // Logpoint gating (issue #235): hard error for known-unsupported
     // adapters; a warning when support is unknown pre-launch. A policy that
-    // compiles logpoints itself also refuses a malformed message here (#853).
+    // knows a message cannot evaluate also refuses it here: js-debug's
+    // compiled logpoints (#853), Python's f-string forms (#1334).
     const logPointGate = args.logMessage !== undefined
       ? ctx.validateLogPointSupport(args.sessionId, args.logMessage, args.condition)
       : {};
