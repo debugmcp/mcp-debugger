@@ -318,57 +318,65 @@ describe('set_breakpoint statement anchors (#271)', () => {
     await expect(callSetBreakpoint({})).rejects.toThrow(/[Mm]issing required/);
   });
 
-  it('rejects statement for attach sessions with the attach-specific reason (issue #497)', async () => {
+  it('refuses statement on an attach session (unknown locality) as a {success: false, error, state} tool answer naming file and line (issues #497, #1326)', async () => {
     mockSessionManager.getSession.mockReturnValue({
       id: 'test-session',
+      state: 'paused',
       sessionLifecycle: 'active',
       run: { attachMode: true }
     });
 
-    const err = await callSetBreakpoint({ statement: 'return total' }).then(
-      () => { throw new Error('expected rejection'); },
-      (e: Error) => e
-    );
-    // The rejection is correct; the reason must be too — the file is a
-    // readable local path, not "a class name or remote path" (issue #497).
-    expect(err.message).toMatch(/not supported for an attach session/);
-    expect(err.message).toMatch(/line addressing/i);
-    expect(err.message).not.toMatch(/class name or remote path/);
+    const result = await callSetBreakpoint({ statement: 'return total' });
+    const content = JSON.parse(result.content[0].text);
+
+    expect(content).toEqual({
+      success: false,
+      error:
+        "statement addressing is not supported for an attach session whose target host is not known " +
+        "(the debuggee's loaded source may differ from the file on the mcp-debugger host); " +
+        'use line addressing (file and line, without statement) instead.',
+      state: 'paused'
+    });
+    expect(content.error).not.toMatch(/class name or remote path/);
+    expect(mockSessionManager.setBreakpoint).not.toHaveBeenCalled();
   });
 
-  it('rejects expectedContent for attach sessions with the attach-specific reason (issue #497)', async () => {
+  it('falls back to plain line addressing with an exact warning when line + expectedContent is passed on an attach with unknown locality (issues #497, #1326)', async () => {
     mockSessionManager.getSession.mockReturnValue({
       id: 'test-session',
+      state: 'paused',
       sessionLifecycle: 'active',
       run: { attachMode: true }
     });
 
-    const err = await callSetBreakpoint({ line: 6, expectedContent: 'return total' }).then(
-      () => { throw new Error('expected rejection'); },
-      (e: Error) => e
+    const result = await callSetBreakpoint({ line: 6, expectedContent: 'does not even match' });
+    const content = JSON.parse(result.content[0].text);
+
+    expect(content.success).toBe(true);
+    expect(content.line).toBe(6);
+    expect(content.warning).toBe(
+      "expectedContent was not checked: not supported for an attach session whose target host is not known " +
+      "(the debuggee's loaded source may differ from the file on the mcp-debugger host) — " +
+      'the breakpoint is set at line 6 by plain line addressing.'
     );
-    expect(err.message).toMatch(/expectedContent/);
-    expect(err.message).toMatch(/not supported for an attach session/);
-    expect(err.message).not.toMatch(/class name or remote path/);
-    // The caller already passed line: the remedy must say what to drop,
-    // not "use line addressing instead" (issue #654)
-    expect(err.message).toMatch(/drop expectedContent and keep line/);
-    expect(err.message).not.toMatch(/use line addressing instead/i);
+    expect(content.note).toBe(
+      "content and context omitted: the target host of this attach is not known, so the host file may not be the debuggee's source"
+    );
+    expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
+      'test-session',
+      expect.objectContaining({ file: '/path/to/test.py', line: 6 })
+    );
   });
 
-  describe('attach locality (issues #903, #899)', () => {
+  describe('attach locality (issues #903, #899, #1326)', () => {
     function attachSession(attachLocality: 'pid' | 'loopback' | 'remote' | 'unknown'): void {
       mockSessionManager.getSession.mockReturnValue({
         id: 'test-session',
+        state: 'paused',
         sessionLifecycle: 'active',
         run: { attachMode: true, attachLocality }
       });
     }
-    const rejection = (args: Record<string, unknown>) =>
-      callSetBreakpoint(args).then(
-        () => { throw new Error('expected rejection'); },
-        (e: Error) => e
-      );
 
     it.each(['pid', 'loopback'] as const)('allows statement addressing on a %s attach whose file is on this host', async (locality) => {
       attachSession(locality);
@@ -382,33 +390,150 @@ describe('set_breakpoint statement anchors (#271)', () => {
       expect(content.anchor).toEqual({ statement: 'return total' });
     });
 
-    it('allows expectedContent on a local attach whose file is on this host', async () => {
+    it('allows expectedContent on a local attach whose file is on this host, and still rejects mismatches', async () => {
       attachSession('pid');
       vi.mocked(mockDependencies.fileSystem.pathExists).mockResolvedValue(true);
 
       const result = await callSetBreakpoint({ line: 6, expectedContent: 'return total' });
-
       expect(JSON.parse(result.content[0].text).success).toBe(true);
+
+      await expect(
+        callSetBreakpoint({ line: 6, expectedContent: 'wrong text' })
+      ).rejects.toThrow(/does not match expectedContent/);
     });
 
-    it('passes a local attach through, line-only, when the file is not on this host', async () => {
+    it('refuses statement as {success: false, error, state} on a local attach when the file is not on this host', async () => {
       attachSession('loopback');
       vi.mocked(mockDependencies.fileSystem.pathExists).mockResolvedValue(false);
 
-      const err = await rejection({ statement: 'return total' });
+      const result = await callSetBreakpoint({ statement: 'return total' });
+      const content = JSON.parse(result.content[0].text);
 
-      expect(err.message).toMatch(/not supported for this attach session/);
-      expect(err.message).toMatch(/is not usable on the mcp-debugger host/);
+      expect(content).toEqual({
+        success: false,
+        error:
+          'statement addressing is not supported for this attach session ("/path/to/test.py" is not usable on the mcp-debugger host, so its content cannot be checked); ' +
+          'use line addressing (file and line, without statement) instead.',
+        state: 'paused'
+      });
+      expect(mockSessionManager.setBreakpoint).not.toHaveBeenCalled();
     });
 
-    it('names the remote target when refusing content addressing on a remote attach', async () => {
+    it('falls back to plain line addressing with the local-attach warning when line + expectedContent is passed and the file is not on this host', async () => {
+      attachSession('loopback');
+      vi.mocked(mockDependencies.fileSystem.pathExists).mockResolvedValue(false);
+
+      const result = await callSetBreakpoint({ line: 6, expectedContent: 'return total' });
+      const content = JSON.parse(result.content[0].text);
+
+      expect(content.success).toBe(true);
+      expect(content.line).toBe(6);
+      expect(content.content).toBeUndefined();
+      expect(content.context).toBeUndefined();
+      expect(content.warning).toBe(
+        'expectedContent was not checked: not supported for this attach session ("/path/to/test.py" is not usable on the mcp-debugger host, so its content cannot be checked) — ' +
+        'the breakpoint is set at line 6 by plain line addressing.'
+      );
+    });
+
+    it('includes the file-checker detail when a local attach receives a relative path with expectedContent', async () => {
+      attachSession('loopback');
+
+      const result = await callSetBreakpoint({ file: 'relative/test.py', line: 6, expectedContent: 'return total' });
+      const content = JSON.parse(result.content[0].text);
+
+      expect(content.success).toBe(true);
+      expect(content.line).toBe(6);
+      expect(content.warning).toBe(
+        'expectedContent was not checked: not supported for this attach session ("relative/test.py" is not usable on the mcp-debugger host: Path must be absolute. Received: "relative/test.py", so its content cannot be checked) — ' +
+        'the breakpoint is set at line 6 by plain line addressing.'
+      );
+    });
+
+    it('sets the breakpoint at line with the remote-attach warning and adapter verdict when line + expectedContent is passed on a remote attach (#1326)', async () => {
+      attachSession('remote');
+      mockSessionManager.setBreakpoint.mockResolvedValueOnce({
+        breakpoint: {
+          id: 'bp-remote-1',
+          file: '/path/to/test.py',
+          line: 6,
+          requestedLine: 6,
+          verified: true
+        }
+      });
+
+      const result = await callSetBreakpoint({ line: 6, expectedContent: 'return total' });
+      const content = JSON.parse(result.content[0].text);
+
+      expect(content).toEqual({
+        success: true,
+        breakpointId: 'bp-remote-1',
+        file: '/path/to/test.py',
+        line: 6,
+        requestedLine: 6,
+        verified: true,
+        message: 'Breakpoint set at /path/to/test.py:6',
+        warning:
+          "expectedContent was not checked: not supported for a remote attach session " +
+          "(the debuggee's loaded source may differ from the file on the mcp-debugger host) — " +
+          'the breakpoint is set at line 6 by plain line addressing.',
+        note:
+          "content and context omitted: the target of this attach is not on the mcp-debugger host, so the host file is not the debuggee's source"
+      });
+      expect(mockDependencies.fileSystem.pathExists).not.toHaveBeenCalled();
+      expect(mockDependencies.fileSystem.readFile).not.toHaveBeenCalled();
+    });
+
+    it('reports both the requested and bound lines in the unchecked-expectedContent warning when the adapter snaps the line (#1326)', async () => {
+      attachSession('remote');
+      mockSessionManager.setBreakpoint.mockResolvedValueOnce({
+        breakpoint: {
+          id: 'bp-snap-1',
+          file: '/path/to/test.py',
+          line: 8,
+          requestedLine: 6,
+          verified: true
+        }
+      });
+
+      const result = await callSetBreakpoint({ line: 6, expectedContent: 'return total' });
+      const content = JSON.parse(result.content[0].text);
+
+      expect(content.success).toBe(true);
+      expect(content.line).toBe(8);
+      expect(content.requestedLine).toBe(6);
+      expect(content.warning).toContain(
+        "expectedContent was not checked: not supported for a remote attach session " +
+        "(the debuggee's loaded source may differ from the file on the mcp-debugger host) — " +
+        'the breakpoint was requested at line 6 by plain line addressing and bound to line 8.'
+      );
+    });
+
+    it('refuses statement on a remote attach as a {success: false, error, state} tool answer naming file and line (#1326)', async () => {
       attachSession('remote');
 
-      const err = await rejection({ line: 6, expectedContent: 'return total' });
+      const result = await callSetBreakpoint({ statement: 'return total' });
+      const content = JSON.parse(result.content[0].text);
 
-      expect(err.message).toMatch(/not supported for a remote attach session/);
-      expect(err.message).toMatch(/drop expectedContent and keep line/);
+      expect(content).toEqual({
+        success: false,
+        error:
+          "statement addressing is not supported for a remote attach session " +
+          "(the debuggee's loaded source may differ from the file on the mcp-debugger host); " +
+          'use line addressing (file and line, without statement) instead.',
+        state: 'paused'
+      });
+      expect(mockSessionManager.setBreakpoint).not.toHaveBeenCalled();
       expect(mockDependencies.fileSystem.pathExists).not.toHaveBeenCalled();
+    });
+
+    it('still rejects statement combined with line as InvalidParams on a remote attach (#1326)', async () => {
+      attachSession('remote');
+
+      await expect(
+        callSetBreakpoint({ line: 6, statement: 'return total' })
+      ).rejects.toThrow(/Provide line or statement, not both/);
+      expect(mockSessionManager.setBreakpoint).not.toHaveBeenCalled();
     });
 
     it('omits content and context on a remote attach, and says so', async () => {
@@ -436,22 +561,44 @@ describe('set_breakpoint statement anchors (#271)', () => {
       expect(content.content).toBe('    total = sum(prices)');
     });
 
-    describe("a child of a remote attach debugs that attach's target (issue #1214)", () => {
+    describe("a child of a remote attach debugs that attach's target (issues #1214, #1326)", () => {
       // The attach is the run's: adoption gives the child the record its root wrote.
       beforeEach(() => {
         const run = { attachMode: true, attachLocality: 'remote' };
         const sessions: Record<string, Record<string, unknown>> = {
-          'root-session': { id: 'root-session', sessionLifecycle: 'active', run },
-          'test-session': { id: 'test-session', sessionLifecycle: 'active', parentSessionId: 'root-session', run }
+          'root-session': { id: 'root-session', state: 'running', sessionLifecycle: 'active', run },
+          'test-session': { id: 'test-session', state: 'paused', sessionLifecycle: 'active', parentSessionId: 'root-session', run }
         };
         mockSessionManager.getSession.mockImplementation((sessionId: string) => sessions[sessionId]);
       });
 
-      it('names the remote target when refusing content addressing', async () => {
-        const err = await rejection({ line: 6, expectedContent: 'return total' });
+      it('sets the breakpoint at line and warns with the remote-attach reason when line + expectedContent is passed', async () => {
+        const result = await callSetBreakpoint({ line: 6, expectedContent: 'return total' });
+        const content = JSON.parse(result.content[0].text);
 
-        expect(err.message).toMatch(/not supported for a remote attach session/);
-        expect(err.message).toMatch(/drop expectedContent and keep line/);
+        expect(content.success).toBe(true);
+        expect(content.line).toBe(6);
+        expect(content.warning).toBe(
+          "expectedContent was not checked: not supported for a remote attach session " +
+          "(the debuggee's loaded source may differ from the file on the mcp-debugger host) — " +
+          'the breakpoint is set at line 6 by plain line addressing.'
+        );
+        expect(mockDependencies.fileSystem.pathExists).not.toHaveBeenCalled();
+      });
+
+      it('refuses statement as {success: false, error, state} naming the remote target and file + line', async () => {
+        const result = await callSetBreakpoint({ statement: 'return total' });
+        const content = JSON.parse(result.content[0].text);
+
+        expect(content).toEqual({
+          success: false,
+          error:
+            "statement addressing is not supported for a remote attach session " +
+            "(the debuggee's loaded source may differ from the file on the mcp-debugger host); " +
+            'use line addressing (file and line, without statement) instead.',
+          state: 'paused'
+        });
+        expect(mockSessionManager.setBreakpoint).not.toHaveBeenCalled();
         expect(mockDependencies.fileSystem.pathExists).not.toHaveBeenCalled();
       });
 
@@ -469,12 +616,18 @@ describe('set_breakpoint statement anchors (#271)', () => {
     });
   });
 
-  it('keeps the class-name wording for non-file source identifiers', async () => {
+  it('keeps the class-name wording for non-file source identifiers on statement refusal (#1326)', async () => {
+    mockSessionManager.getSession.mockReturnValue({
+      id: 'test-session',
+      state: 'created',
+      sessionLifecycle: 'active',
+      run: {}
+    });
     mockSessionManager.getSessionPolicy.mockReturnValue({
       isNonFileSourceIdentifier: () => true
     });
 
-    const err = await callToolHandler({
+    const result = await callToolHandler({
       method: 'tools/call',
       params: {
         name: 'set_breakpoint',
@@ -484,12 +637,17 @@ describe('set_breakpoint statement anchors (#271)', () => {
           statement: 'return total'
         }
       }
-    }).then(
-      () => { throw new Error('expected rejection'); },
-      (e: Error) => e
-    );
-    expect(err.message).toMatch(/class name or remote path/);
-    expect(err.message).toMatch(/line addressing/i);
+    });
+    const content = JSON.parse(result.content[0].text);
+
+    expect(content).toEqual({
+      success: false,
+      error:
+        'statement addressing requires a source file readable by the mcp-debugger server; ' +
+        '"com.example.MyClass" is a class name or remote path — use line addressing (file and line, without statement) instead.',
+      state: 'created'
+    });
+    expect(mockSessionManager.setBreakpoint).not.toHaveBeenCalled();
   });
 
   it('is rejected in assert mode, naming the env value', async () => {

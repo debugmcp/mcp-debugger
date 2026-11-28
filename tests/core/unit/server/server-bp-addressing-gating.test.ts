@@ -137,25 +137,55 @@ describe('DEBUG_MCP_BP_ADDRESSING gating (#271)', () => {
     expect(mockSessionManager.setBreakpoint).not.toHaveBeenCalled();
   });
 
-  // The sentences issue #1331 moved into the descriptions keep the same gates:
-  // the attach path forms name function breakpoints only in content mode, and
-  // the loud-snap sentence appears only where snapping is reported.
+  // The sentences issue #1331 and #1326 placed in the descriptions keep the
+  // same gates: the attach path forms name function breakpoints only in content
+  // mode, the loud-snap sentence appears only where snapping is reported, and
+  // set_breakpoint's content-addressing scope sentence names only the features
+  // the mode serves.
   it('gates the descriptions moved from the instructions by mode', async () => {
-    const descriptionOf = async (mode: string, tool: string): Promise<string> => {
+    const toolInMode = async (mode: string, tool: string) => {
       vi.stubEnv('DEBUG_MCP_BP_ADDRESSING', mode);
       const { listToolsHandler } = buildServer();
-      return (await findTool(listToolsHandler, tool)).description ?? '';
+      return findTool(listToolsHandler, tool);
     };
+    const descriptionOf = async (mode: string, tool: string): Promise<string> =>
+      (await toolInMode(mode, tool)).description ?? '';
 
     for (const mode of ['line', 'assert']) {
       expect(await descriptionOf(mode, 'attach_to_process'), mode).not.toContain('function breakpoint');
     }
     expect(await descriptionOf('content', 'attach_to_process')).toContain('function breakpoints, or a mapping');
 
-    expect(await descriptionOf('line', 'set_breakpoint')).not.toContain('requested line N, bound to line M');
-    for (const mode of ['assert', 'content']) {
-      expect(await descriptionOf(mode, 'set_breakpoint'), mode).toContain('requested line N, bound to line M');
+    const lineBpDesc = await descriptionOf('line', 'set_breakpoint');
+    expect(lineBpDesc).not.toContain('requested line N, bound to line M');
+    for (const token of ['expectedContent', 'statement', 'Content addressing', 'remote attach']) {
+      expect(lineBpDesc).not.toContain(token);
     }
+
+    const assertBp = await toolInMode('assert', 'set_breakpoint');
+    expect(assertBp.description).toContain('requested line N, bound to line M');
+    expect(assertBp.description).toContain(
+      'expectedContent applies on launches and on attaches whose source file is readable on this host; a remote attach takes file and line, with line numbers from the file as the target has it.'
+    );
+    expect(assertBp.description).not.toContain('statement');
+    const assertProps = assertBp.inputSchema.properties as Record<string, { description?: string }>;
+    expect(assertProps.expectedContent.description).toContain(
+      'Checked on launches and on attaches whose source file is readable on this host. A remote attach takes file and line, with line numbers from the file as the target has it'
+    );
+    expect(assertProps.expectedContent.description).not.toContain('statement');
+
+    const contentBp = await toolInMode('content', 'set_breakpoint');
+    expect(contentBp.description).toContain('requested line N, bound to line M');
+    expect(contentBp.description).toContain(
+      'Content addressing (statement, expectedContent) applies on launches and on attaches whose source file is readable on this host; a remote attach takes file and line, with line numbers from the file as the target has it.'
+    );
+    const contentProps = contentBp.inputSchema.properties as Record<string, { description?: string }>;
+    expect(contentProps.statement.description).toContain(
+      'Preferred over line on launches and on attaches whose source file is readable on this host'
+    );
+    expect(contentProps.statement.description).toContain(
+      'a remote attach (or a Java class name) takes file and line instead, with line numbers from the file as the target has it'
+    );
   });
 
   // The server instructions name each content-addressing feature only in a

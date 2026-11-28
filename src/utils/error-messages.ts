@@ -101,6 +101,27 @@ const loggingClause = (loggingSummary: string): string =>
 /** The attach addressing forms a factory declares — `AttachAddressing` in @debugmcp/shared, re-spelled here on purpose: this module imports nothing (issue #903). */
 type AttachForm = 'processId' | 'port' | 'adapterConfig';
 
+/** Attach locality values (`AttachLocality` in @debugmcp/shared), re-spelled here so this module imports nothing. */
+type AttachTargetLocality = 'pid' | 'loopback' | 'remote' | 'unknown' | undefined;
+
+type ContentUncheckableSource =
+  | { reason: 'attach'; locality: AttachTargetLocality; file: string; detail?: string }
+  | { reason: 'non-file-identifier'; file: string };
+
+function describeAttachContentUncheckableTarget(
+  locality: AttachTargetLocality,
+  file: string,
+  detail?: string
+): string {
+  if (locality === 'remote') {
+    return `a remote attach session (the debuggee's loaded source may differ from the file on the mcp-debugger host)`;
+  }
+  if (locality === 'pid' || locality === 'loopback') {
+    return `this attach session ("${file}" is not usable on the mcp-debugger host${detail ? `: ${detail}` : ''}, so its content cannot be checked)`;
+  }
+  return `an attach session whose target host is not known (the debuggee's loaded source may differ from the file on the mcp-debugger host)`;
+}
+
 const ATTACH_FORM_WORDS: Record<AttachForm, string> = {
   processId: 'processId (the PID of a process on this host)',
   port: 'port (with host for a remote endpoint)',
@@ -980,6 +1001,38 @@ export const ErrorMessages = {
     `\`${tool}\` cannot be used on session ${sessionId}: it is a child session; ` +
     `it was started by its parent (${parentSessionId}). ` +
     `Use the parent's id, or close_debug_session on the child.`,
+
+  /**
+   * Warning when `set_breakpoint` receives `line` + `expectedContent` on a
+   * session or file whose content cannot be checked by the server (issue #1326):
+   * the breakpoint is set at `line` by plain line addressing and the warning
+   * discloses that `expectedContent` was not checked, why, and where it bound.
+   */
+  expectedContentNotCheckedWarning: (
+    source: ContentUncheckableSource & { requestedLine: number; boundLine: number }
+  ) => {
+    const why =
+      source.reason === 'attach'
+        ? `not supported for ${describeAttachContentUncheckableTarget(source.locality, source.file, source.detail)}`
+        : `expectedContent requires a source file readable by the mcp-debugger server ("${source.file}" is a class name or remote path)`;
+    const where =
+      source.boundLine === source.requestedLine
+        ? `the breakpoint is set at line ${source.requestedLine} by plain line addressing.`
+        : `the breakpoint was requested at line ${source.requestedLine} by plain line addressing and bound to line ${source.boundLine}.`;
+    return `expectedContent was not checked: ${why} — ${where}`;
+  },
+
+  /**
+   * State-dependent refusal when `set_breakpoint` receives `statement` (with no
+   * fallback `line`) where the server cannot read the authoritative source
+   * (issues #497, #903, #1326). Returned as `{success: false, error, state}`.
+   */
+  statementAddressingNotSupported: (source: ContentUncheckableSource) =>
+    source.reason === 'attach'
+      ? `statement addressing is not supported for ${describeAttachContentUncheckableTarget(source.locality, source.file, source.detail)}; ` +
+        `use line addressing (file and line, without statement) instead.`
+      : `statement addressing requires a source file readable by the mcp-debugger server; ` +
+        `"${source.file}" is a class name or remote path — use line addressing (file and line, without statement) instead.`,
 
   /**
    * A function breakpoint on a child session of an adapter that arms them
