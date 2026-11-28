@@ -10,6 +10,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { Server } from '@modelcontextprotocol/server';
+import { PythonAdapterPolicy } from '@debugmcp/shared';
 import { DebugMcpServer } from '../../../../src/server.js';
 import { SessionManager } from '../../../../src/session/session-manager.js';
 import { createProductionDependencies, type Dependencies } from '../../../../src/container/dependencies.js';
@@ -152,6 +153,33 @@ describe('set_breakpoint logMessage gating', () => {
 
     const result = await callSetBreakpoint();
     expect(JSON.parse(result.content[0].text).success).toBe(true);
+  });
+
+  it('refuses Python f-string conversions and format specs with the working expression, pre- and post-launch (issue #1334)', async () => {
+    mockSessionManager.getSessionPolicy.mockReturnValue(PythonAdapterPolicy);
+
+    await expect(callSetBreakpoint({ logMessage: 'stale={entry!r}' })).rejects.toThrow(
+      /Invalid logpoint: \{entry!r\}:[\s\S]*\{repr\(entry\)\}/
+    );
+    await expect(callSetBreakpoint({ logMessage: '{total:.2f}' })).rejects.toThrow(
+      /Invalid logpoint: \{total:\.2f\}:[\s\S]*\{format\(total, '\.2f'\)\}/
+    );
+    expect(mockSessionManager.setBreakpoint).not.toHaveBeenCalled();
+
+    // Post-launch (live supportsLogPoints: true) runs the same Python policy check.
+    mockSessionManager.getSession.mockReturnValue({
+      run: {},
+      id: 'test-session',
+      sessionLifecycle: 'active',
+      adapterCapabilities: { supportsLogPoints: true }
+    });
+    await expect(callSetBreakpoint({ logMessage: '{x!r}' })).rejects.toThrow(/\{repr\(x\)\}/);
+    expect(mockSessionManager.setBreakpoint).not.toHaveBeenCalled();
+
+    // The replacement named in the refusal and a logpoint condition pass through.
+    const ok = await callSetBreakpoint({ logMessage: 'stale={repr(entry)}', condition: 'entry is not None' });
+    expect(JSON.parse(ok.content[0].text).success).toBe(true);
+    expect(mockSessionManager.setBreakpoint).toHaveBeenCalledTimes(1);
   });
 
   it('validates against live capabilities too: a known-supported adapter still runs the policy check', async () => {

@@ -326,6 +326,11 @@ export {
   type LogMessagePart,
   type CompiledJsLogpoint
 } from './utils/js-logpoint.js';
+export {
+  extractPythonLogMessageGroups,
+  validatePythonLogMessage,
+  type PythonLogMessageGroup
+} from './utils/python-logpoint.js';
 // Argv marker constants shared by spawn-time tagging and the startup orphan
 // reapers (issues #343, #431).
 export {

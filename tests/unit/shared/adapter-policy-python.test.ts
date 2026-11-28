@@ -89,6 +89,12 @@ describe('PythonAdapterPolicy', () => {
     expect(PythonAdapterPolicy.getAttachBehavior?.()).toEqual({ pauseAfterAttach: true });
   });
 
+  it('validates Python logMessage f-string forms up front and leaves condition untouched (issue #1334)', () => {
+    expect(PythonAdapterPolicy.validateLogMessage!('x={x}', 'x >=')).toBeUndefined();
+    expect(PythonAdapterPolicy.validateLogMessage!('stale={entry!r}')).toContain('{repr(entry)}');
+    expect(PythonAdapterPolicy.validateLogMessage!('{total:.2f}')).toContain("{format(total, '.2f')}");
+  });
+
   describe('getAdapterSpawnConfig', () => {
     // scriptPath is required by AdapterSpawnPayload but never read by this
     // policy — the debuggee script reaches debugpy through the launch config.
