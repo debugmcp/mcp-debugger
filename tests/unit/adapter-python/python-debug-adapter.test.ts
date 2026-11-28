@@ -702,6 +702,82 @@ describe('PythonDebugAdapter', () => {
     });
   });
 
+  // pydevd translates the client's paths by the client's operating system and,
+  // without `clientOS`, assumes its own: from a Windows host, a Linux target
+  // never matched a `C:\…` path against `localRoot` (issue #1304).
+  describe('clientOS on an attach (issue #1304)', () => {
+    const onPlatform = <T>(platform: NodeJS.Platform, fn: () => T): T => {
+      const original = process.platform;
+      Object.defineProperty(process, 'platform', { value: platform });
+      try {
+        return fn();
+      } finally {
+        Object.defineProperty(process, 'platform', { value: original });
+      }
+    };
+    const attach = (extra: Record<string, unknown> = {}) =>
+      new PythonDebugAdapter(createDependencies()).transformAttachConfig({ request: 'attach', port: 5678, ...extra });
+
+    // The strings `pydevd_file_utils.set_ide_os` asserts, not a spelling that
+    // relies on debugpy upper-casing the key first.
+    it.each([
+      ['win32', 'WINDOWS'],
+      ['linux', 'UNIX'],
+      ['darwin', 'UNIX']
+    ] as const)('sends the operating system of this machine when the caller set none (%s -> %s)', (platform, expected) => {
+      expect(onPlatform(platform, () => attach()).clientOS).toBe(expected);
+    });
+
+    it('sends it beside pathMappings, which it is about', () => {
+      const pathMappings = [{ localRoot: 'C:\\path\\to\\app', remoteRoot: '/srv/app' }];
+      const config = onPlatform('win32', () => attach({ pathMappings }));
+      expect(config).toMatchObject({ clientOS: 'WINDOWS', pathMappings });
+    });
+
+    it.each([
+      ['win32', 'unix'],
+      ['win32', 'UNIX'],
+      ['linux', 'windows'],
+      // Not ours to judge: pydevd refuses it, and says so in the target.
+      ['linux', 'linux']
+    ] as const)("forwards the caller's own value as given (%s host, caller %s)", (platform, value) => {
+      expect(onPlatform(platform, () => attach({ clientOS: value })).clientOS).toBe(value);
+    });
+
+    it('treats a null clientOS as unset: pydevd would read it as "NONE" and reject it', () => {
+      expect(onPlatform('win32', () => attach({ clientOS: null })).clientOS).toBe('WINDOWS');
+    });
+
+    // pydevd applies `clientOS` after these, so a default beside them would overrule the caller.
+    it.each([
+      [{ debugOptions: ['RedirectOutput', 'UnixClient'] }],
+      [{ debugOptions: ['WindowsClient'] }],
+      [{ options: 'CLIENT_OS_TYPE=UNIX;REDIRECT_OUTPUT=True' }]
+    ])("sends no default when the caller named the system through debugpy's older flags (%o)", (flags) => {
+      const config = onPlatform('win32', () => attach(flags));
+      expect('clientOS' in config).toBe(false);
+      expect(config).toMatchObject(flags);
+    });
+
+    it('adds no note to the attach answer', () => {
+      const adapter = new PythonDebugAdapter(createDependencies());
+      onPlatform('win32', () => adapter.transformAttachConfig({ request: 'attach', port: 5678 }));
+      expect(adapter.consumeLaunchConfigDiagnostics?.() ?? []).toEqual([]);
+    });
+
+    it('leaves a launch alone: its debuggee runs on this machine', async () => {
+      const original = process.platform;
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      try {
+        const adapter = new PythonDebugAdapter(createDependencies());
+        const config = await adapter.transformLaunchConfig({ program: 'C:\\path\\to\\app\\main.py' } as GenericLaunchConfig);
+        expect('clientOS' in config).toBe(false);
+      } finally {
+        Object.defineProperty(process, 'platform', { value: original });
+      }
+    });
+  });
+
   describe('validateEnvironment through the real helpers (coverage sprint)', () => {
     // Scripted spawn: the debugpy probe runs `-c "import debugpy; ..."`,
     // the venv probe runs `-c "... real_prefix ..."`.
