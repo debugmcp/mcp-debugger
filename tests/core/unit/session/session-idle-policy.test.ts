@@ -386,6 +386,20 @@ describe('SessionManager idle policy (issue #1025, step 2)', () => {
       await sessionManager.sweepIdle(WINDOW, { now: now() + WINDOW + 1 });
 
       expect(sessionManager.idleExpiryOf(rootId, undefined)?.outcome).toBe('unconfirmed');
+      expect(sessionManager.idleExpiryOf(rootId, undefined)?.stopFailed).toBeUndefined();
+    });
+
+    it('records why stopping the worker failed, so the answer does not say the connection was closed (issue #1325)', async () => {
+      const rootId = await startRoot();
+      markAttached(rootId);
+      dependencies.mockProxyManager.detachResult = {
+        trigger: 'close', acknowledged: false, error: 'DAP disconnect request timed out after 1000ms'
+      };
+      vi.spyOn(dependencies.mockProxyManager, 'stop').mockRejectedValueOnce(new Error('kill EPERM'));
+
+      await sessionManager.sweepIdle(WINDOW, { now: now() + WINDOW + 1 });
+
+      expect(sessionManager.idleExpiryOf(rootId, undefined)).toMatchObject({ outcome: 'unconfirmed', stopFailed: 'kill EPERM' });
     });
 
     // "Its program was ended" is only true when there was one. A session the

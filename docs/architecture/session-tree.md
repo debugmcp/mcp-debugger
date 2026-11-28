@@ -249,18 +249,34 @@ Two measured effects the answers name:
 - Explicitly closing a **child** uses the adapter's measured child-close semantics for its selected
   subtree: debugpy terminates it (exit 0 reported to its parent, Python spike, row 4); js-debug
   cannot end a child it adopted and releases it to run undebugged (JavaScript spike, row 3). The
-  named child's answer says which (`processEnded: true` / `released: true`). Closing a non-root
-  subtree never shuts down the shared worker or adapter.
+  named child's answer says which (`processEnded: true` / `released: true`), and neither when
+  stopping the child failed: the answer then carries that failure as its `warning` (issue #1325).
+  Closing a non-root subtree never shuts down the shared worker or adapter.
 - Closing or idle-reaping an **attach root** preserves the external targets: every descendant is
   detached deepest-first with `disconnect(terminateDebuggee: false)` and the adapter's existing
   resume-before-detach policy, then the root is detached. All selected rows are removed and the
   answer says `released: true` when the adapter acknowledged the root's detach (issue #1148:
   the worker reports what the adapter did with the detaching disconnect; unacknowledged, the
   answer carries a `warning` and no `released`). This cascade uses the initiating root operation's preserve-target
-  policy, not the termination rule for an explicit child close above. It preserves today's worker
-  auto-detach on attach-mode close (`handleTerminate` and `performShutdown` in
-  `src/proxy/dap-proxy-worker.ts`). Worker/adapter cleanup must not escalate to killing the
-  external targets.
+  policy, not the termination rule for an explicit child close above. `close_debug_session`
+  detaches the root with the release `detach_from_process` sends (`src/session/attach/target-release.ts`,
+  same request, same 10 s bound, issue #1325) before the worker is stopped, from the moment the
+  attach has put the root in `RUNNING` or `PAUSED` (which can be before `attach_to_process`
+  returns); the worker's own auto-detach on attach-mode close (`handleTerminate` and
+  `performShutdown` in `src/proxy/dap-proxy-worker.ts`, 1 s cap) remains for the closes that do
+  not go through it: a close while the root is still `INITIALIZING`, the server's exit, and the
+  idle policy. The descendants' closes come first, one at a time, each under its child close's
+  1 s cap, so a tree's close is bounded by about N × 1 s + 10 s before the worker is stopped,
+  not by 10 s (about 42 s at the default cap of 32 children; the server-side timers allow about
+  10N + 21 s, 10N + 41 s for js-debug), and a child's release is not confirmed before the root's
+  starts. A `close_debug_session` and a `detach_from_process` of one root never both send a
+  confirmed release: `InFlightGuard` holds the session's ending in flight and a later close or
+  plain detach joins it, a close that joins a detach whose release was confirmed and whose cleanup
+  then failed included; after a detach whose release was not confirmed the close sends its own
+  (issue #1325; the pairings are in `docs/tool-reference.md`). The server's exit closes outside
+  that join: its worker stop sends no second `disconnect` once one has gone out, but can close the
+  connection before the answer. Worker/adapter cleanup must not escalate to killing
+  the external targets.
 - A session that ended stays listed until it is closed, as today, so an agent can still read a
   child's `programEnd` and its output. Closing the parent removes its ended children with it.
 - `detach_from_process` on an attach root with children cascades as a detach: every child is
