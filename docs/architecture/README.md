@@ -18,6 +18,7 @@ The core components handle session management, process lifecycle, and DAP commun
 - **[ProxyManager](../../src/proxy/proxy-manager.ts)** - Manages DAP proxy processes
 - **[AdapterLease](../../src/adapters/adapter-lease.ts)** - Explicit ownership of one adapter instance for the duration of a launch or attach setup, so a throw anywhere in that window gives the registry slot back (issue #557)
 - **[SessionStore](../../src/session/session-store.ts)** - In-memory session storage
+- **[Session state machine](./session-state-machine.md)** - The transition table every write of a session's state is judged against, in shadow mode (`src/session/machine/`)
 - **[session-log-layout](../../src/proxy/session-log-layout.ts)** - The naming contract for a session's on-disk logs (`proxyLogPathFor`, `sessionRunDirectoryFor`, `adapterLogPathFor`, `dapTracePathFor`)
 
 ### 2. Debug Adapter Interface

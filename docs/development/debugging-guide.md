@@ -288,8 +288,9 @@ this.logger.debug('[DEBUG] Sending DAP request:', {
 // Condensed from src/session/session-manager-core.ts
 protected _updateSessionState(session: ManagedSession, newState: SessionState, write: StateWrite | TestSetupWrite): void {
   const from = session.state;
-  this.writeSessionState(session, newState);            // the write itself, below
-  this.stateShadow.check(session, from, newState, write); // observes only
+  const boundary = this.stateShadow.begin(session, write);          // the facts its guards read
+  this.writeSessionState(session, newState);                        // the write itself, below
+  this.stateShadow.check(session, from, newState, write, boundary); // observes only
 }
 
 private writeSessionState(session: ManagedSession, newState: SessionState): void {
@@ -312,7 +313,7 @@ session between. The shadow check (`src/session/machine/shadow.ts`) records a ve
 nothing: a transition the table does not list, or one whose guard is not met, is one `[state-shadow]` warn line in
 the log. `MCP_STATE_SHADOW=off` turns it off; `MCP_STATE_SHADOW_LOG=<directory>` writes every verdict there as
 ndjson. The unit test project runs it with `MCP_STATE_SHADOW=strict`, where a transition the table does not list
-fails the test.
+fails the test. See [the session state machine](../architecture/session-state-machine.md).
 
 ## Advanced Debugging Techniques
 

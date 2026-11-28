@@ -28,6 +28,7 @@ import {
 import { isTerminalSessionState } from '@debugmcp/shared';
 import { ProtocolError } from '@modelcontextprotocol/server';
 import { ErrorMessages } from '../../utils/error-messages.js';
+import { DapResponseError } from '../../proxy/dap-response-error.js';
 import { checkLaunchToolchain } from '../../utils/language-availability.js';
 import { setCuratedMessage } from '../breakpoints/hit-verification.js';
 import type { CustomLaunchRequestArguments, DebugResult, LaunchResultData, PausedChildSummary } from '../session-manager-core.js';
@@ -479,8 +480,11 @@ export class DebugLauncher {
       );
     }
     // A live run or a child is replaced here; no state is written for it.
-    this.ctx.stateShadow.noteReplacement(session, 'launch.replace');
+    // Its children are counted before the teardown closes them, and the
+    // replacement is noted once the teardown has detached the run's listeners.
+    const replacing = this.ctx.stateShadow.replacementFacts(session);
     const childrenClosed = await this.ctx.stopProxyPreservingSession(session);
+    this.ctx.stateShadow.noteReplacement(session, 'launch.replace', replacing);
 
     // Update to INITIALIZING state and set lifecycle to ACTIVE
     this.ctx.updateState(session, SessionState.INITIALIZING, { site: 'launch', event: 'start' });
@@ -1154,9 +1158,10 @@ export class DebugLauncher {
       await proxyManager.sendDapRequest('restart', {});
     } catch (error) {
       if (wasPaused && !isTerminalSessionState(session.state)) {
+        // Refused by the adapter, or no answer at all (see continue's catch).
         this.ctx.updateState(session, SessionState.PAUSED, {
-          site: 'hotRestart.refused',
-          event: 'resume-refused',
+          site: 'hotRestart.rejected',
+          event: error instanceof DapResponseError ? 'resume-refused' : 'resume-unanswered',
           facts: { since: resumeToken }
         });
       }

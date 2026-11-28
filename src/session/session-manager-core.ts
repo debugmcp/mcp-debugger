@@ -902,14 +902,17 @@ export abstract class SessionManagerCore extends EventEmitter {
   /**
    * The one gate for a session's public state. `write` names the site and the
    * event of the transition (src/session/machine/transition-table.ts). The
-   * gate writes as it always has; the shadow check runs after all of it,
-   * observes, and refuses nothing (src/session/machine/shadow.ts). A write the
-   * gate itself refuses (its PAUSED-needs-a-stop invariant) never reaches it.
+   * gate writes as it always has. The shadow takes the facts its guards read
+   * just before the write (the listeners the write runs may change the
+   * session), and judges after all of it; it observes and refuses nothing
+   * (src/session/machine/shadow.ts). A write the gate itself refuses (its
+   * PAUSED-needs-a-stop invariant) is never judged.
    */
   protected _updateSessionState(session: ManagedSession, newState: SessionState, write: StateWrite | TestSetupWrite): void {
     const from = session.state;
+    const boundary = this.stateShadow.begin(session, write);
     this.writeSessionState(session, newState);
-    this.stateShadow.check(session, from, newState, write);
+    this.stateShadow.check(session, from, newState, write, boundary);
   }
 
   private writeSessionState(session: ManagedSession, newState: SessionState): void {

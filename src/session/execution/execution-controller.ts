@@ -303,6 +303,9 @@ export class ExecutionController {
 
     this.ctx.logger.info(`[SM ${logTag} ${sessionId}] Sending DAP '${command}' for threadId ${threadId}`);
 
+    // Set once the step (and any same-line repeats) has landed: a failure
+    // after that is in reading the answer, not in the resume.
+    let landed = false;
     try {
       // The last landing read, whatever attempt made it (issue #983): the
       // snapshot is composed once per ANSWER, after any same-line repeats.
@@ -324,6 +327,7 @@ export class ExecutionController {
       const result = repeatsOnSameLine && origin?.rawTop
         ? await this.repeatWhileOnOriginLine(session, sessionId, stepOptions, origin, first)
         : first;
+      landed = true;
       if (
         result.success &&
         result.data !== undefined &&
@@ -342,7 +346,11 @@ export class ExecutionController {
       const errorMessage = getErrorMessage(error);
       this.ctx.logger.error(`[SM ${logTag} ${sessionId}] Error during step:`, error);
       if (!(error instanceof DapResponseError) && !isTerminalSessionState(session.state)) {
-        this.ctx.updateState(session, SessionState.ERROR, { site: 'step.failed', event: 'resume-failed' });
+        this.ctx.updateState(
+          session,
+          SessionState.ERROR,
+          landed ? { site: 'step.failed', event: 'answer-failed' } : { site: 'step.failed', event: 'resume-failed' }
+        );
       }
       return { success: false, error: errorMessage, state: session.state };
     }
@@ -755,12 +763,17 @@ export class ExecutionController {
       // other state reachable here is PAUSED itself — a breakpoint that fired
       // during the await — where the revert is a no-op.
       if (!isTerminalSessionState(session.state)) {
+        // What the catch knows: the adapter refused the request (it answered
+        // with a failure), or the request got no answer (a timeout, a
+        // cancellation at shutdown), when the program may have resumed.
         this.ctx.updateState(
           session,
           SessionState.PAUSED,
           unseen
-            ? { site: 'continue.refused', event: 'resume-unseen-failed' }
-            : { site: 'continue.refused', event: 'resume-refused', facts: { since: resumeToken } }
+            ? { site: 'continue.rejected', event: 'resume-unseen-failed', facts: { since: resumeToken } }
+            : error instanceof DapResponseError
+              ? { site: 'continue.rejected', event: 'resume-refused', facts: { since: resumeToken } }
+              : { site: 'continue.rejected', event: 'resume-unanswered', facts: { since: resumeToken } }
         );
       }
       const errorMessage = getErrorMessage(error);

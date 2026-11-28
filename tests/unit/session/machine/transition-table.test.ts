@@ -1,16 +1,19 @@
 /**
  * The session transition table as data (src/session/machine/transition-table.ts):
- * every row, every (phase, event) pair that has no row, every guard both ways
- * and unevaluated, and the verdict rules.
+ * every row in force, every (phase, event) pair that has no row in force, the
+ * future rows (not in force), every guard both ways and unevaluated, and the
+ * verdict rules.
  */
 import { describe, it, expect } from 'vitest';
 import { SessionState } from '@debugmcp/shared';
 import {
   EVENT_OF_SITE,
   GUARDS,
+  IN_FORCE,
   PHASES,
   PHASE_OF_STATE,
   SESSION_EVENTS,
+  STAGES,
   TRANSITIONS,
   evaluateTransition,
   evaluateVirtual,
@@ -25,68 +28,98 @@ import {
 
 const STOP_A = { reason: 'breakpoint' };
 const STOP_B = { reason: 'exception' };
+const TOKEN_A = { runId: 1, continued: 3, fromStop: STOP_A };
 
 /** A context in which each guard holds, and one in which it fails. */
 const GUARD_CONTEXTS: Record<GuardName, { holds: GuardContext; fails: GuardContext }> = {
   'no-retained-child': { holds: { descendants: 0 }, fails: { descendants: 2 } },
   'retained-child': { holds: { descendants: 1 }, fails: { descendants: 0 } },
-  'entry-stop-off-and-no-stop': { holds: { stopOnEntry: false }, fails: { stopOnEntry: true } },
-  'no-stop-recorded': { holds: {}, fails: { stop: STOP_A } },
+  'entry-stop-off-and-not-at-stop': { holds: { stopOnEntry: false, atStop: false }, fails: { stopOnEntry: true, atStop: false } },
+  'not-at-stop': { holds: { atStop: false }, fails: { atStop: true } },
   'refused-before-resume': {
-    holds: { stop: STOP_A, runNow: 1, continuedNow: 3, since: { runId: 1, continued: 3, fromStop: STOP_A } },
-    fails: { stop: STOP_A, runNow: 1, continuedNow: 4, since: { runId: 1, continued: 3, fromStop: STOP_A } }
+    holds: { stop: STOP_A, runNow: 1, continuedNow: 3, since: TOKEN_A },
+    fails: { stop: STOP_A, runNow: 1, continuedNow: 4, since: TOKEN_A }
+  },
+  'no-continued-since': {
+    holds: { runNow: 1, continuedNow: 3, since: TOKEN_A },
+    fails: { runNow: 1, continuedNow: 4, since: TOKEN_A }
   },
   'newer-stop-shown': {
-    holds: { stop: STOP_B, runNow: 1, since: { runId: 1, continued: 0, fromStop: STOP_A } },
-    fails: { stop: STOP_A, runNow: 1, since: { runId: 1, continued: 0, fromStop: STOP_A } }
+    holds: { stop: STOP_B, lastShownStop: STOP_B, runNow: 1, since: TOKEN_A },
+    fails: { stop: STOP_A, lastShownStop: STOP_A, runNow: 1, since: TOKEN_A }
   },
   'shown-stop-kept': { holds: { stop: STOP_A, lastShownStop: STOP_A }, fails: { stop: STOP_B, lastShownStop: STOP_A } },
   'clean-exit': { holds: { exit: { code: 0, expected: false } }, fails: { exit: { code: 1, expected: false } } }
 };
 
 /** The facts a guard reads; with them removed it cannot be evaluated. */
-const MISSING_FACTS: Record<GuardName, GuardContext | undefined> = {
+const MISSING_FACTS: Record<GuardName, GuardContext> = {
   'no-retained-child': {},
   'retained-child': {},
-  'entry-stop-off-and-no-stop': {},
-  // reads only the session's own stop, which is always known
-  'no-stop-recorded': undefined,
+  'entry-stop-off-and-not-at-stop': { atStop: false },
+  'not-at-stop': {},
   'refused-before-resume': { stop: STOP_A, runNow: 1, continuedNow: 0 },
-  'newer-stop-shown': { stop: STOP_B, runNow: 1 },
+  'no-continued-since': { runNow: 1, continuedNow: 0 },
+  'newer-stop-shown': { stop: STOP_B, lastShownStop: STOP_B, runNow: 1 },
   'shown-stop-kept': { stop: STOP_A },
   'clean-exit': {}
 };
 
-/** Every (event, phase) pair the table has no row for. A change to the table's coverage shows here. */
+/** Every (event, phase) pair no row in force covers. A change to the table's coverage shows here. */
 const HOLES: Partial<Record<SessionEvent, Phase[]>> = {
   'start': ['starting', 'running', 'paused'],
   'replace': ['created'],
   'start-refused': ['created', 'running', 'paused', 'ended', 'failed'],
   'start-failed': ['created'],
-  'adapter-configured': ['created', 'ended', 'failed'],
+  'adapter-configured': ['created', 'paused', 'ended', 'failed'],
   'attach-verified': ['created', 'paused', 'ended', 'failed'],
   'stop-shown': ['created', 'ended', 'failed'],
-  'stop-hidden': ['created', 'ended', 'failed'],
-  'resume-unseen': ['created', 'ended', 'failed'],
-  'resume-unseen-failed': ['created', 'ended', 'failed'],
+  'stop-hidden': ['created', 'paused', 'ended', 'failed'],
+  'resume-unseen': ['created', 'starting', 'running', 'ended', 'failed'],
+  'resume-unseen-failed': ['created', 'starting', 'ended', 'failed'],
   'resume': ['created', 'starting', 'running', 'ended', 'failed'],
   'hot-restart': ['created', 'starting', 'ended', 'failed'],
   'resume-refused': ['created', 'starting', 'ended', 'failed'],
-  'resume-failed': ['created', 'starting', 'ended', 'failed'],
+  'resume-unanswered': ['created', 'starting', 'ended', 'failed'],
+  'resume-failed': ['created', 'starting', 'paused', 'ended', 'failed'],
+  'answer-failed': ['created', 'starting', 'running', 'paused', 'ended', 'failed'],
   'continued': ['created', 'ended', 'failed'],
-  'terminated': ['created'],
-  'exited': ['created'],
-  'worker-exit': ['created'],
-  'error': ['created'],
+  'terminated': ['created', 'ended', 'failed'],
+  'exited': ['created', 'ended', 'failed'],
+  'worker-exit': ['created', 'ended', 'failed'],
+  'error': ['created', 'ended', 'failed'],
   'adopt': ['starting', 'running', 'paused', 'ended', 'failed'],
-  'release': ['created', 'failed']
+  'release': ['created', 'starting', 'failed'],
+  'stale': ['created', 'starting', 'running', 'paused', 'ended', 'failed']
+};
+
+/** The rows that are data for a later stage, and that stage. */
+const FUTURE: Record<string, string> = {
+  'stop-hidden-unseen': 'hidden-stop',
+  'stop-hidden-paused': 'hidden-stop',
+  'resume-unseen-same': 'hidden-stop',
+  'terminated-evidence': 'endings',
+  'exited-evidence': 'endings',
+  'worker-exit-evidence': 'endings',
+  'error-evidence': 'endings',
+  'close-failed-kept': 'endings',
+  'stale': 'stop-record'
+};
+
+/** The rows kept for today's behaviour, and the stage that removes each. */
+const LEGACY: Record<string, string> = {
+  'start-failed-ended': 'endings',
+  'stop-hidden': 'hidden-stop',
+  'resume-unseen': 'hidden-stop',
+  'resume-unanswered': 'admission',
+  'close-failed': 'endings'
 };
 
 const resolve = (to: Phase | 'same', from: Phase): Phase => (to === 'same' ? from : to);
 
-/** Does a current (not legacy) row with no guard list from --event--> to? */
-function listedByCurrentRow(from: Phase, event: SessionEvent, to: Phase, except: TransitionRow): boolean {
-  return rowsFor(from, event).some((row) => row !== except && !row.legacy && !row.guard && resolve(row.to, from) === to);
+/** Does another row in force, with no guard, list from --event--> to? */
+function listedByUnguardedRow(from: Phase, event: SessionEvent, to: Phase, except: TransitionRow, legacy: boolean): boolean {
+  return rowsFor(from, event).some((row) => row !== except && !row.guard && Boolean(row.legacy) === legacy && resolve(row.to, from) === to);
 }
 
 describe('the transition table', () => {
@@ -99,31 +132,56 @@ describe('the transition table', () => {
     expect(PHASE_OF_STATE[SessionState.ERROR]).toBe('failed');
   });
 
-  it('names only known events and phases, and every legacy row a stage', () => {
+  it('names only known events, phases, guards and stages; every row has a unique id', () => {
+    const ids = new Set<string>();
     for (const row of TRANSITIONS) {
+      expect(ids.has(row.id), `duplicate id ${row.id}`).toBe(false);
+      ids.add(row.id);
       expect(SESSION_EVENTS).toContain(row.event);
       for (const from of row.from) expect(PHASES).toContain(from);
       if (row.to !== 'same') expect(PHASES).toContain(row.to);
       if (row.otherwise !== undefined) {
-        expect(row.guard, `${row.event}: an otherwise needs a guard`).toBeDefined();
+        expect(row.guard, `${row.id}: an otherwise needs a guard`).toBeDefined();
       }
       if (row.guard) expect(Object.keys(GUARDS)).toContain(row.guard);
-      if (row.legacy) expect(['hidden-stop', 'S2a', 'S3']).toContain(row.legacy);
+      if (row.legacy) expect(STAGES).toContain(row.legacy);
+      if (row.future) expect(STAGES).toContain(row.future);
+      expect(row.legacy !== undefined && row.future !== undefined, `${row.id}: legacy and future`).toBe(false);
     }
   });
 
-  describe('every row', () => {
-    for (const row of TRANSITIONS) {
+  it('marks exactly these rows legacy and future', () => {
+    expect(Object.fromEntries(TRANSITIONS.filter((r) => r.legacy).map((r) => [r.id, r.legacy]))).toEqual(LEGACY);
+    expect(Object.fromEntries(TRANSITIONS.filter((r) => r.future).map((r) => [r.id, r.future]))).toEqual(FUTURE);
+    expect(IN_FORCE).toEqual(TRANSITIONS.filter((r) => r.future === undefined));
+  });
+
+  it('never pairs a guarded row with an unguarded legacy row to the same target from the same phase', () => {
+    // Such a legacy row would win over the guard, so the transition the guard
+    // exists to report would be counted as legacy instead.
+    const clashes: string[] = [];
+    for (const guarded of IN_FORCE.filter((r) => r.guard)) {
+      for (const from of guarded.from) {
+        const targets = [guarded.to, guarded.otherwise].filter((t): t is Phase | 'same' => t !== undefined).map((t) => resolve(t, from));
+        for (const legacy of IN_FORCE.filter((r) => r.legacy && !r.guard && r.event === guarded.event && r.from.includes(from))) {
+          if (targets.includes(resolve(legacy.to, from))) clashes.push(`${guarded.id} / ${legacy.id} from ${from}`);
+        }
+      }
+    }
+    expect(clashes).toEqual([]);
+  });
+
+  describe('every row in force', () => {
+    for (const row of IN_FORCE) {
       for (const from of row.from) {
-        const label = `${row.event} from ${from} -> ${row.to}${row.guard ? ` [${row.guard}]` : ''}${row.legacy ? ` (legacy ${row.legacy})` : ''}`;
+        const label = `${row.id}: ${row.event} from ${from} -> ${row.to}${row.guard ? ` [${row.guard}]` : ''}${row.legacy ? ` (legacy until ${row.legacy})` : ''}`;
         it(label, () => {
           const to = resolve(row.to, from);
           const context = row.guard ? GUARD_CONTEXTS[row.guard].holds : {};
           const verdict = evaluateTransition(from, row.event, to, context);
-          // A legacy row's transition can also be a current row's (the hidden stop
-          // over a shown stop), which then wins.
-          const expected = row.legacy && !listedByCurrentRow(from, row.event, to, row) ? 'legacy' : 'legal';
+          const expected = row.legacy && !listedByUnguardedRow(from, row.event, to, row, false) ? 'legacy' : 'legal';
           expect(verdict.verdict).toBe(expected);
+          if (expected === (row.legacy ? 'legacy' : 'legal')) expect(verdict.row?.id).toBe(row.id);
 
           if (row.guard) {
             const fails = GUARD_CONTEXTS[row.guard].fails;
@@ -131,15 +189,13 @@ describe('the transition table', () => {
               const otherwise = resolve(row.otherwise, from);
               expect(evaluateTransition(from, row.event, otherwise, fails).verdict).toBe(row.legacy ? 'legacy' : 'legal');
               if (otherwise !== to) {
-                // The guard failed and the code went where it holds.
                 expect(evaluateTransition(from, row.event, to, fails).verdict).toBe('guard-not-met');
               }
-            } else if (!listedByCurrentRow(from, row.event, to, row) && !rowsFor(from, row.event).some((r) => r !== row && r.legacy && resolve(r.to, from) === to)) {
+            } else if (!listedByUnguardedRow(from, row.event, to, row, false) && !listedByUnguardedRow(from, row.event, to, row, true)) {
               expect(evaluateTransition(from, row.event, to, fails).verdict).toBe('guard-not-met');
             }
-            const missing = MISSING_FACTS[row.guard];
-            if (missing !== undefined && !rowsFor(from, row.event).some((r) => r !== row && !r.guard && resolve(r.to, from) === to)) {
-              expect(evaluateTransition(from, row.event, to, missing).verdict).toBe('unevaluated');
+            if (!listedByUnguardedRow(from, row.event, to, row, false) && !listedByUnguardedRow(from, row.event, to, row, true)) {
+              expect(evaluateTransition(from, row.event, to, MISSING_FACTS[row.guard]).verdict).toBe('unevaluated');
             }
           }
         });
@@ -147,8 +203,25 @@ describe('the transition table', () => {
     }
   });
 
-  describe('every (phase, event) pair with no row', () => {
-    const covered = new Set(TRANSITIONS.flatMap((row) => row.from.map((from) => `${row.event}:${from}`)));
+  describe('the future rows', () => {
+    for (const row of TRANSITIONS.filter((r) => r.future)) {
+      it(`${row.id} (${row.future}) is not in force`, () => {
+        for (const from of row.from) {
+          const to = resolve(row.to, from);
+          const context = row.guard ? GUARD_CONTEXTS[row.guard].holds : {};
+          const verdict = evaluateTransition(from, row.event, to, context);
+          // Only a row in force can vouch for it; this one never does.
+          expect(verdict.row?.id).not.toBe(row.id);
+          if (rowsFor(from, row.event).every((r) => resolve(r.to, from) !== to && (r.otherwise === undefined || resolve(r.otherwise, from) !== to))) {
+            expect(verdict.verdict).toBe('no-row');
+          }
+        }
+      });
+    }
+  });
+
+  describe('every (phase, event) pair with no row in force', () => {
+    const covered = new Set(IN_FORCE.flatMap((row) => row.from.map((from) => `${row.event}:${from}`)));
 
     it('is exactly the list of holes', () => {
       const holes: Partial<Record<SessionEvent, Phase[]>> = {};
@@ -173,18 +246,32 @@ describe('the transition table', () => {
     }
   });
 
-  describe('the cases the design runs and its review named', () => {
-    it('a resume refused while a newer stop arrived keeps the session paused at it (the missing same-state row)', () => {
-      const context = { stop: STOP_B, runNow: 1, since: { runId: 1, continued: 0, fromStop: STOP_A } };
+  describe('cases worth naming', () => {
+    it('a resume refused while a newer stop was shown keeps the session paused at it (the same-state row)', () => {
+      const context = { stop: STOP_B, lastShownStop: STOP_B, runNow: 1, since: { runId: 1, continued: 0, fromStop: STOP_A } };
       expect(evaluateTransition('paused', 'resume-refused', 'paused', context).verdict).toBe('legal');
-      expect(evaluateTransition('paused', 'resume-unseen-failed', 'paused').verdict).toBe('legal');
+      expect(evaluateTransition('paused', 'resume-unanswered', 'paused', context).verdict).toBe('legal');
+      expect(evaluateTransition('paused', 'resume-unseen-failed', 'paused', context).verdict).toBe('legal');
     });
 
-    it('a resume refused after the engine reported continued is guard-not-met (R1r)', () => {
+    it('a newer stop that was not shown (a hidden one) does not count as newer', () => {
+      const hidden = { reason: 'entry' };
+      const context = { stop: hidden, lastShownStop: STOP_A, runNow: 1, since: { runId: 1, continued: 0, fromStop: STOP_A } };
+      expect(evaluateTransition('paused', 'resume-refused', 'paused', context).verdict).toBe('guard-not-met');
+      expect(evaluateTransition('paused', 'resume-unseen-failed', 'paused', context).verdict).toBe('guard-not-met');
+    });
+
+    it('a resume refused after the engine reported continued is guard-not-met', () => {
       const context = { stop: STOP_A, runNow: 1, continuedNow: 1, since: { runId: 1, continued: 0, fromStop: STOP_A } };
       const verdict = evaluateTransition('running', 'resume-refused', 'paused', context);
       expect(verdict.verdict).toBe('guard-not-met');
       expect(verdict.why).toContain("guard 'refused-before-resume' not met");
+    });
+
+    it('a request with no answer rolls back as legacy, and is guard-not-met once continued was seen', () => {
+      const before = { runNow: 1, continuedNow: 0, since: { runId: 1, continued: 0, fromStop: STOP_A } };
+      expect(evaluateTransition('running', 'resume-unanswered', 'paused', before)).toMatchObject({ verdict: 'legacy', row: { id: 'resume-unanswered' } });
+      expect(evaluateTransition('running', 'resume-unanswered', 'paused', { ...before, continuedNow: 1 }).verdict).toBe('guard-not-met');
     });
 
     it('a refusal with no stop to return to is guard-not-met (the direct write)', () => {
@@ -202,6 +289,11 @@ describe('the transition table', () => {
         .toBe('unevaluated');
     });
 
+    it('a step that fails while paused, or after it landed, has no row', () => {
+      expect(evaluateTransition('paused', 'resume-failed', 'failed').verdict).toBe('no-row');
+      for (const from of PHASES) expect(evaluateTransition(from, 'answer-failed', 'failed').verdict).toBe('no-row');
+    });
+
     it('an ended session going back to running has no row, whatever the event', () => {
       for (const event of ['continued', 'resume', 'adapter-configured', 'stop-shown', 'attach-verified'] as const) {
         expect(evaluateTransition('ended', event, 'running').verdict).toBe('no-row');
@@ -211,27 +303,27 @@ describe('the transition table', () => {
       }
     });
 
-    it('terminal evidence keeps the phase: from failed a terminated that writes ended has no row', () => {
-      expect(evaluateTransition('failed', 'terminated', 'failed').verdict).toBe('legal');
-      const verdict = evaluateTransition('failed', 'terminated', 'ended');
-      expect(verdict.verdict).toBe('no-row');
-      expect(verdict.why).toBe('terminated from failed goes to ended; the rows allow failed');
+    it('terminal evidence is the endings stage\'s: no terminal event after the ending is in force today', () => {
+      for (const event of ['terminated', 'exited', 'worker-exit', 'error'] as const) {
+        expect(evaluateTransition('ended', event, 'ended').verdict).toBe('no-row');
+        expect(evaluateTransition('failed', event, 'failed').verdict).toBe('no-row');
+      }
+      expect(evaluateTransition('failed', 'terminated', 'ended').why).toBe('no row for terminated from failed');
     });
 
-    it('the close that rewrites a failure as ended is legacy until S3', () => {
+    it('the close that rewrites a failure as ended is legacy until the endings stage', () => {
       const verdict = evaluateTransition('failed', 'close', 'ended');
       expect(verdict.verdict).toBe('legacy');
-      expect(verdict.row?.legacy).toBe('S3');
-      expect(evaluateTransition('failed', 'close', 'failed').verdict).toBe('legal');
+      expect(verdict.row?.legacy).toBe('endings');
+      expect(evaluateTransition('failed', 'close', 'failed').verdict).toBe('no-row');
     });
 
-    it('the transient pause and the resume out of it are legacy until the hidden-stop change', () => {
+    it('the transient pause and the resume out of it are legacy until the hidden-stop stage', () => {
       expect(evaluateTransition('running', 'stop-hidden', 'paused').verdict).toBe('legacy');
       expect(evaluateTransition('starting', 'stop-hidden', 'paused').verdict).toBe('legacy');
       expect(evaluateTransition('paused', 'resume-unseen', 'running').verdict).toBe('legacy');
-      expect(evaluateTransition('running', 'resume-unseen', 'running').verdict).toBe('legal');
-      // over a shown stop: legal only if the shown stop is kept, which today's code never does
-      expect(evaluateTransition('paused', 'stop-hidden', 'paused', { stop: STOP_B, lastShownStop: STOP_A }).verdict).toBe('legacy');
+      // a hidden stop over a shown stop has no row in force: it is the defect its future guard reports
+      expect(evaluateTransition('paused', 'stop-hidden', 'paused', { stop: STOP_B, lastShownStop: STOP_A }).verdict).toBe('no-row');
     });
 
     it('the worker exit follows the four-way rule', () => {
@@ -259,20 +351,20 @@ describe('the transition table', () => {
       expect(evaluateVirtual('running', 'replace')).toMatchObject({ verdict: 'legal', to: 'ended' });
     });
 
-    it('adapter-configured goes to running only with stopOnEntry off and no stop recorded', () => {
-      expect(evaluateTransition('starting', 'adapter-configured', 'running', { stopOnEntry: false }).verdict).toBe('legal');
-      expect(evaluateTransition('starting', 'adapter-configured', 'running', { stopOnEntry: false, stop: STOP_A }).verdict).toBe('guard-not-met');
-      expect(evaluateTransition('starting', 'adapter-configured', 'starting', { stopOnEntry: true }).verdict).toBe('legal');
-      expect(evaluateTransition('starting', 'adapter-configured', 'running').verdict).toBe('unevaluated');
-      expect(evaluateTransition('paused', 'adapter-configured', 'paused').verdict).toBe('legal');
+    it('adapter-configured goes to running only with stopOnEntry off and the session not at a stop', () => {
+      expect(evaluateTransition('starting', 'adapter-configured', 'running', { stopOnEntry: false, atStop: false }).verdict).toBe('legal');
+      expect(evaluateTransition('starting', 'adapter-configured', 'running', { stopOnEntry: true, atStop: false }).verdict).toBe('guard-not-met');
+      expect(evaluateTransition('starting', 'adapter-configured', 'running', { atStop: false }).verdict).toBe('unevaluated');
+      expect(evaluateTransition('running', 'adapter-configured', 'running').verdict).toBe('legal');
+      expect(evaluateTransition('paused', 'adapter-configured', 'paused').verdict).toBe('no-row');
     });
   });
 
   describe('virtual transitions (notes)', () => {
-    it('take the row where it goes', () => {
+    it('take the row in force where it goes', () => {
       expect(evaluateVirtual('running', 'hot-restart')).toMatchObject({ verdict: 'legal', to: 'running' });
       expect(evaluateVirtual('paused', 'continued')).toMatchObject({ verdict: 'legal', to: 'paused' });
-      expect(evaluateVirtual('failed', 'worker-exit')).toMatchObject({ verdict: 'legal', to: 'failed' });
+      expect(evaluateVirtual('failed', 'worker-exit').verdict).toBe('no-row');
       expect(evaluateVirtual('starting', 'hot-restart').verdict).toBe('no-row');
     });
   });
@@ -288,7 +380,7 @@ describe('the transition table', () => {
           named.add(event);
         }
       }
-      // `stale` is the next stage's: no code names it yet.
+      // `stale` is the stop-record stage's: no code names it yet.
       expect(SESSION_EVENTS.filter((event) => !named.has(event))).toEqual(['stale']);
     });
 

@@ -76,13 +76,16 @@ beforeAll(() => {
 // can swallow that throw (a catch that turns it into a failed answer), so the
 // shadow also queues every strict failure on a process-wide registry, and
 // this hook fails the test that left one. A test that provokes one on purpose
-// drains it itself (takeStrictFailures). With MCP_STATE_SHADOW_LOG set, the
-// verdict counts of each test file are written to that directory. The
+// drains it itself (takeStrictFailures). Strict mode is per process: a child
+// process the test spawns has its own queue, which this hook never sees. With
+// MCP_STATE_SHADOW_LOG set, the verdict counts and the row matches of each
+// test file are written to that directory. The
 // registry is reached through globalThis so this file imports nothing from src.
 // Registered before the leak guard below so that, hooks running in 'stack'
 // order, it runs last of all, after every other cleanup.
 interface StateShadowRegistry {
   counts?: Map<string, number>;
+  rows?: Map<string, number>;
   pending?: Array<{ outcome: string; site: string; event: string; from?: string; actual?: string; why?: string }>;
   harness?: boolean;
 }
@@ -112,11 +115,17 @@ afterEach(() => {
 afterAll(() => {
   const dir = process.env.MCP_STATE_SHADOW_LOG;
   const counts = stateShadowRegistry.counts;
+  const rows = stateShadowRegistry.rows;
   if (dir && counts && counts.size > 0) {
     shadowMkdirSync(dir, { recursive: true });
     const name = `vitest-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
-    shadowWriteFileSync(shadowJoin(dir, name), JSON.stringify({ file: stateShadowTestPath, counts: Object.fromEntries(counts) }));
+    shadowWriteFileSync(shadowJoin(dir, name), JSON.stringify({
+      file: stateShadowTestPath,
+      counts: Object.fromEntries(counts),
+      rows: Object.fromEntries(rows ?? [])
+    }));
     counts.clear();
+    rows?.clear();
   }
   const failures = stateShadowStrictFailures();
   if (failures) {

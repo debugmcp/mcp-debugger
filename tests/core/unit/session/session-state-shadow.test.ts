@@ -1,6 +1,6 @@
 /**
  * The transition table's shadow through the real session manager over the mock
- * proxy: the flows the design runs recorded, the rows the review added, the
+ * proxy: the flows the design runs recorded, the rows the reviews added, the
  * notes where today's code writes no state, strict mode on a transition the
  * table does not list, and the proof that the shadow changes no behaviour.
  */
@@ -9,6 +9,7 @@ import { DebugLanguage, MockAdapterPolicy, SessionState, type AdapterPolicy } fr
 import { SessionManager, type SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import { DapResponseError } from '../../../../src/proxy/dap-response-error.js';
 import { StateShadowError, takeStrictFailures, type ShadowRecord, type StateShadow } from '../../../../src/session/machine/shadow.js';
+import type { StateWrite } from '../../../../src/session/machine/transition-table.js';
 import type { ManagedSession } from '../../../../src/session/session-store.js';
 import { createMockDependencies } from './session-manager-test-utils.js';
 import { internals } from '../../../test-utils/helpers/operations-internals.js';
@@ -17,6 +18,16 @@ const CONFIG: SessionManagerConfig = { logDirBase: '/tmp/test-sessions', default
 
 type Dependencies = ReturnType<typeof createMockDependencies>;
 
+/** What the adapter answers when it refuses a request. */
+const refusal = (command: string, message = 'not now (injected)') =>
+  new DapResponseError({ seq: 1, type: 'response', request_seq: 1, success: false, command, message });
+
+const childReport = (reportId: string, pid = 4242) => ({
+  reportId,
+  targetId: String(pid),
+  name: `Subprocess ${pid}`,
+  configuration: { type: 'python', subProcessId: pid }
+});
 
 function shadowOf(sessionManager: SessionManager): StateShadow {
   return internals(sessionManager).stateShadow;
@@ -89,7 +100,7 @@ describe('the transition table shadow, through the session manager', () => {
     return id;
   }
 
-  describe('a hot restart (R1)', () => {
+  describe('a hot restart', () => {
     it('from a running program writes no state and is recorded as a legal hot-restart', async () => {
       const id = await runningSession();
       pinNativeRestart();
@@ -112,7 +123,7 @@ describe('the transition table shadow, through the session manager', () => {
       const id = await runningSession();
       pinNativeRestart();
       dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
-        if (command === 'restart') throw new Error('restart refused (injected)');
+        if (command === 'restart') throw refusal(command);
         return { success: true };
       });
       let result: Awaited<ReturnType<SessionManager['restartDebugging']>> | undefined;
@@ -121,31 +132,53 @@ describe('the transition table shadow, through the session manager', () => {
       expect(added).toEqual({ 'legal|hotRestart.sent|hot-restart|running|running(note)': 1 });
     });
 
-    it('from paused, refused after the engine reported continued, rolls back as today and is guard-not-met (R1r)', async () => {
+    for (const [how, failure, event] of [
+      ['refused by the adapter', (command: string) => refusal(command), 'resume-refused'],
+      ['with no answer', () => new Error('restart timed out after resuming (injected)'), 'resume-unanswered']
+    ] as const) {
+      it(`from paused, ${how} after the engine reported continued, rolls back as today and is guard-not-met`, async () => {
+        const id = await pausedSession();
+        pinNativeRestart();
+        const proxy = dependencies.mockProxyManager;
+        proxy.setDapRequestHandler(async (command: string) => {
+          if (command === 'restart') {
+            proxy.emit('continued');
+            throw failure(command);
+          }
+          return { success: true };
+        });
+        const added = await delta(shadowOf(sessionManager), () => sessionManager.restartDebugging(id));
+        // Today's behaviour, unchanged: the session says paused while the engine runs.
+        expect(managed(sessionManager, id).state).toBe(SessionState.PAUSED);
+        expect(added).toEqual({
+          'legal|hotRestart.sent|hot-restart|paused|running': 1,
+          'legal|handleContinued|continued|running|running': 1,
+          [`guard-not-met|hotRestart.rejected|${event}|running|paused`]: 1
+        });
+      });
+    }
+  });
+
+  describe('a refused or unanswered resume', () => {
+    it('refused by the adapter after the engine reported continued rolls back as today and is guard-not-met', async () => {
       const id = await pausedSession();
-      pinNativeRestart();
       const proxy = dependencies.mockProxyManager;
       proxy.setDapRequestHandler(async (command: string) => {
-        if (command === 'restart') {
+        if (command === 'continue') {
           proxy.emit('continued');
-          throw new Error('restart failed after resuming (injected)');
+          throw refusal(command);
         }
         return { success: true };
       });
-      const added = await delta(shadowOf(sessionManager), () => sessionManager.restartDebugging(id));
-      // Today's behaviour, unchanged: the session says paused while the engine runs.
-      expect(managed(sessionManager, id).state).toBe(SessionState.PAUSED);
-      expect(added).toEqual({
-        'legal|hotRestart.sent|hot-restart|paused|running': 1,
-        'legal|handleContinued|continued|running|running': 1,
-        'guard-not-met|hotRestart.refused|resume-refused|running|paused': 1
+      const added = await delta(shadowOf(sessionManager), async () => {
+        await expect(sessionManager.continue(id)).rejects.toThrow('not now (injected)');
       });
+      expect(managed(sessionManager, id).state).toBe(SessionState.PAUSED);
+      expect(added['guard-not-met|continue.rejected|resume-refused|running|paused']).toBe(1);
       expect(shadowOf(sessionManager).mismatches().at(-1)).toMatchObject({ guard: 'refused-before-resume', sessionId: id });
     });
-  });
 
-  describe('a refused resume', () => {
-    it('after the engine reported continued rolls back as today and is guard-not-met (R1r)', async () => {
+    it('with no answer after the engine reported continued rolls back as today and is guard-not-met', async () => {
       const id = await pausedSession();
       const proxy = dependencies.mockProxyManager;
       proxy.setDapRequestHandler(async (command: string) => {
@@ -159,55 +192,71 @@ describe('the transition table shadow, through the session manager', () => {
         await expect(sessionManager.continue(id)).rejects.toThrow('continue timed out after resuming');
       });
       expect(managed(sessionManager, id).state).toBe(SessionState.PAUSED);
-      expect(added['guard-not-met|continue.refused|resume-refused|running|paused']).toBe(1);
+      expect(added['guard-not-met|continue.rejected|resume-unanswered|running|paused']).toBe(1);
+      expect(shadowOf(sessionManager).mismatches().at(-1)).toMatchObject({ guard: 'no-continued-since', sessionId: id });
     });
 
-    it('before the engine resumed is legal', async () => {
+    it('refused before the engine resumed is legal; with no answer, the rollback is legacy', async () => {
       const id = await pausedSession();
       dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
-        if (command === 'continue') throw new Error('continue refused (injected)');
+        if (command === 'continue') throw refusal(command);
         return { success: true };
       });
-      const added = await delta(shadowOf(sessionManager), async () => {
-        await expect(sessionManager.continue(id)).rejects.toThrow('continue refused');
+      let added = await delta(shadowOf(sessionManager), async () => {
+        await expect(sessionManager.continue(id)).rejects.toThrow('not now');
       });
       expect(added).toEqual({
         'legal|continue.sent|resume|paused|running': 1,
-        'legal|continue.refused|resume-refused|running|paused': 1
+        'legal|continue.rejected|resume-refused|running|paused': 1
+      });
+      dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
+        if (command === 'continue') throw new Error('Request cancelled during proxy shutdown: continue');
+        return { success: true };
+      });
+      added = await delta(shadowOf(sessionManager), async () => {
+        await expect(sessionManager.continue(id)).rejects.toThrow('cancelled');
+      });
+      expect(added).toEqual({
+        'legal|continue.sent|resume|paused|running': 1,
+        'legacy|continue.rejected|resume-unanswered|running|paused': 1
       });
     });
 
-    it('while a newer stop arrived keeps the session paused at that stop: the same-state row', async () => {
-      const id = await pausedSession();
-      const session = managed(sessionManager, id);
-      const firstStop = session.lastStop;
-      const proxy = dependencies.mockProxyManager;
-      proxy.setDapRequestHandler(async (command: string) => {
-        if (command === 'continue') {
-          proxy.simulateStopped(2, 'exception');
-          throw new Error('continue rejected after a newer stop (injected)');
-        }
-        return { success: true };
+    for (const [how, failure, event] of [
+      ['refused', (command: string) => refusal(command), 'resume-refused'],
+      ['unanswered', () => new Error('continue rejected after a newer stop (injected)'), 'resume-unanswered']
+    ] as const) {
+      it(`${how} while a newer stop was shown keeps the session paused at that stop: the same-state row`, async () => {
+        const id = await pausedSession();
+        const session = managed(sessionManager, id);
+        const firstStop = session.lastStop;
+        const proxy = dependencies.mockProxyManager;
+        proxy.setDapRequestHandler(async (command: string) => {
+          if (command === 'continue') {
+            proxy.simulateStopped(2, 'exception');
+            throw failure(command);
+          }
+          return { success: true };
+        });
+        const added = await delta(shadowOf(sessionManager), async () => {
+          await expect(sessionManager.continue(id)).rejects.toThrow();
+        });
+        expect(session.state).toBe(SessionState.PAUSED);
+        expect(session.lastStop).not.toBe(firstStop);
+        expect(session.lastStop?.reason).toBe('exception');
+        expect(added).toEqual({
+          'legal|continue.sent|resume|paused|running': 1,
+          'legal|settleStop.shown|stop-shown|running|paused': 1,
+          [`legal|continue.rejected|${event}|paused|paused`]: 1
+        });
       });
-      const added = await delta(shadowOf(sessionManager), async () => {
-        await expect(sessionManager.continue(id)).rejects.toThrow('continue rejected after a newer stop');
-      });
-      expect(session.state).toBe(SessionState.PAUSED);
-      expect(session.lastStop).not.toBe(firstStop);
-      expect(session.lastStop?.reason).toBe('exception');
-      expect(added).toEqual({
-        'legal|continue.sent|resume|paused|running': 1,
-        'legal|settleStop.shown|stop-shown|running|paused': 1,
-        'legal|continue.refused|resume-refused|paused|paused': 1
-      });
-    });
+    }
 
     it('a step the adapter refused is legal; with no stop recorded the direct write is guard-not-met', async () => {
       const id = await pausedSession();
       const session = managed(sessionManager, id);
-      const refuse = (command: string) => new DapResponseError({ seq: 1, type: 'response', request_seq: 1, success: false, command, message: 'not now (injected)' });
       dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
-        if (command === 'next') throw refuse(command);
+        if (command === 'next') throw refusal(command);
         return { success: true, body: { stackFrames: [] } };
       });
       let added = await delta(shadowOf(sessionManager), () => sessionManager.stepOver(id));
@@ -219,7 +268,7 @@ describe('the transition table shadow, through the session manager', () => {
       dependencies.mockProxyManager.setDapRequestHandler(async (command: string) => {
         if (command === 'next') {
           session.lastStop = undefined;
-          throw refuse(command);
+          throw refusal(command);
         }
         return { success: true, body: { stackFrames: [] } };
       });
@@ -244,12 +293,33 @@ describe('the transition table shadow, through the session manager', () => {
       expect(added).toEqual({
         'legacy|settleStop.hidden|stop-hidden|running|paused': 1,
         'legacy|continue.sent|resume-unseen|paused|running': 1,
-        'legal|continue.refused|resume-unseen-failed|running|paused': 1
+        'legal|continue.rejected|resume-unseen-failed|running|paused': 1
       });
+    });
+
+    it('the core\'s own resume that fails after a newer stop was shown keeps that stop (resume-unseen-failed from paused)', async () => {
+      const id = await runningSession();
+      const proxy = dependencies.mockProxyManager;
+      proxy.setDapRequestHandler(async (command: string) => {
+        if (command === 'continue') {
+          proxy.simulateStopped(1, 'breakpoint');
+          throw new Error('auto-continue failed after a newer stop (injected)');
+        }
+        return { success: true };
+      });
+      const added = await delta(shadowOf(sessionManager), async () => {
+        proxy.simulateStopped(1, 'entry');
+        await vi.runAllTimersAsync();
+      });
+      const session = managed(sessionManager, id);
+      expect(session.state).toBe(SessionState.PAUSED);
+      expect(session.lastStop?.reason).toBe('breakpoint');
+      expect(added['legal|continue.rejected|resume-unseen-failed|paused|paused']).toBe(1);
+      expect(shadowOf(sessionManager).mismatches()).toEqual([]);
     });
   });
 
-  describe('the endings (R2)', () => {
+  describe('the endings', () => {
     const ORDERS: Array<Array<'terminated' | 'exited' | 'worker-exit'>> = [
       ['exited', 'terminated', 'worker-exit'],
       ['exited', 'worker-exit', 'terminated'],
@@ -281,14 +351,15 @@ describe('the transition table shadow, through the session manager', () => {
       });
     }
 
-    it('a worker exit that reaches an already-failed session is recorded as evidence', async () => {
+    it('a worker exit that reaches a session a step failure left failed, handlers attached, has no row today', async () => {
       const id = await failedByAStep();
-      const added = await delta(shadowOf(sessionManager), async () => {
-        dependencies.mockProxyManager.emit('exit', 1, undefined, false);
-        await vi.runAllTimersAsync();
-      });
+      // The evidence row it would be is the endings stage's (future); today the
+      // exit reaches the session only because the failure left its handlers on.
+      expect(() => dependencies.mockProxyManager.emit('exit', 1, undefined, false)).toThrow(StateShadowError);
       expect(managed(sessionManager, id).state).toBe(SessionState.ERROR);
-      expect(added).toEqual({ 'legal|handleExit.ended|worker-exit|failed|failed(note)': 1 });
+      expect(takeStrictFailures()).toEqual([
+        expect.objectContaining<Partial<ShadowRecord>>({ outcome: 'no-row', site: 'handleExit.ended', from: 'failed', note: true })
+      ]);
     });
 
     it('a terminated after a failure that left the handlers attached rewrites failed as ended: no row, recorded', async () => {
@@ -301,7 +372,7 @@ describe('the transition table shadow, through the session manager', () => {
       // Today's behaviour, unchanged; the table says failed is absorbing.
       expect(managed(sessionManager, id).state).toBe(SessionState.STOPPED);
       expect(added['no-row|handleTerminated|terminated|failed|ended']).toBe(1);
-      expect(shadowOf(sessionManager).mismatches().at(-1)?.why).toBe('terminated from failed goes to ended; the rows allow failed');
+      expect(shadowOf(sessionManager).mismatches().at(-1)?.why).toBe('no row for terminated from failed');
     });
   });
 
@@ -350,6 +421,29 @@ describe('the transition table shadow, through the session manager', () => {
     });
   });
 
+  describe('the facts a guard reads are taken at the write', () => {
+    it('a state listener that changes the stop record does not change the verdict on the write that told it', async () => {
+      const session = await sessionManager.createSession({ language: DebugLanguage.MOCK, executablePath: 'python' });
+      const s = managed(sessionManager, session.id);
+      const gate = (next: SessionState, write: StateWrite) =>
+        (sessionManager as unknown as { _updateSessionState: (s: ManagedSession, next: SessionState, write: StateWrite) => void })
+          ._updateSessionState(s, next, write);
+      gate(SessionState.INITIALIZING, { site: 'launch', event: 'start' });
+      const shown = { reason: 'breakpoint', threadId: 1, timestamp: 1 };
+      s.lastStop = shown;
+      gate(SessionState.PAUSED, { site: 'settleStop.shown', event: 'stop-shown' });
+      const token = shadowOf(sessionManager).token(s);
+      gate(SessionState.RUNNING, { site: 'executeStep.sent', event: 'resume' });
+      // When the refusal writes PAUSED, a listener moves the record to another stop.
+      internals(sessionManager).opsContext.onStateChange(s.id, () => {
+        if (s.state === SessionState.PAUSED) s.lastStop = { reason: 'exception', threadId: 2, timestamp: 2 };
+      });
+      const added = await delta(shadowOf(sessionManager), () =>
+        gate(SessionState.PAUSED, { site: 'executeStep.refused', event: 'resume-refused', facts: { since: token } }));
+      expect(added).toEqual({ 'legal|executeStep.refused|resume-refused|running|paused': 1 });
+    });
+  });
+
   describe('a run replaced', () => {
     it('a relaunch over a running program notes the replacement and judges the start from the old run\'s ending', async () => {
       const id = await runningSession();
@@ -362,6 +456,63 @@ describe('the transition table shadow, through the session manager', () => {
       expect(added['legal|launch|start|ended|starting']).toBe(1);
       expect(added['lifecycle-agrees|launch|lifecycle|-|starting']).toBe(1);
       expect(shadowOf(sessionManager).runOf(managed(sessionManager, id))).toBe(2);
+    });
+
+    it('a root event that arrives while a child is closing is judged from the live phase, then the replacement, then the start', async () => {
+      const rootId = await runningSession();
+      const proxy = dependencies.mockProxyManager;
+      proxy.simulateEvent('child-reported', childReport('r1'));
+      await vi.runAllTimersAsync();
+      const child = sessionManager.getAllSessions().find((s) => s.parentSessionId === rootId)!;
+      const view = proxy.childViews.get(child.id)!;
+      const stopChild = view.stop.bind(view);
+      // The root's listeners are still on while its children close.
+      view.stop = async (options) => {
+        proxy.simulateStopped(1, 'breakpoint');
+        return stopChild(options);
+      };
+      const added = await delta(shadowOf(sessionManager), async () => {
+        const again = sessionManager.startDebugging(rootId, 'test.py', [], { stopOnEntry: false });
+        await vi.runAllTimersAsync();
+        await again;
+      });
+      expect(added['legal|settleStop.shown|stop-shown|running|paused']).toBe(1);
+      expect(added['legal|closeSingleSession|close|running|ended']).toBe(1);
+      expect(added['legal|launch.replace|replace|paused|ended(note)']).toBe(1);
+      expect(added['legal|launch|start|ended|starting']).toBe(1);
+      expect(Object.keys(added).filter((key) => !/^(legal|legacy|lifecycle-agrees)\|/.test(key))).toEqual([]);
+      expect(shadowOf(sessionManager).mismatches()).toEqual([]);
+    });
+
+    it('the same for a re-attach: a root event while a child is closing, then the replacement, then the start', async () => {
+      const session = await sessionManager.createSession({ language: DebugLanguage.MOCK, executablePath: 'python' });
+      const proxy = dependencies.mockProxyManager;
+      proxy.setDapRequestHandler(async (command: string) =>
+        command === 'threads' ? { success: true, body: { threads: [{ id: 1, name: 'main' }] } } : { success: true });
+      const attached = sessionManager.attachToProcess(session.id, { port: 5678, stopOnEntry: false });
+      await vi.runAllTimersAsync();
+      expect((await attached).success).toBe(true);
+      expect(managed(sessionManager, session.id).state).toBe(SessionState.RUNNING);
+      proxy.simulateEvent('child-reported', childReport('r1'));
+      await vi.runAllTimersAsync();
+      const child = sessionManager.getAllSessions().find((s) => s.parentSessionId === session.id);
+      expect(child, 'the attached root adopted a child').toBeDefined();
+      const view = proxy.childViews.get(child!.id)!;
+      const stopChild = view.stop.bind(view);
+      view.stop = async (options) => {
+        proxy.simulateStopped(1, 'breakpoint');
+        return stopChild(options);
+      };
+      const added = await delta(shadowOf(sessionManager), async () => {
+        const again = sessionManager.attachToProcess(session.id, { port: 5678, stopOnEntry: false });
+        await vi.runAllTimersAsync();
+        await again;
+      });
+      expect(added['legal|settleStop.shown|stop-shown|running|paused']).toBe(1);
+      expect(added['legal|attach.replace|replace|paused|ended(note)']).toBe(1);
+      expect(added['legal|attach|start|ended|starting']).toBe(1);
+      expect(Object.keys(added).filter((key) => !/^(legal|legacy|lifecycle-agrees)\|/.test(key))).toEqual([]);
+      expect(shadowOf(sessionManager).mismatches()).toEqual([]);
     });
   });
 
@@ -379,6 +530,8 @@ describe('the transition table shadow, through the session manager', () => {
         shadow.evaluate = boom;
         shadow.evaluateNote = boom;
         shadow.impliedLifecycle = boom;
+        // and inside `begin`, the one call the gate makes before it writes
+        (shadow.options as Record<string, unknown>).descendantsOf = boom;
       }
       const proxy = deps.mockProxyManager;
       const answers: unknown[] = [];

@@ -191,8 +191,11 @@ export class AttachController {
       );
     }
     // A live run or a child is replaced here; no state is written for it.
-    this.ctx.stateShadow.noteReplacement(session, 'attach.replace');
+    // Its children are counted before the teardown closes them, and the
+    // replacement is noted once the teardown has detached the run's listeners.
+    const replacing = this.ctx.stateShadow.replacementFacts(session);
     await this.ctx.stopProxyPreservingSession(session);
+    this.ctx.stateShadow.noteReplacement(session, 'attach.replace', replacing);
 
     // Update to INITIALIZING state and set lifecycle to ACTIVE
     this.ctx.updateState(session, SessionState.INITIALIZING, { site: 'attach', event: 'start' });

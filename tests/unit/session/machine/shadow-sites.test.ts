@@ -1,9 +1,22 @@
 /**
  * Every place that writes a session's state names its site and event, and
  * each names the event of its row (src/session/machine/transition-table.ts).
- * Read from the sources with the TypeScript parser, so a gate call added
- * without a site, a site named with the wrong event, a second direct
- * assignment of `.state`, or a test mark in production code fails here.
+ * Read from the sources of src/session with the TypeScript parser, so that a
+ * state write added without a site, a site named with the wrong event, a
+ * second direct assignment of `.state`, or a test mark in production code
+ * fails here.
+ *
+ * What the scan sees, by name, outside the gate itself (`_updateSessionState`
+ * and `writeSessionState`, and the context's forwarding `updateState`):
+ * - a call of `updateState` or `_updateSessionState` on any receiver;
+ * - a call of `update` or `updateSession` whose object literal has a `state` key;
+ * - an assignment to `.state` on any receiver but `this` (the store's own
+ *   write, in session-store.ts, aside).
+ * What a scan of names cannot see: a write through an alias (a method taken
+ * off its object and called later), a computed key (`{ ['state']: … }`), an
+ * object spread or `Object.assign` from a variable, and anything outside
+ * src/session. Closing those is the compiler's job, once the stage that makes
+ * a session's `state` read-only to everything but the gate lands.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'fs';
@@ -30,27 +43,27 @@ interface Found {
  */
 const EXPECTED: Array<{ file: string; site: string; kind: Kind; events: string[] }> = [
   // attach-controller.ts
-  { file: 'attach/attach-controller.ts', site: 'attach.replace', kind: 'replacement', events: ['replace'] }, // a live run or child, before the teardown
+  { file: 'attach/attach-controller.ts', site: 'attach.replace', kind: 'replacement', events: ['replace'] }, // a live run or child, after the teardown
   { file: 'attach/attach-controller.ts', site: 'attach', kind: 'gate', events: ['start'] }, // -> INITIALIZING, the attach starts
   { file: 'attach/attach-controller.ts', site: 'attach.verified', kind: 'gate', events: ['attach-verified'] }, // -> RUNNING, threads verified, no stop observed
-  { file: 'attach/attach-controller.ts', site: 'attach.failed', kind: 'gate', events: ['start-failed'] }, // -> ERROR, the attach failed, not terminal
+  { file: 'attach/attach-controller.ts', site: 'attach.failed', kind: 'gate', events: ['start-failed'] }, // -> ERROR, the attach failed
   { file: 'attach/attach-controller.ts', site: 'detach', kind: 'gate', events: ['release'] }, // -> STOPPED, a plain detach
   // execution-controller.ts
-  { file: 'execution/execution-controller.ts', site: 'step.failed', kind: 'gate', events: ['resume-failed'] }, // -> ERROR, the step threw a non-DAP error
+  { file: 'execution/execution-controller.ts', site: 'step.failed', kind: 'gate', events: ['resume-failed', 'answer-failed'] }, // -> ERROR, before or after the step landed
   { file: 'execution/execution-controller.ts', site: 'executeStep.sent', kind: 'gate', events: ['resume'] }, // PAUSED -> RUNNING, the step request goes out
   { file: 'execution/execution-controller.ts', site: 'executeStep.refused', kind: 'gate', events: ['resume-refused'] }, // -> PAUSED, the adapter refused, no continued
   { file: 'execution/execution-controller.ts', site: 'executeStep.refused-unrecorded', kind: 'direct', events: ['resume-refused'] }, // -> PAUSED by assignment, no stop recorded
   { file: 'execution/execution-controller.ts', site: 'executeStep.failed', kind: 'gate', events: ['resume-failed'] }, // -> ERROR, the step request failed otherwise
   { file: 'execution/execution-controller.ts', site: 'continue.sent', kind: 'gate', events: ['resume', 'resume-unseen'] }, // PAUSED -> RUNNING, the caller's or the core's own
-  { file: 'execution/execution-controller.ts', site: 'continue.refused', kind: 'gate', events: ['resume-refused', 'resume-unseen-failed'] }, // -> PAUSED unless terminal
+  { file: 'execution/execution-controller.ts', site: 'continue.rejected', kind: 'gate', events: ['resume-refused', 'resume-unanswered', 'resume-unseen-failed'] }, // -> PAUSED unless terminal
   // debug-launcher.ts
-  { file: 'launch/debug-launcher.ts', site: 'launch.replace', kind: 'replacement', events: ['replace'] }, // a live run or child, before the teardown
+  { file: 'launch/debug-launcher.ts', site: 'launch.replace', kind: 'replacement', events: ['replace'] }, // a live run or child, after the teardown
   { file: 'launch/debug-launcher.ts', site: 'launch', kind: 'gate', events: ['start'] }, // -> INITIALIZING, the launch starts
   { file: 'launch/debug-launcher.ts', site: 'launch.refused', kind: 'gate', events: ['start-refused'] }, // -> CREATED, an incompatible toolchain
   { file: 'launch/debug-launcher.ts', site: 'launch.failed', kind: 'gate', events: ['start-failed'] }, // -> ERROR, the launch failed
   { file: 'launch/debug-launcher.ts', site: 'hotRestart.sent', kind: 'gate', events: ['hot-restart'] }, // PAUSED -> RUNNING, DAP restart goes out
   { file: 'launch/debug-launcher.ts', site: 'hotRestart.sent', kind: 'note', events: ['hot-restart'] }, // from RUNNING: no state written
-  { file: 'launch/debug-launcher.ts', site: 'hotRestart.refused', kind: 'gate', events: ['resume-refused'] }, // -> PAUSED, restart refused
+  { file: 'launch/debug-launcher.ts', site: 'hotRestart.rejected', kind: 'gate', events: ['resume-refused', 'resume-unanswered'] }, // -> PAUSED, restart refused or unanswered
   // session-manager-core.ts
   { file: 'session-manager-core.ts', site: 'releaseDescendants', kind: 'gate', events: ['release'] }, // -> STOPPED, the detach cascade released a child
   { file: 'session-manager-core.ts', site: 'closeSingleSession', kind: 'gate', events: ['close'] }, // any -> STOPPED, then removed
@@ -63,7 +76,7 @@ const EXPECTED: Array<{ file: string; site: string; kind: Kind; events: string[]
   { file: 'session-manager-core.ts', site: 'handleExited', kind: 'gate', events: ['exited'] }, // -> STOPPED, DAP exited
   { file: 'session-manager-core.ts', site: 'handleAdapterConfigured', kind: 'gate', events: ['adapter-configured'] }, // -> RUNNING unless PAUSED or stopOnEntry
   { file: 'session-manager-core.ts', site: 'handleError', kind: 'gate', events: ['error'] }, // -> ERROR, the proxy's error
-  { file: 'session-manager-core.ts', site: 'handleExit.expected', kind: 'gate', events: ['worker-exit'] }, // -> STOPPED, worker exit expected
+  { file: 'session-manager-core.ts', site: 'handleExit.expected', kind: 'gate', events: ['worker-exit'] }, // -> STOPPED, exit reported expected
   { file: 'session-manager-core.ts', site: 'handleExit.unexpected', kind: 'gate', events: ['worker-exit'] }, // -> STOPPED on code 0, else ERROR
   { file: 'session-manager-core.ts', site: 'handleExit.clean', kind: 'gate', events: ['worker-exit'] }, // -> STOPPED, real exit code 0 or null
   { file: 'session-manager-core.ts', site: 'handleExit.crashed', kind: 'gate', events: ['worker-exit'] }, // -> ERROR, real exit otherwise
@@ -90,89 +103,112 @@ function sourceFiles(dir: string, filter: (file: string) => boolean): string[] {
   return out;
 }
 
+/** The string literals a property can take: a literal, or either branch of a conditional. */
+function literals(node: ts.Expression): string[] {
+  if (ts.isStringLiteral(node)) return [node.text];
+  if (ts.isConditionalExpression(node)) return [...literals(node.whenTrue), ...literals(node.whenFalse)];
+  if (ts.isParenthesizedExpression(node)) return literals(node.expression);
+  return [];
+}
+
 function stringsOf(node: ts.Expression | undefined, key: string): string[] {
   if (!node) return [];
   if (ts.isConditionalExpression(node)) return [...stringsOf(node.whenTrue, key), ...stringsOf(node.whenFalse, key)];
   if (ts.isParenthesizedExpression(node)) return stringsOf(node.expression, key);
   if (!ts.isObjectLiteralExpression(node)) return [];
   for (const property of node.properties) {
-    if (ts.isPropertyAssignment(property) && ts.isIdentifier(property.name) && property.name.text === key && ts.isStringLiteral(property.initializer)) {
-      return [property.initializer.text];
+    if (ts.isPropertyAssignment(property) && ts.isIdentifier(property.name) && property.name.text === key) {
+      return literals(property.initializer);
     }
   }
   return [];
 }
 
-/** Inside the gate itself or the context's forwarding arrow: not a site (the census rule). */
+/** Inside the gate itself, or the context's forwarding arrow: not a site. */
 function insideTheGate(node: ts.Node): boolean {
   for (let current = node.parent; current; current = current.parent) {
     if ((ts.isPropertyAssignment(current) || ts.isMethodDeclaration(current)) && ts.isIdentifier(current.name) &&
-      (current.name.text === 'updateState' || current.name.text === '_updateSessionState')) {
+      ['updateState', '_updateSessionState', 'writeSessionState'].includes(current.name.text)) {
       return true;
     }
   }
   return false;
 }
 
-/** Every state write in src/session, by the parser. */
-function scan(): Found[] {
-  const found: Found[] = [];
-  for (const file of sourceFiles(SESSION_DIR, (f) => f.endsWith('.ts'))) {
-    const relative = path.relative(SESSION_DIR, file).split(path.sep).join('/');
-    const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
-    const lineOf = (node: ts.Node) => source.getLineAndCharacterOfPosition(node.getStart()).line + 1;
-    const visit = (node: ts.Node): void => {
-      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
-        const name = node.expression.name.text;
-        const receiver = node.expression.expression.getText(source);
-        if ((name === 'updateState' && receiver === 'this.ctx' || name === '_updateSessionState' && receiver === 'this') && !insideTheGate(node)) {
-          const write = node.arguments[2];
-          const sites = stringsOf(write, 'site');
-          found.push({ file: relative, line: lineOf(node), kind: 'gate', site: sites[0], events: stringsOf(write, 'event') });
-          expect(new Set(sites).size, `${relative}:${lineOf(node)} names one site`).toBeLessThanOrEqual(1);
-        } else if (name === 'note' && receiver.endsWith('stateShadow')) {
-          const write = node.arguments[1];
-          found.push({
-            file: relative,
-            line: lineOf(node),
-            kind: node.arguments.length > 2 ? 'direct' : 'note',
-            site: stringsOf(write, 'site')[0],
-            events: stringsOf(write, 'event')
-          });
-        } else if (name === 'noteReplacement' && receiver.endsWith('stateShadow')) {
-          const site = node.arguments[1];
-          found.push({ file: relative, line: lineOf(node), kind: 'replacement', site: site && ts.isStringLiteral(site) ? site.text : undefined, events: ['replace'] });
-        }
-      }
-      ts.forEachChild(node, visit);
-    };
-    visit(source);
-  }
-  return found;
+/** An object literal with a `state` key, written as `state: …` or shorthand `state`. */
+function hasStateKey(node: ts.Expression | undefined): boolean {
+  return node !== undefined && ts.isObjectLiteralExpression(node) && node.properties.some((property) =>
+    (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) &&
+    ts.isIdentifier(property.name) && property.name.text === 'state');
 }
 
-/** `.state =` assignments in src/session on a receiver other than `this`, the store's own write aside. */
-function directStateWrites(): string[] {
-  const out: string[] = [];
-  for (const file of sourceFiles(SESSION_DIR, (f) => f.endsWith('.ts') && !f.endsWith('session-store.ts'))) {
-    const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
-    const visit = (node: ts.Node): void => {
-      if (
-        ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-        ts.isPropertyAccessExpression(node.left) && node.left.name.text === 'state' &&
-        node.left.expression.kind !== ts.SyntaxKind.ThisKeyword
-      ) {
-        out.push(`${path.relative(SESSION_DIR, file).split(path.sep).join('/')}:${source.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);
+interface Scan {
+  found: Found[];
+  /** `update`/`updateSession` calls carrying a `state` key. */
+  patches: string[];
+  /** `.state =` assignments on a receiver other than `this`. */
+  assignments: string[];
+}
+
+/** Every state write in one source text, by the parser. */
+function scanSource(relative: string, text: string): Scan {
+  const scan: Scan = { found: [], patches: [], assignments: [] };
+  const source = ts.createSourceFile(relative, text, ts.ScriptTarget.Latest, true);
+  const lineOf = (node: ts.Node) => source.getLineAndCharacterOfPosition(node.getStart()).line + 1;
+  const where = (node: ts.Node) => `${relative}:${lineOf(node)}`;
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+      const name = node.expression.name.text;
+      const receiver = node.expression.expression.getText(source);
+      if ((name === 'updateState' || name === '_updateSessionState') && !insideTheGate(node)) {
+        const write = node.arguments[2];
+        scan.found.push({ file: relative, line: lineOf(node), kind: 'gate', site: stringsOf(write, 'site')[0], events: stringsOf(write, 'event') });
+      } else if ((name === 'update' || name === 'updateSession') && node.arguments.some((argument) => hasStateKey(argument))) {
+        scan.patches.push(where(node));
+      } else if (name === 'note' && receiver.endsWith('stateShadow')) {
+        const write = node.arguments[1];
+        scan.found.push({
+          file: relative,
+          line: lineOf(node),
+          kind: node.arguments.length > 2 ? 'direct' : 'note',
+          site: stringsOf(write, 'site')[0],
+          events: stringsOf(write, 'event')
+        });
+      } else if (name === 'noteReplacement' && receiver.endsWith('stateShadow')) {
+        const site = node.arguments[1];
+        scan.found.push({ file: relative, line: lineOf(node), kind: 'replacement', site: site && ts.isStringLiteral(site) ? site.text : undefined, events: ['replace'] });
       }
-      ts.forEachChild(node, visit);
-    };
-    visit(source);
+    }
+    if (
+      ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isPropertyAccessExpression(node.left) && node.left.name.text === 'state' &&
+      node.left.expression.kind !== ts.SyntaxKind.ThisKeyword
+    ) {
+      scan.assignments.push(where(node));
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return scan;
+}
+
+/** Every state write in src/session; the store's own module aside for assignments and patches. */
+function scan(): Scan {
+  const all: Scan = { found: [], patches: [], assignments: [] };
+  for (const file of sourceFiles(SESSION_DIR, (f) => f.endsWith('.ts'))) {
+    const relative = path.relative(SESSION_DIR, file).split(path.sep).join('/');
+    const one = scanSource(relative, readFileSync(file, 'utf8'));
+    all.found.push(...one.found.filter((f) => relative !== 'session-store.ts' || f.kind !== 'gate'));
+    if (relative !== 'session-store.ts') {
+      all.patches.push(...one.patches);
+      all.assignments.push(...one.assignments);
+    }
   }
-  return out;
+  return all;
 }
 
 describe('the state-writing sites', () => {
-  const found = scan();
+  const { found, patches, assignments } = scan();
 
   it('every gate call names a site and an event', () => {
     const unnamed = found.filter((f) => f.site === undefined || f.events.length === 0);
@@ -199,11 +235,24 @@ describe('the state-writing sites', () => {
     expect(Object.keys(EVENT_OF_SITE).filter((site) => !used.has(site))).toEqual([]);
   });
 
-  it('29 gate calls and one direct assignment write the state: the count of writers does not rise', () => {
+  it('29 gate calls and one direct assignment write the state, and no patch carries a state: the count of writers does not rise', () => {
     expect(found.filter((f) => f.kind === 'gate')).toHaveLength(29);
-    const direct = directStateWrites();
-    expect(direct).toHaveLength(1);
-    expect(direct[0]).toMatch(/^execution\/execution-controller\.ts:\d+$/);
+    expect(assignments).toHaveLength(1);
+    expect(assignments[0]).toMatch(/^execution\/execution-controller\.ts:\d+$/);
+    expect(patches).toEqual([]);
+  });
+
+  it('the scan sees each shape it claims to: any receiver, the store outside the gate, a state patch, a direct assignment', () => {
+    const probe = scanSource('probe.ts', [
+      'function helper(ctx: any, s: any) { ctx.updateState(s, "running", { site: "x", event: "resume" }); }',
+      'class A { other(this: any, s: any) { this.sessionStore.updateState(s.id, "running"); }',
+      '  writeSessionState(this: any, s: any) { this.sessionStore.updateState(s.id, "running"); } }',
+      'function patch(store: any, id: string, state: string) { store.update(id, { state }); store.updateSession(id, { state: "x" }); store.update(id, { other: 1 }); }',
+      'function assign(s: any) { s.state = "paused"; }'
+    ].join('\n'));
+    expect(probe.found.map((f) => `${f.line} ${f.site ?? '(no site)'}`)).toEqual(['1 x', '2 (no site)']);
+    expect(probe.patches).toEqual(['probe.ts:4', 'probe.ts:4']);
+    expect(probe.assignments).toEqual(['probe.ts:5']);
   });
 
   it('the test mark is used by no production file, and by the listed test files only', () => {
