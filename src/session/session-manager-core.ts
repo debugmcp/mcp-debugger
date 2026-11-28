@@ -42,6 +42,7 @@ import { isChildProxyView } from '../proxy/child-proxy-view.js';
 import { maxChildSessions, MAX_CHILD_SESSIONS_ENV } from './child-session-cap.js';
 import { connectionBehaviorOf } from './connection-behavior.js';
 import { rootOfTree, runFactsOf } from './run-facts.js';
+import { releaseAttachedTarget, type TargetRelease } from './attach/target-release.js';
 import { IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
 import type { BreakpointSyncResult, FunctionBreakpointSyncResult } from '../proxy/dap-proxy-interfaces.js';
 import { CHILD_RELEASE_COMMAND } from '../proxy/dap-proxy-interfaces.js';
@@ -383,6 +384,25 @@ export interface CloseSessionOutcome {
    * detach (issue #1148): why. Neither `released` nor `processEnded` is set.
    */
   releaseUnconfirmed?: string;
+}
+
+/** What a close did to the program its session borrowed, as the close answer states it. */
+interface BorrowedProgramFate {
+  released: boolean;
+  processEnded: boolean;
+  unconfirmed?: string;
+}
+
+/** The close answer's reading of the release it sent (issue #1325). */
+function fateOfRelease(release: TargetRelease): BorrowedProgramFate {
+  switch (release.fate) {
+    case 'released':
+      return { released: true, processEnded: false };
+    case 'program-ended':
+      return { released: false, processEnded: true };
+    case 'unconfirmed':
+      return { released: false, processEnded: false, unconfirmed: release.reason };
+  }
 }
 
 /**
@@ -1086,7 +1106,26 @@ export abstract class SessionManagerCore extends EventEmitter {
    * program's exit, otherwise not confirmed, with why. No proxy means the
    * program was already gone from this session: nothing is claimed.
    */
-  private borrowedProgramFate(proxy: IProxyManager | undefined): { released: boolean; processEnded: boolean; unconfirmed?: string } {
+  /**
+   * An attach root's close outcome (issue #1325): the release this close
+   * sent, when it sent one; but an unconfirmed release whose worker then
+   * detached by itself (the request never reached it, or it was already
+   * shutting down) answers from that detach, when it was acknowledged.
+   */
+  private fateOfClose(release: TargetRelease | undefined, proxy: IProxyManager | undefined): BorrowedProgramFate {
+    if (!release) {
+      return this.borrowedProgramFate(proxy);
+    }
+    if (release.fate === 'unconfirmed') {
+      const own = this.borrowedProgramFate(proxy);
+      if (own.released || own.processEnded) {
+        return own;
+      }
+    }
+    return fateOfRelease(release);
+  }
+
+  private borrowedProgramFate(proxy: IProxyManager | undefined): BorrowedProgramFate {
     if (!proxy) {
       return { released: false, processEnded: false };
     }
@@ -1113,8 +1152,16 @@ export abstract class SessionManagerCore extends EventEmitter {
    * whether its process was ended (the policy's `closeChild` pin: debugpy
    * terminates it) or released; for an attach root, that every descendant was
    * detached with its target kept running, as the root's own target is.
+   *
+   * `releaseBeforeStop` (close_debug_session, issue #1325): an attach root's
+   * target is released with the request and bound detach_from_process uses
+   * before the worker is stopped. Without it (the server's exit, the idle
+   * policy) the worker's own close-time detach releases it, under its 1 s cap.
    */
-  async closeSessionReporting(sessionId: string, options: { terminateDebuggee?: boolean } = {}): Promise<CloseSessionOutcome> {
+  async closeSessionReporting(
+    sessionId: string,
+    options: { terminateDebuggee?: boolean; releaseBeforeStop?: boolean } = {}
+  ): Promise<CloseSessionOutcome> {
     const session = this.sessionStore.get(sessionId);
     if (!session) {
       this.logger.warn(`[SESSION_CLOSE_FAIL] Session not found: ${sessionId}`);
@@ -1156,15 +1203,26 @@ export abstract class SessionManagerCore extends EventEmitter {
         }
       }
       // A borrowed program (issue #1148): what this close did to it is what
-      // the worker saw the adapter do with the detaching disconnect, read
-      // once the worker has gone. A root with no live program has nothing
-      // for this close to release; a child answers from its own semantics.
+      // the worker saw the adapter do with the detaching disconnect. A root
+      // with no live program has nothing for this close to release; a child
+      // answers from its own semantics.
       const borrowedRoot =
         !session.parentSessionId && releaseDescendants && session.proxyManager?.isRunning() ? session.proxyManager : undefined;
+      // close_debug_session releases an attached target the way
+      // detach_from_process does, with the same request and bound, before
+      // the worker is stopped (issue #1325): the worker's own close-time
+      // detach gives the adapter 1 s and then closes the connection, and an
+      // adapter that belongs to the target and answers only once the target
+      // is free ends itself when its client leaves first. Only once the
+      // attach has completed; before that the worker's detach still runs.
+      const release = options.releaseBeforeStop && borrowedRoot &&
+        (session.state === SessionState.RUNNING || session.state === SessionState.PAUSED)
+        ? await releaseAttachedTarget(borrowedRoot, this.logger)
+        : undefined;
       const closed = await this.closeSingleSession(sessionId, { releaseChild: childEnd === 'release' });
-      const fate = session.parentSessionId
+      const fate: BorrowedProgramFate = session.parentSessionId
         ? { released: released === true, processEnded: childEnd === 'terminate' }
-        : this.borrowedProgramFate(borrowedRoot);
+        : this.fateOfClose(release, borrowedRoot);
       if (closed) {
         closedSessionIds.push(sessionId);
         if (fate.released) {

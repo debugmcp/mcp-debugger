@@ -111,6 +111,15 @@ const ATTACH_FORM_WORDS: Record<AttachForm, string> = {
 const describeAttachForms = (accepted: readonly AttachForm[]): string =>
   accepted.map((form) => ATTACH_FORM_WORDS[form]).join(' or ');
 
+/**
+ * What an unconfirmed release can have done, after the connection to the
+ * adapter was closed (issue #1325): an adapter that belongs to the target can
+ * end itself when its client leaves before it has replied.
+ */
+const RELEASE_UNCONFIRMED_CONSEQUENCE =
+  'if the adapter belongs to the target (it was listening before this session attached), the target\'s debug port ' +
+  'may have closed with it. Whether the process is still running is not known';
+
 export const ErrorMessages = {
   /**
    * Error message for DAP request timeouts
@@ -1012,24 +1021,32 @@ export const ErrorMessages = {
   /**
    * The detach answer when nothing acknowledged the detach (issue #1148)
    * Occurs when: the detaching disconnect was neither answered nor followed
-   * by `terminated` within its bound, or the worker reported nothing. The
-   * adapter is stopped all the same; what that did to the target is not
-   * something the server saw. It used to answer "process still running".
+   * by `terminated` within its bound (`no answer within 10000 ms`), or the
+   * worker reported nothing. The worker is stopped all the same, which
+   * closes its connection to the adapter; what that did to the target is
+   * not something the server saw. An adapter that belongs to the target can
+   * end itself when its client leaves before it has replied, taking the
+   * target's debug port with it (issue #1325), so the answer says that may
+   * have happened. It used to answer "process still running".
    * Used in: src/session/attach/attach-controller.ts
    * @param reason - Why there is no acknowledgement
    * @param look - What a look at the target's pid showed, for a pid attach
    */
   detachUnconfirmed: (reason: string, look?: string) =>
-    `Detached, but the debug adapter did not confirm it (${reason}). The debugger was stopped anyway; ` +
-    `whether the process is still running is not known${look ? `: ${look}` : ''}`,
+    `Detached, but the debug adapter did not confirm the release (${reason}). The debugger was stopped anyway, ` +
+    `and its connection to the adapter was closed: ${RELEASE_UNCONFIRMED_CONSEQUENCE}${look ? `: ${look}` : ''}`,
 
   /**
    * The close answer's warning when the detach of a borrowed program was not acknowledged (issue #1148)
+   * Occurs when: as detachUnconfirmed, for close_debug_session on an attach
+   * session (its release is the same request under the same bound, issue
+   * #1325), or for the worker's own close-time detach where that one ran.
    * Used in: src/server/handlers/session-tools.ts
    * @param reason - Why there is no acknowledgement
    */
   closeReleaseUnconfirmed: (reason: string) =>
-    `The debug adapter did not confirm that it released the process (${reason}); whether the process is still running is not known`,
+    `The debug adapter did not confirm that it released the process (${reason}). ` +
+    `The connection to the adapter was closed: ${RELEASE_UNCONFIRMED_CONSEQUENCE}`,
 
   /**
    * Refusal of a plain detach on a session that launched its program (issue #1151)

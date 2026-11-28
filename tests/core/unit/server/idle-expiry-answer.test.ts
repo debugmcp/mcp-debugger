@@ -107,8 +107,11 @@ describe('what an agent sees of the idle policy (issue #1025, step 2)', () => {
         expect(describeIdleExpiry(record({ outcome: 'released' }))).toContain(' The process it was attached to was released and keeps running. ');
         expect(describeIdleExpiry(record({ outcome: 'closed' }))).toContain(' It had no running program by then. ');
         // Issue #1148: an attached process whose detach nothing acknowledged is not called released, or ended.
+        // Issue #1325: and the connection to the adapter was closed, which can have closed the target's debug port.
         expect(describeIdleExpiry(record({ outcome: 'unconfirmed' }))).toContain(
-          ' The debug adapter did not confirm that it released the process it was attached to, so whether that process is still running is not known. '
+          ' The debug adapter did not confirm that it released the process it was attached to, so whether that process is still running is not known;' +
+          ' the connection to the adapter was closed, and if the adapter belonged to the target (it was listening before the session attached),' +
+          " the target's debug port may have closed with it. "
         );
       });
 

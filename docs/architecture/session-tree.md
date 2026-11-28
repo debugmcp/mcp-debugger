@@ -257,10 +257,13 @@ Two measured effects the answers name:
   answer says `released: true` when the adapter acknowledged the root's detach (issue #1148:
   the worker reports what the adapter did with the detaching disconnect; unacknowledged, the
   answer carries a `warning` and no `released`). This cascade uses the initiating root operation's preserve-target
-  policy, not the termination rule for an explicit child close above. It preserves today's worker
+  policy, not the termination rule for an explicit child close above. `close_debug_session`
+  detaches the root with the release `detach_from_process` sends (`src/session/attach/target-release.ts`,
+  same request, same 10 s bound, issue #1325) before the worker is stopped; the worker's own
   auto-detach on attach-mode close (`handleTerminate` and `performShutdown` in
-  `src/proxy/dap-proxy-worker.ts`). Worker/adapter cleanup must not escalate to killing the
-  external targets.
+  `src/proxy/dap-proxy-worker.ts`, 1 s cap) remains for the closes that do not go through it: a
+  close while the attach is still being made, the server's exit, and the idle policy.
+  Worker/adapter cleanup must not escalate to killing the external targets.
 - A session that ended stays listed until it is closed, as today, so an agent can still read a
   child's `programEnd` and its output. Closing the parent removes its ended children with it.
 - `detach_from_process` on an attach root with children cascades as a detach: every child is

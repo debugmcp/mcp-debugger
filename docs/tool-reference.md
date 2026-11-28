@@ -166,15 +166,31 @@ A session with child sessions, a child session or an attach root says what the c
   child's close terminates it, exit 0 reported to its parent).
 - `released: true` when the named session borrowed its program (an attach) and the debug adapter
   acknowledged the detach (issue #1148): its descendants are detached with their targets kept
-  running, deepest first, their rows removed, then the root is detached. When the adapter did not
-  acknowledge it within the worker's 1 s bound there is no `released`, and `warning` reads `The
-  debug adapter did not confirm that it released the process (<why>); whether the process is still
-  running is not known`; `processEnded: true` instead when the adapter reported that the program
-  exited. A session whose program was already gone, or one that launched its program, carries none
-  of the three. It used to be `released: true` for every attach root, whatever the adapter did. Also
-  when the named session is a JavaScript child: js-debug cannot end a target it adopted, so the
-  close disconnects with the process kept running and it finishes undebugged (a root's close
-  releases its JavaScript children the same way, counted in `childrenClosed`).
+  running, deepest first, their rows removed, then the root is released with the same `disconnect`
+  and the same 10 s bound as [`detach_from_process`](#detach_from_process), before the session's
+  worker is stopped (issue #1325). The close therefore waits for the adapter's answer: milliseconds
+  on an idle target, and for an adapter that answers only once the target is free (debugpy), as
+  long as the target's busy call lasts, up to 10 s. When the adapter did not acknowledge it there is
+  no `released`, and `warning` reads `The debug adapter did not confirm that it released the
+  process (no answer within 10000 ms). The connection to the adapter was closed: if the adapter
+  belongs to the target (it was listening before this session attached), the target's debug port
+  may have closed with it. Whether the process is still running is not known` (with another reason
+  in the parentheses when the request failed otherwise); `processEnded: true` instead when the
+  adapter reported that the program exited. A session whose program was already gone, or one that
+  launched its program, carries none of the three. It used to be `released: true` for every attach
+  root, whatever the adapter did. Also when the named session is a JavaScript child: js-debug
+  cannot end a target it adopted, so the close disconnects with the process kept running and it
+  finishes undebugged (a root's close releases its JavaScript children the same way, counted in
+  `childrenClosed`).
+- **Why the close waits** (issue #1325): debugpy's `--listen` adapter belongs to the target (it is
+  started once and owns the target's debug port) and ends itself when its client closes the
+  connection before the reply to `disconnect` is written. The close used to give it 1 s, so closing
+  a session while the target was busy for longer closed the target's debug port for good. A target
+  busy for longer than the 10 s bound can still lose its port, on a close as on a detach; the rest
+  is tracked in #1325.
+- Closes that do not come from this tool still release through the worker's own detach, with its
+  1 s bound: a close while the attach is still being made, the closes the server makes as it exits,
+  and the idle policy's.
 
 **Notes:**
 - Sessions may close automatically on errors
@@ -1844,9 +1860,9 @@ Detaches the debugger from a process the session attached to, leaving the proces
 
 - `released: true`: the adapter acknowledged the detach, by answering the request or by sending `terminated` in reply to it (debugpy does the latter). The process was left running.
 - `processEnded: true`: the adapter reported that the program exited (`message`: `Detached from process: the debug adapter reported that the program had exited, so there is no process left running`).
-- Neither field, and a `warning` that carries the `message` (joined with the pre-detach resume's note when that resume was refused too): `Detached, but the debug adapter did not confirm it (<why>). The debugger was stopped anyway; whether the process is still running is not known`. The adapter did not acknowledge the detach within 10 s; it is stopped all the same, and what that did to the target is not something the server saw. `success` is still `true`: the session is ended either way. This used to answer `Detached from process (process still running)`, after 30 s.
+- Neither field, and a `warning` that carries the `message` (joined with the pre-detach resume's note when that resume was refused too): `Detached, but the debug adapter did not confirm the release (no answer within 10000 ms). The debugger was stopped anyway, and its connection to the adapter was closed: if the adapter belongs to the target (it was listening before this session attached), the target's debug port may have closed with it. Whether the process is still running is not known` (with another reason in the parentheses when the request failed otherwise). The adapter did not acknowledge the detach within 10 s; the worker is stopped all the same, and what that did to the target is not something the server saw. An adapter that belongs to the target can end itself when its client leaves before it has replied: debugpy's `--listen` adapter does, and the target's debug port closes for good with it (issue #1325; measured with a target that held its interpreter for 13 s). `success` is still `true`: the session is ended either way. This used to answer `Detached from process (process still running)`, after 30 s.
 
-The 10 s is sized by measurement: every attach-capable adapter acknowledges a detach in 0 to 15 ms, and the worker may first spend up to 2 s resuming a stopped CodeLLDB target.
+The 10 s is sized by measurement: every attach-capable adapter acknowledges a detach in 0 to 15 ms on an idle target, and the worker may first spend up to 2 s resuming a stopped CodeLLDB target. debugpy acknowledges it only once the target's interpreter is free: a detach during a 3 to 4 s hold answers when the hold ends. [`close_debug_session`](#close_debug_session) sends the same release under the same bound.
 
 **Notes:**
 
@@ -2084,7 +2100,7 @@ Session-lifecycle failures (unknown/terminated session, proxy not running) are a
 ```
 
 ### Common Error Scenarios
-1. **Session not found**: Occurs when a session terminates unexpectedly or was closed. A session the idle policy closed (`MCP_DEBUG_SESSION_IDLE_MS`, see `create_debug_session`) says so instead: `{ "success": false, "error": "Session … was closed by the idle policy at … Its program was ended. Create a new session to continue.", "closedBy": "idle-policy" }`. The sentence about the program is one of four: "Its program was ended." (a launched program the policy ended), "The process it was attached to was released and keeps running." (the debug adapter acknowledged the detach), "The debug adapter did not confirm that it released the process it was attached to, so whether that process is still running is not known." (it did not; issue #1148), or "It had no running program by then." (the session never launched, or its program was already over). An id created by another MCP client of the same process is found like any other; one outside the caller's scope (a future authenticated `http` mode; today every caller shares one scope) does not exist for that caller — every tool answers it exactly as it answers an id nobody holds (issue #1025)
+1. **Session not found**: Occurs when a session terminates unexpectedly or was closed. A session the idle policy closed (`MCP_DEBUG_SESSION_IDLE_MS`, see `create_debug_session`) says so instead: `{ "success": false, "error": "Session … was closed by the idle policy at … Its program was ended. Create a new session to continue.", "closedBy": "idle-policy" }`. The sentence about the program is one of four: "Its program was ended." (a launched program the policy ended), "The process it was attached to was released and keeps running." (the debug adapter acknowledged the detach), "The debug adapter did not confirm that it released the process it was attached to, so whether that process is still running is not known; the connection to the adapter was closed, and if the adapter belonged to the target (it was listening before the session attached), the target's debug port may have closed with it." (it did not; issues #1148, #1325), or "It had no running program by then." (the session never launched, or its program was already over). An id created by another MCP client of the same process is found like any other; one outside the caller's scope (a future authenticated `http` mode; today every caller shares one scope) does not exist for that caller — every tool answers it exactly as it answers an id nobody holds (issue #1025)
 2. **Invalid language**: Language must be one of the supported languages (discovered dynamically from installed adapters)
 3. **File not found**: When setting breakpoints in non-existent files
 4. **Invalid scope**: When passing wrong variablesReference to get_variables

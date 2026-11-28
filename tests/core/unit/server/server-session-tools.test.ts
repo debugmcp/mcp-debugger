@@ -290,9 +290,9 @@ describe('Server Session Tools Tests', () => {
       expect(announce).toHaveBeenCalledTimes(3);
     });
 
-    it('says the release was not confirmed, and why, when nothing acknowledged the detach (issue #1148)', async () => {
+    it('says the release was not confirmed, why, and what closing the connection can have done (issues #1148, #1325)', async () => {
       mockSessionManager.closeSessionReporting.mockResolvedValue({
-        closed: true, closedSessionIds: ['test-session'], releaseUnconfirmed: 'DAP disconnect request timed out after 1000ms'
+        closed: true, closedSessionIds: ['test-session'], releaseUnconfirmed: 'no answer within 10000 ms'
       });
 
       const result = await callToolHandler({
@@ -303,9 +303,21 @@ describe('Server Session Tools Tests', () => {
       expect(JSON.parse(result.content[0].text)).toEqual({
         success: true,
         message: 'Closed debug session: test-session',
-        warning: 'The debug adapter did not confirm that it released the process (DAP disconnect request timed out after 1000ms); ' +
-          'whether the process is still running is not known'
+        warning: 'The debug adapter did not confirm that it released the process (no answer within 10000 ms). ' +
+          'The connection to the adapter was closed: if the adapter belongs to the target (it was listening before this ' +
+          "session attached), the target's debug port may have closed with it. Whether the process is still running is not known"
       });
+    });
+
+    it('releases an attached target before the worker is stopped: the close asks for it (issue #1325)', async () => {
+      mockSessionManager.closeSessionReporting.mockResolvedValue({ closed: true, closedSessionIds: ['test-session'] });
+
+      await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'close_debug_session', arguments: { sessionId: 'test-session' } }
+      });
+
+      expect(mockSessionManager.closeSessionReporting).toHaveBeenCalledWith('test-session', { releaseBeforeStop: true });
     });
 
     it('says processEnded when the close ended a child process', async () => {

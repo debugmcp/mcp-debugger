@@ -85,7 +85,7 @@ const OUTCOME_SENTENCE: Record<IdleExpiryRecord['outcome'], string> = {
   ended: 'Its program was ended.',
   released: 'The process it was attached to was released and keeps running.',
   closed: 'It had no running program by then.',
-  unconfirmed: 'The debug adapter did not confirm that it released the process it was attached to, so whether that process is still running is not known.'
+  unconfirmed: 'The debug adapter did not confirm that it released the process it was attached to, so whether that process is still running is not known; the connection to the adapter was closed, and if the adapter belonged to the target (it was listening before the session attached), the target\'s debug port may have closed with it.'
 };
 
 /** How many expiry records the core keeps; the oldest go first. */

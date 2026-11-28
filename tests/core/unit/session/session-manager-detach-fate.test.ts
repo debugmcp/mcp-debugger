@@ -14,6 +14,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
+import { noAnswerWithin } from '../../../../src/session/attach/target-release.js';
 import { DebugLanguage, SessionState, JsDebugAdapterPolicy, MockAdapterPolicy } from '@debugmcp/shared';
 import { createMockDependencies } from './session-manager-test-utils.js';
 import { ErrorMessages } from '../../../../src/utils/error-messages.js';
@@ -202,10 +203,24 @@ describe('SessionManager - the fate of a borrowed program (issue #1148)', () => 
       expect(detached).toMatchObject({ success: true, state: SessionState.STOPPED });
       expect(detached.data?.released).toBeUndefined();
       expect(detached.data?.processEnded).toBeUndefined();
-      expect(detached.data?.message).toBe(ErrorMessages.detachUnconfirmed(failure));
-      expect(detached.data?.warning).toBe(ErrorMessages.detachUnconfirmed(failure));
+      // A timeout is stated as the bound that expired (issue #1325).
+      expect(detached.data?.message).toBe(ErrorMessages.detachUnconfirmed(noAnswerWithin(10_000)));
+      expect(detached.data?.warning).toBe(ErrorMessages.detachUnconfirmed(noAnswerWithin(10_000)));
       expect(detached.data?.message).toMatch(/not known/);
       expect(detached.data?.message).not.toContain('(process still running)');
+    });
+
+    it('says what closing the connection can have done to the target when the release was not confirmed (issue #1325)', async () => {
+      const sessionId = await borrowedSession();
+      vi.spyOn(dependencies.mockProxyManager, 'sendDapRequest').mockRejectedValueOnce(new Error("Request 'disconnect' timed out after 10s"));
+
+      const detached = await sessionManager.detachFromProcess(sessionId);
+
+      expect(detached.data?.message).toBe(
+        'Detached, but the debug adapter did not confirm the release (no answer within 10000 ms). The debugger was stopped ' +
+        'anyway, and its connection to the adapter was closed: if the adapter belongs to the target (it was listening ' +
+        "before this session attached), the target's debug port may have closed with it. Whether the process is still running is not known"
+      );
     });
 
     it('reads a missing report as not confirmed when the request failed, and as acknowledged when it was answered', async () => {
@@ -351,6 +366,140 @@ describe('SessionManager - the fate of a borrowed program (issue #1148)', () => 
       const outcome = await sessionManager.closeSessionReporting(session.id);
 
       expect(outcome).toEqual({ closed: true, closedSessionIds: [session.id] });
+    });
+  });
+
+  // Issue #1325: close_debug_session used to leave the release to the
+  // worker's shutdown, which gives the adapter 1 s and then closes the
+  // connection; an adapter that belongs to the target and answers only once
+  // the target is free ends itself when its client leaves first. The tool's
+  // close now sends the release detach_from_process sends, before the worker
+  // is stopped. The closes above (the server's exit, the idle policy) keep
+  // the worker's own detach.
+  describe("close_debug_session's own release (issue #1325)", () => {
+    const close = (sessionId: string) => sessionManager.closeSessionReporting(sessionId, { releaseBeforeStop: true });
+    /** Make the release request itself fail, the way a worker answers a detach that got no answer. */
+    const failRelease = (message: string): void => {
+      dependencies.mockProxyManager.setDapRequestHandler(async (command) => {
+        if (command === 'disconnect') {
+          throw new Error(message);
+        }
+        return { success: true };
+      });
+    };
+
+    it('sends the request and bound detach_from_process uses, before the worker is stopped', async () => {
+      const sessionId = await borrowedSession();
+      const mock = dependencies.mockProxyManager;
+      let stopsWhenReleased: number | undefined;
+      mock.setDapRequestHandler(async (command) => {
+        if (command === 'disconnect') {
+          stopsWhenReleased = mock.stopCalls;
+        }
+        return { success: true };
+      });
+
+      const outcome = await close(sessionId);
+
+      expect(mock.dapRequestCalls.filter((call) => call.command === 'disconnect')).toEqual([
+        { command: 'disconnect', args: { terminateDebuggee: false }, options: { timeoutMs: 10_000 } }
+      ]);
+      expect(stopsWhenReleased).toBe(0);
+      expect(mock.stopCalls).toBe(1);
+      expect(outcome).toEqual({ closed: true, closedSessionIds: [sessionId], releasedSessionIds: [sessionId], released: true });
+    });
+
+    it('says released when the adapter acknowledged it by terminated in reply', async () => {
+      const sessionId = await borrowedSession();
+      dependencies.mockProxyManager.detachResult = { trigger: 'detach', acknowledged: true, by: 'terminated' };
+      failRelease('DAP client disconnected');
+
+      const outcome = await close(sessionId);
+
+      expect(outcome.released).toBe(true);
+    });
+
+    it('states an expired bound as the bound, and does not say released', async () => {
+      const sessionId = await borrowedSession();
+      const timeout = "Request 'disconnect' timed out after 10s";
+      dependencies.mockProxyManager.detachResult = { trigger: 'detach', acknowledged: false, error: timeout };
+      failRelease(timeout);
+
+      const outcome = await close(sessionId);
+
+      expect(outcome).toEqual({ closed: true, closedSessionIds: [sessionId], releaseUnconfirmed: 'no answer within 10000 ms' });
+    });
+
+    it('states the bound when the request timed out before any report of it came (measured order)', async () => {
+      // The worker's request tracker answers the timeout first; its report of
+      // the detach can come after the close has read it, or not at all.
+      const sessionId = await borrowedSession();
+      dependencies.mockProxyManager.reportsDetachOnStop = false;
+      failRelease("Request 'disconnect' timed out after 10s");
+
+      const outcome = await close(sessionId);
+
+      expect(outcome).toEqual({ closed: true, closedSessionIds: [sessionId], releaseUnconfirmed: 'no answer within 10000 ms' });
+    });
+
+    it('carries any other failure as it came', async () => {
+      const sessionId = await borrowedSession();
+      dependencies.mockProxyManager.detachResult = { trigger: 'detach', acknowledged: false, error: 'the adapter refused' };
+      failRelease('the adapter refused');
+
+      const outcome = await close(sessionId);
+
+      expect(outcome.releaseUnconfirmed).toBe('the adapter refused');
+      expect(outcome.released).toBeUndefined();
+    });
+
+    it('says the program ended when the adapter reported its exit', async () => {
+      const sessionId = await borrowedSession();
+      dependencies.mockProxyManager.detachResult = { trigger: 'detach', acknowledged: true, by: 'response', debuggeeExited: true };
+
+      const outcome = await close(sessionId);
+
+      expect(outcome).toEqual({ closed: true, closedSessionIds: [sessionId], processEnded: true });
+    });
+
+    it("falls back to the worker's own detach when the release never reached the worker", async () => {
+      // The proxy refused the request before the worker saw it: the worker's
+      // shutdown detaches by itself, and its report is the close's answer.
+      const sessionId = await borrowedSession();
+      failRelease('Proxy not initialized');
+
+      const outcome = await close(sessionId);
+
+      expect(outcome).toEqual({ closed: true, closedSessionIds: [sessionId], releasedSessionIds: [sessionId], released: true });
+    });
+
+    it('leaves the release to the worker while the attach is still being made', async () => {
+      const sessionId = await borrowedSession();
+      sessionManager.getSession(sessionId)!.state = SessionState.INITIALIZING;
+
+      const outcome = await close(sessionId);
+
+      expect(dependencies.mockProxyManager.dapRequestCalls.some((call) => call.command === 'disconnect')).toBe(false);
+      expect(outcome.released).toBe(true);
+    });
+
+    it('sends no release for a program the session launched', async () => {
+      const session = await sessionManager.createSession({ language: DebugLanguage.MOCK, executablePath: 'python' });
+      const started = sessionManager.startDebugging(session.id, 'test.py', [], { stopOnEntry: false });
+      await vi.runAllTimersAsync();
+      await started;
+
+      const outcome = await close(session.id);
+
+      expect(outcome).toEqual({ closed: true, closedSessionIds: [session.id] });
+      expect(dependencies.mockProxyManager.dapRequestCalls.some((call) => call.command === 'disconnect')).toBe(false);
+    });
+
+    it("leaves the server's exit and the idle policy on the worker's own detach", async () => {
+      const exiting = await borrowedSession();
+      await sessionManager.closeAllSessions();
+      expect(sessionManager.getSession(exiting)).toBeUndefined();
+      expect(dependencies.mockProxyManager.dapRequestCalls.some((call) => call.command === 'disconnect')).toBe(false);
     });
   });
 });

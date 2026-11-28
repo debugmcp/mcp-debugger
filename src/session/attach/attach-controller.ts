@@ -36,6 +36,7 @@ import { describeStopLocation, landingFields } from '../inspection/stop-location
 import { composeStopSnapshot } from '../inspection/stop-snapshot.js';
 import type { PauseCoordinator } from '../execution/pause-coordinator.js';
 import { refuseChildSession, type InFlightGuard } from '../in-flight-guard.js';
+import { releaseAttachedTarget } from './target-release.js';
 
 /** The attach_to_process arguments as the session layer receives them. */
 export interface AttachRequest {
@@ -60,17 +61,6 @@ export interface AttachRequest {
 function observedAttachStopThread(session: ManagedSession): number | undefined {
   return session.state === SessionState.PAUSED ? session.lastStop?.threadId : undefined;
 }
-
-/**
- * How long a detach waits for the adapter to acknowledge it (issue #1148).
- * Sized by measurement: every attach-capable adapter answers a detaching
- * disconnect in 0 to 15 ms (413 ms at most across a day of launch-mode
- * runs), and the worker may spend up to 2 s on the resume it sends ahead of
- * one. When it expires the adapter is stopped anyway and the answer says
- * the detach was not confirmed. It used to wait the full request timeout,
- * 30 s, and then answer "process still running".
- */
-export const DETACH_ACKNOWLEDGEMENT_TIMEOUT_MS = 10_000;
 
 export class AttachController {
   constructor(
@@ -685,32 +675,17 @@ export class AttachController {
         // attach mode the worker resumes a stopped target ahead of it where
         // the policy asks (issue #763: CodeLLDB on Windows kills a target
         // detached right after a step) and reports the outcome as the
-        // 'pre_detach_resume' status, read back below for the result.
-        let disconnectFailure: string | undefined;
-        try {
-          await proxyManager.sendDapRequest('disconnect', {
-            terminateDebuggee: false
-          }, { timeoutMs: DETACH_ACKNOWLEDGEMENT_TIMEOUT_MS });
-        } catch (disconnectError) {
-          disconnectFailure = disconnectError instanceof Error ? disconnectError.message : String(disconnectError);
-          this.ctx.logger.warn(`[SessionManager] Disconnect request failed, continuing with cleanup:`, disconnectError);
-        }
-        // What the adapter did with it (issue #1148), as the worker saw it:
-        // the request's own failure says nothing when `terminated` came in
-        // reply (debugpy). With no report, the request's outcome stands.
-        // Only a report of this request: a worker shutting down by itself
-        // (the adapter sent `terminated` unasked) reports its own disconnect,
-        // which says nothing about a detach that arrived as it went.
-        const reported = proxyManager.getDetachResult();
-        const report = reported?.trigger === 'detach' ? reported : undefined;
-        if (report?.debuggeeExited) {
+        // 'pre_detach_resume' status, read back below for the result. What
+        // the adapter did with it (issue #1148) is the worker's report: the
+        // request's own failure says nothing when `terminated` came in reply.
+        // The same release close_debug_session sends (issue #1325).
+        const release = await releaseAttachedTarget(proxyManager, this.ctx.logger);
+        if (release.fate === 'program-ended') {
           fate = { message: ErrorMessages.detachProgramEnded(), processEnded: true };
-        } else if (report ? report.acknowledged : disconnectFailure === undefined) {
+        } else if (release.fate === 'released') {
           fate = { message: ErrorMessages.detachReleased(), released: true };
         } else {
-          const unconfirmed = ErrorMessages.detachUnconfirmed(
-            report?.error ?? disconnectFailure ?? 'the debug adapter did not answer the detach'
-          );
+          const unconfirmed = ErrorMessages.detachUnconfirmed(release.reason);
           fate = { message: unconfirmed, warning: unconfirmed };
         }
 
