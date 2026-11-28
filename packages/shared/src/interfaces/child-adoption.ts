@@ -50,10 +50,12 @@ export interface ChildAdoptionContract {
    */
   childOutput: 'own-connection' | 'launch-session';
   /**
-   * What closing a child's own connection with `terminateDebuggee: true`
-   * does to its process, the close a child of a launched tree gets: debugpy
-   * terminates it; js-debug can only release it to run undebugged. A child
-   * of an attached tree is always released, whatever this says (issue #1343).
+   * What closing a child's own connection can do to its process: debugpy
+   * terminates it on `disconnect { terminateDebuggee: true }`; js-debug can
+   * only release it to run undebugged, so its connection is closed with
+   * `terminateDebuggee: false`. A child of a launched tree is closed by this
+   * pin; a child of an attached tree is always released, whatever it says
+   * (issue #1343).
    */
   closeChild: 'terminate' | 'release';
   /** Local attaches with child debugging enabled change the target beyond detach. */

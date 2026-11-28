@@ -13,11 +13,15 @@
  *
  * The target says it is ready on its own output, never through a connection
  * to its debug port (a session-less connection makes debugpy's adapter exit).
- * It runs until the test stops it, with a 10-minute backstop of its own.
+ * The released child keeps running, waiting, until the test creates its go
+ * file, so no assertion depends on how long the server took to answer. Both
+ * processes run until the test stops them, and each bounds its own life with
+ * a 10-minute backstop armed when it starts (an aborted run leaves neither).
  */
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'node:path';
 import os from 'node:os';
+import fs from 'node:fs';
 import net from 'node:net';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -30,11 +34,11 @@ const treeDir = path.resolve(currentDirName, '../../../fixtures/python/subproces
 const parentScript = path.join(treeDir, 'attach_service_parent.py');
 const childScript = path.join(treeDir, 'child_steps.py');
 /** `print("parent attached", ...)` in attach_service_parent.py: before the child starts. */
-const PARENT_BREAKPOINT_LINE = 25;
+const PARENT_BREAKPOINT_LINE = 36;
 /** `return count + 1  # TICK` in attach_service_parent.py: reached every 50 ms once the child has ended. */
-const TICK_LINE = 19;
+const TICK_LINE = 29;
 /** `total += i  # BREAKPOINT` in child_steps.py. */
-const CHILD_BREAKPOINT_LINE = 14;
+const CHILD_BREAKPOINT_LINE = 27;
 const PYTHON =
   process.env.PYTHON_PATH ??
   process.env.PYTHON_EXECUTABLE ??
@@ -91,6 +95,10 @@ interface Target {
   exited: Promise<number | null>;
   /** The child process the target started, once the server reported it: stopped with the target. */
   childPid?: number;
+  /** The file the child waits for after its first step; created by the test to let it finish. */
+  goFile: string;
+  /** The directory that holds it, removed when the target is stopped. */
+  dir: string;
 }
 
 const PORT_IN_USE_PATTERN = /Address already in use|EADDRINUSE|10048/i;
@@ -127,6 +135,7 @@ describe('Closing a child session of an attached Python tree (issue #1343) @requ
       }
       await Promise.race([target.exited, new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000))]);
     }
+    fs.rmSync(target.dir, { recursive: true, force: true });
   }
 
   async function stopAllTargets(): Promise<void> {
@@ -185,7 +194,9 @@ describe('Closing a child session of an attached Python tree (issue #1343) @requ
 
   async function startTargetOnce(): Promise<Target> {
     const port = await getAttachPort();
-    const proc = spawn(PYTHON, ['-m', 'debugpy', '--listen', `127.0.0.1:${port}`, parentScript], {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-debugger-1343-'));
+    const goFile = path.join(dir, 'go');
+    const proc = spawn(PYTHON, ['-m', 'debugpy', '--listen', `127.0.0.1:${port}`, parentScript, goFile], {
       cwd: treeDir,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe']
@@ -193,7 +204,7 @@ describe('Closing a child session of an attached Python tree (issue #1343) @requ
     let buffer = '';
     // close also waits for the output pipes, so the assertions see the final lines.
     const exited = new Promise<number | null>((resolve) => proc.on('close', (code) => resolve(code)));
-    const target: Target = { proc, port, output: () => buffer, exited };
+    const target: Target = { proc, port, output: () => buffer, exited, goFile, dir };
     // Registered before readiness, so afterEach also stops a target that failed to start.
     targets.push(target);
     await new Promise<void>((resolve, reject) => {
@@ -281,9 +292,11 @@ describe('Closing a child session of an attached Python tree (issue #1343) @requ
       expect(closed.processEnded, JSON.stringify(closed)).toBeUndefined();
       expect(closed.warning, JSON.stringify(closed)).toBeUndefined();
 
-      // The child runs on: alive after the answer, then it finishes its work
-      // and exits 0 on its own, and its parent says so.
+      // The child runs on: it waits for its go file after its first step, so
+      // it is alive however long the answer took. Told to finish, it does its
+      // remaining steps and exits 0 on its own, and its parent says so.
       expect(isAlive(childPid)).toBe(true);
+      fs.writeFileSync(target.goFile, 'go');
       await targetPrinted(target, 'child done 3', 20000);
       await targetPrinted(target, 'parent child exit 0', 20000);
 

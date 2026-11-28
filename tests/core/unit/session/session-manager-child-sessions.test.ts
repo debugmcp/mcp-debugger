@@ -981,11 +981,13 @@ describe('SessionManager child sessions (issue #1081)', () => {
   // adapter's close semantics (debugpy: terminate), so close_debug_session
   // ended a process this server did not start and said processEnded.
   describe('closing a child of an attached tree (issue #1343)', () => {
-    async function tree(attached: boolean) {
+    type RunShape = { attachMode: boolean; programOwnership: 'borrowed' } | undefined;
+    /** attach_to_process: an attach that borrows its program. */
+    const ATTACHED: RunShape = { attachMode: true, programOwnership: 'borrowed' };
+    async function tree(run: RunShape) {
       const rootId = await startRoot();
-      if (attached) {
-        sessionManager.getSession(rootId)!.run.attachMode = true;
-        sessionManager.getSession(rootId)!.run.programOwnership = 'borrowed';
+      if (run) {
+        Object.assign(sessionManager.getSession(rootId)!.run, run);
       }
       dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
       await vi.runAllTimersAsync();
@@ -1000,8 +1002,14 @@ describe('SessionManager child sessions (issue #1081)', () => {
     const disconnects = (view: { dapRequestCalls: Array<{ command: string }> }) =>
       view.dapRequestCalls.filter((call) => call.command === 'disconnect');
 
-    it('releases the named child and its descendants, and says released: each connection is closed with terminateDebuggee false', async () => {
-      const { rootId, childId, grandchildId, childView, grandchildView } = await tree(true);
+    // What decides is the program's ownership on the run record (borrowsProgram),
+    // not attachMode: attach-shaped launch arguments borrow a program with
+    // attachMode false, and its children are no more this server's.
+    it.each([
+      ['attached by attach_to_process', ATTACHED],
+      ['borrowed by attach-shaped launch arguments, attachMode false', { attachMode: false, programOwnership: 'borrowed' }]
+    ] as const)('releases the named child and its descendants, and says released: each connection is closed with terminateDebuggee false (%s)', async (_shape, run) => {
+      const { rootId, childId, grandchildId, childView, grandchildView } = await tree(run);
 
       const outcome = await sessionManager.closeDebugSession(childId);
 
@@ -1022,7 +1030,7 @@ describe('SessionManager child sessions (issue #1081)', () => {
     });
 
     it('claims neither released nor processEnded for a child whose process had already ended', async () => {
-      const { childId, grandchildView, childView } = await tree(true);
+      const { childId, grandchildView, childView } = await tree(ATTACHED);
       grandchildView.simulateEvent('terminated');
       childView.simulateEvent('terminated');
       await vi.runAllTimersAsync();
@@ -1062,7 +1070,7 @@ describe('SessionManager child sessions (issue #1081)', () => {
     });
 
     it('leaves a launched tree as it was: closing a child by name ends it and its descendants, and says processEnded', async () => {
-      const { childId, grandchildId, childView, grandchildView } = await tree(false);
+      const { childId, grandchildId, childView, grandchildView } = await tree(undefined);
 
       const outcome = await sessionManager.closeDebugSession(childId);
 
