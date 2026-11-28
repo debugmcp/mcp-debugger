@@ -246,12 +246,19 @@ Two measured effects the answers name:
 - Closing a **launch root** ends the whole process tree (Python spike, row 6; JavaScript spike,
   row 6: only the root's `disconnect` ends a js-debug tree, and it never answers, so the worker's
   timeout-then-tree-kill stays).
-- Explicitly closing a **child** uses the adapter's measured child-close semantics for its selected
-  subtree: debugpy terminates it (exit 0 reported to its parent, Python spike, row 4); js-debug
-  cannot end a child it adopted and releases it to run undebugged (JavaScript spike, row 3). The
-  named child's answer says which (`processEnded: true` / `released: true`), and neither when
-  stopping the child failed: the answer then carries that failure as its `warning` (issue #1325).
-  Closing a non-root subtree never shuts down the shared worker or adapter.
+- Explicitly closing a **child** follows how its tree was started, which is the run record's and
+  the same for every session of the tree (issue #1343). In a **launched** tree it uses the adapter's
+  measured child-close semantics for its selected subtree: debugpy terminates it (exit 0 reported
+  to its parent, Python spike, row 4); js-debug cannot end a child it adopted and releases it to
+  run undebugged (JavaScript spike, row 3). In an **attached** tree the child and its descendants
+  are released, deepest first, with `disconnect(terminateDebuggee: false)` on each connection, as
+  the root's close releases them: debugpy resumes the child and it runs undebugged (Python spike,
+  row 3). The server did not start those processes, so no close of one of its sessions ends them;
+  `detach_from_process { terminateProcess: true }` on the root does. The named child's answer says
+  which (`processEnded: true` / `released: true`), and neither when stopping the child failed: the
+  answer then carries that failure as its `warning` (issue #1325). A child's `released` and
+  `processEnded` are read from the request the close sent, not yet from the adapter's answer to
+  it (issue #1350). Closing a non-root subtree never shuts down the shared worker or adapter.
 - Closing or idle-reaping an **attach root** preserves the external targets: every descendant is
   detached deepest-first with `disconnect(terminateDebuggee: false)` and the adapter's existing
   resume-before-detach policy, then the root is detached. All selected rows are removed and the
@@ -563,10 +570,10 @@ the builder's; the members are the design):
   attach-then-detach of #501, and never `success: false` (that parks the child forever);
 - **output attribution**: whether the child's connection carries the child's own output (debugpy
   with `redirectOutput: true`; js-debug: never);
-- **end semantics**: what an explicit `close_debug_session` on a child does to the process
-  (debugpy: terminates it; js-debug: releases it); an attach-root close/reap instead cascades its
-  preserve-target policy through every descendant; whether the launch root's `disconnect` answers
-  (js-debug: no);
+- **end semantics**: what an explicit `close_debug_session` on a child of a launched tree does to
+  the process (debugpy: terminates it; js-debug: releases it); in an attached tree every close,
+  of the root or of a child, instead applies the preserve-target policy to every session it closes
+  (issue #1343); whether the launch root's `disconnect` answers (js-debug: no);
 - the existing `childRoutedCommands`, `mirrorBreakpointsToChild`, `pauseAfterChildAttach`,
   `childInitTimeout` and `isChildReadyEvent` keep their roles for the program's own target.
 
@@ -591,7 +598,8 @@ One row per measured fact; the "answer" column is what this design adds on top o
 |---|---|---|---|
 | child exits while the parent is paused | child `terminated`; the parent, once continued, sees the exit and ends normally (row 1) | same (row 1) | the child row goes `stopped`; the parent's wait still reports the paused parent (rule 1), with the ended child in `children`; after the parent resumes, the child's end alone does not complete that wait (rule 4) |
 | parent exits with a child live | the parent's `exited` is held until the child ends (inherited stdout pipe, #993); the child stays debuggable (row 2) | the program's exit kills unreported children within 300 ms (row 2) and ends an adopted, paused child at the same moment — its `terminated` arrives with the parent's exit, no exit code (measured in M2) | Python: the parent row stays `running` and its wait reports the child; the child row carries `parentSessionId` of a parent that is gone when it finally ends. js-debug: the child row goes `stopped` with no exit code and the root ends with its own; every adopted child stays listed and follows its own terminal events |
-| explicit `close_debug_session` on a child | `disconnect(terminateDebuggee: true)`: the child ends, exit 0 reported to the parent (row 4) | `disconnect` with either flag leaves the child running (row 3) | its descendants closed deepest-first, then the child; `processEnded: true` / `released: true`; ancestors, siblings and the shared worker stay open |
+| explicit `close_debug_session` on a child of a launched tree | `disconnect(terminateDebuggee: true)`: the child ends, exit 0 reported to the parent (row 4) | `disconnect` with either flag leaves the child running (row 3) | its descendants closed deepest-first, then the child; `processEnded: true` / `released: true`; ancestors, siblings and the shared worker stay open |
+| explicit `close_debug_session` on a child of an attached tree (issue #1343) | `disconnect(terminateDebuggee: false)`: the child resumes and runs undebugged (row 3) | same (row 3) | its descendants released deepest-first, then the child; `released: true`; ancestors, siblings and the shared worker stay open |
 | `close_debug_session` on a launch root | `disconnect(terminateDebuggee: true)` on the root ends the tree (row 6) | only the root's `disconnect` ends the tree, and it never answers (row 6); `terminate` or `disconnect` on a program or child session leave the processes alive (rows 4–5) | children closed deepest-first, then the root; the worker's timeout-then-tree-kill stays the backstop |
 | close or idle expiry of an attach root | `disconnect(terminateDebuggee: false)` releases each child (row 3) | each child keeps running (row 3) | detach descendants deepest-first, then the root; preserve external targets and remove the tree's rows; `released: true`; no target-killing escalation |
 | `detach_from_process` on an attach root with children | each child's `disconnect(terminateDebuggee: false)` resumes it undebugged (row 3) | each child keeps running (row 3) | children detached deepest-first (`released: true`), then the parent; the parent-side order with several children is measured by the M1 suite |

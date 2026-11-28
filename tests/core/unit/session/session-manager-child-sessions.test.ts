@@ -976,6 +976,102 @@ describe('SessionManager child sessions (issue #1081)', () => {
     });
   });
 
+  // Issue #1343: how a tree was started is its run record's, shared by every
+  // session of it. A named child of an attached tree used to take its
+  // adapter's close semantics (debugpy: terminate), so close_debug_session
+  // ended a process this server did not start and said processEnded.
+  describe('closing a child of an attached tree (issue #1343)', () => {
+    async function tree(attached: boolean) {
+      const rootId = await startRoot();
+      if (attached) {
+        sessionManager.getSession(rootId)!.run.attachMode = true;
+        sessionManager.getSession(rootId)!.run.programOwnership = 'borrowed';
+      }
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+      await vi.runAllTimersAsync();
+      const childId = childOf(rootId)!.id;
+      const childView = dependencies.mockProxyManager.childViews.get(childId)!;
+      childView.simulateEvent('child-reported', report('r2', 4343));
+      await vi.runAllTimersAsync();
+      const grandchildId = childOf(childId)!.id;
+      const grandchildView = dependencies.mockProxyManager.childViews.get(grandchildId)!;
+      return { rootId, childId, grandchildId, childView, grandchildView };
+    }
+    const disconnects = (view: { dapRequestCalls: Array<{ command: string }> }) =>
+      view.dapRequestCalls.filter((call) => call.command === 'disconnect');
+
+    it('releases the named child and its descendants, and says released: each connection is closed with terminateDebuggee false', async () => {
+      const { rootId, childId, grandchildId, childView, grandchildView } = await tree(true);
+
+      const outcome = await sessionManager.closeDebugSession(childId);
+
+      expect(outcome).toEqual({
+        closed: true,
+        closedSessionIds: [grandchildId, childId],
+        releasedSessionIds: [grandchildId, childId],
+        childrenClosed: 1,
+        released: true
+      });
+      expect(grandchildView.stopOptions).toEqual([{ terminateDebuggee: false }]);
+      expect(childView.stopOptions).toEqual([{ terminateDebuggee: false }]);
+      // The child's own connection close is its release: no root-style
+      // release goes out on it, and the root is not touched.
+      expect(disconnects(childView)).toEqual([]);
+      expect(disconnects(dependencies.mockProxyManager)).toEqual([]);
+      expect(sessionManager.getSession(rootId)?.state).toBe(SessionState.RUNNING);
+    });
+
+    it('claims neither released nor processEnded for a child whose process had already ended', async () => {
+      const { childId, grandchildView, childView } = await tree(true);
+      grandchildView.simulateEvent('terminated');
+      childView.simulateEvent('terminated');
+      await vi.runAllTimersAsync();
+      expect(sessionManager.getSession(childId)!.proxyManager).toBeUndefined();
+
+      const outcome = await sessionManager.closeSessionReporting(childId);
+
+      expect(outcome.closed).toBe(true);
+      expect(outcome.released).toBeUndefined();
+      expect(outcome.processEnded).toBeUndefined();
+    });
+
+    it.each([
+      ['attached', true, [{ terminateDebuggee: false }]],
+      ['launched', false, [undefined]]
+    ] as const)('a failed adoption closes the child it gives up on the way its tree closes children (%s tree)', async (_kind, attached, expected) => {
+      const rootId = await startRoot();
+      if (attached) {
+        sessionManager.getSession(rootId)!.run.attachMode = true;
+        sessionManager.getSession(rootId)!.run.programOwnership = 'borrowed';
+      }
+      const views: MockChildProxyView[] = [];
+      const originalCreate = dependencies.mockProxyManager.createChildView.bind(dependencies.mockProxyManager);
+      dependencies.mockProxyManager.createChildView = (id: string) => {
+        const view = originalCreate(id);
+        view.shouldFailAdopt = true;
+        views.push(view);
+        return view;
+      };
+
+      dependencies.mockProxyManager.simulateEvent('child-reported', report('r1'));
+      await vi.runAllTimersAsync();
+
+      expect(childOf(rootId)).toBeUndefined();
+      expect(views).toHaveLength(1);
+      expect(views[0].stopOptions).toEqual(expected);
+    });
+
+    it('leaves a launched tree as it was: closing a child by name ends it and its descendants, and says processEnded', async () => {
+      const { childId, grandchildId, childView, grandchildView } = await tree(false);
+
+      const outcome = await sessionManager.closeDebugSession(childId);
+
+      expect(outcome).toEqual({ closed: true, closedSessionIds: [grandchildId, childId], childrenClosed: 1, processEnded: true });
+      expect(grandchildView.stopOptions).toEqual([undefined]);
+      expect(childView.stopOptions).toEqual([undefined]);
+    });
+  });
+
   describe('the tree answers (issue #1081, the designed flow)', () => {
     it("a child released beyond the cap is counted on the parent's next wait answer as childrenReleased", async () => {
       build({ DEBUG_MCP_MAX_CHILD_SESSIONS: '0' });
