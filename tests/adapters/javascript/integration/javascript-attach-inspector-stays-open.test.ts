@@ -1,12 +1,12 @@
 /**
  * What an attach by processId leaves in a Node.js target, said, never undone
- * (issue #1261). The signal makes Node open its inspector, Node never closes
- * it, and this server closes none: the answers say so in one field,
- * `inspector`. With a real Node target and the built server, this pins:
+ * (issue #1261). This server closes no inspector, and the answers say what
+ * the attach observed in one field, `inspector`. With a real Node target and
+ * the built server, this pins:
  *
- *   1. an attach that opened it says so, with the address; the detach and the
- *      close say what one probe of that address sees; it is still listening,
- *      and the process runs on and serves;
+ *   1. an attach that saw the port refuse, signalled, and saw an inspector
+ *      answer says that, in that order; the detach and the close say what one
+ *      probe of that address sees; it still listens, and the process serves;
  *   2. one that was already open is said to be left as it was;
  *   3. an attach by port says nothing about it;
  *   4. two sessions on one target: neither one's end closes anything.
@@ -115,11 +115,14 @@ const call = (name: string, args: Record<string, unknown> = {}): Promise<Answer>
 const attachByPid = (target: Target): Promise<Answer> =>
   call('attach_to_process', { processId: target.pid, port: target.inspectPort, stopOnEntry: false, verifyTimeout: 20000 });
 
-const opened = (port: number) =>
-  `opened by this attach on 127.0.0.1:${port}; it stays open, unauthenticated, after this session ends, until the target restarts`;
-const stillListening = (port: number) =>
-  `still listening: 127.0.0.1:${port}, where this attach opened the inspector, still answers as one, unauthenticated; ` +
-  'this server does not close it, and restarting the target does';
+const signalled = (target: Target) =>
+  `signalled: 127.0.0.1:${target.inspectPort} refused this attach's first probe, this attach then signalled PID ${target.pid}, ` +
+  'and an inspector answered there after the signal, unauthenticated; this server does not close it';
+const listeningNow = (target: Target) =>
+  `listening: an inspector answers on 127.0.0.1:${target.inspectPort}, unauthenticated ` +
+  `(one answered there after this attach signalled PID ${target.pid}); this server does not close it`;
+const found = (target: Target) =>
+  `an inspector of PID ${target.pid} answered this attach's first probe on 127.0.0.1:${target.inspectPort}, so no signal was sent`;
 
 beforeEach(async () => {
   server = await startStdioClient({ name: 'js-attach-inspector-stays-open', callTimeoutMs: 60_000 });
@@ -134,21 +137,21 @@ afterEach(async () => {
 });
 
 describe('the inspector an attach by processId leaves in the target (issue #1261)', () => {
-  it('an attach that opened it says so; detach and close say it is still listening; nothing closes it', async () => {
+  it('an attach that signalled says what it saw; detach and close say it still listens; nothing closes it', async () => {
     const target = await startTarget('closed');
     await server.createSession('javascript', 'inspector-opened');
     expect(await listening(target.inspectPort)).toBe(false);
 
     const attached = await attachByPid(target);
     expect(attached.success, JSON.stringify(attached)).toBe(true);
-    expect(attached.inspector).toBe(opened(target.inspectPort));
+    expect(attached.inspector).toBe(signalled(target));
 
     const detached = await call('detach_from_process');
-    expect(detached.inspector).toBe(stillListening(target.inspectPort));
+    expect(detached.inspector).toBe(listeningNow(target));
     await expectOpenAndServing(target);
 
     const closed = await call('close_debug_session');
-    expect(closed.inspector).toBe(stillListening(target.inspectPort));
+    expect(closed.inspector).toBe(listeningNow(target));
     server.sessionId = undefined;
     await expectOpenAndServing(target);
   }, 120000);
@@ -159,10 +162,10 @@ describe('the inspector an attach by processId leaves in the target (issue #1261
 
     const attached = await attachByPid(target);
     expect(attached.success, JSON.stringify(attached)).toBe(true);
-    expect(attached.inspector).toBe(`already open on 127.0.0.1:${target.inspectPort} before this attach; left as it was`);
+    expect(attached.inspector).toBe(`already open: ${found(target)}; this server does not close it`);
 
     const detached = await call('detach_from_process');
-    expect(detached.inspector).toBe(`left as it was: it was already open on 127.0.0.1:${target.inspectPort} before this attach`);
+    expect(detached.inspector).toBe(`left as it was: ${found(target)}; this server does not close it`);
     await expectOpenAndServing(target);
   }, 120000);
 
@@ -180,12 +183,12 @@ describe('the inspector an attach by processId leaves in the target (issue #1261
   it('two sessions on one target: neither one\'s end closes anything under the other', async () => {
     const target = await startTarget('closed');
     const first = await server.createSession('javascript', 'inspector-first');
-    expect((await attachByPid(target)).inspector).toBe(opened(target.inspectPort));
+    expect((await attachByPid(target)).inspector).toBe(signalled(target));
 
     const second = await server.createSession('javascript', 'inspector-second');
-    expect((await attachByPid(target)).inspector).toBe(`already open on 127.0.0.1:${target.inspectPort} before this attach; left as it was`);
+    expect((await attachByPid(target)).inspector).toBe(`already open: ${found(target)}; this server does not close it`);
 
-    expect((await call('detach_from_process', { sessionId: first })).inspector).toBe(stillListening(target.inspectPort));
+    expect((await call('detach_from_process', { sessionId: first })).inspector).toBe(listeningNow(target));
     await expectOpenAndServing(target);
     // The second session still debugs.
     const paused = await call('pause_execution', { sessionId: second });

@@ -97,6 +97,24 @@ function invalid(message: string): AdapterError {
   return new AdapterError(`JavaScript attach: ${message}`, AdapterErrorCode.ENVIRONMENT_INVALID);
 }
 
+/**
+ * An activation that failed after it had signalled the process (issue
+ * #1261): its message says so, and the adapter reports what the attach left.
+ */
+export class SignalledActivationError extends AdapterError {
+  constructor(message: string, readonly pid: number, readonly host: string, readonly port: number) {
+    super(message, AdapterErrorCode.ENVIRONMENT_INVALID);
+    this.name = 'SignalledActivationError';
+  }
+}
+
+/** A target list entry is a Node inspector's when it names a Node target and its WebSocket address. */
+function isNodeTarget(target: unknown): target is InspectorTarget {
+  const t = target as InspectorTarget | null;
+  return typeof t === 'object' && t !== null && t.type === 'node' &&
+    typeof t.webSocketDebuggerUrl === 'string' && t.webSocketDebuggerUrl.length > 0;
+}
+
 function parsePid(raw: number | string): number {
   const text = String(raw).trim();
   const pid = typeof raw === 'number' ? raw : /^\d+$/.test(text) ? Number(text) : NaN;
@@ -306,7 +324,13 @@ export function probeInspector(host: string, port: number, timeoutMs = 1000): Pr
         try {
           const parsed: unknown = JSON.parse(body);
           if (Array.isArray(parsed)) {
-            finish({ status: 'inspector', targets: parsed as InspectorTarget[] });
+            // A Node inspector lists its target with a type and a WebSocket
+            // address, even with a client attached (issue #1261): a bare JSON
+            // array is some other HTTP server.
+            const targets = parsed.filter(isNodeTarget);
+            finish(targets.length > 0
+              ? { status: 'inspector', targets }
+              : { status: 'other', detail: `/json/list answered a list with no Node inspector target in it (${parsed.length} ${parsed.length === 1 ? 'entry' : 'entries'})` });
             return;
           }
         } catch {
@@ -382,7 +406,9 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
     }
     const other = owners.find((owner) => owner !== undefined && owner !== pid);
     if (other !== undefined) {
-      throw invalid(`${where} is already held by a Node inspector for a different process (PID ${other}: ${describeTargets(probe.targets)}); pass port if PID ${pid} listens elsewhere, or free the port`);
+      const held = `${where} is already held by a Node inspector for a different process (PID ${other}: ${describeTargets(probe.targets)})`;
+      // After the signal, the failure says the signal was sent (below).
+      throw afterSignal ? new Error(held) : invalid(`${held}; pass port if PID ${pid} listens elsewhere, or free the port`);
     }
     if (afterSignal) {
       // Closed before our signal, open right after it: PID pid's, even though
@@ -429,20 +455,27 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
     throw invalid(`could not activate the inspector of PID ${pid}: ${detail}${hint}`);
   }
 
-  const deadline = now() + deadlineMs;
-  for (;;) {
-    await sleep(pollMs);
-    const result = await classify(await listTargets(host, port), true);
-    if (result) return result;
-    if (now() >= deadline) {
-      // The signal was sent and can have opened an inspector elsewhere: said,
-      // not looked for (issue #1310), and nothing is closed (issue #1261).
-      throw invalid(
-        `PID ${pid} was signalled to open its inspector, but none appeared on ${where} within ${deadlineMs} ms` +
-          (lastTransient ? ` (last probe: ${lastTransient})` : '') +
-          `; one may now be open on another port (a target started with --inspect-port=<n> opens it there), ` +
-          `and this server closed nothing: restarting the target closes it (#1310). To attach to it, pass that port with processId`
-      );
+  // From here the signal has been sent: every failure says so, and that an
+  // inspector may now be open elsewhere, not looked for (issue #1310); this
+  // server closes none (issue #1261).
+  const signalled = (why: string): SignalledActivationError => new SignalledActivationError(
+    `JavaScript attach: PID ${pid} was signalled to open its inspector, but ${why}; ` +
+      `one may now be open on another port (a target started with --inspect-port=<n> opens it there), ` +
+      `and this server does not close it (#1310). To attach to it, pass that port with processId`,
+    pid, host, port
+  );
+  try {
+    const deadline = now() + deadlineMs;
+    for (;;) {
+      await sleep(pollMs);
+      const result = await classify(await listTargets(host, port), true);
+      if (result) return result;
+      if (now() >= deadline) {
+        throw signalled(`none appeared on ${where} within ${deadlineMs} ms` + (lastTransient ? ` (last probe: ${lastTransient})` : ''));
+      }
     }
+  } catch (err) {
+    if (err instanceof SignalledActivationError) throw err;
+    throw signalled(err instanceof Error ? err.message : String(err));
   }
 }

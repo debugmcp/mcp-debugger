@@ -207,8 +207,8 @@ describe('debuggee lifecycle tool handlers', () => {
   describe('what the attach left in the target, on the attach and detach answers (issue #1261)', () => {
     const footprint = (field = 'inspector') => ({
       field,
-      atAttach: 'opened by this attach on 127.0.0.1:9229; it stays open, unauthenticated, after this session ends, until the target restarts',
-      atEnd: vi.fn(async () => 'still listening: 127.0.0.1:9229, where this attach opened the inspector, still answers as one')
+      atAttach: 'signalled: an inspector answers on 127.0.0.1:9229 now; this server leaves it open when this session ends',
+      atEnd: vi.fn(async () => 'listening: an inspector answers on 127.0.0.1:9229')
     });
 
     it('attach says what the attach did, in one top-level field named for it, and a failed attach the same', async () => {
@@ -242,7 +242,7 @@ describe('debuggee lifecycle tool handlers', () => {
       });
       const payload = JSON.parse((await detachFromProcessTool(ctx, { sessionId: 'test-session' }, 'detach_from_process')).content[0].text);
 
-      expect(payload).toMatchObject({ success: true, released: true, inspector: 'still listening: 127.0.0.1:9229, where this attach opened the inspector, still answers as one' });
+      expect(payload).toMatchObject({ success: true, released: true, inspector: 'listening: an inspector answers on 127.0.0.1:9229' });
       expect(payload.data).not.toHaveProperty('attachFootprint');
       expect(left.atEnd).toHaveBeenCalledTimes(1);
     });
@@ -253,7 +253,7 @@ describe('debuggee lifecycle tool handlers', () => {
           success: true, state: 'stopped', data: { message: 'released', attachFootprint: footprint(field) }
         });
         const payload = JSON.parse((await detachFromProcessTool(ctx, { sessionId: 'test-session' }, 'detach_from_process')).content[0].text);
-        expect(payload).toMatchObject({ message: 'released', attachFootprint: 'still listening: 127.0.0.1:9229, where this attach opened the inspector, still answers as one' });
+        expect(payload).toMatchObject({ message: 'released', attachFootprint: 'listening: an inspector answers on 127.0.0.1:9229' });
       }
     });
   });

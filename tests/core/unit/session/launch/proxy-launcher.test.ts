@@ -113,7 +113,7 @@ function makeHarness(options: HarnessOptions = {}): Harness {
 
 /** What an adapter hands over after an attach transform that left something in its target (issue #1261). */
 function fakeFootprint(): AttachFootprint {
-  return { field: 'inspector', atAttach: 'opened by this attach', atEnd: vi.fn(async () => 'still listening') };
+  return { field: 'inspector', atAttach: 'signalled', atEnd: vi.fn(async () => 'listening') };
 }
 
 describe('ProxyLauncher.prepareLaunchInputs', () => {

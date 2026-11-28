@@ -291,12 +291,12 @@ describe('Server Session Tools Tests', () => {
     });
 
     it('says what is seen of what the closed root\'s attach left in its target, the field detach carries (issue #1261)', async () => {
-      const atEnd = vi.fn(async () => 'no longer listening: 127.0.0.1:9229, where this attach opened the inspector, no longer accepts connections');
+      const atEnd = vi.fn(async () => 'not listening: 127.0.0.1:9229 no longer accepts connections');
       mockSessionManager.closeSessionReporting.mockResolvedValue({
         closed: true,
         closedSessionIds: ['test-session'],
         released: true,
-        attachFootprint: { field: 'inspector', atAttach: 'opened by this attach on 127.0.0.1:9229', atEnd }
+        attachFootprint: { field: 'inspector', atAttach: 'signalled: an inspector answers on 127.0.0.1:9229 now', atEnd }
       });
 
       const result = await callToolHandler({
@@ -308,7 +308,7 @@ describe('Server Session Tools Tests', () => {
         success: true,
         message: 'Closed debug session: test-session',
         released: true,
-        inspector: 'no longer listening: 127.0.0.1:9229, where this attach opened the inspector, no longer accepts connections'
+        inspector: 'not listening: 127.0.0.1:9229 no longer accepts connections'
       });
       expect(atEnd).toHaveBeenCalledTimes(1);
     });

@@ -595,7 +595,7 @@ describe('hot_reload and attach stopOnEntry tests', () => {
         state: 'running',
         data: {
           message: 'Attached to process PID 4242',
-          attachFootprint: { field: 'inspector', atAttach: 'opened by this attach on 127.0.0.1:9229', atEnd: async () => 'unused' }
+          attachFootprint: { field: 'inspector', atAttach: 'signalled: an inspector answers on 127.0.0.1:9229 now', atEnd: async () => 'unused' }
         }
       });
 
@@ -605,7 +605,7 @@ describe('hot_reload and attach stopOnEntry tests', () => {
       });
 
       const payload = JSON.parse(result.content[0].text);
-      expect(payload.inspector).toBe('opened by this attach on 127.0.0.1:9229');
+      expect(payload.inspector).toBe('signalled: an inspector answers on 127.0.0.1:9229 now');
       expect(payload.data).toEqual({ message: 'Attached to process PID 4242' });
     });
   });

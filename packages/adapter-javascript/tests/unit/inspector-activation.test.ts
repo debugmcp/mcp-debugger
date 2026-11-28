@@ -16,6 +16,7 @@ import {
   isNodeProcessByPid,
   pidViaInspector,
   probeInspector,
+  SignalledActivationError,
   type InspectorActivationOptions,
   type InspectorProbe,
   type InspectorTarget
@@ -184,10 +185,30 @@ describe('activateInspector (issue #871)', () => {
     expect(signal).not.toHaveBeenCalled();
   });
 
-  it('refuses when a different process grabs the port after the signal', async () => {
-    const { options } = harness({ probes: [closed, inspector('node[31337]')] });
+  // The review's construction (issue #1261): the target opens its inspector on its own
+  // --inspect-port when signalled, and another process takes the expected port meanwhile.
+  it('a different process on the port after the signal fails as a signalled attach, saying so', async () => {
+    const { options, signal } = harness({ probes: [closed, inspector('node[31337]')] });
     const err = await failure(activateInspector(options));
-    expect(err.message).toMatch(/different process \(PID 31337: node\[31337\]\)/);
+    expect(signal).toHaveBeenCalledWith(4242);
+    expect(err).toBeInstanceOf(SignalledActivationError);
+    expect(err.message).toBe(
+      'JavaScript attach: PID 4242 was signalled to open its inspector, but 127.0.0.1:9229 is already held by a Node inspector ' +
+        'for a different process (PID 31337: node[31337]); one may now be open on another port (a target started with ' +
+        '--inspect-port=<n> opens it there), and this server does not close it (#1310). To attach to it, pass that port with processId'
+    );
+    expect(err).toMatchObject({ pid: 4242, host: '127.0.0.1', port: 9229 });
+  });
+
+  it('any other failure after the signal is a signalled one too; one before it is not', async () => {
+    const thrown = harness({ probes: [closed, inspector('server.js')], pidOf: async () => { throw new Error('read ECONNRESET'); } });
+    // The pre-signal probe sees the port closed, so the ownership read only runs after the signal.
+    const err = await failure(activateInspector(thrown.options));
+    expect(err).toBeInstanceOf(SignalledActivationError);
+    expect(err.message).toMatch(/^JavaScript attach: PID 4242 was signalled to open its inspector, but read ECONNRESET; /);
+
+    const before = await failure(activateInspector(harness({ probes: [inspector('node[31337]')] }).options));
+    expect(before).not.toBeInstanceOf(SignalledActivationError);
   });
 
   it('never signals a PID that is not a Node.js process on POSIX (SIGUSR1 would terminate it)', async () => {
@@ -230,10 +251,11 @@ describe('activateInspector (issue #871)', () => {
   it('gives up when no inspector opens on the port before the deadline, saying the signal was sent and nothing was closed (#1261, #1310)', async () => {
     const { options, listTargets } = harness({ probes: [closed], deadlineMs: 350, pollMs: 100 });
     const err = await failure(activateInspector(options));
+    expect(err).toBeInstanceOf(SignalledActivationError);
     expect(err.message).toBe(
       'JavaScript attach: PID 4242 was signalled to open its inspector, but none appeared on 127.0.0.1:9229 within 350 ms; ' +
         'one may now be open on another port (a target started with --inspect-port=<n> opens it there), ' +
-        'and this server closed nothing: restarting the target closes it (#1310). To attach to it, pass that port with processId'
+        'and this server does not close it (#1310). To attach to it, pass that port with processId'
     );
     // the pre-signal probe, then one per poll until the clock passes the deadline
     expect(listTargets.mock.calls.length).toBeGreaterThanOrEqual(3);
@@ -275,11 +297,14 @@ describe('probeInspector (the real /json/list probe)', () => {
     const srv = await serve((req, res) => {
       expect(req.url).toBe('/json/list');
       res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify([{ id: 'abc', title: 'node[777]', type: 'node', url: 'file://' }]));
+      res.end(JSON.stringify([{ id: 'abc', title: 'node[777]', type: 'node', url: 'file://', webSocketDebuggerUrl: 'ws://127.0.0.1:9229/abc' }]));
     });
     try {
       const probe = await probeInspector('127.0.0.1', srv.port, 1000);
-      expect(probe).toEqual({ status: 'inspector', targets: [{ id: 'abc', title: 'node[777]', type: 'node', url: 'file://' }] });
+      expect(probe).toEqual({
+        status: 'inspector',
+        targets: [{ id: 'abc', title: 'node[777]', type: 'node', url: 'file://', webSocketDebuggerUrl: 'ws://127.0.0.1:9229/abc' }]
+      });
     } finally {
       await srv.close();
     }
@@ -291,6 +316,30 @@ describe('probeInspector (the real /json/list probe)', () => {
       const probe = await probeInspector('127.0.0.1', srv.port, 1000);
       expect(probe.status).toBe('other');
       expect((probe as { detail: string }).detail).toMatch(/404/);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  // The review's construction (issue #1261): an ordinary HTTP server on the port answers a JSON array.
+  it.each([
+    [[], '/json/list answered a list with no Node inspector target in it (0 entries)'],
+    [[{ id: 'x', title: 'app', type: 'page', webSocketDebuggerUrl: 'ws://127.0.0.1/x' }], '/json/list answered a list with no Node inspector target in it (1 entry)'],
+    [[{ id: 'x', title: 'node[1]', type: 'node' }, { name: 'thing' }], '/json/list answered a list with no Node inspector target in it (2 entries)']
+  ])('an HTTP server whose /json/list is not a Node inspector\'s target list is "other": %j', async (list, detail) => {
+    const srv = await serve((_req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(list)); });
+    try {
+      expect(await probeInspector('127.0.0.1', srv.port, 1000)).toEqual({ status: 'other', detail });
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it('keeps only the Node targets of a list that has one', async () => {
+    const node = { id: 'n', title: 'server.js', type: 'node', webSocketDebuggerUrl: 'ws://127.0.0.1:9229/n' };
+    const srv = await serve((_req, res) => { res.end(JSON.stringify([{ id: 'p', type: 'page' }, node])); });
+    try {
+      expect(await probeInspector('127.0.0.1', srv.port, 1000)).toEqual({ status: 'inspector', targets: [node] });
     } finally {
       await srv.close();
     }

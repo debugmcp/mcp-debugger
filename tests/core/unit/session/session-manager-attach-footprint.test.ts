@@ -10,7 +10,7 @@ import { SessionManager, SessionManagerConfig } from '../../../../src/session/se
 import { createMockDependencies } from './session-manager-test-utils.js';
 
 function fakeFootprint(): AttachFootprint {
-  return { field: 'inspector', atAttach: 'opened by this attach on 127.0.0.1:9229', atEnd: vi.fn(async () => 'still listening') };
+  return { field: 'inspector', atAttach: 'signalled: an inspector answers on 127.0.0.1:9229 now', atEnd: vi.fn(async () => 'listening') };
 }
 
 describe('SessionManager - what an attach left in its target (issue #1261)', () => {

@@ -50,9 +50,10 @@ import { resolveLaunchEnvironment } from './utils/launch-environment.js';
 import {
   activateInspector,
   type InspectorActivationOptions,
-  type InspectorActivationResult
+  type InspectorActivationResult,
+  SignalledActivationError
 } from './utils/inspector-activation.js';
-import { inspectorFootprint } from './utils/inspector-footprint.js';
+import { inspectorFootprint, signalledFootprint } from './utils/inspector-footprint.js';
 
 /**
  * Base path js-debug uses to resolve source-map `sources` on attach (issue
@@ -206,7 +207,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     return diagnostics;
   }
 
-  /** The inspector the last attach by processId opened or found (issue #1261), until the session layer drains it. */
+  /** What the last attach by processId observed of the inspector, signalled or found (issue #1261), until the session layer drains it. */
   private attachFootprint: AttachFootprint | undefined;
 
   consumeAttachFootprint(): AttachFootprint | undefined {
@@ -997,15 +998,24 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
 
     const byPid = processId !== undefined && processId !== null && processId !== '';
     if (byPid) {
-      const activated = await this.activateInspector({
-        pid: processId as number | string,
-        host: attachHost,
-        port: attachPort
-      });
+      let activated: InspectorActivationResult;
+      try {
+        activated = await this.activateInspector({
+          pid: processId as number | string,
+          host: attachHost,
+          port: attachPort
+        });
+      } catch (error) {
+        // A failure after the signal still says the process was signalled (issue #1261).
+        if (error instanceof SignalledActivationError) {
+          this.attachFootprint = signalledFootprint(error);
+        }
+        throw error;
+      }
       attachHost = activated.host;
       attachPort = activated.port;
-      // The inspector stays open after the session ends: the answers say so (issue #1261).
-      this.attachFootprint = inspectorFootprint(activated);
+      // What the attach observed of the inspector, which this server does not close (issue #1261).
+      this.attachFootprint = inspectorFootprint({ ...activated, pid: Number(String(processId).trim()) });
       this.dependencies.logger.info(
         `[JavascriptDebugAdapter] ${activated.alreadyActive ? 'Found' : 'Activated'} the inspector of PID ${processId} ` +
           `on ${attachHost}:${attachPort} (${activated.title})`

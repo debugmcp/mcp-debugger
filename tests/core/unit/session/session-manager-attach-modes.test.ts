@@ -1170,8 +1170,8 @@ describe('SessionManagerOperations attach modes', () => {
     function adapterLeaving() {
       const footprint: AttachFootprint = {
         field: 'inspector',
-        atAttach: 'opened by this attach on 127.0.0.1:9229; it stays open, unauthenticated, after this session ends, until the target restarts',
-        atEnd: vi.fn(async () => 'still listening')
+        atAttach: 'signalled: an inspector answers on 127.0.0.1:9229 now; this server leaves it open when this session ends',
+        atEnd: vi.fn(async () => 'listening')
       };
       const adapter = Object.assign(makeDirectConnectRubyAdapter(), { consumeAttachFootprint: vi.fn(() => footprint) });
       return { adapter, footprint };
@@ -1196,6 +1196,23 @@ describe('SessionManagerOperations attach modes', () => {
       const result = await operations.attachToProcess('test-session', { port: 12345, stopOnEntry: false, verifyTimeout: 30 });
 
       expect(result).toMatchObject({ success: false, state: SessionState.ERROR });
+      expect(result.data?.attachFootprint).toBe(footprint);
+    });
+
+    // The review's construction, through the launcher: an activation that signalled and then failed throws from the
+    // attach transform, and the footprint the adapter left must still reach the failed answer.
+    it('a transform that fails after it left a footprint still hands it to the failed attach answer', async () => {
+      const { adapter, footprint } = adapterLeaving();
+      Object.assign(adapter, {
+        transformAttachConfig: vi.fn(async () => { throw new Error('JavaScript attach: PID 4242 was signalled to open its inspector, but none appeared'); })
+      });
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapter);
+
+      const result = await operations.attachToProcess('test-session', { processId: 4242, stopOnEntry: false });
+
+      expect(result).toMatchObject({ success: false });
+      expect(result.error).toMatch(/was signalled to open its inspector/);
+      expect(adapter.consumeAttachFootprint).toHaveBeenCalledTimes(1);
       expect(result.data?.attachFootprint).toBe(footprint);
     });
 
