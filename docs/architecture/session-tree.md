@@ -503,7 +503,9 @@ A child is a session of its own, and what is read about it is read where it is t
   (`subProcess: false` on Python launch, `autoAttachChildProcesses: false` on JavaScript
   launch/attach, or `'adapter-default'` when the JavaScript adapter itself left it off on an
   attach) so end summaries and unbound warnings qualify that any child processes would
-  not be debugged.
+  not be debugged, and `deliveredStepFilterHints` (issue #1328) whenever a returned stop answer
+  carries a `describeStepInFilter` hint so each distinct hint is delivered once per run across the
+  tree.
   One thing does not follow: the notes of the root's launch are seeded into
   the root's output only. The record is mutated in place and not replaced per run, so a child
   row that outlives its run reads what its root reads; the readers that are new to children

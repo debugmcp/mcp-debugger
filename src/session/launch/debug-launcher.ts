@@ -508,6 +508,7 @@ export class DebugLauncher {
     // The previous launch's debugger-off decision does not carry over
     // (issue #749); this attempt decides again below.
     session.run.launchDebuggerOff = undefined;
+    session.run.deliveredStepFilterHints = undefined;
     this.ctx.logger.info(`[SessionManager] Session ${sessionId} lifecycle state set to ACTIVE`);
 
     // Record the launch spec for restart_debugging BEFORE attempting the
@@ -1154,6 +1155,7 @@ export class DebugLauncher {
         error: `The adapter refused the restart request: ${message}`
       };
     }
+    session.run.deliveredStepFilterHints = undefined;
 
     const readiness = await waitForLaunchReadiness(this.ctx, {
       sessionId,

@@ -723,11 +723,11 @@ export interface AdapterPolicy {
    * (issues #1184, #1328: Python debugpy's `justMyCode`, JavaScript's
    * `skipFiles` + `smartStep`, netcoredbg's `enableStepFiltering` for
    * properties and operators, and CodeLLDB's Rust `std`/`core`/`alloc`
-   * step-avoid regexp). Appended to the step landing's `note` when `step_into`
-   * completes in the starting function without stopping inside a called
-   * function; worded conditionally so it remains true whether or not the line
-   * contained a call. Optional — absent or undefined adds nothing beyond the
-   * core "The step did not stop inside a called function." disclosure.
+   * step-avoid regexp). Appended at most once per run (keyed by hint text on
+   * `session.run`) to the step landing's `note` when `step_into` stops in the
+   * starting function at the same visible call-stack depth; worded conditionally
+   * so it remains true whether or not the line contained a call. Optional —
+   * absent or undefined adds nothing beyond the core positional sentence.
    */
   describeStepInFilter?(info: StepInFilterContext): string | undefined;
 

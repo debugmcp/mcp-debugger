@@ -127,13 +127,18 @@ export const PythonAdapterPolicy = {
     if (attachMode) {
       return undefined;
     }
-    const merged = { ...(launch?.dapLaunchArgs ?? {}), ...(launch?.adapterLaunchConfig ?? {}) };
+    const adapterConfig = launch?.adapterLaunchConfig;
+    const merged = { ...(launch?.dapLaunchArgs ?? {}), ...(adapterConfig ?? {}) };
     if (merged.justMyCode === false) {
       return undefined;
     }
+    const configBag =
+      adapterConfig !== undefined && Object.hasOwn(adapterConfig, 'justMyCode')
+        ? 'adapterLaunchConfig'
+        : 'dapLaunchArgs';
     return (
       'If the line called into Python library or dependency code, debugpy ran through it without stopping ' +
-      '(justMyCode is true by default); pass dapLaunchArgs: { justMyCode: false } to step into it.'
+      `(justMyCode is true by default); pass ${configBag}: { justMyCode: false } to step into it.`
     );
   },
   

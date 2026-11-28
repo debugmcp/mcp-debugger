@@ -110,7 +110,7 @@ describe('PythonAdapterPolicy', () => {
       ).toBeUndefined();
     });
 
-    it('lets adapterLaunchConfig win over dapLaunchArgs and stays silent on attach', () => {
+    it('lets adapterLaunchConfig win over dapLaunchArgs, names the config bag that decides, and stays silent on attach', () => {
       expect(
         PythonAdapterPolicy.describeStepInFilter({
           attachMode: false,
@@ -121,15 +121,26 @@ describe('PythonAdapterPolicy', () => {
         })
       ).toBeUndefined();
 
+      const adapterWon = PythonAdapterPolicy.describeStepInFilter({
+        attachMode: false,
+        launch: {
+          dapLaunchArgs: { justMyCode: false },
+          adapterLaunchConfig: { justMyCode: true }
+        }
+      });
+      expect(adapterWon).toContain('adapterLaunchConfig: { justMyCode: false }');
+      expect(adapterWon).not.toContain('dapLaunchArgs');
+
+      // Unrelated keys in adapterLaunchConfig keep the dapLaunchArgs remedy.
       expect(
         PythonAdapterPolicy.describeStepInFilter({
           attachMode: false,
           launch: {
-            dapLaunchArgs: { justMyCode: false },
-            adapterLaunchConfig: { justMyCode: true }
+            dapLaunchArgs: { justMyCode: true },
+            adapterLaunchConfig: { subProcess: false }
           }
         })
-      ).toContain('justMyCode: false');
+      ).toContain('dapLaunchArgs: { justMyCode: false }');
 
       expect(PythonAdapterPolicy.describeStepInFilter({ attachMode: true })).toBeUndefined();
     });

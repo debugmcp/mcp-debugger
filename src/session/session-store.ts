@@ -155,9 +155,12 @@ export interface StepStopProvenance {
  *
  * Written by the launch-shaped code (the launcher, the proxy launcher and
  * the attach controller, which refuse a child session), each field reset
- * where it was reset before the move, and in one place by the core: a stop
- * that proves the debugger on clears `launchDebuggerOff`, from whichever
- * session of the tree stopped. A dry run leaves the record as it was; a real
+ * where it was reset before the move, plus runtime per-run bookkeeping from
+ * whichever session of the tree observes it (the core clearing
+ * `launchDebuggerOff` or stamping `breakpointStopOccurred`, breakpoint
+ * verification recording `treeVerifiedBreakpointIds`, and `ExecutionController`
+ * recording `deliveredStepFilterHints` when a returned stop answer carries a
+ * `step_into` filter hint). A dry run leaves the record as it was; a real
  * start that fails has already reset the facts it resets at its top.
  *
  * The record is mutated in place, not replaced per run. A child row that
@@ -261,6 +264,14 @@ export interface Run {
    * detach and close answers. Nothing is given back. Reset by each start.
    */
   attachFootprint?: AttachFootprint;
+  /**
+   * Engine step-in filter hints (`AdapterPolicy.describeStepInFilter`) already
+   * delivered in a returned stop answer during this run (issue #1328), keyed by
+   * the hint's text so each distinct hint is appended at most once per run
+   * across the session tree (`session.run`), while the positional sentence is
+   * reported every time. Reset on each launch, attach, or restart.
+   */
+  deliveredStepFilterHints?: Set<string>;
 }
 
 export interface ManagedSession extends DebugSessionInfo {

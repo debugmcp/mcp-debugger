@@ -117,13 +117,18 @@ export const DotnetAdapterPolicy = {
         'on a .NET attach (enableStepFiltering cannot be turned off on attach).'
       );
     }
-    const merged = { ...(launch?.dapLaunchArgs ?? {}), ...(launch?.adapterLaunchConfig ?? {}) };
+    const adapterConfig = launch?.adapterLaunchConfig;
+    const merged = { ...(launch?.dapLaunchArgs ?? {}), ...(adapterConfig ?? {}) };
     if (merged.enableStepFiltering === false) {
       return undefined;
     }
+    const configBag =
+      adapterConfig !== undefined && Object.hasOwn(adapterConfig, 'enableStepFiltering')
+        ? 'adapterLaunchConfig'
+        : 'dapLaunchArgs';
     return (
       'If the line invoked a property accessor or operator, netcoredbg steps over property accessors and operators ' +
-      'by default on a .NET launch; pass dapLaunchArgs: { enableStepFiltering: false } to step into them.'
+      `by default on a .NET launch; pass ${configBag}: { enableStepFiltering: false } to step into them.`
     );
   },
 

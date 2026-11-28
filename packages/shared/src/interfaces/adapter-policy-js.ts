@@ -570,7 +570,8 @@ export const JsDebugAdapterPolicy = {
     if (attachMode) {
       return undefined;
     }
-    const merged = { ...(launch?.dapLaunchArgs ?? {}), ...(launch?.adapterLaunchConfig ?? {}) };
+    const adapterConfig = launch?.adapterLaunchConfig;
+    const merged = { ...(launch?.dapLaunchArgs ?? {}), ...(adapterConfig ?? {}) };
     const skipFiles = resolveJsLaunchSkipFiles(merged);
     const smartStep = resolveJsLaunchSmartStep(merged);
     if (!smartStep || skipFiles.length === 0) {
@@ -588,13 +589,27 @@ export const JsDebugAdapterPolicy = {
             : 'files matching skipFiles';
     const hasExplicitSkipFiles = Array.isArray(merged.skipFiles);
     const hasExplicitSmartStep = merged.smartStep === true;
+    const justMyCodeBag =
+      adapterConfig !== undefined && Object.hasOwn(adapterConfig, 'justMyCode')
+        ? 'adapterLaunchConfig'
+        : 'dapLaunchArgs';
+    const skipFilesRef =
+      adapterConfig !== undefined && Array.isArray(adapterConfig.skipFiles)
+        ? 'adapterLaunchConfig.skipFiles'
+        : 'skipFiles';
+    const smartStepFromAdapter =
+      adapterConfig !== undefined && Object.hasOwn(adapterConfig, 'smartStep');
+    const smartStepBag = smartStepFromAdapter ? 'adapterLaunchConfig' : 'dapLaunchArgs';
+    const smartStepRef = smartStepFromAdapter ? 'adapterLaunchConfig.smartStep' : 'smartStep';
     const remedy = hasExplicitSkipFiles && hasExplicitSmartStep
-      ? 'remove the pattern from skipFiles and set smartStep: false'
+      ? `remove the pattern from ${skipFilesRef} and set ${smartStepRef}: false`
       : hasExplicitSkipFiles
-        ? 'pass dapLaunchArgs: { justMyCode: false } (and remove the pattern from skipFiles)'
+        ? `pass ${justMyCodeBag}: { justMyCode: false } (and remove the pattern from ${skipFilesRef})`
         : hasExplicitSmartStep
-          ? 'pass adapterLaunchConfig: { smartStep: false } (with dapLaunchArgs: { justMyCode: false })'
-          : 'pass dapLaunchArgs: { justMyCode: false }';
+          ? smartStepBag === justMyCodeBag
+            ? `pass ${smartStepBag}: { smartStep: false, justMyCode: false }`
+            : `pass ${smartStepBag}: { smartStep: false } (with ${justMyCodeBag}: { justMyCode: false })`
+          : `pass ${justMyCodeBag}: { justMyCode: false }`;
     return (
       `If the line called into ${skippedWhat}, the debugger ran through that skipped code without stopping; ` +
       `${remedy} to step into it.`

@@ -880,6 +880,17 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
         bound({ attachMode: false, launch: { dapLaunchArgs: { justMyCode: true, enableStepFiltering: true }, adapterLaunchConfig: optOut } }),
         policy.name
       ).toBeUndefined();
+
+      const adapterOptIn: Record<string, unknown> = Object.fromEntries(
+        Object.keys(optOut).map((key) => [key, true])
+      );
+      expect(defaultHint, policy.name).toContain('dapLaunchArgs:');
+      const overriddenByAdapter = bound({
+        attachMode: false,
+        launch: { dapLaunchArgs: optOut, adapterLaunchConfig: adapterOptIn }
+      });
+      expect(overriddenByAdapter, policy.name).toContain('adapterLaunchConfig:');
+      expect(overriddenByAdapter, policy.name).not.toContain('dapLaunchArgs:');
     }
 
     const attachHint = bound({ attachMode: true });

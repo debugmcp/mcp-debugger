@@ -49,7 +49,8 @@ const SCRIPT_SOURCE = [
   "def main(prefix='alpha'):",
   "    joined = os.path.join(prefix, 'beta')  # MARK: lib_call",
   '    plain = 1 + 2  # MARK: no_call',
-  '    own = own_helper(plain)  # MARK: own_call',
+  '    plain2 = plain + 3  # MARK: no_call_2',
+  '    own = own_helper(plain2)  # MARK: own_call',
   '    return f"{joined}:{own}"',
   '',
   'main()',
@@ -82,7 +83,11 @@ describe('Python step_into provenance notes across library, plain, and program c
     }
   });
 
-  async function stepIntoFrom(marker: string, dapLaunchArgs?: Record<string, unknown>): Promise<StopAnswer> {
+  async function stepIntoSequenceFrom(
+    marker: string,
+    steps: number,
+    dapLaunchArgs?: Record<string, unknown>
+  ): Promise<StopAnswer[]> {
     const client = await startStdioClient({ name: 'py-step-into-1328', env: pythonPath() });
     try {
       await client.createSession('python', 'py-step-into-1328');
@@ -100,38 +105,49 @@ describe('Python step_into provenance notes across library, plain, and program c
       expect(launch, JSON.stringify(launch)).toMatchObject({ success: true, state: 'paused' });
       expect(launch.location?.line, JSON.stringify(launch)).toBe(lineOf(marker));
 
-      let step = await client.call<StopAnswer>('step_into', {});
-      expect(step.success, JSON.stringify(step)).toBe(true);
-      if (step.pending) {
-        step = await client.call<StopAnswer>('wait_for_stop', { timeout: 15_000 });
+      const answers: StopAnswer[] = [];
+      for (let i = 0; i < steps; i++) {
+        let step = await client.call<StopAnswer>('step_into', {});
+        expect(step.success, JSON.stringify(step)).toBe(true);
+        if (step.pending) {
+          step = await client.call<StopAnswer>('wait_for_stop', { timeout: 15_000 });
+        }
+        expect(step.state, JSON.stringify(step)).toBe('paused');
+        answers.push(step);
       }
-      expect(step.state, JSON.stringify(step)).toBe('paused');
-      return step;
+      return answers;
     } finally {
       await client.close();
     }
   }
 
-  it('default launch (justMyCode: true): (a) library call, (b) no call, (c) own call', async () => {
+  async function stepIntoFrom(marker: string, dapLaunchArgs?: Record<string, unknown>): Promise<StopAnswer> {
+    const [step] = await stepIntoSequenceFrom(marker, 1, dapLaunchArgs);
+    return step;
+  }
+
+  it('default launch (justMyCode: true): (a) library call, (b) two plain lines in one session (once-per-run hint), (c) own call', async () => {
+    const positional = "The stop is in 'main' at the same visible call-stack depth as before step_into.";
+    const hint =
+      'If the line called into Python library or dependency code, debugpy ran through it without stopping ' +
+      '(justMyCode is true by default); pass dapLaunchArgs: { justMyCode: false } to step into it.';
+
     const libStep = await stepIntoFrom('lib_call');
     console.log('[Workflow Test] MATRIX python | default | (a) os.path.join -> note:', JSON.stringify(libStep.note ?? null));
     expect(libStep.location?.line).toBe(lineOf('no_call'));
     expect(libStep.snapshot?.changedVariables?.['(return) join']).toBeDefined();
-    expect(libStep.note).toBe(
-      "The step did not stop inside a called function ('join' returned). " +
-        'If the line called into Python library or dependency code, debugpy ran through it without stopping ' +
-        '(justMyCode is true by default); pass dapLaunchArgs: { justMyCode: false } to step into it.'
-    );
+    expect(libStep.note).toBe(`${positional} ${hint}`);
     expect(libStep.note).not.toContain('No function was entered');
+    expect(libStep.note).not.toContain('returned)');
+    expect(libStep.note).not.toContain('did not stop inside a called function');
 
-    const noCallStep = await stepIntoFrom('no_call');
-    console.log('[Workflow Test] MATRIX python | default | (b) no call -> note:', JSON.stringify(noCallStep.note ?? null));
-    expect(noCallStep.location?.line).toBe(lineOf('own_call'));
-    expect(noCallStep.note).toBe(
-      'The step did not stop inside a called function. ' +
-        'If the line called into Python library or dependency code, debugpy ran through it without stopping ' +
-        '(justMyCode is true by default); pass dapLaunchArgs: { justMyCode: false } to step into it.'
-    );
+    const [firstPlainStep, secondPlainStep] = await stepIntoSequenceFrom('no_call', 2);
+    console.log('[Workflow Test] MATRIX python | default | (b1) first plain line -> note:', JSON.stringify(firstPlainStep.note ?? null));
+    console.log('[Workflow Test] MATRIX python | default | (b2) second plain line -> note:', JSON.stringify(secondPlainStep.note ?? null));
+    expect(firstPlainStep.location?.line).toBe(lineOf('no_call_2'));
+    expect(firstPlainStep.note).toBe(`${positional} ${hint}`);
+    expect(secondPlainStep.location?.line).toBe(lineOf('own_call'));
+    expect(secondPlainStep.note).toBe(positional);
 
     const ownCallStep = await stepIntoFrom('own_call');
     console.log('[Workflow Test] MATRIX python | default | (c) own call -> note:', JSON.stringify(ownCallStep.note ?? null));
@@ -148,8 +164,8 @@ describe('Python step_into provenance notes across library, plain, and program c
 
     const noCallStep = await stepIntoFrom('no_call', { justMyCode: false });
     console.log('[Workflow Test] MATRIX python | justMyCode:false | (b) no call -> note:', JSON.stringify(noCallStep.note ?? null));
-    expect(noCallStep.location?.line).toBe(lineOf('own_call'));
-    expect(noCallStep.note).toBe('The step did not stop inside a called function.');
+    expect(noCallStep.location?.line).toBe(lineOf('no_call_2'));
+    expect(noCallStep.note).toBe("The stop is in 'main' at the same visible call-stack depth as before step_into.");
 
     const ownCallStep = await stepIntoFrom('own_call', { justMyCode: false });
     console.log('[Workflow Test] MATRIX python | justMyCode:false | (c) own call -> note:', JSON.stringify(ownCallStep.note ?? null));

@@ -114,7 +114,7 @@ describe('JavaScript step_into provenance notes across library, dependency, plai
 
   it('default launch (justMyCode: true): (a) library and node_modules calls, (b) no call, (c) own call', async () => {
     const expectedFilteredNote =
-      'The step did not stop inside a called function. ' +
+      "The stop is in 'main' at the same visible call-stack depth as before step_into. " +
       'If the line called into Node internals or node_modules, the debugger ran through that skipped code without stopping; ' +
       'pass dapLaunchArgs: { justMyCode: false } to step into it.';
 
@@ -123,6 +123,7 @@ describe('JavaScript step_into provenance notes across library, dependency, plai
     expect(libStep.location?.line).toBe(lineOf('dep_call'));
     expect(libStep.note).toBe(expectedFilteredNote);
     expect(libStep.note).not.toContain('No function was entered');
+    expect(libStep.note).not.toContain('did not stop inside a called function');
 
     const depStep = await stepIntoFrom('dep_call');
     console.log('[Workflow Test] MATRIX javascript | default | (a2) node_modules depJoin -> note:', JSON.stringify(depStep.note ?? null));
@@ -145,18 +146,20 @@ describe('JavaScript step_into provenance notes across library, dependency, plai
     console.log('[Workflow Test] MATRIX javascript | justMyCode:false | (a) path.join -> note:', JSON.stringify(libStep.note ?? null));
     expect(libStep.location?.file ?? '').toMatch(/node_internals|^node:/);
     expect(libStep.note).toMatch(/^Paused inside an internal frame /);
+    expect(libStep.note).not.toContain('at the same visible call-stack depth as before step_into');
     expect(libStep.note).not.toContain('did not stop inside a called function');
 
     const depStep = await stepIntoFrom('dep_call', { justMyCode: false });
     console.log('[Workflow Test] MATRIX javascript | justMyCode:false | (a2) node_modules depJoin -> note:', JSON.stringify(depStep.note ?? null));
     expect(depStep.location?.file ?? '').toMatch(/tiny-dep[\\/]index\.cjs$/);
     expect(depStep.note).toMatch(/^Paused inside an internal frame 'depJoin'/);
+    expect(depStep.note).not.toContain('at the same visible call-stack depth as before step_into');
     expect(depStep.note).not.toContain('did not stop inside a called function');
 
     const noCallStep = await stepIntoFrom('no_call', { justMyCode: false });
     console.log('[Workflow Test] MATRIX javascript | justMyCode:false | (b) no call -> note:', JSON.stringify(noCallStep.note ?? null));
     expect(noCallStep.location?.line).toBe(lineOf('own_call'));
-    expect(noCallStep.note).toBe('The step did not stop inside a called function.');
+    expect(noCallStep.note).toBe("The stop is in 'main' at the same visible call-stack depth as before step_into.");
 
     const ownCallStep = await stepIntoFrom('own_call', { justMyCode: false });
     console.log('[Workflow Test] MATRIX javascript | justMyCode:false | (c) own call -> note:', JSON.stringify(ownCallStep.note ?? null));

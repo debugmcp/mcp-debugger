@@ -212,6 +212,7 @@ export class AttachController {
     session.lastProxyExit = undefined;
     // An attach debugs regardless of any earlier noDebug launch (issue #749).
     session.run.launchDebuggerOff = undefined;
+    session.run.deliveredStepFilterHints = undefined;
 
     try {
       // For attach mode, we use a placeholder scriptPath

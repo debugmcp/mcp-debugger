@@ -85,7 +85,7 @@ describe('step-provenance (issues #1180, #1182, #1183, #1184)', () => {
       expect(compareStepOriginAndLanding('stepOut', origin, [main])).toBeUndefined();
     });
 
-    it('discloses stacks sharing only the outermost entry without confusing an ordinary caller return', () => {
+    it('discloses stacks where only the outermost entry appears in both without confusing an ordinary caller return', () => {
       const main = frame(3, '<main>', '/proj/app.rb', 30);
       const origin = captureStepOrigin([
         frame(1, 'fiber_leaf', '/proj/app.rb', 5), frame(2, 'fiber_caller', '/proj/app.rb', 10), main
@@ -93,10 +93,18 @@ describe('step-provenance (issues #1180, #1182, #1183, #1184)', () => {
       expect(compareStepOriginAndLanding('stepOver', origin, [
         frame(4, 'other_leaf', '/proj/app.rb', 15), frame(5, 'other_caller', '/proj/app.rb', 20), main
       ])).toBe(
-        "The stack at the stop shares only '<main>' with the stack where the step started (from 'fiber_leaf', now in 'other_leaf')."
+        "Only '<main>' appears in both visible stacks (from 'fiber_leaf', now in 'other_leaf')."
       );
       expect(compareStepOriginAndLanding('stepOut', origin, [
         frame(2, 'fiber_caller', '/proj/app.rb', 11), main
+      ])).toBeUndefined();
+      // A shared bottom frame that is not a top-level entry name does not trigger the outermost-only disclosure.
+      const customRoot = frame(6, 'custom_worker', '/proj/app.rb', 40);
+      const underCustom = captureStepOrigin([
+        frame(1, 'fiber_leaf', '/proj/app.rb', 5), customRoot
+      ], {}, 1);
+      expect(compareStepOriginAndLanding('stepOver', underCustom, [
+        frame(4, 'other_leaf', '/proj/app.rb', 15), customRoot
       ])).toBeUndefined();
     });
 
@@ -151,7 +159,7 @@ describe('step-provenance (issues #1180, #1182, #1183, #1184)', () => {
       expect(compareStepOriginAndLanding('stepOut', origin, landing)).toBeUndefined();
     });
 
-    it('discloses when step_out lands back in the function stepped out of at the same depth (issues #1180, #1196, #1328)', () => {
+    it('discloses when step_out lands in the starting function at the same visible depth (issues #1180, #1196, #1328)', () => {
       const stack = [
         frame(1, 'global.key', '/proj/cb.cjs', 3),
         frame(2, 'global.viaMap', '/proj/cb.cjs', 7),
@@ -160,11 +168,11 @@ describe('step-provenance (issues #1180, #1182, #1183, #1184)', () => {
       const origin = captureStepOrigin(stack, {}, 1);
       const note = compareStepOriginAndLanding('stepOut', origin, stack);
       expect(note).toBe(
-        "The stop is in 'global.key' at the same call-stack depth as before step_out (either that call has not returned or 'global.key' was called again)."
+        "The stop is in 'global.key' at the same visible call-stack depth as before step_out (either that call has not returned or 'global.key' was called again)."
       );
     });
 
-    it('discloses when step_out lands in a frame above the origin function slot without assuming the same activation (Go deferred recover / loop re-entry)', () => {
+    it('discloses when a frame with the starting function name appears below the stop on step_out (Go deferred recover / loop re-entry)', () => {
       const origin = captureStepOrigin(
         [frame(1, 'main.work', '/proj/main.go', 15), frame(2, 'main.main', '/proj/main.go', 30)],
         {},
@@ -177,11 +185,11 @@ describe('step-provenance (issues #1180, #1182, #1183, #1184)', () => {
       ];
       const note = compareStepOriginAndLanding('stepOut', origin, landing);
       expect(note).toBe(
-        "'main.work' (where step_out was issued) is on the stack 1 frame(s) below the stop (either that call has not returned or 'main.work' was called again)."
+        "A frame named 'main.work' appears 1 visible frame(s) below the stop; it may be the original call or a later call."
       );
     });
 
-    it('discloses when step_out drops more than one frame on the same call stack (issues #1180, #1191, #1195)', () => {
+    it('discloses when step_out lands on a stack more than one frame shallower (issues #1180, #1191, #1195, #1328)', () => {
       const origin = captureStepOrigin(
         [
           frame(1, 'thrower', '/proj/app.js', 9),
@@ -194,24 +202,34 @@ describe('step-provenance (issues #1180, #1182, #1183, #1184)', () => {
       );
       const landing = [frame(3, 'viaThrow', '/proj/app.js', 22), frame(4, 'main', '/proj/app.js', 30)];
       expect(compareStepOriginAndLanding('stepOut', origin, landing)).toBe(
-        "The stop is 2 frames below 'thrower' (where step_out was issued)."
+        'The visible stack is 2 frame(s) shallower than before step_out.'
       );
     });
 
-    it('discloses when step_into does not stop inside a called function, and names returned calls from changedVariables (issues #1180, #1184, #1328)', () => {
+    it('discloses when step_into stops in the starting function at the same visible depth (issues #1180, #1184, #1328)', () => {
       const origin = captureStepOrigin(
         [frame(1, 'Leave.ViaProp', '/proj/Leave.cs', 41), frame(2, 'Leave.Main', '/proj/Leave.cs', 88)],
         {},
         1
       );
 
-      // Same line (e.g. Dart `var x = f();` #1200, or JS multi-statement line after a skipped call)
+      // Next line without hint
+      expect(
+        compareStepOriginAndLanding('stepInto', origin, [
+          frame(1, 'Leave.ViaProp', '/proj/Leave.cs', 42),
+          frame(2, 'Leave.Main', '/proj/Leave.cs', 88)
+        ])
+      ).toBe("The stop is in 'Leave.ViaProp' at the same visible call-stack depth as before step_into.");
+
+      // Same starting source line (e.g. Dart `var x = f();` #1200, or JS multi-statement line after a skipped call)
       expect(
         compareStepOriginAndLanding('stepInto', origin, [
           frame(1, 'Leave.ViaProp', '/proj/Leave.cs', 41),
           frame(2, 'Leave.Main', '/proj/Leave.cs', 88)
         ])
-      ).toBe('The step did not stop inside a called function; execution is still on the starting line.');
+      ).toBe(
+        "The stop is in 'Leave.ViaProp' at the same visible call-stack depth as before step_into. It is on the starting source line."
+      );
 
       // Next line with policy step-filter hint (#1184, #1328)
       expect(
@@ -222,44 +240,20 @@ describe('step-provenance (issues #1180, #1182, #1183, #1184)', () => {
           { stepFilterHint: 'If the line invoked a property accessor or operator, netcoredbg steps over it.' }
         )
       ).toBe(
-        'The step did not stop inside a called function. If the line invoked a property accessor or operator, netcoredbg steps over it.'
+        "The stop is in 'Leave.ViaProp' at the same visible call-stack depth as before step_into. If the line invoked a property accessor or operator, netcoredbg steps over it."
       );
 
-      // Python `(return) <name>` in changedVariables (#1328): names returned call(s) without contradicting them
-      expect(
-        compareStepOriginAndLanding(
-          'stepInto',
-          origin,
-          [frame(1, 'Leave.ViaProp', '/proj/Leave.cs', 42), frame(2, 'Leave.Main', '/proj/Leave.cs', 88)],
-          {
-            stepFilterHint: 'If the line called into Python library or dependency code, debugpy ran through it without stopping.',
-            changedVariables: {
-              '(return) join': { after: "'a/b'", new: true },
-              joined: { after: "'a/b'", new: true }
-            }
-          }
-        )
-      ).toBe(
-        "The step did not stop inside a called function ('join' returned). If the line called into Python library or dependency code, debugpy ran through it without stopping."
-      );
-
-      // Updated `(return) <name>` from a second call on a later step (`before` + `after`) counts,
-      // while `gone: true` and truncation-shifted `{ after }` (neither `new` nor `before`) do not.
+      // Starting source line with policy step-filter hint
       expect(
         compareStepOriginAndLanding(
           'stepInto',
           origin,
           [frame(1, 'Leave.ViaProp', '/proj/Leave.cs', 41), frame(2, 'Leave.Main', '/proj/Leave.cs', 88)],
-          {
-            changedVariables: {
-              '(return) join': { before: "'a/b'", after: "'c/d'" },
-              '(return) dirname': { after: "'c'", new: true },
-              '(return) old': { before: "'x'", gone: true },
-              '(return) shifted': { after: "'y'" }
-            }
-          }
+          { stepFilterHint: 'If the line invoked a property accessor or operator, netcoredbg steps over it.' }
         )
-      ).toBe("The step did not stop inside a called function ('join', 'dirname' returned); execution is still on the starting line.");
+      ).toBe(
+        "The stop is in 'Leave.ViaProp' at the same visible call-stack depth as before step_into. It is on the starting source line. If the line invoked a property accessor or operator, netcoredbg steps over it."
+      );
 
       // Suppressed when JS stepper already provided a walk-limit note
       expect(
@@ -272,7 +266,7 @@ describe('step-provenance (issues #1180, #1182, #1183, #1184)', () => {
       ).toBeUndefined();
     });
 
-    it('discloses stacks sharing no frame (Ruby fiber switch #1198) while allowing step_into bar(foo()) on main', () => {
+    it('discloses stacks with no starting function in common (Ruby fiber switch #1198) while allowing step_into bar(foo()) on main', () => {
       const fiberOrigin = captureStepOrigin([frame(1, 'block in Object#gen_enum', '/proj/enum.rb', 13)], {}, 1);
       const mainLanding = [
         frame(2, 'Object#consume_enum', '/proj/enum.rb', 24),
@@ -280,7 +274,7 @@ describe('step-provenance (issues #1180, #1182, #1183, #1184)', () => {
         frame(4, '<main>', '/proj/enum.rb', 93)
       ];
       expect(compareStepOriginAndLanding('stepOut', fiberOrigin, mainLanding)).toBe(
-        "The stack at the stop shares no frame with the stack where the step started (from 'block in Object#gen_enum', now in 'Object#consume_enum')."
+        "No starting function appears in the current visible stack (from 'block in Object#gen_enum', now in 'Object#consume_enum')."
       );
 
       // Normal step_into from `return x` inside `foo` (or a tail-return leaf inside `foo`) into `bar` on `bar(foo())` in `main` at line 10
