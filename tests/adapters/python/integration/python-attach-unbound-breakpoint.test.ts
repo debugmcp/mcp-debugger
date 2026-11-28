@@ -72,37 +72,42 @@ async function startDebugpyTarget(): Promise<{ proc: ChildProcess; port: number;
   let output = '';
   const closed = new Promise<void>((resolve) => proc.once('close', () => resolve()));
 
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`debugpy target did not become ready: ${output}`)), 20_000);
-    const onData = (chunk: Buffer) => {
-      output += chunk.toString();
-      if (output.includes('ATTACH_LOOP_READY')) {
-        clearTimeout(timer);
-        resolve();
-      }
-    };
-    proc.stdout?.on('data', onData);
-    proc.stderr?.on('data', onData);
-    proc.once('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-    proc.once('exit', (code) => {
-      clearTimeout(timer);
-      reject(new Error(`debugpy target exited (${code}) before ready: ${output}`));
-    });
-  });
-
-  return {
-    proc,
-    port,
-    stop: async () => {
-      if (proc.exitCode === null && !proc.killed) {
-        proc.kill();
-      }
-      await Promise.race([closed, new Promise<void>((resolve) => setTimeout(resolve, 3_000))]);
+  const stop = async (): Promise<void> => {
+    if (proc.exitCode === null && !proc.killed) {
+      proc.kill();
     }
+    await Promise.race([closed, new Promise<void>((resolve) => setTimeout(resolve, 3_000))]);
   };
+
+  // A target that never becomes ready must not outlive the test: the caller
+  // gets no handle to stop it with when this helper rejects.
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`debugpy target did not become ready: ${output}`)), 20_000);
+      const onData = (chunk: Buffer) => {
+        output += chunk.toString();
+        if (output.includes('ATTACH_LOOP_READY')) {
+          clearTimeout(timer);
+          resolve();
+        }
+      };
+      proc.stdout?.on('data', onData);
+      proc.stderr?.on('data', onData);
+      proc.once('error', (err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+      proc.once('exit', (code) => {
+        clearTimeout(timer);
+        reject(new Error(`debugpy target exited (${code}) before ready: ${output}`));
+      });
+    });
+  } catch (error) {
+    await stop();
+    throw error;
+  }
+
+  return { proc, port, stop };
 }
 
 describe('Python attach unbound breakpoint hint against live debugpy (issue #1320)', () => {
@@ -110,10 +115,14 @@ describe('Python attach unbound breakpoint hint against live debugpy (issue #132
   let target: Awaited<ReturnType<typeof startDebugpyTarget>> | undefined;
 
   afterEach(async () => {
-    await server?.close();
-    server = undefined;
-    await target?.stop();
-    target = undefined;
+    // The target is stopped whatever the server's close does.
+    try {
+      await server?.close();
+    } finally {
+      server = undefined;
+      await target?.stop();
+      target = undefined;
+    }
   });
 
   it('appends pathMappings and target-path guidance after debugpy missing-file sentence', async () => {
