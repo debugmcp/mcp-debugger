@@ -1,8 +1,8 @@
 /**
  * Attach-mode sessions: `attach_to_process` and `detach_from_process`, and
  * the session's ending by `close_debug_session`, which a detach joins and
- * which joins a detach (issue #1325: one release per session, whatever
- * overlaps).
+ * which joins a detach (issue #1325: one confirmed release per session,
+ * whatever overlaps).
  *
  * An attach is a launch whose configuration says `request: 'attach'`, so the
  * proxy comes up through the same ProxyLauncher. What is attach-specific is
@@ -699,12 +699,14 @@ export class AttachController {
   /**
    * close_debug_session (issue #1325): the session's ending, joined like a
    * detach. A close that arrives while another close or a detach is in
-   * flight waits for it and sends no second release: the close it joined is
-   * its answer; after a detach that sent the release it removes what is left
-   * and sends nothing, whether or not that detach's own cleanup succeeded
-   * (when it did not, this close stops the worker the detach could not), and
-   * answers from what the detach's release observed (after one that failed
-   * before its release, it sends that release itself). While it runs, every
+   * flight waits for it: the close it joined is its answer; after a detach
+   * whose release was confirmed (released, or the program's exit reported)
+   * it removes what is left and sends no second release, whether or not that
+   * detach's own cleanup succeeded (when it did not, this close stops the
+   * worker the detach could not), and answers from what that release
+   * observed. After a detach whose release was not confirmed, or that failed
+   * before its release, it makes its own release, as a close that joined
+   * nothing does, and answers from that. While it runs, every
    * attach, launch or restart is refused (`InFlightGuard.tryAcquire`) rather
    * than stopping the worker under its release, and it takes the session's
    * claim as well when that is free. A close is never refused: with a
@@ -715,7 +717,7 @@ export class AttachController {
     return this.close(sessionId, undefined);
   }
 
-  /** closeSession, with the release a detach this close joined already sent, if it sent one. */
+  /** closeSession, with the confirmed release a detach this close joined already sent, if it sent one. */
   private async close(sessionId: string, releaseSent: TargetRelease | undefined): Promise<CloseSessionOutcome> {
     const inFlight = this.inFlight.ending(sessionId);
     if (inFlight) {
@@ -726,7 +728,10 @@ export class AttachController {
       if (record.closed) {
         return record.closed;
       }
-      return this.close(sessionId, record.release);
+      // Only a confirmed release is handed on: an unconfirmed one may never
+      // have reached the adapter (refused before it was forwarded), and this
+      // close then sends its own, as one that joined nothing does.
+      return this.close(sessionId, record.release?.fate === 'unconfirmed' ? undefined : record.release);
     }
     const claimed = this.inFlight.tryAcquire(sessionId, 'close', 'close_debug_session') === undefined;
     return this.inFlight.runEnding(sessionId, { operation: 'close', claimed }, async () => {
@@ -750,8 +755,9 @@ export class AttachController {
 
     // What a close or detach that joins this one reads (issue #1325): only
     // what this detach observed. A release it sent stays in the record when
-    // its cleanup fails afterwards: the release is on the wire, and a close
-    // that joined must not send another; the answer says the cleanup failed.
+    // its cleanup fails afterwards: a confirmed one is on the wire, and a
+    // close that joined must not send another (an unconfirmed one it does
+    // not take as sent); the answer says the cleanup failed.
     const answered = (
       answer: DebugResult<DetachResultData>,
       observed: Pick<EndingRecord, 'release' | 'closed'> = {}

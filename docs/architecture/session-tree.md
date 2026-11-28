@@ -249,8 +249,9 @@ Two measured effects the answers name:
 - Explicitly closing a **child** uses the adapter's measured child-close semantics for its selected
   subtree: debugpy terminates it (exit 0 reported to its parent, Python spike, row 4); js-debug
   cannot end a child it adopted and releases it to run undebugged (JavaScript spike, row 3). The
-  named child's answer says which (`processEnded: true` / `released: true`). Closing a non-root
-  subtree never shuts down the shared worker or adapter.
+  named child's answer says which (`processEnded: true` / `released: true`), and neither when
+  stopping the child failed: the answer then carries that failure as its `warning` (issue #1325).
+  Closing a non-root subtree never shuts down the shared worker or adapter.
 - Closing or idle-reaping an **attach root** preserves the external targets: every descendant is
   detached deepest-first with `disconnect(terminateDebuggee: false)` and the adapter's existing
   resume-before-detach policy, then the root is detached. All selected rows are removed and the
@@ -269,11 +270,12 @@ Two measured effects the answers name:
   not by 10 s (about 42 s at the default cap of 32 children; the server-side timers allow about
   10N + 21 s, 10N + 41 s for js-debug), and a child's release is not confirmed before the root's
   starts. A `close_debug_session` and a `detach_from_process` of one root never both send a
-  release: `InFlightGuard` holds the session's ending in flight and a later close or plain detach
-  joins it, a close that joins a detach whose cleanup then failed included (issue #1325; the
-  pairings are in `docs/tool-reference.md`). The server's exit closes outside that join: its
-  worker stop sends no second `disconnect` once one has gone out, but can close the connection
-  before the answer. Worker/adapter cleanup must not escalate to killing
+  confirmed release: `InFlightGuard` holds the session's ending in flight and a later close or
+  plain detach joins it, a close that joins a detach whose release was confirmed and whose cleanup
+  then failed included; after a detach whose release was not confirmed the close sends its own
+  (issue #1325; the pairings are in `docs/tool-reference.md`). The server's exit closes outside
+  that join: its worker stop sends no second `disconnect` once one has gone out, but can close the
+  connection before the answer. Worker/adapter cleanup must not escalate to killing
   the external targets.
 - A session that ended stays listed until it is closed, as today, so an agent can still read a
   child's `programEnd` and its output. Closing the parent removes its ended children with it.

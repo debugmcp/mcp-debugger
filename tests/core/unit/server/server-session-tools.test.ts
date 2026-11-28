@@ -374,6 +374,25 @@ describe('Server Session Tools Tests', () => {
       });
     });
 
+    it('says stopping the worker failed when that is all the close can say, as for a child whose stop failed (issue #1325)', async () => {
+      // A child's close whose stop failed claims neither processEnded nor released.
+      mockSessionManager.closeDebugSession.mockResolvedValue({
+        closed: true, closedSessionIds: ['test-session'], stopFailed: 'child close failed before forwarding'
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'close_debug_session', arguments: { sessionId: 'test-session' } }
+      });
+
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        success: true,
+        message: 'Closed debug session: test-session',
+        warning: 'Stopping the debugger failed (child close failed before forwarding): the session was removed all the ' +
+          'same, and whether its connection to the adapter was closed is not known'
+      });
+    });
+
     it("closes through the session manager's close_debug_session ending, which an overlapping close or detach joins (issue #1325)", async () => {
       mockSessionManager.closeDebugSession.mockResolvedValue({ closed: true, closedSessionIds: ['test-session'] });
 

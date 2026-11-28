@@ -614,7 +614,12 @@ describe('SessionManager - the fate of a borrowed program (issue #1148)', () => 
       expect(sessionManager.getSession(sessionId)).toBeUndefined();
     });
 
-    it("close during detach: an unconfirmed release is the close's warning too", async () => {
+    // Issue #1325: only a confirmed release is handed on. An unconfirmed one
+    // is not the close's: the close makes its own release, as a close that
+    // joined nothing does. Here the detach finished its cleanup, so nothing
+    // is left running: the close sends nothing and claims nothing; the
+    // warning is the detach's.
+    it("close during detach: an unconfirmed release is not the close's; it answers as a close of its own", async () => {
       const sessionId = await borrowedSession();
       dependencies.mockProxyManager.reportsDetachOnStop = false;
       let letGo!: () => void;
@@ -634,7 +639,7 @@ describe('SessionManager - the fate of a borrowed program (issue #1148)', () => 
       const [detached, closed] = await Promise.all([detach, close]);
 
       expect(detached.data?.warning).toBe(ErrorMessages.detachUnconfirmed(noAnswerWithin(10_000)));
-      expect(closed).toEqual({ closed: true, closedSessionIds: [sessionId], releaseUnconfirmed: 'no answer within 10000 ms' });
+      expect(closed).toEqual({ closed: true, closedSessionIds: [sessionId] });
       expect(disconnects()).toHaveLength(1);
     });
 
@@ -1038,24 +1043,37 @@ describe('SessionManager - the fate of a borrowed program (issue #1148)', () => 
         expect(disconnects()).toHaveLength(1);
       });
 
-      // A fate the close observed of its own is kept over an unconfirmed one
-      // the joined detach observed, as for a release of the close's own. A
-      // release that never reached the worker is not confirmed; the worker's
-      // own detach, when the close stops it, can be: that one is what
-      // happened to the target.
-      it('an unconfirmed release yields to the worker\'s own detach that the close then saw acknowledged', async () => {
+      // The review's case (issue #1325): the detach's request was refused by
+      // the proxy before anything was forwarded, so its release is not
+      // confirmed, and its stop then failed. The close that joined it used to
+      // take that attempt as sent, skip its own release, and stop the worker,
+      // whose 1 s shutdown detach lost a busy debugpy target's port. An
+      // unconfirmed release is not handed on: the close sends its own, under
+      // the usual bound and before the worker is stopped, and answers from it.
+      it('a detach whose release never reached the adapter leaves the release to the joined close, which sends it and answers from it', async () => {
         const sessionId = await borrowedSession();
         const mock = dependencies.mockProxyManager;
+        // No fabricated close-time report: what the close says comes from its own release.
+        mock.reportsDetachOnStop = false;
+        const stop = vi.spyOn(mock, 'stop').mockRejectedValueOnce(new Error('stop failed before teardown'));
         let letGo!: () => void;
         const held = new Promise<void>((resolve) => { letGo = resolve; });
+        let attempts = 0;
+        let reachedAdapter = 0;
+        let stopsWhenForwarded: number | undefined;
         mock.setDapRequestHandler(async (command) => {
           if (command === 'disconnect') {
-            await held;
-            throw new Error('Proxy not initialized');
+            attempts += 1;
+            if (attempts === 1) {
+              await held;
+              // ProxyManager's own check, before anything is forwarded.
+              throw new Error('Proxy not initialized');
+            }
+            reachedAdapter += 1;
+            stopsWhenForwarded = stop.mock.calls.length;
           }
           return { success: true };
         });
-        vi.spyOn(mock, 'stop').mockRejectedValueOnce(new Error('stop failed before teardown'));
 
         const detach = sessionManager.detachFromProcess(sessionId);
         await firstDisconnectSent();
@@ -1063,10 +1081,18 @@ describe('SessionManager - the fate of a borrowed program (issue #1148)', () => 
         letGo();
         const [detached, closed] = await Promise.all([detach, close]);
 
-        expect(detached.success).toBe(false);
-        // The mock worker's stop reports its own close-time detach, acknowledged.
+        expect(detached).toMatchObject({ success: false, error: 'Failed to detach: stop failed before teardown' });
+        // One disconnect reached the adapter: the close's, with the same request and bound.
+        expect(reachedAdapter).toBe(1);
+        expect(disconnects()).toEqual([
+          { command: 'disconnect', args: { terminateDebuggee: false }, options: { timeoutMs: 10_000 } },
+          { command: 'disconnect', args: { terminateDebuggee: false }, options: { timeoutMs: 10_000 } }
+        ]);
+        // Sent before the close stopped the worker (the one stop before it is the detach's, which failed).
+        expect(stopsWhenForwarded).toBe(1);
+        expect(stop).toHaveBeenCalledTimes(2);
         expect(closed).toEqual({ closed: true, closedSessionIds: [sessionId], releasedSessionIds: [sessionId], released: true });
-        expect(disconnects()).toHaveLength(1);
+        expect(sessionManager.getSession(sessionId)).toBeUndefined();
       });
 
       // The other side: a detach that failed before it sent anything leaves

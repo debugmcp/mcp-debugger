@@ -1174,13 +1174,14 @@ export abstract class SessionManagerCore extends EventEmitter {
    * target is released with the request and bound detach_from_process uses
    * before the worker is stopped. Without it (the server's exit, the idle
    * policy) the worker's own close-time detach releases it, under its 1 s cap.
-   * `releaseSent` (issue #1325): the release a detach this close joined
-   * already sent, and what it observed. Nothing is sent; the outcome is read
-   * from it as from a release of this close's own, whether or not the
-   * detach's cleanup succeeded, and the worker the detach left, if any, is
-   * stopped. close_debug_session comes through AttachController.closeSession,
-   * which makes it the session's one ending in flight; this method itself does
-   * not serialize overlapping closes.
+   * `releaseSent` (issue #1325): the confirmed release a detach this close
+   * joined already sent, and what it observed (AttachController hands on no
+   * unconfirmed one). Nothing is sent; the outcome is read from it as from a
+   * release of this close's own, whether or not the detach's cleanup
+   * succeeded, and the worker the detach left, if any, is stopped.
+   * close_debug_session comes through AttachController.closeSession, which
+   * makes it the session's one ending in flight; this method itself does not
+   * serialize overlapping closes.
    */
   async closeSessionReporting(
     sessionId: string,
@@ -1244,15 +1245,20 @@ export abstract class SessionManagerCore extends EventEmitter {
       // successfully or not), and the release goes out all the same, because
       // what the port depends on is the live connection, not the call. Before
       // that (INITIALIZING: the handshake is not done) the worker's own detach
-      // runs. A close that joined a detach sends none: that detach's release
-      // is this close's.
+      // runs. A close that joined a detach whose release was confirmed sends
+      // none: that detach's release is this close's.
       const release = options.releaseSent ?? (options.releaseBeforeStop && borrowedRoot &&
         (session.state === SessionState.RUNNING || session.state === SessionState.PAUSED)
         ? await releaseAttachedTarget(borrowedRoot, this.logger)
         : undefined);
       const { closed, stopFailed } = await this.closeSingleSessionReporting(sessionId, { releaseChild: childEnd === 'release' });
+      // A child's fate is its adapter's close semantics only when its stop
+      // succeeded (issue #1325): a stop that failed may have forwarded
+      // nothing, and the answer carries that failure alone.
       const fate: BorrowedProgramFate = session.parentSessionId
-        ? { released: released === true, processEnded: childEnd === 'terminate' }
+        ? stopFailed === undefined
+          ? { released: released === true, processEnded: childEnd === 'terminate' }
+          : { released: false, processEnded: false }
         : this.fateOfClose(release, borrowedRoot);
       if (closed) {
         closedSessionIds.push(sessionId);

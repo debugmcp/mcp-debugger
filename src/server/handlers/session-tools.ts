@@ -265,12 +265,13 @@ export const closeDebugSessionTool: ToolHandler = async (ctx, args) => {
     ...(outcome.released ? { released: true } : {}),
     // A borrowed program whose detach nothing acknowledged (issue #1148):
     // neither field above, and the answer says why, and whether the
-    // connection to the adapter was seen to close (issue #1325). Beside a
-    // confirmed release or a reported exit, a failed stop of the worker is
-    // said on its own (issue #1325): the release is not the cleanup.
+    // connection to the adapter was seen to close (issue #1325). Otherwise a
+    // failed stop of the worker is said on its own (issue #1325): beside a
+    // confirmed release or a reported exit, because the release is not the
+    // cleanup, and alone for a child whose stop failed, which claims neither.
     ...(outcome.releaseUnconfirmed !== undefined
       ? { warning: ErrorMessages.closeReleaseUnconfirmed(outcome.releaseUnconfirmed, outcome.stopFailed) }
-      : outcome.stopFailed !== undefined && (outcome.released || outcome.processEnded)
+      : outcome.stopFailed !== undefined
         ? { warning: ErrorMessages.closeStopFailed(outcome.stopFailed) }
         : {})
   };

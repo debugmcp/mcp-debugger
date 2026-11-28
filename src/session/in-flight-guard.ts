@@ -24,7 +24,9 @@
  * debugpy's adapter and the target's debug port with it, while both calls
  * said the target was released. So for one session there is at most one
  * ending in flight: a close or a detach that arrives meanwhile joins it and
- * answers from what it observed, and no second release goes out. While an
+ * answers from what it observed, and no second release goes out after one
+ * that was confirmed (a close that joined a detach whose release was not
+ * confirmed makes its own, issue #1325). While an
  * ending is in flight every launch-shaped call is refused, whoever holds the
  * claim, so none can stop the worker under its release. A close takes the
  * claim as well when it is free; it is never refused, though, and one that
@@ -78,8 +80,10 @@ export interface EndingRecord {
   operation: EndingOperation;
   /**
    * A plain detach's release, and what the adapter did with it: set once the
-   * release was sent, whether or not the detach's cleanup then succeeded (its
-   * answer says that), so a close that joins it never sends a second one.
+   * release was attempted, whether or not the detach's cleanup then succeeded
+   * (its answer says that). A close that joins it sends no second one after
+   * a confirmed release; after an unconfirmed one, which may never have
+   * reached the adapter, it sends its own.
    */
   release?: TargetRelease;
   /** The close the ending made: a close's outcome, or the one a terminating detach makes. */

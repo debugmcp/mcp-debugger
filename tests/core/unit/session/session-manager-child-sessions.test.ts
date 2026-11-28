@@ -750,6 +750,33 @@ describe('SessionManager child sessions (issue #1081)', () => {
       expect(sessionManager.getSession(rootId)).toBeDefined();
     });
 
+    // Issue #1325: a child's fate was read off its adapter's close semantics
+    // even when stopping it failed, so the answer said `processEnded: true`
+    // (or `released: true`) beside the failure, for a stop that forwarded
+    // nothing. It says the failure alone.
+    it.each([
+      ['ends (debugpy)', undefined],
+      ['releases (js-debug)', JsDebugAdapterPolicy.childAdoption]
+    ] as const)('a child whose close %s its process, but whose stop failed, is called neither ended nor released', async (_semantics, childAdoption) => {
+      if (childAdoption) {
+        overridePolicy(sessionManager, { childAdoption });
+      }
+      const { childId, grandchildId, childView } = await tree();
+      const stop = vi.spyOn(childView, 'stop').mockRejectedValueOnce(new Error('child close failed before forwarding'));
+
+      const outcome = await sessionManager.closeSessionReporting(childId);
+
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(outcome).toEqual({
+        closed: true,
+        closedSessionIds: [grandchildId, childId],
+        // The grandchild's own stop succeeded: a releasing adapter released it.
+        ...(childAdoption ? { releasedSessionIds: [grandchildId] } : {}),
+        childrenClosed: 1,
+        stopFailed: 'child close failed before forwarding'
+      });
+    });
+
     it('closing a launch root counts the descendants it took with it, deepest first', async () => {
       const { rootId, childId, grandchildId } = await tree();
 

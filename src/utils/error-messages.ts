@@ -1061,14 +1061,15 @@ export const ErrorMessages = {
         `and with it a debug port that belongs to the target, is not known. Whether the process is still running is not known`),
 
   /**
-   * The close answer's warning when the release was confirmed (or the
-   * program's exit reported) but stopping the session's worker failed
-   * (issue #1325)
+   * The close answer's warning when stopping the session's worker failed and
+   * no unconfirmed release already says so (issue #1325)
    * Occurs when: a close_debug_session that joined a detach whose own stop
-   * failed after its release, and whose own stop of the worker failed too, or
-   * any close whose release was confirmed and whose stop failed. The release
-   * is what the adapter answered; the stop is the worker, which the close
-   * did not see end. The session is removed either way.
+   * failed after its confirmed release, and whose own stop of the worker
+   * failed too, or any close whose release was confirmed and whose stop
+   * failed: the release is what the adapter answered; the stop is the
+   * worker, which the close did not see end. Also any other close whose stop
+   * failed, a child's among them, whose answer then claims neither
+   * processEnded nor released. The session is removed either way.
    * Used in: src/server/handlers/session-tools.ts
    * @param stopFailed - Why stopping the session's worker failed
    */

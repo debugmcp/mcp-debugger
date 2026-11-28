@@ -67,11 +67,15 @@ The guard also holds the session's ending in flight (issue #1325):
 `close_debug_session` reaches the facade's `closeDebugSession`, which delegates
 to `AttachController.closeSession`, and a close or a plain detach that arrives
 while another close or detach of the session is in flight joins it
-(`InFlightGuard.ending` / `runEnding`), and no second `disconnect` goes out; a
-terminating detach is refused instead. A detach that sent the release keeps
-it in its record when its cleanup fails afterwards, and a close that joined it
-hands it to `closeSessionReporting` as `releaseSent`: nothing is sent, and the
-close stops the worker the detach left. While an ending is in flight
+(`InFlightGuard.ending` / `runEnding`), and no second `disconnect` goes out
+after a confirmed release; a terminating detach is refused instead. A detach
+that sent the release keeps it in its record when its cleanup fails
+afterwards, and a close that joined it hands it to `closeSessionReporting` as
+`releaseSent` only when it was confirmed (`released` or `program-ended`):
+nothing is sent, and the close stops the worker the detach left. After an
+unconfirmed release, which may never have reached the adapter (the proxy can
+refuse the request before forwarding it), the close makes its own release, as
+a close that joined nothing does. While an ending is in flight
 `InFlightGuard.tryAcquire` refuses every launch, restart or attach, whoever
 holds the claim. The close claims the session as well when nothing holds it,
 and is itself never refused: with a launch-shaped call in flight it goes ahead

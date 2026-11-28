@@ -181,12 +181,14 @@ A session with child sessions, a child session or an attach root says what the c
   as well, the warning does not say the connection was closed: its second sentence reads
   `Stopping the debugger then failed (<why>), so whether its connection to the adapter was closed,
   and with it a debug port that belongs to the target, is not known`. `processEnded: true` instead
-  when the adapter reported that the program exited. Beside `released` or `processEnded` (a child
-  session's close included), a failed stop of the session's worker is said in a `warning` of its
-  own: `Stopping the debugger failed (<why>): the session was removed all the same, and whether its
-  connection to the adapter was closed is not known` (issue #1325). A session whose program was already gone, or
-  one that launched its program, carries none of the three. It used to be `released: true` for
-  every attach root, whatever the adapter did. Also when the named session is a JavaScript child:
+  when the adapter reported that the program exited. Beside `released` or `processEnded`, a failed
+  stop of the session's worker is said in a `warning` of its own: `Stopping the debugger failed
+  (<why>): the session was removed all the same, and whether its connection to the adapter was
+  closed is not known` (issue #1325). A child session whose stop failed carries neither
+  `processEnded` nor `released`, only that `warning`: the stop may have sent the child's
+  connection nothing. A session whose program was already gone, or one that launched its program,
+  carries none of the three, and that `warning` alone when stopping its worker failed. It used to
+  be `released: true` for every attach root, whatever the adapter did. Also when the named session is a JavaScript child:
   js-debug cannot end a target it adopted, so the close disconnects with the process kept running
   and it finishes undebugged (a root's close releases its JavaScript children the same way, counted
   in `childrenClosed`).
@@ -207,14 +209,20 @@ A session with child sessions, a child session or an attach root says what the c
   with its 1 s bound, as do the closes the server makes as it exits and the idle policy's.
 - **Overlapping endings** (issue #1325): between `close_debug_session` and `detach_from_process`
   calls, one session has at most one release in flight. A close or a detach that arrives while
-  another close or detach of the same session is in flight sends no second release: it waits for
-  it. A close during a detach removes what the detach left and answers with what the detach's
-  release observed (`released`, `processEnded` or the `warning`); that holds when the detach then
-  fails too (`Failed to detach: …`, because stopping its worker failed): the close sends nothing,
-  stops the worker itself, and when that stop fails as well, its answer carries a `warning` that
-  says so beside `released` or `processEnded`: `Stopping the debugger failed (<why>): the session
-  was removed all the same, and whether its connection to the adapter was closed is not known`. A
-  detach that failed before it sent the release leaves it to the close, which sends it. A second
+  another close or detach of the same session is in flight waits for it. A close during a detach
+  whose release was confirmed (`released` or `processEnded`) sends no second release: it removes
+  what the detach left and answers with what that release observed; that holds when the detach
+  then fails too (`Failed to detach: …`, because stopping its worker failed): the close sends
+  nothing, stops the worker itself, and when that stop fails as well, its answer carries a
+  `warning` that says so beside `released` or `processEnded`: `Stopping the debugger failed
+  (<why>): the session was removed all the same, and whether its connection to the adapter was
+  closed is not known`. A detach whose release was not confirmed (its answer's `warning`: the
+  request may never have reached the adapter), or that failed before it sent the release, leaves
+  the release to the close, which makes its own and answers from it, as a close that joined nothing
+  does: after a detach that went on to stop its worker there is nothing left to release, and the
+  close answers without a `warning` of its own; after one whose stop failed while its worker still
+  runs, the close sends the release under the same 10 s bound. When the detach's request did reach the adapter and only went
+  unanswered, that adapter then gets a second `disconnect`. A second
   close answers what the first did. A detach during a close answers from the close's release, in a
   detach's words, ending `The release was the one the close_debug_session already in progress
   sent; that close also removed the session`. A detach with `terminateProcess: true` is not a
@@ -1911,7 +1919,7 @@ Detaches the debugger from a process the session attached to, leaving the proces
 
 The 10 s is sized by measurement: every attach-capable adapter acknowledges a detach in 0 to 15 ms on an idle target, and the worker may first spend up to 2 s resuming a stopped CodeLLDB target. debugpy acknowledges it only once the target's interpreter is free: a detach during a 3 to 4 s hold answers when the hold ends. [`close_debug_session`](#close_debug_session) sends the same release under the same bound.
 
-A `detach_from_process` and a `close_debug_session` of the same session never both send a release (issue #1325); the closes the server makes as it exits do not join them (see [`close_debug_session`](#close_debug_session)). A plain detach that arrives while a close or another plain detach is in flight sends no second release: it waits for it, and answers from what its release observed: a second detach answers what the first did; a detach during a close answers in a detach's words, ending `The release was the one the close_debug_session already in progress sent; that close also removed the session`, or `No active debug session to detach from` when that close had nothing to release. A detach with `terminateProcess: true` while a close or a detach is in flight, and a plain detach while a terminating one runs, are refused (`This session is being closed …` / `A detach is already in progress …`) and send nothing. A close that arrives during a detach waits for it too and sends no second release, also when the detach then fails after its release (stopping its worker failed); one that failed before it sent the release leaves the close to send it. See [`close_debug_session`](#close_debug_session).
+A `detach_from_process` and a `close_debug_session` of the same session never both send a release once one is confirmed (issue #1325); the closes the server makes as it exits do not join them (see [`close_debug_session`](#close_debug_session)). A plain detach that arrives while a close or another plain detach is in flight sends no second release: it waits for it, and answers from what its release observed: a second detach answers what the first did; a detach during a close answers in a detach's words, ending `The release was the one the close_debug_session already in progress sent; that close also removed the session`, or `No active debug session to detach from` when that close had nothing to release. A detach with `terminateProcess: true` while a close or a detach is in flight, and a plain detach while a terminating one runs, are refused (`This session is being closed …` / `A detach is already in progress …`) and send nothing. A close that arrives during a detach waits for it too, and sends no second release after a detach whose release was confirmed, also when the detach then fails after it (stopping its worker failed); a detach whose release was not confirmed, or that failed before it sent the release, leaves the close to send its own. See [`close_debug_session`](#close_debug_session).
 
 **Notes:**
 
