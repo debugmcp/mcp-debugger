@@ -8,13 +8,14 @@
  * them, and verifies Python's attach-only debugpy file-missing hint.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DebugLanguage, SessionState } from '@debugmcp/shared';
+import { DebugLanguage, SessionState, type UnboundBreakpointContext } from '@debugmcp/shared';
 import { DebugMcpServer } from '../../../../../src/server.js';
 import { registerToolHandlers } from '../../../../../src/server/tool-dispatch.js';
 import type { ToolResult } from '../../../../../src/server/tool-result.js';
 import { createProductionDependencies, type Dependencies } from '../../../../../src/container/dependencies.js';
 import { DapResponseError } from '../../../../../src/proxy/dap-response-error.js';
 import type { IProxyManager } from '../../../../../src/proxy/proxy-manager.js';
+import { markChildMirrorUnanswered } from '../../../../../src/utils/child-origin-events.js';
 import { createMockDependencies } from '../session-manager-test-utils.js';
 
 vi.mock('../../../../../src/container/dependencies.js');
@@ -176,6 +177,36 @@ describe('Ruby attach unbound-path answers stay character-for-character identica
     expect(otherErrRes.message).toBe('Connection lost');
     expect(otherErrRes.warning).toBe('Breakpoint state updated, but live sync failed: Connection lost');
   });
+
+  it('adds no hint on a Ruby attach when setBreakpoints succeeds with verified: false and "<path> is not available"', async () => {
+    const sessionId = await createPausedSession(DebugLanguage.RUBY, true);
+    sendDapRequest.mockResolvedValueOnce({
+      body: { breakpoints: [{ id: 0, verified: false, message: '/host/path/app.rb is not available' }] }
+    });
+
+    const setRes = parseToolJson(
+      await callTool({
+        method: 'tools/call',
+        params: {
+          name: 'set_breakpoint',
+          arguments: { sessionId, file: '/host/path/app.rb', line: 12 }
+        }
+      })
+    );
+
+    expect(typeof setRes.breakpointId).toBe('string');
+    expect(setRes).toEqual({
+      success: true,
+      breakpointId: setRes.breakpointId,
+      file: '/host/path/app.rb',
+      line: 12,
+      requestedLine: 12,
+      verified: false,
+      message: '/host/path/app.rb is not available',
+      warning: '/host/path/app.rb is not available',
+      note: "content and context omitted: the target of this attach is not on the mcp-debugger host, so the host file is not the debuggee's source"
+    });
+  });
 });
 
 describe('Python attach unbound-file hint and cross-engine non-matching (#1320)', () => {
@@ -183,8 +214,8 @@ describe('Python attach unbound-file hint and cross-engine non-matching (#1320)'
   const PYTHON_HINT =
     "debugpy looked for this path, after any adapterConfig.pathMappings, on the target's file system. " +
     'If the target runs in a container or on another machine, attach with a pathMappings entry whose ' +
-    "localRoot contains this file and whose remoteRoot is the same directory on the target, or set the " +
-    "breakpoint by the target's own path.";
+    'localRoot contains this file and whose remoteRoot is the same directory on the target, or set the ' +
+    "breakpoint by the target's own path when no pathMappings entry rewrites it.";
 
   let core: DebugMcpServer;
   let callTool: CallTool;
@@ -321,6 +352,78 @@ describe('Python attach unbound-file hint and cross-engine non-matching (#1320)'
 
     expect(res.verified).toBe(true);
     expect(res.warning).toBeUndefined();
+  });
+
+  it('adds no Python unverified-file hint when setBreakpoints is refused on attach with debugpy sentence', async () => {
+    const sessionId = await createPausedSession(DebugLanguage.PYTHON, true);
+    sendDapRequest.mockRejectedValueOnce(refusal('setBreakpoints', DEBUGPY_SENTENCE));
+
+    const res = parseToolJson(
+      await callTool({
+        method: 'tools/call',
+        params: {
+          name: 'set_breakpoint',
+          arguments: { sessionId, file: '/path/to/local/app.py', line: 15 }
+        }
+      })
+    );
+
+    expect(res.verified).toBe(false);
+    expect(res.message).toBe(DEBUGPY_SENTENCE);
+    expect(res.warning).toBe(`Breakpoint state updated, but live sync failed: ${DEBUGPY_SENTENCE}`);
+  });
+
+  it('does not call describeUnboundBreakpoint when an unverified reply omits message', async () => {
+    const sessionId = await createPausedSession(DebugLanguage.PYTHON, true);
+    const describeSpy = vi.fn((_info: UnboundBreakpointContext) => 'should not be called');
+    vi.spyOn(core.sessionManager as unknown as { selectPolicy: () => unknown }, 'selectPolicy').mockReturnValue({
+      describeUnboundBreakpoint: describeSpy
+    });
+    sendDapRequest.mockResolvedValueOnce({
+      body: { breakpoints: [{ id: 0, verified: false }] }
+    });
+
+    const res = parseToolJson(
+      await callTool({
+        method: 'tools/call',
+        params: {
+          name: 'set_breakpoint',
+          arguments: { sessionId, file: '/path/to/local/app.py', line: 15 }
+        }
+      })
+    );
+
+    expect(describeSpy).not.toHaveBeenCalled();
+    expect(res.verified).toBe(false);
+    expect(res.warning).toBeUndefined();
+  });
+
+  it('keeps sync.warning and skips describeUnboundBreakpoint when a mirrored target did not answer', async () => {
+    const sessionId = await createPausedSession(DebugLanguage.PYTHON, true);
+    const describeSpy = vi.fn((_info: UnboundBreakpointContext) => 'should not be appended');
+    vi.spyOn(core.sessionManager as unknown as { selectPolicy: () => unknown }, 'selectPolicy').mockReturnValue({
+      describeUnboundBreakpoint: describeSpy
+    });
+    const unansweredResponse = {
+      body: { breakpoints: [{ id: 0, verified: false, message: DEBUGPY_SENTENCE }] }
+    };
+    markChildMirrorUnanswered(unansweredResponse);
+    sendDapRequest.mockResolvedValueOnce(unansweredResponse);
+
+    const res = parseToolJson(
+      await callTool({
+        method: 'tools/call',
+        params: {
+          name: 'set_breakpoint',
+          arguments: { sessionId, file: '/path/to/local/app.py', line: 15 }
+        }
+      })
+    );
+
+    expect(describeSpy).not.toHaveBeenCalled();
+    expect(res.verified).toBe(false);
+    expect(res.warning).not.toContain('should not be appended');
+    expect(String(res.warning)).toContain('app.py');
   });
 
   it.each([DebugLanguage.JAVASCRIPT, DebugLanguage.GO, DebugLanguage.MOCK])(

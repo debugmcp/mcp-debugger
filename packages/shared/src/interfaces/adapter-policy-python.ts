@@ -75,13 +75,15 @@ const DEBUGPY_MISSING_FILE_MESSAGE = 'Breakpoint in file that does not exist.';
 const PYTHON_ATTACH_UNBOUND_FILE_HINT =
   "debugpy looked for this path, after any adapterConfig.pathMappings, on the target's file system. " +
   'If the target runs in a container or on another machine, attach with a pathMappings entry whose ' +
-  "localRoot contains this file and whose remoteRoot is the same directory on the target, or set the " +
-  "breakpoint by the target's own path.";
+  'localRoot contains this file and whose remoteRoot is the same directory on the target, or set the ' +
+  "breakpoint by the target's own path when no pathMappings entry rewrites it.";
 
 export const PythonAdapterPolicy = {
   name: 'python',
-  describeUnboundBreakpoint: ({ message, attached }: UnboundBreakpointContext): string | undefined =>
-    attached && message === DEBUGPY_MISSING_FILE_MESSAGE ? PYTHON_ATTACH_UNBOUND_FILE_HINT : undefined,
+  describeUnboundBreakpoint: ({ outcome, message, attachMode }: UnboundBreakpointContext): string | undefined =>
+    attachMode && outcome === 'unverified' && message === DEBUGPY_MISSING_FILE_MESSAGE
+      ? PYTHON_ATTACH_UNBOUND_FILE_HINT
+      : undefined,
   // Python prints `Traceback (most recent call last):` and debugpy/runpy launcher
   // frames first and the user's innermost frame + `<Exception>: <message>` last
   // (issue #1277), so the plain last 8 lines carry both the user frame and the cause.

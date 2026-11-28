@@ -30,6 +30,7 @@ import {
   type GeneratedFileContext,
   type LocalVariableExtraction,
   type StackFrame,
+  type UnboundBreakpointContext,
   type Variable
 } from '@debugmcp/shared';
 import { createChildSafePolicy } from '../../../src/proxy/child-safe-policy.js';
@@ -629,6 +630,10 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
     if (!policy.describeUnboundBreakpoint) {
       return;
     }
+    const ownOutcome: UnboundBreakpointContext['outcome'] =
+      language === DebugLanguage.PYTHON ? 'unverified' : 'syncFailed';
+    const otherOutcome: UnboundBreakpointContext['outcome'] =
+      language === DebugLanguage.PYTHON ? 'syncFailed' : 'unverified';
     const ownMessage =
       language === DebugLanguage.PYTHON
         ? 'Breakpoint in file that does not exist.'
@@ -638,13 +643,19 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
         ? '/host/app.rb is not available'
         : 'Breakpoint in file that does not exist.';
 
-    const hint = policy.describeUnboundBreakpoint({ message: ownMessage, attached: true });
+    const matchingContext: UnboundBreakpointContext = {
+      outcome: ownOutcome,
+      message: ownMessage,
+      attachMode: true
+    };
+    const hint = policy.describeUnboundBreakpoint(matchingContext);
     expect(typeof hint).toBe('string');
     expect(hint!.length).toBeGreaterThan(0);
-    expect(policy.describeUnboundBreakpoint({ message: ownMessage, attached: false })).toBeUndefined();
-    expect(policy.describeUnboundBreakpoint({ message: otherMessage, attached: true })).toBeUndefined();
-    expect(policy.describeUnboundBreakpoint({ message: 'Unbound breakpoint', attached: true })).toBeUndefined();
-    expect(policy.describeUnboundBreakpoint({ message: '', attached: true })).toBeUndefined();
+    expect(policy.describeUnboundBreakpoint({ outcome: otherOutcome, message: ownMessage, attachMode: true })).toBeUndefined();
+    expect(policy.describeUnboundBreakpoint({ outcome: ownOutcome, message: ownMessage, attachMode: false })).toBeUndefined();
+    expect(policy.describeUnboundBreakpoint({ outcome: ownOutcome, message: otherMessage, attachMode: true })).toBeUndefined();
+    expect(policy.describeUnboundBreakpoint({ outcome: ownOutcome, message: 'Unbound breakpoint', attachMode: true })).toBeUndefined();
+    expect(policy.describeUnboundBreakpoint({ outcome: ownOutcome, message: '', attachMode: true })).toBeUndefined();
   });
 
   it('pins whether step_over repeats a token-position step on the same line (issue #879)', () => {

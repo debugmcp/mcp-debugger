@@ -9,11 +9,13 @@ const RDBG_UNAVAILABLE_PATH_HINT =
 
 export const RubyAdapterPolicy = {
   name: 'ruby',
-  // Topology guidance for a Ruby attach session whose breakpoint path rdbg
+  // Topology guidance for a Ruby attach session whose breakpoint request rdbg
   // rejects with "<path> is not available" on the target's filesystem
   // (issues #357, #1320).
-  describeUnboundBreakpoint: ({ message, attached }: UnboundBreakpointContext): string | undefined =>
-    attached && /is not available/.test(message) ? RDBG_UNAVAILABLE_PATH_HINT : undefined,
+  describeUnboundBreakpoint: ({ outcome, message, attachMode }: UnboundBreakpointContext): string | undefined =>
+    attachMode && outcome === 'syncFailed' && /is not available/.test(message)
+      ? RDBG_UNAVAILABLE_PATH_HINT
+      : undefined,
   // rdbg does not advertise supportsLogPoints and its setBreakpoints ignores
   // logMessage, silently downgrading a logpoint into a pausing breakpoint —
   // the inverse of what a logpoint promises. Reject up front (issue #469).

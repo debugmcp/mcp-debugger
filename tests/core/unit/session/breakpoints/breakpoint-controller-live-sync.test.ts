@@ -431,6 +431,46 @@ describe('BreakpointController.resyncAll hands the failures back (issue #754)', 
     ]);
   });
 
+  it('carries the ruby attach topology hint on a refused function-breakpoint re-send with no line breakpoints (#357, #1320)', async () => {
+    const { controller } = makeController();
+    vi.spyOn(controller, 'syncFunctionBreakpoints').mockResolvedValue(refused('/host/app.rb is not available'));
+    const { session } = refusingSession([], [{ id: 'f1', functionName: 'compute' }]);
+    Object.assign(session, { language: 'ruby', run: { attachMode: true } });
+
+    const { warnings, functionBreakpointsFailed } = await controller.resyncAll(session);
+
+    expect(functionBreakpointsFailed).toBe(true);
+    expect(warnings).toEqual([
+      'The debugger refused the re-send of the function breakpoints: /host/app.rb is not available',
+      LOCALFS_HINT
+    ]);
+  });
+
+  it('preserves an earlier re-send topology hint when later file and function re-sends fail with unrelated messages (#357, #1320)', async () => {
+    const { controller } = makeController();
+    vi.spyOn(controller, 'syncBreakpointsForFile').mockImplementation(async (_session, file) =>
+      file.endsWith('app.rb') ? refused(`${file} is not available`) : failed('Connection lost')
+    );
+    vi.spyOn(controller, 'syncFunctionBreakpoints').mockResolvedValue(refused('Unsupported request'));
+    const { session } = refusingSession(
+      [
+        { id: 'a', file: '/host/app.rb', line: 1 },
+        { id: 'b', file: '/host/lib.rb', line: 1 }
+      ],
+      [{ id: 'f1', functionName: 'compute' }]
+    );
+    Object.assign(session, { language: 'ruby', run: { attachMode: true } });
+
+    const { warnings } = await controller.resyncAll(session);
+
+    expect(warnings).toEqual([
+      'The debugger refused the re-send of the breakpoints for app.rb: /host/app.rb is not available',
+      'The re-send of the breakpoints for lib.rb failed: Connection lost',
+      'The debugger refused the re-send of the function breakpoints: Unsupported request',
+      LOCALFS_HINT
+    ]);
+  });
+
   it('appends the curated notes the function records carry, so capability-drift guidance still reaches the launch result', async () => {
     const { controller } = makeController();
     const drift = 'Adapter does not advertise function-breakpoint support — this breakpoint will not bind';
