@@ -82,7 +82,9 @@ export function attachLocalityOf(request: AttachAddressingRequest): AttachLocali
     return 'pid';
   }
   if (given(request.port)) {
-    return isLoopbackHost(request.host ?? 'localhost') ? 'loopback' : 'remote';
+    // Match ProxyLauncher: adapterConfig keys override the top-level attach arguments.
+    const { host } = { host: request.host, ...request.adapterConfig };
+    return isLoopbackHost(typeof host === 'string' ? host : 'localhost') ? 'loopback' : 'remote';
   }
   for (const key of URI_KEYS) {
     const uri = request.adapterConfig?.[key];

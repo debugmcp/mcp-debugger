@@ -466,8 +466,9 @@ describe('Server Inspection Tools Tests', () => {
       expect(content.note).toContain('includeInternals: true');
     });
 
-    it('forwards noProgramFrame when no frame of the shown stack is program code (issue #904)', async () => {
-      mockSessionManager.getSession.mockReturnValue({ run: {}, proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) } });
+    it.each(['none', 'line', 'function', 'logpoint', 'downgraded'])('forwards noProgramFrame with %s (#1288)', async kind => {
+      const hasBreakpoints = kind === 'line' || kind === 'function' || kind === 'downgraded';
+      mockSessionManager.getSession.mockReturnValue({ run: {}, breakpoints: new Map(kind === 'line' ? [['bp', {}]] : kind === 'logpoint' || kind === 'downgraded' ? [['log', { logMessage: 'log' }]] : []), functionBreakpoints: new Map(kind === 'function' ? [['fn', {}]] : []), adapterCapabilities: { supportsLogPoints: kind !== 'downgraded' }, proxyManager: { getCurrentThreadId: vi.fn().mockReturnValue(1) } });
       mockSessionManager.getStackTraceDetailed.mockResolvedValue({
         frames: [{ id: 0, name: '<anonymous>', file: '<unknown_source>', line: 1, column: 1 }],
         totalFrameCount: 1, hiddenFrameCount: 0, allFramesInternal: false, noProgramFrame: true
@@ -480,6 +481,7 @@ describe('Server Inspection Tools Tests', () => {
 
       const content = JSON.parse(result.content[0].text);
       expect(content.noProgramFrame).toBe(true);
+      expect(content.note.includes('or set a breakpoint')).toBe(!hasBreakpoints);
       expect(content.note).toContain("No program frame is active: the only frame is internal/runtime (top: '<anonymous>' <unknown_source>:1)");
       // This answer IS the stack: pointing at get_stack_trace from it goes round in a circle (issue #1141).
       expect(content.note).not.toContain('lists the frames');

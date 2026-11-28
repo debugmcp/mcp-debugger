@@ -142,7 +142,10 @@ export interface LaunchArming {
   noUncaughtStop?: NoUncaughtStop;
 }
 
-export function describeLaunchArming(session: ArmingSession, stopOnEntry: boolean | undefined): LaunchArming {
+type BreakpointSession = Partial<Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'adapterCapabilities'>>;
+type BreakpointArming = Pick<LaunchArming, 'lineBreakpoints' | 'logpointsThatPause' | 'functionBreakpoints' | 'logpoints'>;
+
+function describeBreakpointArming(session: BreakpointSession): BreakpointArming {
   // The same rule as the run-to-completion summary: a logpoint runs on only
   // when the adapter advertises supportsLogPoints; before the handshake has
   // said so, it counts as a stop the program can meet.
@@ -150,7 +153,7 @@ export function describeLaunchArming(session: ArmingSession, stopOnEntry: boolea
   let lineBreakpoints = 0;
   let logpointsThatPause = 0;
   let logpoints = 0;
-  for (const bp of session.breakpoints.values()) {
+  for (const bp of (session.breakpoints?.values() ?? [])) {
     if (bp.logMessage === undefined) {
       lineBreakpoints++;
     } else if (logpointsRunOn) {
@@ -160,6 +163,17 @@ export function describeLaunchArming(session: ArmingSession, stopOnEntry: boolea
     }
   }
   const functionBreakpoints = session.functionBreakpoints?.size ?? 0;
+  return { lineBreakpoints, logpointsThatPause, logpoints, functionBreakpoints };
+}
+
+/** Pausing line/function breakpoints, including logpoints only when downgraded. */
+export function hasPausingBreakpoint(source: BreakpointSession | Pick<LaunchArming, 'lineBreakpoints' | 'logpointsThatPause' | 'functionBreakpoints'>): boolean {
+  const counts = 'lineBreakpoints' in source ? source : describeBreakpointArming(source);
+  return counts.lineBreakpoints + counts.logpointsThatPause + counts.functionBreakpoints > 0;
+}
+
+export function describeLaunchArming(session: ArmingSession, stopOnEntry: boolean | undefined): LaunchArming {
+  const { lineBreakpoints, logpointsThatPause, logpoints, functionBreakpoints } = describeBreakpointArming(session);
   const { effectiveBreakOnExceptions, launchExceptionFilters } = session.run;
   const pausesOnCaughtExceptions = effectiveBreakOnExceptions === 'all';
   const extraExceptionFilters = launchExceptionFilters?.beyondMode ?? [];

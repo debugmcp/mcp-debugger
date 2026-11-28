@@ -238,6 +238,24 @@ describe('SessionManager.evaluateExpression default-frame resolution', () => {
       return { sessionManager, session, evaluated };
     }
 
+    it.each([
+      { kind: 'function', supportsLogPoints: true, pauses: true },
+      { kind: 'logpoint', supportsLogPoints: true, pauses: false },
+      { kind: 'logpoint', supportsLogPoints: false, pauses: true }
+    ])('uses pausing-breakpoint advice for evaluation: %j (#1288)', async ({ kind, supportsLogPoints, pauses }) => {
+      const { sessionManager, session } = await pausedOutsideTheProgram([TIMERS]);
+      const managed = sessionManager.getSession(session.id)!;
+      managed.adapterCapabilities = { supportsLogPoints };
+      if (kind === 'function') {
+        managed.functionBreakpoints!.set('fn', { id: 'fn', functionName: 'work', verified: true });
+      } else {
+        managed.breakpoints.set('log', { id: 'log', file: '/test.js', line: 1, verified: true, logMessage: 'log' });
+      }
+      const result = await sessionManager.evaluateExpression(session.id, 'typeof now');
+      expect(result.noProgramFrame).toBe(true);
+      expect(result.anchorNote?.includes('or set a breakpoint')).toBe(!pauses);
+    });
+
     it('evaluates in the runtime frame and says that is what it is', async () => {
       const { sessionManager, session, evaluated } = await pausedOutsideTheProgram([TIMERS]);
 

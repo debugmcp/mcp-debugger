@@ -7,48 +7,213 @@
  * (their tests called them off the prototype with a bare receiver to prove
  * it); as free functions the purity is the signature rather than a convention.
  */
-import type { AdapterPolicy, ExceptionBreakMode } from '@debugmcp/shared';
+import {
+  getPolicyForLanguage,
+  type AdapterPolicy,
+  type ExceptionBreakMode,
+  type ProgramOutputContract
+} from '@debugmcp/shared';
 import { normalizeBreakpointMessage } from '../../utils/breakpoint-message.js';
-import { OUTPUT_BUFFER_CAP, type OutputRingBuffer } from '../output-buffer.js';
+import type { BufferedOutputEntry, OutputRingBuffer } from '../output-buffer.js';
+import { hasPausingBreakpoint, type LaunchArming } from '../launch/launch-arming.js';
+import type { RunFacts } from '../run-facts.js';
 import type { ManagedSession } from '../session-store.js';
 
 const DEFAULT_ATTACH_CHILD_DEBUGGING_NOTE = "on an attach, processes the target starts afterwards are not debugged unless requested, so a breakpoint in code only such a process runs is never hit; adapterConfig: { autoAttachChildProcesses: true } on the attach requests it for a target reached through a local endpoint, but it changes the target: each process it starts from then on is made to load a file from this server (through NODE_OPTIONS) and to wait at startup for the debugger, so it can fail to start if the target cannot load this server's file, starts late when the target forks fast, and can be left waiting if it is forked during a detach (#1286)";
 
+/** A conditional explanation, never a claim about which process runs the code (#1288). */
+export function buildPendingAttachBreakpointClause(
+  arming: Pick<LaunchArming, 'lineBreakpoints' | 'logpointsThatPause' | 'functionBreakpoints'>,
+  run: Pick<RunFacts, 'attached' | 'childDebuggingOptedOut' | 'breakpointStopOccurred'>
+): string | undefined {
+  if (!run.attached || run.childDebuggingOptedOut === undefined ||
+      run.breakpointStopOccurred || !hasPausingBreakpoint(arming)) {
+    return undefined;
+  }
+  return "If a breakpoint's code runs only in a process the target starts (a fork or a worker process), this attach does not debug that process: " +
+    'see adapterConfig.autoAttachChildProcesses in the attach_to_process description for what turning that on costs.';
+}
+
+/** Verification describes binding in this process, not a promise about future children. */
+export function buildAttachBreakpointScopeWarning(run: Pick<RunFacts, 'attached' | 'childDebuggingOptedOut'> | undefined): string | undefined {
+  return run?.attached && run.childDebuggingOptedOut !== undefined
+    ? 'Verified says the breakpoint is bound in the attached process, not that a process the target starts will stop on it; see adapterConfig.autoAttachChildProcesses in the attach_to_process description.'
+    : undefined;
+}
+
 export const OUTPUT_TAIL_LINES = 8;
 export const OUTPUT_TAIL_LINE_CHARS = 300;
+export const OUTPUT_TAIL_STDERR_HEAD_LINES = 4;
+export const OUTPUT_TAIL_STDERR_TAIL_LINES = OUTPUT_TAIL_LINES - OUTPUT_TAIL_STDERR_HEAD_LINES - 1;
+
+export function formatOutputTailGapMarker(omittedLines: number): string {
+  return `... (${omittedLines} lines omitted)`;
+}
+
+interface CategoryRun {
+  category: string;
+  categoryOmitted: boolean;
+  text: string;
+  closedByTruncation: boolean;
+}
+
+interface ProgramLine {
+  category: 'stdout' | 'stderr' | 'console';
+  text: string;
+}
 
 /**
- * The last non-empty lines captured on `buffer`, with the bounds shared by a
- * failed launch's output quote and a non-zero exit's `outputTail` (issues
- * #1036, #1254): split per entry on `\n` so entries without a trailing newline
- * never run into the next one, trimmed, up to 8 lines of 300 characters each.
- * Undefined when nothing was captured.
+ * Join consecutive buffer entries of the same category (and same explicit vs
+ * omitted category origin) before splitting on `\n` (issues #1036, #1277):
+ * - consecutive stream chunks (including `\r` and `\n` split across two chunks
+ *   on a pty) join into one line;
+ * - an entry of another category between two chunks (such as Delve's `console`
+ *   line between its newline-less `Building <pkg>` `stdout` chunk and the Go
+ *   program's first `stdout` line) keeps the two runs separate;
+ * - an entry the ring buffer cut at 8,192 characters (`truncated: true`) ends
+ *   its run so the next chunk is never glued onto it.
+ */
+function joinConsecutiveRuns(
+  entries: readonly Pick<BufferedOutputEntry, 'category' | 'output' | 'truncated' | 'categoryOmitted'>[]
+): CategoryRun[] {
+  const runs: CategoryRun[] = [];
+  for (const entry of entries) {
+    const omitted = entry.categoryOmitted === true;
+    const truncated = entry.truncated === true;
+    const last = runs[runs.length - 1];
+    if (last && !last.closedByTruncation && last.category === entry.category && last.categoryOmitted === omitted) {
+      last.text += entry.output;
+      last.closedByTruncation = truncated;
+    } else {
+      runs.push({
+        category: entry.category,
+        categoryOmitted: omitted,
+        text: entry.output,
+        closedByTruncation: truncated
+      });
+    }
+  }
+  return runs;
+}
+
+function splitTrimmedNonEmptyLines(text: string): string[] {
+  return text
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line.length > 0);
+}
+
+function boundOutputTailLine(line: string): string {
+  return line.length > OUTPUT_TAIL_LINE_CHARS ? `${line.slice(0, OUTPUT_TAIL_LINE_CHARS)}…` : line;
+}
+
+function safePredicate(fn: () => boolean): boolean {
+  try {
+    return fn();
+  } catch {
+    return false;
+  }
+}
+
+function findTrailingLongStderrBlockStart(lines: readonly ProgramLine[]): number | undefined {
+  let start = lines.length;
+  while (start > 0 && lines[start - 1].category === 'stderr') {
+    start--;
+  }
+  return lines.length - start > OUTPUT_TAIL_LINES ? start : undefined;
+}
+
+function findLastFatalErrorIndex(
+  lines: readonly ProgramLine[],
+  isFatalErrorLine: ProgramOutputContract['isFatalErrorLine']
+): number {
+  if (!isFatalErrorLine) {
+    return -1;
+  }
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (safePredicate(() => isFatalErrorLine(lines[i].text))) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * The last non-empty lines captured on `buffer` across all categories, for a
+ * failed launch's adapter-output quote (issue #1036): consecutive chunks of
+ * the same category joined (ending after a truncated chunk), trimmed, up to 8
+ * lines of 300 characters each. Undefined when nothing was captured.
  */
 export function readOutputTailLines(
-  buffer: Pick<OutputRingBuffer, 'read'> | undefined
+  buffer: Pick<OutputRingBuffer, 'readBuffered'> | undefined
 ): string[] | undefined {
-  const lines = (buffer?.read(0, OUTPUT_BUFFER_CAP).entries ?? [])
-    .flatMap(entry => entry.output.split('\n'))
-    .map(line => line.trim())
-    .filter(line => line.length > 0)
+  const lines = joinConsecutiveRuns(buffer?.readBuffered() ?? [])
+    .flatMap(run => splitTrimmedNonEmptyLines(run.text))
     .slice(-OUTPUT_TAIL_LINES)
-    .map(line => (line.length > OUTPUT_TAIL_LINE_CHARS ? `${line.slice(0, OUTPUT_TAIL_LINE_CHARS)}…` : line));
+    .map(boundOutputTailLine);
   return lines.length > 0 ? lines : undefined;
 }
 
 /**
- * The `outputTail` an end answer carries for `session`, or undefined (issues
- * #1254, #1136): present only when the run reported a non-zero exit code and
- * `session`'s own output buffer captured at least one non-empty line. Reads
- * what `get_output` on `session` reads — never walks the session tree.
+ * The tail is the last 8 non-empty lines of the program's own output (up to 300
+ * characters plus `"…"` each) in arrival order across streams — except when the
+ * runtime does not put its cause last (`causeLast !== true`) and either the
+ * last policy-recognised runtime fatal-error line sits above the last 8 or
+ * (with no fatal-error line recognised) all 8 fall inside one `stderr` block
+ * longer than 8 lines, in which case it quotes that head line and the 3 after
+ * it, `"... (N lines omitted)"`, and the last 3 lines (issues #1254, #1136,
+ * #1277). Reads only `session`'s own buffer and never walks the session tree;
+ * undefined when `exitCode` is 0, unreported, or no program output was captured.
  */
 export function exitOutputTail(
-  session: Pick<ManagedSession, 'exitCode'> & Partial<Pick<ManagedSession, 'outputBuffer'>>
+  session: Pick<ManagedSession, 'exitCode'> & Partial<Pick<ManagedSession, 'outputBuffer' | 'language'>>
 ): string[] | undefined {
   if (typeof session.exitCode !== 'number' || session.exitCode === 0) {
     return undefined;
   }
-  return readOutputTailLines(session.outputBuffer);
+  const contract = session.language ? getPolicyForLanguage(session.language).programOutput : undefined;
+  const runs = joinConsecutiveRuns(session.outputBuffer?.readBuffered() ?? []);
+  const programLines: ProgramLine[] = [];
+
+  for (const run of runs) {
+    if (run.category === 'stdout' || run.category === 'stderr') {
+      const category = run.category;
+      for (const line of splitTrimmedNonEmptyLines(run.text)) {
+        if (!safePredicate(() => contract?.isAdapterLine?.(category, line) === true)) {
+          programLines.push({ category, text: line });
+        }
+      }
+    } else if (run.category === 'console' && contract?.explicitConsoleIsProgram === true && !run.categoryOmitted) {
+      for (const line of splitTrimmedNonEmptyLines(run.text)) {
+        programLines.push({ category: 'console', text: line });
+      }
+    }
+  }
+
+  if (programLines.length === 0) {
+    return undefined;
+  }
+
+  let quoteStart: number | undefined;
+  if (contract?.causeLast !== true) {
+    const fatalIdx = findLastFatalErrorIndex(programLines, contract?.isFatalErrorLine);
+    if (fatalIdx >= 0) {
+      quoteStart = fatalIdx < programLines.length - OUTPUT_TAIL_LINES ? fatalIdx : undefined;
+    } else {
+      quoteStart = findTrailingLongStderrBlockStart(programLines);
+    }
+  }
+
+  if (quoteStart !== undefined) {
+    const omitted = programLines.length - quoteStart - (OUTPUT_TAIL_STDERR_HEAD_LINES + OUTPUT_TAIL_STDERR_TAIL_LINES);
+    return [
+      ...programLines.slice(quoteStart, quoteStart + OUTPUT_TAIL_STDERR_HEAD_LINES).map(line => boundOutputTailLine(line.text)),
+      formatOutputTailGapMarker(omitted),
+      ...programLines.slice(-OUTPUT_TAIL_STDERR_TAIL_LINES).map(line => boundOutputTailLine(line.text))
+    ];
+  }
+
+  return programLines.slice(-OUTPUT_TAIL_LINES).map(line => boundOutputTailLine(line.text));
 }
 
 /** Appends a short `get_output` pointer clause when an end answer carries `outputTail` (issue #1254). */
@@ -284,7 +449,7 @@ export function describeProgramEnd(exitCode: number | undefined): string {
  */
 export function buildRunToCompletionSummary(
   session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'exitCode' | 'lastStop' | 'descendantStops' | 'adapterCapabilities' | 'programEndExplanation'> &
-    Partial<Pick<ManagedSession, 'run' | 'outputBuffer'>>
+    Partial<Pick<ManagedSession, 'run' | 'outputBuffer' | 'language'>>
 ): RunToCompletionSummary {
   const base = summarizeProgramEnd(session);
   // What the adapter read into the end (issue #877: the devices a Flutter launch found when
@@ -302,7 +467,7 @@ export function buildRunToCompletionSummary(
 
 function summarizeProgramEnd(
   session: Pick<ManagedSession, 'breakpoints' | 'functionBreakpoints' | 'exitCode' | 'lastStop' | 'descendantStops' | 'adapterCapabilities'> &
-    Partial<Pick<ManagedSession, 'run' | 'outputBuffer'>>
+    Partial<Pick<ManagedSession, 'run' | 'outputBuffer' | 'language'>>
 ): RunToCompletionSummary {
   const exitCode = session.exitCode;
   const ended = describeProgramEnd(exitCode);
@@ -371,7 +536,7 @@ function summarizeProgramEnd(
     ? ` Verified${optedOut !== undefined ? ` in ${processScope}` : ''} but never hit: ${verifiedNames.join(', ')}.`
     : '';
   return {
-    summary: withOutputTailClause(`${ended} without hitting any breakpoint${optOutClause}.${verifiedClause}`, outputTail),
+    summary: withOutputTailClause(`${ended}${exitCode === undefined ? '; no breakpoint was hit' : ' without hitting any breakpoint'}${optOutClause}.${verifiedClause}`, outputTail),
     data
   };
 }

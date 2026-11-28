@@ -540,3 +540,14 @@ describe('stopWithoutProgramFrame offers the frames only when some are unseen (i
     expect(ErrorMessages.stopWithoutProgramFrame(undefined, 1, top)).toMatch(/^No program frame is active: the only frame is/);
   });
 });
+
+
+describe('no-program-frame advice with existing breakpoints (#1288)', () => {
+  it.each([false, true])('only suggests a breakpoint when none exists (sourceless=%s)', sourceless => {
+    const top = { name: 'processTimers', file: '<internal>', line: 1 };
+    expect(ErrorMessages.stopWithoutProgramFrame(0, 1, top, { sourceless })).toContain('or set a breakpoint');
+    const note = ErrorMessages.stopWithoutProgramFrame(0, 1, top, { sourceless, hasBreakpoints: true });
+    expect(note).not.toContain('set a breakpoint');
+    expect(note).toContain('continue_execution and trigger activity.');
+  });
+});

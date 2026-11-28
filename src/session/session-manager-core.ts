@@ -10,7 +10,7 @@ import {
   isTerminalSessionState, AdapterPolicy, SessionOutputEntry, redactSecretsInString
 } from '@debugmcp/shared';
 import type { Breakpoint, DapClientBehavior, FunctionBreakpoint, ProgramEndExplanation, SessionStopInfo, StackFrame, StopTopFrameLine } from '@debugmcp/shared';
-import { USER_BREAK_REASONS } from '@debugmcp/shared';
+import { USER_BREAK_REASONS, BREAKPOINT_STOP_REASONS } from '@debugmcp/shared';
 import { stopProvesDebuggerOn } from './debugger-off.js';
 import { isRedactionEnabled } from '../utils/redaction-mode.js';
 import { isSnapshotEnabled } from '../utils/snapshot-mode.js';
@@ -352,6 +352,8 @@ export type { AttachLoanReport } from './session-store.js';
  * terminating detach closed.
  */
 export type DetachResultData = DebugResultData & Pick<TreeAnswerFields, 'childrenReleased' | 'childrenClosed'> & {
+  /** Attach side effects that survive this detach (#1288). */
+  note?: string;
   /** The adapter acknowledged the detach and reported no exit: the process was left running (issue #1148). */
   released?: true;
   /** The adapter reported that the program exited (issue #1148). */
@@ -2017,7 +2019,7 @@ export abstract class SessionManagerCore extends EventEmitter {
         'console',
         `[mcp-debugger] Warning: ${note}\n`,
         undefined,
-        redacted ? { redacted: true } : undefined
+        { ...(redacted ? { redacted: true } : {}), categoryOmitted: true }
       );
       if (noteEntry) {
         this.emit('output-captured', sessionId, noteEntry);
@@ -2193,6 +2195,9 @@ export abstract class SessionManagerCore extends EventEmitter {
         this.logger.debug(
           `[SessionManager ${sessionId}] Stop-reason normalization failed; keeping raw reason '${rawReason}': ${err instanceof Error ? err.message : String(err)}`
         );
+      }
+      if (BREAKPOINT_STOP_REASONS.has(reason)) {
+        session.run.breakpointStopOccurred = true;
       }
       clearPauseIntent(session);
       this.logger.debug(`[SessionManager] handleStopped: session=${sessionId} currentState=${session.state} reason=${reason} threadId=${threadId}`);
@@ -3059,7 +3064,10 @@ export abstract class SessionManagerCore extends EventEmitter {
         category,
         text,
         undefined,
-        redacted ? { redacted: true } : undefined
+        {
+          ...(redacted ? { redacted: true } : {}),
+          ...(body.category === undefined ? { categoryOmitted: true } : {})
+        }
       );
       if (entry) {
         this.emit('output-captured', sessionId, entry);
@@ -3169,7 +3177,9 @@ export abstract class SessionManagerCore extends EventEmitter {
       // restart may already have installed a fresh session.outputBuffer.
       const entry = (outputBuffer ?? session.outputBuffer)?.push(
         'console',
-        `[mcp-debugger] Warning: function breakpoint(s) never bound during this run: ${names}. The program never stopped there — check the symbol name(s).\n`
+        `[mcp-debugger] Warning: function breakpoint(s) never bound during this run: ${names}. The program never stopped there — check the symbol name(s).\n`,
+        undefined,
+        { categoryOmitted: true }
       );
       if (entry) {
         this.emit('output-captured', session.id, entry);

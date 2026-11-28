@@ -3,7 +3,8 @@
  * list_breakpoints, remove_breakpoint, clear_breakpoints.
  */
 import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
-import { Breakpoint, FunctionBreakpoint } from '@debugmcp/shared';
+import { buildAttachBreakpointScopeWarning } from '../../session/breakpoints/launch-warnings.js';
+import { Breakpoint, FunctionBreakpoint, SessionState } from '@debugmcp/shared';
 import {
   BP_ADDRESSING_ENV_KEY,
   getBpAddressingMode,
@@ -292,7 +293,12 @@ export const listBreakpointsTool: ToolHandler = async (ctx, args) => {
     // anyway is not contradicted.
     const anyUnverified =
       breakpoints.some((bp) => !bp.verified) || functionBreakpoints.some((bp) => !bp.verified);
-    const why = debuggerOffNote(ctx, args.sessionId, !anyUnverified);
+    const session = ctx.sessionManager.getSession(args.sessionId);
+    const scopeWarning = breakpoints.length + functionBreakpoints.length > 0 &&
+      (session?.state === SessionState.RUNNING || session?.state === SessionState.PAUSED)
+      ? buildAttachBreakpointScopeWarning(runFactsFor(ctx, args.sessionId))
+      : undefined;
+    const why = [debuggerOffNote(ctx, args.sessionId, !anyUnverified), scopeWarning].filter(Boolean).join(' ');
     return jsonResult({
       success: true,
       breakpoints,

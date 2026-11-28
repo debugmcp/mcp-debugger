@@ -138,7 +138,7 @@ When a human wants to look around in their IDE, expose_session {sessionId} opens
 
 ## Crash diagnosis
 - Launch sessions pause at uncaught exceptions by default with stack + locals live ("none" opts out; "all" also stops on caught raises; Ruby has no uncaught filter so its crashes still terminate). Attach applies no default.
-- The paused answer's snapshot.exception carries the class and message up front (secret-redacted), with snapshot.frames and snapshot.locals beside it — usually all you need before evaluate_expression. lastStop.description/text carry the same (redacted in answers); where supported (Python/JS/Java/.NET), lastStop.exceptionInfo adds exceptionId/breakMode/details a moment after the pause. End answers (start_debugging, restart_debugging, wait_for_stop, step_*) carry exitCode when reported, plus outputTail on a non-zero exit with captured output (full output in get_output); list_debug_sessions keeps exitCode.
+- The paused answer's snapshot.exception carries the class and message up front (secret-redacted), with snapshot.frames and snapshot.locals beside it — usually all you need before evaluate_expression. lastStop.description/text carry the same (redacted in answers); where supported (Python/JS/Java/.NET), lastStop.exceptionInfo adds exceptionId/breakMode/details a moment after the pause. End answers (start_debugging, restart_debugging, wait_for_stop, step_*) carry exitCode when reported, plus outputTail on a non-zero exit with program output (full output in get_output); list_debug_sessions keeps exitCode.
 
 The full skill (with per-language reference files) lives in skills/debugging/ of the mcp-debugger repo.`;
 }

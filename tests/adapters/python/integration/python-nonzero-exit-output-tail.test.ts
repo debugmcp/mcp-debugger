@@ -1,9 +1,9 @@
 /**
- * Real debugpy coverage for issues #1254 and #1136: a Python program that
- * writes to stderr and ends with a non-zero exit code carries `exitCode` and
- * `outputTail` at the top level of whichever answer reports its end —
- * `start_debugging` when the run finishes inside the launch hold, or the
- * `wait_for_stop` after a `pending: true` launch answer.
+ * Real debugpy coverage for issues #1254, #1136, and #1277: a Python program
+ * that exits non-zero carries `exitCode` and `outputTail` at the top level of
+ * whichever answer reports its end — keeping both the user's frames and the
+ * exception on a traceback with caret lines, and keeping a stdout failure
+ * report that follows a stderr warning.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import path from 'node:path';
@@ -14,6 +14,8 @@ import { ensurePythonOnPath } from './env-utils.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = path.resolve(here, '../../../fixtures/debug-scripts/python-nonzero-exit.py');
+const CRASH_FIXTURE = path.resolve(here, '../../../fixtures/debug-scripts/python-throws-uncaught.py');
+const WARN_STDERR_FAIL_STDOUT_FIXTURE = path.resolve(here, '../../../fixtures/debug-scripts/python-warn-stderr-fail-stdout.py');
 
 function hasDebugpy(): boolean {
   const env: Record<string, string> = {};
@@ -47,7 +49,7 @@ type EndAnswer = ToolAnswer & {
   };
 };
 
-describe.skipIf(!hasDebugpy())('Python non-zero exit carries outputTail (issues #1254, #1136) @requires-python', () => {
+describe.skipIf(!hasDebugpy())('Python non-zero exit carries outputTail (issues #1254, #1136, #1277) @requires-python', () => {
   let server: StdioClientHandle | undefined;
 
   afterEach(async () => {
@@ -88,5 +90,61 @@ describe.skipIf(!hasDebugpy())('Python non-zero exit carries outputTail (issues 
       expect(started.data?.exitCode).toBe(3);
       expect(started.data).not.toHaveProperty('outputTail');
     }
+  }, 60_000);
+
+  it('keeps the user File and line plus the exception at the end of a debugpy traceback with caret lines (issue #1277)', async () => {
+    const env: Record<string, string> = {};
+    ensurePythonOnPath(env);
+    server = await startStdioClient({ name: 'python-crash-tail', env });
+    await server.createSession('python', 'python-crash-tail');
+
+    const started = await server.call<EndAnswer>('start_debugging', {
+      scriptPath: CRASH_FIXTURE,
+      breakOnExceptions: 'none'
+    });
+    expect(started.success, JSON.stringify(started)).toBe(true);
+    const ended = started.pending
+      ? await server.call<EndAnswer>('wait_for_stop', { timeout: 20_000 })
+      : started;
+
+    expect(ended.state, JSON.stringify(ended)).toBe('stopped');
+    expect(ended.exitCode, JSON.stringify(ended)).toBe(1);
+    const tail = ended.outputTail ?? [];
+    expect(tail).toHaveLength(8);
+    expect(tail.some(line => line.includes('python-throws-uncaught.py", line 5, in <module>')), JSON.stringify(tail)).toBe(true);
+    expect(tail.some(line => line.includes('python-throws-uncaught.py", line 2, in trigger_crash')), JSON.stringify(tail)).toBe(true);
+    expect(tail.some(line => line.includes('lines omitted')), JSON.stringify(tail)).toBe(false);
+    expect(tail.at(-1), JSON.stringify(ended)).toBe("KeyError: 'uncaught on purpose'");
+  }, 60_000);
+
+  it('keeps a stdout failure line that follows a stderr warning (issue #1277)', async () => {
+    const env: Record<string, string> = {};
+    ensurePythonOnPath(env);
+    server = await startStdioClient({ name: 'python-warn-then-fail-tail', env });
+    await server.createSession('python', 'python-warn-then-fail-tail');
+
+    const started = await server.call<EndAnswer>('start_debugging', {
+      scriptPath: WARN_STDERR_FAIL_STDOUT_FIXTURE,
+      breakOnExceptions: 'none'
+    });
+    expect(started.success, JSON.stringify(started)).toBe(true);
+    const ended = started.pending
+      ? await server.call<EndAnswer>('wait_for_stop', { timeout: 20_000 })
+      : started;
+
+    expect(ended.state, JSON.stringify(ended)).toBe('stopped');
+    expect(ended.exitCode, JSON.stringify(ended)).toBe(1);
+    // stdout and stderr are separate pipes read independently by debugpy, so cross-stream
+    // arrival order is not guaranteed; assert presence across streams and order within stderr.
+    const tail = ended.outputTail ?? [];
+    expect(tail, JSON.stringify(ended)).toContain(
+      'FAILED tests/test_auth.py::test_login - AssertionError: expected 200, got 401'
+    );
+    const warnHeaderIdx = tail.findIndex(line => line.includes('DeprecationWarning: legacy config flag used'));
+    const warnSourceIdx = tail.findIndex(
+      line => line === 'warnings.warn("legacy config flag used", DeprecationWarning, stacklevel=1)'
+    );
+    expect(warnHeaderIdx, JSON.stringify(tail)).toBeGreaterThanOrEqual(0);
+    expect(warnSourceIdx, JSON.stringify(tail)).toBeGreaterThan(warnHeaderIdx);
   }, 60_000);
 });

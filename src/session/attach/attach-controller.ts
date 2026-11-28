@@ -672,6 +672,10 @@ export class AttachController {
       };
     }
 
+    const detachNote = session.run.attachMode === true && session.run.childDebuggingOptedOut === undefined &&
+      (session.run.attachLocality === 'pid' || session.run.attachLocality === 'loopback')
+      ? this.ctx.selectPolicy(session.language).childAdoption?.attachLeavesTargetChanged
+      : undefined;
     let resumedBeforeDetach: boolean | undefined;
     let warning: string | undefined;
     // What became of the process, as observed (issue #1148).
@@ -777,6 +781,8 @@ export class AttachController {
         state: SessionState.STOPPED,
         data: {
           message: terminateProcess ? 'Detached and terminated process' : fate.message,
+          ...(!terminateProcess && !fate.processEnded && detachNote
+            ? { note: detachNote } : {}),
           ...(!terminateProcess && fate.released ? { released: true as const } : {}),
           ...(!terminateProcess && fate.processEnded ? { processEnded: true as const } : {}),
           ...(resumedBeforeDetach !== undefined ? { resumedBeforeDetach } : {}),
