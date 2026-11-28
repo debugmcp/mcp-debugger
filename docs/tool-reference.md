@@ -162,8 +162,17 @@ A session with child sessions, a child session or an attach root says what the c
 - `childrenClosed: n` when the close took descendants with it: descendants are closed first,
   deepest first, then the named session. Closing a child leaves its ancestors, its siblings and the
   debug adapter they share alone.
-- `processEnded: true` when the named session is a child whose process the close ended (debugpy: a
-  child's close terminates it, exit 0 reported to its parent).
+- `processEnded: true` when the named session is a child of a launched tree whose process the
+  close ended (debugpy: a child's close terminates it, exit 0 reported to its parent).
+- `released: true` when the named session is a child of an attached tree, in every language
+  (issue #1343), whose connection was still live and whose stop succeeded (a child that had
+  already ended carries neither field, and one whose stop failed only the `warning` below): the
+  server did not start it, so the close disconnects it and its descendants with
+  `terminateDebuggee: false`, deepest first, and each process runs on undebugged, as when the root
+  is closed. Ending the processes of an attached tree takes `detach_from_process` with
+  `terminateProcess: true` on its root. For a child, `released` says what the close asked for:
+  what the debug adapter answered is not read back for a child yet (issue #1350). It used to be
+  `processEnded: true` for a Python child: the close ended a process this server did not start.
 - `released: true` when the named session borrowed its program (an attach) and the debug adapter
   acknowledged the detach (issue #1148): its descendants are detached with their targets kept
   running, deepest first, their rows removed, then the root is released with the same `disconnect`

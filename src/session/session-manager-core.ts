@@ -374,11 +374,12 @@ export interface CloseSessionOutcome {
   releasedSessionIds?: string[];
   /** Descendants closed with the named session, when any. */
   childrenClosed?: number;
-  /** The named session is a child whose process this close ended (the policy's `closeChild: 'terminate'`). */
+  /** The named session is a launched tree's child whose process this close ended (the policy's `closeChild: 'terminate'`). */
   processEnded?: true;
   /**
    * The named session's target runs on: a borrowed program whose adapter
-   * acknowledged the detach (issue #1148), or a child under `closeChild: 'release'`.
+   * acknowledged the detach (issue #1148), a child of an attached tree
+   * (issue #1343), or a child under `closeChild: 'release'`.
    */
   released?: true;
   /**
@@ -1166,8 +1167,10 @@ export abstract class SessionManagerCore extends EventEmitter {
   /**
    * Close a session and its subtree, and say what the close did (issue
    * #1081): the descendants it took with it, deepest first; for a child,
-   * whether its process was ended (the policy's `closeChild` pin: debugpy
-   * terminates it) or released; for an attach root, that every descendant was
+   * whether its process was ended (a launched tree's child, by the policy's
+   * `closeChild` pin: debugpy terminates it) or released (a child of an
+   * attached tree, whatever its adapter, issue #1343, or one whose adapter
+   * can only release it); for an attach root, that every descendant was
    * detached with its target kept running, as the root's own target is.
    *
    * `releaseBeforeStop` (close_debug_session, issue #1325): an attach root's
@@ -1192,15 +1195,18 @@ export abstract class SessionManagerCore extends EventEmitter {
       this.logger.warn(`[SESSION_CLOSE_FAIL] Session not found: ${sessionId}`);
       return { closed: false, closedSessionIds: [] };
     }
-    // An attach root's close preserves its external targets, descendants
-    // included: their connections are closed without ending them.
-    const releaseDescendants = !options.terminateDebuggee && !session.parentSessionId && borrowsProgram(session);
+    // A close of any session of an attached tree preserves its external
+    // targets, descendants included: their connections are closed without
+    // ending them. How the tree was started is its run record's, which a
+    // child shares with its root (issue #1343): a child of an attached tree
+    // is a process this server did not start either.
+    const preserveTargets = !options.terminateDebuggee && borrowsProgram(session);
     const closedSessionIds: string[] = [];
     const releasedSessionIds: string[] = [];
     const finishClose = this.beginSubtreeClose(sessionId);
     try {
       for (const descendant of this.descendantsDeepestFirst(sessionId)) {
-        const releaseChild = this.shouldReleaseDescendant(descendant, releaseDescendants);
+        const releaseChild = this.shouldReleaseDescendant(descendant, preserveTargets);
         // Capture each outcome at its own close, not before the cascade: a
         // later child can end naturally while an earlier close is awaited.
         const released = releaseChild || descendant.programEndExplanation?.data?.released === true;
@@ -1215,9 +1221,15 @@ export abstract class SessionManagerCore extends EventEmitter {
       // Read the named session's outcome after its descendants close, but
       // before a terminating disconnect can clear its connection. A retained
       // released child still runs on when only its row is being removed.
-      const childEnd = session.parentSessionId && session.proxyManager ? this.childCloseSemantics(session) : undefined;
+      // A child of an attached tree is released whatever its adapter can do
+      // to it (issue #1343); a launched tree's child gets its adapter's
+      // close semantics. `released` is a child's: a root's outcome is read
+      // from its release below.
+      const childEnd = session.parentSessionId && session.proxyManager
+        ? preserveTargets ? 'release' : this.childCloseSemantics(session)
+        : undefined;
       const alreadyReleased = session.parentSessionId && session.programEndExplanation?.data?.released === true;
-      const released = childEnd === 'release' || releaseDescendants || alreadyReleased;
+      const released = childEnd === 'release' || alreadyReleased;
       // An explicit terminating detach ends every child before the root's
       // disconnect can tear down their shared adapter/worker connection.
       if (options.terminateDebuggee && session.proxyManager) {
@@ -1232,7 +1244,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       // with no live program has nothing for this close to release; a child
       // answers from its own semantics.
       const borrowedRoot =
-        !session.parentSessionId && releaseDescendants && session.proxyManager?.isRunning() ? session.proxyManager : undefined;
+        !session.parentSessionId && preserveTargets && session.proxyManager?.isRunning() ? session.proxyManager : undefined;
       // close_debug_session releases an attached target the way
       // detach_from_process does, with the same request and bound, before
       // the worker is stopped (issue #1325): the worker's own close-time
