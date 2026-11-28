@@ -99,7 +99,7 @@
       },
       {
         "name": "set_breakpoint",
-        "description": "Set a breakpoint. Setting breakpoints on non-executable lines (structural, declarative) may lead to unexpected behavior. A breakpoint can answer verified: false before the launch, or until the module or class holding its line is loaded; that is normal. An answer saying \"requested line N, bound to line M\" means the debugger moved the breakpoint: it stops at the bound line.",
+        "description": "Set a breakpoint. Setting breakpoints on non-executable lines (structural, declarative) may lead to unexpected behavior. A breakpoint can answer verified: false before the launch, or until the module or class holding its line is loaded; that is normal. expectedContent is checked against readable launch and local-attach files. On a remote or unknown-host attach, an attach path this host cannot resolve, or a class name, pass file and the target's own line: expectedContent is then skipped with a warning. An answer saying \"requested line N, bound to line M\" means the debugger moved the breakpoint: it stops at the bound line.",
         "inputSchema": {
           "type": "object",
           "properties": {

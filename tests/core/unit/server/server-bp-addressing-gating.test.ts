@@ -137,25 +137,52 @@ describe('DEBUG_MCP_BP_ADDRESSING gating (#271)', () => {
     expect(mockSessionManager.setBreakpoint).not.toHaveBeenCalled();
   });
 
-  // The sentences issue #1331 moved into the descriptions keep the same gates:
-  // the attach path forms name function breakpoints only in content mode, and
-  // the loud-snap sentence appears only where snapping is reported.
+  // The sentences issue #1331 and #1326 placed in the descriptions keep the
+  // same gates: the attach path forms name function breakpoints only in content
+  // mode, the loud-snap sentence appears only where snapping is reported, and
+  // set_breakpoint's content-addressing scope sentence names only the features
+  // the mode serves.
   it('gates the descriptions moved from the instructions by mode', async () => {
-    const descriptionOf = async (mode: string, tool: string): Promise<string> => {
+    const toolInMode = async (mode: string, tool: string) => {
       vi.stubEnv('DEBUG_MCP_BP_ADDRESSING', mode);
       const { listToolsHandler } = buildServer();
-      return (await findTool(listToolsHandler, tool)).description ?? '';
+      return findTool(listToolsHandler, tool);
     };
+    const descriptionOf = async (mode: string, tool: string): Promise<string> =>
+      (await toolInMode(mode, tool)).description ?? '';
 
     for (const mode of ['line', 'assert']) {
       expect(await descriptionOf(mode, 'attach_to_process'), mode).not.toContain('function breakpoint');
     }
     expect(await descriptionOf('content', 'attach_to_process')).toContain('function breakpoints, or a mapping');
 
-    expect(await descriptionOf('line', 'set_breakpoint')).not.toContain('requested line N, bound to line M');
-    for (const mode of ['assert', 'content']) {
-      expect(await descriptionOf(mode, 'set_breakpoint'), mode).toContain('requested line N, bound to line M');
+    const lineBpDesc = await descriptionOf('line', 'set_breakpoint');
+    expect(lineBpDesc).not.toContain('requested line N, bound to line M');
+    for (const token of ['expectedContent', 'statement', 'local-attach', 'remote or unknown-host attach']) {
+      expect(lineBpDesc).not.toContain(token);
     }
+
+    const assertBp = await toolInMode('assert', 'set_breakpoint');
+    expect(assertBp.description).toContain('requested line N, bound to line M');
+    expect(assertBp.description).toContain(
+      "expectedContent is checked against readable launch and local-attach files. On a remote or unknown-host attach, an attach path this host cannot resolve, or a class name, pass file and the target's own line: expectedContent is then skipped with a warning."
+    );
+    expect(assertBp.description).not.toContain('statement');
+    const assertProps = assertBp.inputSchema.properties as Record<string, { description?: string }>;
+    expect(assertProps.expectedContent.description).toBe(
+      'Optional assertion: text you expect on the target line — a distinctive substring is enough (leading/trailing whitespace and trailing //- or #-comments are ignored). If it does not match, the breakpoint is NOT set and the error shows the actual content of that line and its neighbors — use this to catch stale or off-by-one line numbers before they cause confusing behavior'
+    );
+
+    const contentBp = await toolInMode('content', 'set_breakpoint');
+    expect(contentBp.description).toContain('requested line N, bound to line M');
+    expect(contentBp.description).toContain(
+      "statement and expectedContent are checked against readable launch and local-attach files. On a remote or unknown-host attach, an attach path this host cannot resolve, or a class name, pass file and the target's own line: expectedContent is then skipped with a warning, and statement is refused."
+    );
+    const contentProps = contentBp.inputSchema.properties as Record<string, { description?: string }>;
+    expect(contentProps.expectedContent.description).toBe(assertProps.expectedContent.description);
+    expect(contentProps.statement.description).toBe(
+      'Address by content instead of line number: the text of the target line, like an Edit-tool match — a distinctive substring is enough (leading/trailing whitespace and trailing //- or #-comments are ignored; an exact whole-line match always wins over substring matches). Preferred over line — it can only land on a line containing your text (an inexact or multi-candidate match adds a warning to the response) and survives file edits across restart_debugging. If the text appears on multiple lines, the error lists every match; add nearLine to pick one. Provide statement OR line, not both'
+    );
   });
 
   // The server instructions name each content-addressing feature only in a

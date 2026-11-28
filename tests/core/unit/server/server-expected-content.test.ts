@@ -235,39 +235,74 @@ describe('set_breakpoint expectedContent (#271)', () => {
     });
   });
 
-  it('rejects expectedContent for attach sessions (no host-readable file)', async () => {
+  it('requests the breakpoint at line with a warning when expectedContent cannot be checked on a remote attach (#1326)', async () => {
     mockSessionManager.getSession.mockReturnValue({
       id: 'test-session',
+      state: 'paused',
       sessionLifecycle: 'active',
-      run: { attachMode: true }
+      run: { attachMode: true, attachLocality: 'remote' }
     });
 
-    await expect(
-      callSetBreakpoint({ line: 3, expectedContent: 'total = sum(prices)' })
-    ).rejects.toThrow(/line addressing/i);
-    expect(mockSessionManager.setBreakpoint).not.toHaveBeenCalled();
+    const result = await callSetBreakpoint({ line: 3, expectedContent: 'total = sum(prices)' });
+    const content = JSON.parse(result.content[0].text);
+
+    expect(content.success).toBe(true);
+    expect(content.line).toBe(3);
+    expect(content.verified).toBe(false);
+    expect(content.warning).toBe(
+      "expectedContent was not checked: this is a remote attach, and the file on this host may differ from the target's source. " +
+      'The breakpoint was requested at /path/to/test.py:3 by line addressing; ' +
+      'verified, line, boundFile, boundLine and message say whether and where it is bound.'
+    );
+    expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
+      'test-session',
+      expect.objectContaining({ file: '/path/to/test.py', line: 3 })
+    );
   });
 
-  it('rejects expectedContent for non-file source identifiers (Java FQCN)', async () => {
+  it('requests the breakpoint at line with the source-identifier warning for non-file source identifiers (Java FQCN, #1326)', async () => {
     mockSessionManager.getSessionPolicy.mockReturnValue({
       isNonFileSourceIdentifier: (f: string) => !f.includes('/')
     });
+    mockSessionManager.setBreakpoint.mockResolvedValueOnce({
+      breakpoint: {
+        id: 'bp-fqcn-1',
+        file: 'com.example.MyClass',
+        line: 3,
+        requestedLine: 3,
+        verified: false
+      }
+    });
 
-    await expect(
-      callToolHandler({
-        method: 'tools/call',
-        params: {
-          name: 'set_breakpoint',
-          arguments: {
-            sessionId: 'test-session',
-            file: 'com.example.MyClass',
-            line: 3,
-            expectedContent: 'total = sum(prices)'
-          }
+    const result = await callToolHandler({
+      method: 'tools/call',
+      params: {
+        name: 'set_breakpoint',
+        arguments: {
+          sessionId: 'test-session',
+          file: 'com.example.MyClass',
+          line: 3,
+          expectedContent: 'total = sum(prices)'
         }
-      })
-    ).rejects.toThrow(/line addressing/i);
-    expect(mockSessionManager.setBreakpoint).not.toHaveBeenCalled();
+      }
+    });
+    const content = JSON.parse(result.content[0].text);
+
+    expect(content.success).toBe(true);
+    expect(content.file).toBe('com.example.MyClass');
+    expect(content.line).toBe(3);
+    expect(content.verified).toBe(false);
+    expect(content.content).toBeUndefined();
+    expect(content.context).toBeUndefined();
+    expect(content.warning).toBe(
+      'expectedContent was not checked: "com.example.MyClass" is a source identifier, not a file this server can read. ' +
+      'The breakpoint was requested at com.example.MyClass:3 by line addressing; ' +
+      'verified, line, boundFile, boundLine and message say whether and where it is bound.'
+    );
+    expect(mockSessionManager.setBreakpoint).toHaveBeenCalledWith(
+      'test-session',
+      expect.objectContaining({ file: 'com.example.MyClass', line: 3 })
+    );
   });
 
   it('rejects clearly when the file cannot be read for verification', async () => {
