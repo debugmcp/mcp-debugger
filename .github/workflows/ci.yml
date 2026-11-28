@@ -322,10 +322,12 @@ jobs:
   container-tests:
     name: Container Tests
     runs-on: ubuntu-latest
-    env:
-      CODELLDB_CACHE_DIR: ${{ runner.temp }}/codelldb-cache
     
     steps:
+    - name: Set the CodeLLDB cache directory
+      shell: bash
+      run: echo "CODELLDB_CACHE_DIR=${RUNNER_TEMP}/codelldb-cache" >> "$GITHUB_ENV"
+
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
     
@@ -451,8 +453,11 @@ jobs:
     timeout-minutes: 20
     env:
       SKIP_ADAPTER_VENDOR: 'true'
-      CODELLDB_CACHE_DIR: ${{ runner.temp }}/codelldb-cache
     steps:
+    - name: Set the CodeLLDB cache directory
+      shell: bash
+      run: echo "CODELLDB_CACHE_DIR=${RUNNER_TEMP}/codelldb-cache" >> "$GITHUB_ENV"
+
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
     - name: Setup pnpm
