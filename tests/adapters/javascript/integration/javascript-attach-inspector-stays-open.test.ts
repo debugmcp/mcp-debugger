@@ -16,8 +16,10 @@
  * it; MCP_TEST_INSPECT_PORT_RANGE=<from>-<to> picks from a range instead.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -198,4 +200,45 @@ describe('the inspector an attach by processId leaves in the target (issue #1261
     await expectOpenAndServing(target);
     await call('close_debug_session', { sessionId: first });
   }, 120000);
+
+  it('refuses to attach to process A when process B holds the port with a script filename ending in [<pid A>] (issue #1332)', async () => {
+    const procA = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], {
+      windowsHide: true, stdio: ['ignore', 'ignore', 'ignore']
+    });
+    targets.push({ proc: procA, pid: procA.pid!, httpPort: 0, inspectPort: 0 });
+
+    const inspectPort = await freePort();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-1332-'));
+    const spoofScript = path.join(tmpDir, `target[${procA.pid!}]`);
+    fs.writeFileSync(spoofScript, 'setTimeout(() => {}, 60000);\n', 'utf8');
+    try {
+      const procB = spawn(process.execPath, [`--inspect=127.0.0.1:${inspectPort}`, spoofScript], {
+        windowsHide: true, stdio: ['ignore', 'ignore', 'pipe']
+      });
+      targets.push({ proc: procB, pid: procB.pid!, httpPort: 0, inspectPort });
+      let stderr = '';
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`procB did not open inspector: ${stderr}`)), 15000);
+        procB.stderr!.on('data', (chunk: Buffer) => {
+          stderr += chunk.toString();
+          if (/Debugger listening on/.test(stderr)) { clearTimeout(timer); resolve(); }
+        });
+        procB.on('exit', (code) => { clearTimeout(timer); reject(new Error(`procB exited ${code}: ${stderr}`)); });
+      });
+
+      await server.createSession('javascript', 'spoofed-title-refusal');
+      const attached = await call('attach_to_process', {
+        processId: procA.pid!,
+        port: inspectPort,
+        stopOnEntry: false,
+        verifyTimeout: 20000
+      });
+      expect(attached.success, JSON.stringify(attached)).toBe(false);
+      expect(String(attached.error ?? attached.message ?? '')).toMatch(
+        new RegExp(`127\\.0\\.0\\.1:${inspectPort} is already held by a Node inspector for a different process \\(PID ${procB.pid!}: .*target\\[${procA.pid!}\\]\\)`)
+      );
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 60000);
 });

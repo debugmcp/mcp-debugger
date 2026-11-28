@@ -5,7 +5,8 @@
  * clock), so the decision flow is tested without touching real processes;
  * one test exercises the real HTTP probe against a local server.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import * as crypto from 'node:crypto';
 import * as http from 'node:http';
 import { spawn } from 'node:child_process';
 import type { AddressInfo } from 'node:net';
@@ -291,6 +292,383 @@ describe('activateInspector (issue #871)', () => {
     const err = await failure(activateInspector(options));
     expect(err.message).toMatch(/processId must be a positive integer/);
   });
+});
+
+/**
+ * Minimal fake Node inspector (HTTP /json/list + WebSocket CDP responder)
+ * so #1332 tests exercise the real default ownership path end to end.
+ */
+async function startFakeInspector(opts: {
+  title: string;
+  answerPid?: number | 'reject' | 'hang';
+}): Promise<{ port: number; wsRequests: number; close: () => Promise<void> }> {
+  let wsRequests = 0;
+  const openSockets = new Set<import('node:stream').Duplex>();
+  const server = http.createServer((req, res) => {
+    if (req.url === '/json/list') {
+      const port = (server.address() as AddressInfo).port;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify([{
+        id: 't1',
+        title: opts.title,
+        type: 'node',
+        url: 'file://',
+        webSocketDebuggerUrl: `ws://127.0.0.1:${port}/t1`
+      }]));
+      return;
+    }
+    res.statusCode = 404;
+    res.end();
+  });
+
+  server.on('upgrade', (req, socket) => {
+    wsRequests++;
+    openSockets.add(socket);
+    socket.once('close', () => openSockets.delete(socket));
+    if (opts.answerPid === 'reject') {
+      socket.end('HTTP/1.1 500 Internal Server Error\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    const key = req.headers['sec-websocket-key'];
+    const accept = crypto.createHash('sha1').update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64');
+    socket.write(
+      'HTTP/1.1 101 Switching Protocols\r\n' +
+        'Upgrade: websocket\r\n' +
+        'Connection: Upgrade\r\n' +
+        `Sec-WebSocket-Accept: ${accept}\r\n\r\n`
+    );
+    if (opts.answerPid === 'hang') return;
+    socket.once('data', () => {
+      const payload = Buffer.from(JSON.stringify({
+        id: 1,
+        result: { result: { type: 'number', value: opts.answerPid } }
+      }), 'utf8');
+      const header = payload.length < 126
+        ? Buffer.from([0x81, payload.length])
+        : Buffer.from([0x81, 126, (payload.length >> 8) & 0xff, payload.length & 0xff]);
+      socket.write(Buffer.concat([header, payload]));
+    });
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as AddressInfo).port;
+  return {
+    port,
+    get wsRequests() { return wsRequests; },
+    close: async () => {
+      for (const s of openSockets) s.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  };
+}
+
+describe('activateInspector ownership verification (issue #1332)', () => {
+  it('asks the inspector for process.pid before trusting a title ending in [<requested pid>] and refuses a different process by name', async () => {
+    const fake = await startFakeInspector({ title: 'C:\\work\\target[44528]', answerPid: 36252 });
+    const signal = vi.fn();
+    try {
+      const err = await failure(activateInspector({
+        pid: 44528,
+        port: fake.port,
+        platform: 'win32',
+        processExists: () => true,
+        selfPid: 1,
+        signal
+      }));
+      expect(fake.wsRequests).toBe(1);
+      expect(signal).not.toHaveBeenCalled();
+      expect(err.message).toBe(
+        `JavaScript attach: 127.0.0.1:${fake.port} is already held by a Node inspector for a different process ` +
+          `(PID 36252: C:\\work\\target[44528]); pass port if PID 44528 listens elsewhere, or free the port`
+      );
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it('attaches when the inspector answers the requested process.pid even if the title ends in [<another id>]', async () => {
+    const fake = await startFakeInspector({ title: 'C:\\work\\target[44528]', answerPid: 36252 });
+    const signal = vi.fn();
+    try {
+      const result = await activateInspector({
+        pid: 36252,
+        port: fake.port,
+        platform: 'win32',
+        processExists: () => true,
+        selfPid: 1,
+        signal
+      });
+      expect(fake.wsRequests).toBe(1);
+      expect(signal).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        host: '127.0.0.1',
+        port: fake.port,
+        alreadyActive: true,
+        title: 'C:\\work\\target[44528]'
+      });
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it('falls back to the title with weaker wording when asking fails and the title matches the requested pid', async () => {
+    const fake = await startFakeInspector({ title: 'node[4242]', answerPid: 'reject' });
+    const signal = vi.fn();
+    try {
+      const result = await activateInspector({
+        pid: 4242,
+        port: fake.port,
+        platform: 'win32',
+        processExists: () => true,
+        selfPid: 1,
+        signal
+      });
+      expect(fake.wsRequests).toBe(1);
+      expect(signal).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        host: '127.0.0.1',
+        port: fake.port,
+        alreadyActive: true,
+        title: 'node[4242]',
+        ownershipNote: `the inspector on 127.0.0.1:${fake.port} did not answer process.pid; target title node[4242] matched PID 4242, but ownership was not confirmed`
+      });
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it('refuses with weaker wording (never naming the title digits as a PID) when asking fails and the title ends in [<other>] before the signal', async () => {
+    const fake = await startFakeInspector({ title: 'target[9999]', answerPid: 'reject' });
+    const signal = vi.fn();
+    try {
+      const err = await failure(activateInspector({
+        pid: 4242,
+        port: fake.port,
+        platform: 'win32',
+        processExists: () => true,
+        selfPid: 1,
+        signal
+      }));
+      expect(fake.wsRequests).toBe(1);
+      expect(signal).not.toHaveBeenCalled();
+      expect(err.message).toBe(
+        `JavaScript attach: 127.0.0.1:${fake.port} is already held by a Node inspector (target[9999]) that did not answer process.pid — ` +
+          `its target title does not match PID 4242; if it is PID 4242's, attach by port instead of processId, otherwise pass port if PID 4242 listens elsewhere or free the port`
+      );
+      expect(err.message).not.toMatch(/for a different process|PID 9999/);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it('refuses with weaker wording when asking fails and a title-mismatching inspector appears after the signal', async () => {
+    const { options, signal } = harness({
+      probes: [closed, inspector('node[31337]')],
+      pidOf: async () => undefined
+    });
+    const err = await failure(activateInspector(options));
+    expect(signal).toHaveBeenCalledWith(4242);
+    expect(err).toBeInstanceOf(SignalledActivationError);
+    expect(err.message).toBe(
+      'JavaScript attach: PID 4242 was signalled to open its inspector, but 127.0.0.1:9229 is already held by a Node inspector ' +
+        '(node[31337]) that did not answer process.pid — its target title does not match PID 4242; one may now be open on another port ' +
+        '(a target started with --inspect-port=<n> opens it there), and this server does not close it (#1310). To attach to it, pass that port with processId'
+    );
+    expect(err.message).not.toMatch(/for a different process|PID 31337/);
+  });
+
+  it('bounds a hanging process.pid query and falls back to the title with weaker wording', async () => {
+    const fake = await startFakeInspector({ title: 'node[4242]', answerPid: 'hang' });
+    try {
+      const started = Date.now();
+      const result = await activateInspector({
+        pid: 4242,
+        port: fake.port,
+        platform: 'win32',
+        processExists: () => true,
+        selfPid: 1,
+        signal: vi.fn()
+      });
+      const elapsed = Date.now() - started;
+      expect(fake.wsRequests).toBe(1);
+      expect(elapsed).toBeGreaterThanOrEqual(1200);
+      expect(elapsed).toBeLessThan(3500);
+      expect(result.ownershipNote).toBe(
+        `the inspector on 127.0.0.1:${fake.port} did not answer process.pid; target title node[4242] matched PID 4242, but ownership was not confirmed`
+      );
+    } finally {
+      await fake.close();
+    }
+  }, 10000);
+});
+
+describe('activateInspector strict wait bound (issue #1339)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('with fake timers, a probe that never answers fails at the 5000 ms deadline, not after it', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const listTargets = vi.fn(() => {
+      calls++;
+      if (calls === 1) return Promise.resolve(closed);
+      return new Promise<InspectorProbe>(() => {});
+    });
+    const started = Date.now();
+    const outcome: { settled?: { err: unknown; at: number } } = {};
+    const pending = activateInspector({
+      pid: 4242,
+      platform: 'linux',
+      container: false,
+      processExists: () => true,
+      isNodeProcess: async () => true,
+      inspectorSignalDisabled: async () => false,
+      selfPid: 1,
+      signal: vi.fn(),
+      listTargets,
+      pidOf: async () => undefined
+    }).then(
+      (res) => { outcome.settled = { err: new Error(`unexpected resolve: ${JSON.stringify(res)}`), at: Date.now() - started }; },
+      (err) => { outcome.settled = { err, at: Date.now() - started }; }
+    );
+
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(outcome.settled).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(outcome.settled).toBeDefined();
+    await pending;
+    expect(outcome.settled!.at).toBe(5000);
+    expect(outcome.settled!.err).toBeInstanceOf(SignalledActivationError);
+    expect((outcome.settled!.err as Error).message).toBe(
+      'JavaScript attach: PID 4242 was signalled to open its inspector, but none appeared on 127.0.0.1:9229 within 5000 ms; ' +
+        'one may now be open on another port (a target started with --inspect-port=<n> opens it there), ' +
+        'and this server does not close it (#1310). To attach to it, pass that port with processId'
+    );
+  });
+
+  it('with fake timers, caps each probe timeout by remaining time, cuts off an in-flight probe at the deadline, and starts no probe when nothing remains', async () => {
+    vi.useFakeTimers();
+    const seenTimeouts: Array<number | undefined> = [];
+    let calls = 0;
+    const listTargets = vi.fn((_h: string, _p: number, timeoutMs?: number) => {
+      calls++;
+      if (calls === 1) return Promise.resolve(closed);
+      seenTimeouts.push(timeoutMs);
+      if (calls < 4) return Promise.resolve(closed);
+      // Probe at t=300 (remaining 50 ms) would otherwise take 1000 ms.
+      return new Promise<InspectorProbe>((resolve) => {
+        setTimeout(() => resolve(closed), 1000);
+      });
+    });
+
+    const started = Date.now();
+    const outcome: { settled?: { err: unknown; at: number } } = {};
+    const pending = activateInspector({
+      pid: 4242,
+      platform: 'linux',
+      container: false,
+      processExists: () => true,
+      isNodeProcess: async () => true,
+      inspectorSignalDisabled: async () => false,
+      selfPid: 1,
+      signal: vi.fn(),
+      listTargets,
+      pidOf: async () => undefined,
+      deadlineMs: 350,
+      pollMs: 100
+    }).then(
+      (res) => { outcome.settled = { err: new Error(`unexpected resolve: ${JSON.stringify(res)}`), at: Date.now() - started }; },
+      (err) => { outcome.settled = { err, at: Date.now() - started }; }
+    );
+
+    await vi.advanceTimersByTimeAsync(349);
+    expect(outcome.settled).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(outcome.settled).toBeDefined();
+    await pending;
+    expect(outcome.settled!.at).toBe(350);
+    expect(seenTimeouts).toEqual([250, 150, 50]);
+    expect(calls).toBe(4);
+    expect(outcome.settled!.err).toBeInstanceOf(SignalledActivationError);
+    expect((outcome.settled!.err as Error).message).toMatch(/none appeared on 127\.0\.0\.1:9229 within 350 ms/);
+  });
+
+  it('with fake timers, does not start a probe when the poll sleep reaches the deadline', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const listTargets = vi.fn(() => {
+      calls++;
+      return Promise.resolve(closed);
+    });
+    const started = Date.now();
+    const outcome: { settled?: { err: unknown; at: number } } = {};
+    const pending = activateInspector({
+      pid: 4242,
+      platform: 'linux',
+      container: false,
+      processExists: () => true,
+      isNodeProcess: async () => true,
+      inspectorSignalDisabled: async () => false,
+      selfPid: 1,
+      signal: vi.fn(),
+      listTargets,
+      pidOf: async () => undefined,
+      deadlineMs: 250,
+      pollMs: 100
+    }).then(
+      (res) => { outcome.settled = { err: new Error(`unexpected resolve: ${JSON.stringify(res)}`), at: Date.now() - started }; },
+      (err) => { outcome.settled = { err, at: Date.now() - started }; }
+    );
+
+    await vi.advanceTimersByTimeAsync(250);
+    expect(outcome.settled).toBeDefined();
+    await pending;
+    expect(outcome.settled!.at).toBe(250);
+    // 1 pre-signal probe + 2 post-signal probes (at t=100 and t=200); none at t=250.
+    expect(calls).toBe(3);
+    expect(outcome.settled!.err).toBeInstanceOf(SignalledActivationError);
+  });
+
+  it('cuts off a real in-flight HTTP probe at the deadline and destroys its connection', async () => {
+    let closedByClient!: () => void;
+    const connectionClosed = new Promise<void>((resolve) => { closedByClient = resolve; });
+    const server = http.createServer((_req, res) => {
+      res.on('close', () => closedByClient());
+      // Intentionally never answer.
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as AddressInfo).port;
+    let firstProbe = true;
+    try {
+      const started = Date.now();
+      const err = await failure(activateInspector({
+        pid: 4242,
+        port,
+        platform: 'win32',
+        processExists: () => true,
+        selfPid: 1,
+        signal: vi.fn(),
+        // Simulate port closed before signal, then real probeInspector against the silent server after signal.
+        listTargets: (h, p, timeoutMs) => {
+          if (firstProbe) { firstProbe = false; return Promise.resolve(closed); }
+          return probeInspector(h, p, timeoutMs);
+        },
+        deadlineMs: 350,
+        pollMs: 100
+      }));
+      const elapsed = Date.now() - started;
+      expect(err).toBeInstanceOf(SignalledActivationError);
+      expect(err.message).toMatch(/none appeared on 127\.0\.0\.1:\d+ within 350 ms/);
+      expect(elapsed).toBeLessThan(650);
+      await connectionClosed;
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 10000);
 });
 
 describe('probeInspector (the real /json/list probe)', () => {

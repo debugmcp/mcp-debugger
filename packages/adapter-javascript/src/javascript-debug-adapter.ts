@@ -1016,6 +1016,9 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       attachPort = activated.port;
       // What the attach observed of the inspector, which this server does not close (issue #1261).
       this.attachFootprint = inspectorFootprint({ ...activated, pid: Number(String(processId).trim()) });
+      if (activated.ownershipNote) {
+        this.launchConfigDiagnostics.push({ key: 'processId', message: activated.ownershipNote });
+      }
       this.dependencies.logger.info(
         `[JavascriptDebugAdapter] Attach by PID ${processId}: an inspector answered ` +
           `${activated.alreadyActive ? 'the first probe' : 'after the signal'} on ${attachHost}:${attachPort} (${activated.title})`

@@ -8,12 +8,14 @@
  * inspector opens — 9229 unless the target was started with
  * `--inspect-port`. This module is that step.
  *
- * Whose inspector is on the port? The `/json/list` title ends in `[<pid>]`
- * only for a script-less process (`node -e`); for `node script.js` it is the
- * script path. So ownership is asked of the inspector itself — one short CDP
- * session evaluating `process.pid` — and when that cannot be told either (a
- * paused target does not answer), an inspector that opened right after our
- * signal is taken as ours, while one that was already open is refused.
+ * Whose inspector is on the port? Node uses the script path as the `/json/list`
+ * title, so a title ending in `[<digits>]` can be a filename rather than a PID
+ * (issue #1332). Ownership is therefore asked of the inspector itself first —
+ * one bounded CDP session evaluating `process.pid` — and the title is read only
+ * as a fallback when asking fails (e.g. a paused target or busy event loop),
+ * never stated as a confirmed PID. When neither identifies the owner, an
+ * inspector that opened right after our signal is taken as ours, while one that
+ * was already open is refused.
  *
  * Safety: SIGUSR1's default disposition is *terminate*. On POSIX the target
  * is confirmed to be a Node.js executable before it is signalled, a PID that
@@ -34,6 +36,16 @@ const execFileAsync = promisify(execFile);
 
 /** Node's default inspector port, where SIGUSR1 / `_debugProcess` opens it. */
 export const DEFAULT_INSPECTOR_PORT = 9229;
+
+/** Bound on a single `/json/list` HTTP probe. */
+export const DEFAULT_PROBE_TIMEOUT_MS = 1000;
+
+/**
+ * Bound on asking an inspector target for its `process.pid` over CDP (issue #1332).
+ * A target paused at a breakpoint or stuck in a busy event loop does not answer
+ * `Runtime.evaluate`, so asking times out here and falls back to the title.
+ */
+export const DEFAULT_PID_QUERY_TIMEOUT_MS = 1500;
 
 export interface InspectorTarget {
   id?: string;
@@ -71,9 +83,9 @@ export interface InspectorActivationOptions {
   /** This server's own PID (default process.pid) — never a valid target. */
   selfPid?: number;
   signal?: (pid: number) => void;
-  listTargets?: (host: string, port: number) => Promise<InspectorProbe>;
-  /** The PID behind an inspector target, or undefined when it cannot be told. */
-  pidOf?: (target: InspectorTarget) => Promise<number | undefined>;
+  listTargets?: (host: string, port: number, timeoutMs?: number) => Promise<InspectorProbe>;
+  /** Ask the inspector behind a target for its `process.pid`, or undefined when it did not answer. */
+  pidOf?: (target: InspectorTarget, timeoutMs?: number) => Promise<number | undefined>;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
 }
@@ -83,8 +95,10 @@ export interface InspectorActivationResult {
   port: number;
   /** The inspector was already open on the port (no signal was sent). */
   alreadyActive: boolean;
-  /** The inspector target's title, `<process title>[<pid>]`. */
+  /** The inspector target's title (script path or `<process title>[<pid>]`). */
   title: string;
+  /** Present only when the inspector did not answer `process.pid` and ownership fell back to the title. */
+  ownershipNote?: string;
 }
 
 // Loopback is decided by the shared `isLoopbackHost` (issue #903). A
@@ -145,20 +159,28 @@ type WebSocketConstructor = new (url: string) => MinimalWebSocket;
  * it cannot be told: no answer within `timeoutMs` (a paused target does not
  * evaluate), a refused connection, or no WebSocket in this runtime.
  */
-export function pidViaInspector(webSocketDebuggerUrl: string, timeoutMs = 1500): Promise<number | undefined> {
+export function pidViaInspector(
+  webSocketDebuggerUrl: string,
+  timeoutMs = DEFAULT_PID_QUERY_TIMEOUT_MS,
+  abortSignal?: AbortSignal
+): Promise<number | undefined> {
+  if (timeoutMs <= 0 || abortSignal?.aborted) return Promise.resolve(undefined);
   const WebSocketImpl = (globalThis as { WebSocket?: WebSocketConstructor }).WebSocket;
   if (typeof WebSocketImpl !== 'function') return Promise.resolve(undefined);
   return new Promise((resolve) => {
     let socket: MinimalWebSocket | undefined;
     let settled = false;
+    const onAbort = (): void => finish(undefined);
     const finish = (pid?: number): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      abortSignal?.removeEventListener('abort', onAbort);
       try { socket?.close(); } catch { /* already closed */ }
       resolve(pid);
     };
     const timer = setTimeout(() => finish(undefined), timeoutMs);
+    abortSignal?.addEventListener('abort', onAbort, { once: true });
     try {
       socket = new WebSocketImpl(webSocketDebuggerUrl);
     } catch {
@@ -166,14 +188,18 @@ export function pidViaInspector(webSocketDebuggerUrl: string, timeoutMs = 1500):
       return;
     }
     socket.onopen = () => {
-      socket!.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression: 'process.pid', returnByValue: true } }));
+      try {
+        socket!.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression: 'process.pid', returnByValue: true } }));
+      } catch {
+        finish(undefined);
+      }
     };
     socket.onmessage = (event) => {
       try {
         const message = JSON.parse(String(event.data)) as { id?: number; result?: { result?: { value?: unknown } } };
         if (message.id !== 1) return;
         const value = message.result?.result?.value;
-        finish(typeof value === 'number' ? value : undefined);
+        finish(typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined);
       } catch {
         finish(undefined);
       }
@@ -183,12 +209,14 @@ export function pidViaInspector(webSocketDebuggerUrl: string, timeoutMs = 1500):
   });
 }
 
-/** The PID behind a target: the title's `[pid]` suffix when present, else the inspector's own answer. */
-async function defaultPidOf(target: InspectorTarget): Promise<number | undefined> {
-  const fromTitle = pidOfTitle(target.title);
-  if (fromTitle !== undefined) return fromTitle;
+/** Ask the inspector behind a target for its `process.pid` over CDP; never trusts the title. */
+async function defaultPidOf(
+  target: InspectorTarget,
+  timeoutMs = DEFAULT_PID_QUERY_TIMEOUT_MS,
+  abortSignal?: AbortSignal
+): Promise<number | undefined> {
   if (typeof target.webSocketDebuggerUrl !== 'string') return undefined;
-  return pidViaInspector(target.webSocketDebuggerUrl);
+  return pidViaInspector(target.webSocketDebuggerUrl, timeoutMs, abortSignal);
 }
 
 function describeTargets(targets: InspectorTarget[]): string {
@@ -294,13 +322,23 @@ const PROBE_MAX_BODY_BYTES = 64 * 1024;
  * keeps sending, is answered "other" when it passes and its connection is
  * destroyed; a body larger than any inspector's is answered "other" at once.
  */
-export function probeInspector(host: string, port: number, timeoutMs = 1000): Promise<InspectorProbe> {
+export function probeInspector(
+  host: string,
+  port: number,
+  timeoutMs = DEFAULT_PROBE_TIMEOUT_MS,
+  abortSignal?: AbortSignal
+): Promise<InspectorProbe> {
+  if (timeoutMs <= 0 || abortSignal?.aborted) {
+    return Promise.resolve({ status: 'other', detail: `no answer from /json/list within ${Math.max(0, timeoutMs)} ms` });
+  }
   return new Promise((resolve) => {
     let settled = false;
+    const onAbort = (): void => finish({ status: 'other', detail: `no answer from /json/list within ${timeoutMs} ms` });
     const finish = (probe: InspectorProbe): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      abortSignal?.removeEventListener('abort', onAbort);
       request.destroy();
       resolve(probe);
     };
@@ -341,6 +379,7 @@ export function probeInspector(host: string, port: number, timeoutMs = 1000): Pr
       response.on('error', (err) => finish({ status: 'other', detail: err.message }));
     });
     const timer = setTimeout(() => finish({ status: 'other', detail: `no answer from /json/list within ${timeoutMs} ms` }), timeoutMs);
+    abortSignal?.addEventListener('abort', onAbort, { once: true });
     request.on('error', (err: NodeJS.ErrnoException) => {
       finish(err.code === 'ECONNREFUSED' ? { status: 'closed' } : { status: 'other', detail: err.message });
     });
@@ -364,8 +403,8 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
   const isNodeProcess = options.isNodeProcess ?? ((p: number) => isNodeProcessByPid(p, platform));
   const inspectorSignalDisabled = options.inspectorSignalDisabled ?? ((p: number) => inspectorSignalDisabledByPid(p, platform));
   const signal = options.signal ?? ((p: number) => defaultSignal(p, platform));
-  const listTargets = options.listTargets ?? ((h: string, p: number) => probeInspector(h, p));
-  const pidOf = options.pidOf ?? defaultPidOf;
+  const listTargets = options.listTargets;
+  const pidOf = options.pidOf;
   const sleep = options.sleep ?? wait;
   const now = options.now ?? Date.now;
   const deadlineMs = options.deadlineMs ?? 5000;
@@ -386,11 +425,32 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
     );
   }
 
+  // Ask the inspector for `process.pid` first; only fall back to a `[digits]`
+  // title suffix when asking fails (issue #1332).
+  type TargetOwner = { pid: number; source: 'inspector' | 'title' };
+  const resolveOwner = async (
+    target: InspectorTarget,
+    queryTimeoutMs?: number,
+    abortSignal?: AbortSignal
+  ): Promise<TargetOwner | undefined> => {
+    const answered = pidOf
+      ? (queryTimeoutMs === undefined ? await pidOf(target) : await pidOf(target, queryTimeoutMs))
+      : await defaultPidOf(target, queryTimeoutMs ?? DEFAULT_PID_QUERY_TIMEOUT_MS, abortSignal);
+    if (answered !== undefined) return { pid: answered, source: 'inspector' };
+    const fromTitle = pidOfTitle(target.title);
+    return fromTitle !== undefined ? { pid: fromTitle, source: 'title' } : undefined;
+  };
+
   // After our signal a transient probe failure (ECONNRESET or a read timeout
   // while the inspector's HTTP server comes up) is not a verdict — keep
   // polling and name it only if the deadline passes.
   let lastTransient: string | undefined;
-  const classify = async (probe: InspectorProbe, afterSignal: boolean): Promise<InspectorActivationResult | undefined> => {
+  const classify = async (
+    probe: InspectorProbe,
+    afterSignal: boolean,
+    remainingMs?: number,
+    abortSignal?: AbortSignal
+  ): Promise<InspectorActivationResult | undefined> => {
     if (probe.status === 'closed') return undefined;
     if (probe.status === 'other') {
       if (afterSignal) {
@@ -399,16 +459,36 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
       }
       throw invalid(`${where} is in use by something that is not a Node inspector (${probe.detail}); pass port if PID ${pid} listens elsewhere, or free the port`);
     }
-    const owners = await Promise.all(probe.targets.map((target) => pidOf(target)));
-    const index = owners.indexOf(pid);
-    if (index >= 0) {
-      return { host, port, alreadyActive: !afterSignal, title: probe.targets[index].title ?? '' };
+    const queryTimeoutMs = remainingMs !== undefined ? Math.min(DEFAULT_PID_QUERY_TIMEOUT_MS, remainingMs) : undefined;
+    const owners = await Promise.all(probe.targets.map((target) => resolveOwner(target, queryTimeoutMs, abortSignal)));
+
+    const confirmedIndex = owners.findIndex((owner) => owner?.source === 'inspector' && owner.pid === pid);
+    if (confirmedIndex >= 0) {
+      return { host, port, alreadyActive: !afterSignal, title: probe.targets[confirmedIndex].title ?? '' };
     }
-    const other = owners.find((owner) => owner !== undefined && owner !== pid);
-    if (other !== undefined) {
-      const held = `${where} is already held by a Node inspector for a different process (PID ${other}: ${describeTargets(probe.targets)})`;
+    const confirmedOther = owners.find((owner) => owner?.source === 'inspector' && owner.pid !== pid);
+    if (confirmedOther !== undefined) {
+      const held = `${where} is already held by a Node inspector for a different process (PID ${confirmedOther.pid}: ${describeTargets(probe.targets)})`;
       // After the signal, the failure says the signal was sent (below).
       throw afterSignal ? new Error(held) : invalid(`${held}; pass port if PID ${pid} listens elsewhere, or free the port`);
+    }
+    const titleIndex = owners.findIndex((owner) => owner?.source === 'title' && owner.pid === pid);
+    if (titleIndex >= 0) {
+      const matchedTitle = probe.targets[titleIndex].title ?? '';
+      return {
+        host,
+        port,
+        alreadyActive: !afterSignal,
+        title: matchedTitle,
+        ownershipNote: `the inspector on ${where} did not answer process.pid; target title ${matchedTitle} matched PID ${pid}, but ownership was not confirmed`
+      };
+    }
+    const titleOther = owners.find((owner) => owner?.source === 'title' && owner.pid !== pid);
+    if (titleOther !== undefined) {
+      const held = `${where} is already held by a Node inspector (${describeTargets(probe.targets)}) that did not answer process.pid — its target title does not match PID ${pid}`;
+      throw afterSignal
+        ? new Error(held)
+        : invalid(`${held}; if it is PID ${pid}'s, attach by port instead of processId, otherwise pass port if PID ${pid} listens elsewhere or free the port`);
     }
     if (afterSignal) {
       // Closed before our signal, open right after it: PID pid's, even though
@@ -421,7 +501,8 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
     );
   };
 
-  const before = await classify(await listTargets(host, port), false);
+  const firstProbe = listTargets ? await listTargets(host, port) : await probeInspector(host, port);
+  const before = await classify(firstProbe, false);
   if (before) return before;
 
   if (platform !== 'win32') {
@@ -464,18 +545,80 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
       `and this server does not close it (#1310). To attach to it, pass that port with processId`,
     pid, host, port
   );
+  // Strict wait bound (issue #1339): every probe's timeout is capped by the
+  // time remaining, no probe is started once nothing remains, and any probe or
+  // ownership query still in flight when the deadline passes is cut off.
+  const deadlineError = (): SignalledActivationError =>
+    signalled(`none appeared on ${where} within ${deadlineMs} ms` + (lastTransient ? ` (last probe: ${lastTransient})` : ''));
+  const deadline = now() + deadlineMs;
+  if (deadlineMs <= 0) {
+    throw deadlineError();
+  }
+  const abortController = new AbortController();
+  let deadlineReached = false;
+  const onDeadlineListeners: Array<() => void> = [];
+  const deadlineTimer = setTimeout(() => {
+    deadlineReached = true;
+    abortController.abort();
+    for (const notify of onDeadlineListeners.splice(0)) notify();
+  }, deadlineMs);
+  const raceDeadline = <T>(promise: Promise<T>): Promise<T> => new Promise<T>((resolve, reject) => {
+    if (deadlineReached) {
+      promise.catch(() => { /* discard late settlement after deadline */ });
+      reject(deadlineError());
+      return;
+    }
+    const onDeadline = (): void => reject(deadlineError());
+    const detach = (): void => {
+      const idx = onDeadlineListeners.indexOf(onDeadline);
+      if (idx >= 0) onDeadlineListeners.splice(idx, 1);
+    };
+    onDeadlineListeners.push(onDeadline);
+    promise.then(
+      (value) => { detach(); resolve(value); },
+      (err) => { detach(); reject(err); }
+    );
+  });
   try {
-    const deadline = now() + deadlineMs;
     for (;;) {
-      await sleep(pollMs);
-      const result = await classify(await listTargets(host, port), true);
+      const beforeSleep = deadline - now();
+      if (beforeSleep <= 0) {
+        throw deadlineError();
+      }
+      await raceDeadline(sleep(Math.min(pollMs, beforeSleep)));
+      const remainingForProbe = deadline - now();
+      if (remainingForProbe <= 0) {
+        throw deadlineError();
+      }
+      const probeTimeout = Math.min(DEFAULT_PROBE_TIMEOUT_MS, remainingForProbe);
+      const probe = await raceDeadline(
+        listTargets
+          ? listTargets(host, port, probeTimeout)
+          : probeInspector(host, port, probeTimeout, abortController.signal)
+      );
+      if (probe.status === 'closed') {
+        if (now() >= deadline) throw deadlineError();
+        continue;
+      }
+      if (probe.status === 'other') {
+        lastTransient = probe.detail;
+        if (now() >= deadline) throw deadlineError();
+        continue;
+      }
+      const remainingForClassify = deadline - now();
+      if (remainingForClassify <= 0) {
+        throw deadlineError();
+      }
+      const result = await raceDeadline(classify(probe, true, remainingForClassify, abortController.signal));
       if (result) return result;
       if (now() >= deadline) {
-        throw signalled(`none appeared on ${where} within ${deadlineMs} ms` + (lastTransient ? ` (last probe: ${lastTransient})` : ''));
+        throw deadlineError();
       }
     }
   } catch (err) {
     if (err instanceof SignalledActivationError) throw err;
     throw signalled(err instanceof Error ? err.message : String(err));
+  } finally {
+    clearTimeout(deadlineTimer);
   }
 }
