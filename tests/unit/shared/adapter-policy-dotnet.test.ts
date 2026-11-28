@@ -51,18 +51,22 @@ describe('DotnetAdapterPolicy', () => {
     ).toContain('async iterator or async ValueTask');
   });
 
-  it('describes netcoredbg step filtering unless disabled on launch (issue #1184)', () => {
-    expect(DotnetAdapterPolicy.describeStepInFilter({ attachMode: false })).toContain('enableStepFiltering: false');
+  it('describes netcoredbg step filtering conditionally unless disabled on launch (issues #1184, #1281, #1328)', () => {
+    const launchHint = DotnetAdapterPolicy.describeStepInFilter({ attachMode: false });
+    expect(launchHint).toMatch(/^If the line /);
+    expect(launchHint).toContain('enableStepFiltering: false');
     expect(
       DotnetAdapterPolicy.describeStepInFilter({
         attachMode: false,
         launch: { dapLaunchArgs: { enableStepFiltering: false } }
       })
     ).toBeUndefined();
-    expect(DotnetAdapterPolicy.describeStepInFilter({ attachMode: true })).toContain('cannot be turned off on attach');
+    const attachHint = DotnetAdapterPolicy.describeStepInFilter({ attachMode: true });
+    expect(attachHint).toMatch(/^If the line /);
+    expect(attachHint).toContain('cannot be turned off on attach');
   });
 
-  it('uses the effective launch setting when the two configuration objects disagree', () => {
+  it('uses the effective launch setting and names adapterLaunchConfig when it decides', () => {
     expect(DotnetAdapterPolicy.describeStepInFilter({
       attachMode: false,
       launch: {
@@ -70,13 +74,24 @@ describe('DotnetAdapterPolicy', () => {
         adapterLaunchConfig: { enableStepFiltering: false }
       }
     })).toBeUndefined();
-    expect(DotnetAdapterPolicy.describeStepInFilter({
+    const adapterWon = DotnetAdapterPolicy.describeStepInFilter({
       attachMode: false,
       launch: {
         dapLaunchArgs: { enableStepFiltering: false },
         adapterLaunchConfig: { enableStepFiltering: true }
       }
-    })).toContain('steps over property accessors and operators');
+    });
+    expect(adapterWon).toContain('steps over property accessors and operators');
+    expect(adapterWon).toContain('adapterLaunchConfig: { enableStepFiltering: false }');
+    expect(adapterWon).not.toContain('dapLaunchArgs');
+
+    expect(DotnetAdapterPolicy.describeStepInFilter({
+      attachMode: false,
+      launch: {
+        dapLaunchArgs: { enableStepFiltering: true },
+        adapterLaunchConfig: { cwd: '/proj' }
+      }
+    })).toContain('dapLaunchArgs: { enableStepFiltering: false }');
   });
 
   it('does not imply a launch-only setting disables filtering on attach', () => {

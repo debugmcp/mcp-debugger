@@ -54,7 +54,7 @@ Rules that prevent 90% of failed sessions:
 - **Breakpoints may verify late.** Some adapters (debugpy, JDI) report breakpoints unverified until the module/class loads; that is normal, not an error.
 - **`<redacted:...>` placeholders are masking, not program state.** Credential-shaped values and values of sensitive variable names (`password`, `api_key`, ...) are masked by default in variable/evaluate/output results; a `redaction` field reports what was hidden. The real value is intact in the debuggee — don't "fix" it, and don't retry the read. The user can disable masking by restarting the server with `DEBUG_MCP_NO_REDACT=1`.
 - **If `get_variables` demands `names`, the server is in least-privilege mode** (`DEBUG_MCP_VARIABLE_ACCESS=explicit`): pass the exact variable names you need (`names: ["user", "total"]`; case-sensitive, misses reported in `notFound`) instead of dumping the scope. `evaluate_expression` still works for targeted reads.
-- **Always `close_debug_session`** when done — it tears down the debuggee process tree.
+- **Always `close_debug_session`** when done — it tears down the debuggee process tree. An attached process is released instead: `released: true` means the debug adapter confirmed it and the process runs on; a `warning` in its place means the release was not confirmed, and whether the process still runs is not known. Closing a Python child session ends that child, in an attached tree too.
 
 ## Root-cause discipline
 
@@ -92,7 +92,7 @@ Breakpoint paths on attach are sent **verbatim** and resolved against the **targ
 
 Direct-connect attaches (debugpy, rdbg) need no local language toolchain — the debug engine runs inside the target. `list_supported_languages` reports per-mode availability (`modes.launch` / `modes.attach`) with reasons.
 
-`detach_from_process` leaves the target running; `close_debug_session` after detach cleans up the session.
+`detach_from_process` leaves the target running; `close_debug_session` after detach cleans up the session. Either ending of an attach waits up to 10 s for the debug adapter to confirm the release, whatever the language, and a busy target can confirm late (a Python target answers only once its interpreter is free). `released: true` is the confirmation; a `warning` in its place means it did not come, and the target's debug port may have closed with the connection. A close or detach sent while another is still waiting waits for the first; after a confirmed release it sends no second one and answers from it (after one that was not confirmed, a close sends its own), so there is no need to retry one (a detach with `terminateProcess: true` is refused then, and so are `start_debugging`, `restart_debugging` and `attach_to_process` while a close waits). The server's own exit does not wait for a release in flight.
 
 For Kubernetes pods, don't re-derive attach configs: the [Kubernetes recipe](https://github.com/debugmcp/mcp-debugger/blob/main/docs/kubernetes.md#breakpoints-and-paths-on-attach-read-this-once) (pattern decision table, path rules) and the per-language [attach presets](https://github.com/debugmcp/mcp-debugger/blob/main/examples/kubernetes/attach-presets.md) have verified copy-paste calls.
 

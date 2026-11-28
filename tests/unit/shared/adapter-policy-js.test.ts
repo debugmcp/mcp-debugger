@@ -1218,3 +1218,81 @@ describe('JsDebugAdapterPolicy and the session tree (issue #1082)', () => {
     expect(first.sendResponse).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('JsDebugAdapterPolicy.describeStepInFilter (issue #1328)', () => {
+  const hook = JsDebugAdapterPolicy.describeStepInFilter;
+  const launch = (dapLaunchArgs?: Record<string, unknown>, adapterLaunchConfig?: Record<string, unknown>) => ({
+    dapLaunchArgs,
+    adapterLaunchConfig
+  });
+
+  it('conditionally explains Node internals and node_modules skipping on the default launch', () => {
+    const text = hook({ attachMode: false });
+    expect(text).toBe(
+      'If the line called into Node internals or node_modules, the debugger ran through that skipped code without stopping; ' +
+        'pass dapLaunchArgs: { justMyCode: false } to step into it.'
+    );
+    expect(hook({ attachMode: false, launch: launch({ justMyCode: true }) })).toBe(text);
+  });
+
+  it('returns undefined when stepping through skipped code is off or skipFiles is empty, and on attach', () => {
+    expect(hook({ attachMode: false, launch: launch({ justMyCode: false }) })).toBeUndefined();
+    expect(hook({ attachMode: false, launch: launch({ justMyCode: true }, { smartStep: false }) })).toBeUndefined();
+    expect(hook({ attachMode: false, launch: launch({ skipFiles: [] }) })).toBeUndefined();
+    expect(hook({ attachMode: true })).toBeUndefined();
+    expect(hook({ attachMode: true, launch: launch({ justMyCode: true }) })).toBeUndefined();
+  });
+
+  it('names adapterLaunchConfig in the remedy when adapterLaunchConfig decides justMyCode', () => {
+    const fromAdapter = hook({
+      attachMode: false,
+      launch: launch({ justMyCode: false }, { justMyCode: true })
+    });
+    expect(fromAdapter).toBe(
+      'If the line called into Node internals or node_modules, the debugger ran through that skipped code without stopping; ' +
+        'pass adapterLaunchConfig: { justMyCode: false } to step into it.'
+    );
+    expect(hook({ attachMode: false, launch: launch(undefined, { justMyCode: true }) })).toBe(fromAdapter);
+    expect(hook({ attachMode: false, launch: launch({ justMyCode: true }, { sourceMaps: true }) })).toContain(
+      'pass dapLaunchArgs: { justMyCode: false }'
+    );
+  });
+
+  it('tailors the skipped target and remedy when smartStep or skipFiles was overridden explicitly', () => {
+    const forcedSmartStep = hook({ attachMode: false, launch: launch({ justMyCode: false }, { smartStep: true }) });
+    expect(forcedSmartStep).toContain('Node internals');
+    expect(forcedSmartStep).not.toContain('node_modules');
+    expect(forcedSmartStep).toContain('pass adapterLaunchConfig: { smartStep: false } (with dapLaunchArgs: { justMyCode: false })');
+
+    const bothFromAdapter = hook({ attachMode: false, launch: launch({ justMyCode: false }, { justMyCode: true, smartStep: true }) });
+    expect(bothFromAdapter).toContain('pass adapterLaunchConfig: { smartStep: false, justMyCode: false }');
+
+    const bothFromDap = hook({ attachMode: false, launch: launch({ smartStep: true }) });
+    expect(bothFromDap).toContain('pass dapLaunchArgs: { smartStep: false, justMyCode: false }');
+
+    const onlyNodeModules = hook({ attachMode: false, launch: launch({ skipFiles: ['**/node_modules/**'] }) });
+    expect(onlyNodeModules).toContain('node_modules');
+    expect(onlyNodeModules).not.toContain('Node internals');
+    expect(onlyNodeModules).toContain('pass dapLaunchArgs: { justMyCode: false } (and remove the pattern from skipFiles)');
+
+    const skipFilesFromAdapter = hook({
+      attachMode: false,
+      launch: launch({ justMyCode: false }, { justMyCode: true, skipFiles: ['**/node_modules/**'] })
+    });
+    expect(skipFilesFromAdapter).toContain(
+      'pass adapterLaunchConfig: { justMyCode: false } (and remove the pattern from adapterLaunchConfig.skipFiles)'
+    );
+
+    const customGlobs = hook({ attachMode: false, launch: launch({ skipFiles: ['**/vendor/**'], smartStep: true }) });
+    expect(customGlobs).toContain('files matching skipFiles');
+    expect(customGlobs).toContain('remove the pattern from skipFiles and set smartStep: false');
+
+    const customGlobsFromAdapter = hook({
+      attachMode: false,
+      launch: launch(undefined, { skipFiles: ['**/vendor/**'], smartStep: true })
+    });
+    expect(customGlobsFromAdapter).toContain(
+      'remove the pattern from adapterLaunchConfig.skipFiles and set adapterLaunchConfig.smartStep: false'
+    );
+  });
+});

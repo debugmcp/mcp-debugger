@@ -41,6 +41,7 @@ import { AttachController, type AttachRequest } from './attach/attach-controller
 import { InFlightGuard } from './in-flight-guard.js';
 import {
   AttachResultData,
+  CloseSessionOutcome,
   DetachResultData,
   CustomLaunchRequestArguments,
   DebugResult,
@@ -222,7 +223,9 @@ export abstract class SessionManagerOperations extends SessionManagerData {
    * attach still being awaited refuses any other launch-shaped call on the
    * session, and `restartDebugging` replays the launch under its own claim
    * (through the launcher's private launch sequence, not this facade's
-   * `startDebugging`).
+   * `startDebugging`). The guard also holds the session's ending in flight,
+   * a close or a detach, which an overlapping close or detach joins (issue
+   * #1325).
    */
   protected readonly opsContext: OperationsContext = this.buildOperationsContext();
   protected readonly inFlight = new InFlightGuard();
@@ -473,6 +476,16 @@ export abstract class SessionManagerOperations extends SessionManagerData {
     terminateProcess: boolean = false
   ): Promise<DebugResult<DetachResultData>> {
     return this.attach.detachFromProcess(sessionId, terminateProcess);
+  }
+
+  /**
+   * close_debug_session (issue #1325): the close, as one ending of the
+   * session that an overlapping close or detach joins. Delegates to the
+   * attach controller, which owns both endings. The server's exit and the
+   * idle policy close through closeSessionReporting directly.
+   */
+  async closeDebugSession(sessionId: string): Promise<CloseSessionOutcome> {
+    return this.attach.closeSession(sessionId);
   }
 
   /**

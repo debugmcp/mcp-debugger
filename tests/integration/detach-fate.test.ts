@@ -115,8 +115,12 @@ describe('the fate of an attached process, as the debug server answered for it (
     expect(detached.state).toBe('stopped');
     expect(detached.released, JSON.stringify(detached)).toBeUndefined();
     expect(detached.processEnded).toBeUndefined();
-    expect(detached.message, JSON.stringify(detached)).toMatch(/^Detached, but the debug adapter did not confirm it \(.*timed out.*\)\./);
-    expect(detached.message).toContain('whether the process is still running is not known');
+    expect(detached.message, JSON.stringify(detached)).toMatch(
+      /^Detached, but the debug adapter did not confirm the release \(no answer within 10000 ms\)\./
+    );
+    // The connection was closed, and what that can have done (issue #1325).
+    expect(detached.message).toContain("the target's debug port may have closed with it");
+    expect(detached.message).toContain('Whether the process is still running is not known');
     expect(detached.warning).toBe(detached.message);
     // The 10 s bound, not the 30 s request timeout it used to wait out.
     expect(elapsed).toBeGreaterThan(8_000);
@@ -136,15 +140,22 @@ describe('the fate of an attached process, as the debug server answered for it (
     expect(closed.warning).toBeUndefined();
   }, 60_000);
 
-  it('close does not say released when the debug server never acknowledges the detach', async () => {
+  it('close does not say released when the debug server never acknowledges the detach, and waits the detach bound for it', async () => {
     await attached('close-fate-silence', 'silence');
 
+    const startedAt = Date.now();
     const closed = await server!.call<Ended>('close_debug_session');
+    const elapsed = Date.now() - startedAt;
 
     expect(closed.success, JSON.stringify(closed)).toBe(true);
     expect(closed.released, JSON.stringify(closed)).toBeUndefined();
-    expect(closed.warning, JSON.stringify(closed)).toMatch(
-      /^The debug adapter did not confirm that it released the process \(.*\); whether the process is still running is not known$/
+    expect(closed.warning, JSON.stringify(closed)).toBe(
+      'The debug adapter did not confirm that it released the process (no answer within 10000 ms). The connection to ' +
+      "the adapter was closed: if the adapter belongs to the target (it was listening before this session attached), the target's " +
+      'debug port may have closed with it. Whether the process is still running is not known'
     );
+    // The same release, under the same 10 s bound, as detach_from_process (issue #1325); it used to be 1 s.
+    expect(elapsed).toBeGreaterThan(8_000);
+    expect(elapsed).toBeLessThan(20_000);
   }, 60_000);
 });

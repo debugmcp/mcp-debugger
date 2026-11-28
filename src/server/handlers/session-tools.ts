@@ -264,10 +264,16 @@ export const closeDebugSessionTool: ToolHandler = async (ctx, args) => {
     ...(outcome.processEnded ? { processEnded: true } : {}),
     ...(outcome.released ? { released: true } : {}),
     // A borrowed program whose detach nothing acknowledged (issue #1148):
-    // neither field above, and the answer says why.
+    // neither field above, and the answer says why, and whether the
+    // connection to the adapter was seen to close (issue #1325). Otherwise a
+    // failed stop of the worker is said on its own (issue #1325): beside a
+    // confirmed release or a reported exit, because the release is not the
+    // cleanup, and alone for a child whose stop failed, which claims neither.
     ...(outcome.releaseUnconfirmed !== undefined
-      ? { warning: ErrorMessages.closeReleaseUnconfirmed(outcome.releaseUnconfirmed) }
-      : {})
+      ? { warning: ErrorMessages.closeReleaseUnconfirmed(outcome.releaseUnconfirmed, outcome.stopFailed) }
+      : outcome.stopFailed !== undefined
+        ? { warning: ErrorMessages.closeStopFailed(outcome.stopFailed) }
+        : {})
   };
   // What the closed root's attach left in its target, as seen now (issue #1261).
   await hoistAttachFootprint(payload, outcome.attachFootprint, 'end');

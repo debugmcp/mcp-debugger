@@ -745,12 +745,16 @@ export interface AdapterPolicy {
   explainRequestFailure?(command: string, message: string, context: { program?: string }): string | undefined;
 
   /**
-   * Explain an engine-side step filter that causes `step_into` to step over
-   * calls by default (issue #1184: netcoredbg's `enableStepFiltering` for
-   * properties and operators; CodeLLDB's Rust step-avoid regexp). Appended to
-   * the step landing's `note` when `step_into` completes in the starting
-   * function without entering a callee. Optional — absent or undefined adds
-   * nothing beyond the factual "No function was entered." disclosure.
+   * Conditionally explain an active step filter that causes `step_into` to run
+   * through library, dependency, or language-synthesized code without stopping
+   * (issues #1184, #1328: Python debugpy's `justMyCode`, JavaScript's
+   * `skipFiles` + `smartStep`, netcoredbg's `enableStepFiltering` for
+   * properties and operators, and CodeLLDB's Rust `std`/`core`/`alloc`
+   * step-avoid regexp). Appended at most once per run (keyed by hint text on
+   * `session.run`) to the step landing's `note` when `step_into` stops in the
+   * starting function at the same visible call-stack depth; worded conditionally
+   * so it remains true whether or not the line contained a call. Optional —
+   * absent or undefined adds nothing beyond the core positional sentence.
    */
   describeStepInFilter?(info: StepInFilterContext): string | undefined;
 

@@ -75,10 +75,15 @@ const IN_FLIGHT = {
   launch: 'A launch is already in progress for this session (start_debugging has not returned yet)',
   restart: 'A restart is already in progress for this session (restart_debugging has not returned yet)',
   attach: 'An attach is already in progress for this session (attach_to_process has not returned yet)',
-  detach: 'A detach is already in progress for this session (detach_from_process has not returned yet)'
+  detach: 'A detach is already in progress for this session (detach_from_process has not returned yet)',
+  close: 'This session is being closed (close_debug_session has not returned yet)'
 } as const;
 
-/** The launch-shaped operations one session may hold a claim for (issue #711). */
+/**
+ * The operations one session may hold a claim for: the launch-shaped ones
+ * (issue #711), and close_debug_session, which takes it while it releases an
+ * attached target (issue #1325).
+ */
 export type InFlightOperation = keyof typeof IN_FLIGHT;
 
 /**
@@ -144,6 +149,15 @@ const ATTACH_FORM_WORDS: Record<AttachForm, string> = {
 /** "processId (…) or port (…)" — the forms a language accepts, for a refusal. */
 const describeAttachForms = (accepted: readonly AttachForm[]): string =>
   accepted.map((form) => ATTACH_FORM_WORDS[form]).join(' or ');
+
+/**
+ * What an unconfirmed release can have done, after the connection to the
+ * adapter was closed (issue #1325): an adapter that belongs to the target can
+ * end itself when its client leaves before it has replied.
+ */
+const RELEASE_UNCONFIRMED_CONSEQUENCE =
+  'if the adapter belongs to the target (it was listening before this session attached), the target\'s debug port ' +
+  'may have closed with it. Whether the process is still running is not known';
 
 export const ErrorMessages = {
   /**
@@ -1075,24 +1089,70 @@ export const ErrorMessages = {
   /**
    * The detach answer when nothing acknowledged the detach (issue #1148)
    * Occurs when: the detaching disconnect was neither answered nor followed
-   * by `terminated` within its bound, or the worker reported nothing. The
-   * adapter is stopped all the same; what that did to the target is not
-   * something the server saw. It used to answer "process still running".
+   * by `terminated` within its bound (`no answer within 10000 ms`), or the
+   * worker reported nothing. The worker is stopped all the same, which
+   * closes its connection to the adapter; what that did to the target is
+   * not something the server saw. An adapter that belongs to the target can
+   * end itself when its client leaves before it has replied, taking the
+   * target's debug port with it (issue #1325), so the answer says that may
+   * have happened. It used to answer "process still running".
    * Used in: src/session/attach/attach-controller.ts
    * @param reason - Why there is no acknowledgement
    * @param look - What a look at the target's pid showed, for a pid attach
    */
   detachUnconfirmed: (reason: string, look?: string) =>
-    `Detached, but the debug adapter did not confirm it (${reason}). The debugger was stopped anyway; ` +
-    `whether the process is still running is not known${look ? `: ${look}` : ''}`,
+    `Detached, but the debug adapter did not confirm the release (${reason}). The debugger was stopped anyway, ` +
+    `and its connection to the adapter was closed: ${RELEASE_UNCONFIRMED_CONSEQUENCE}${look ? `: ${look}` : ''}`,
 
   /**
    * The close answer's warning when the detach of a borrowed program was not acknowledged (issue #1148)
-   * Used in: src/server/handlers/session-tools.ts
+   * Occurs when: as detachUnconfirmed, for close_debug_session on an attach
+   * session (its release is the same request under the same bound, issue
+   * #1325), or for the worker's own close-time detach where that one ran.
+   * The connection is said to be closed only when stopping the worker
+   * succeeded; when that failed too, the answer says so, with why (issue
+   * #1325): the close removes the session either way.
+   * Used in: src/server/handlers/session-tools.ts, src/session/attach/attach-controller.ts
    * @param reason - Why there is no acknowledgement
+   * @param stopFailed - Why stopping the session's worker failed, when it did
    */
-  closeReleaseUnconfirmed: (reason: string) =>
-    `The debug adapter did not confirm that it released the process (${reason}); whether the process is still running is not known`,
+  closeReleaseUnconfirmed: (reason: string, stopFailed?: string) =>
+    `The debug adapter did not confirm that it released the process (${reason}). ` +
+    (stopFailed === undefined
+      ? `The connection to the adapter was closed: ${RELEASE_UNCONFIRMED_CONSEQUENCE}`
+      : `Stopping the debugger then failed (${stopFailed}), so whether its connection to the adapter was closed, ` +
+        `and with it a debug port that belongs to the target, is not known. Whether the process is still running is not known`),
+
+  /**
+   * The close answer's warning when stopping the session's worker failed and
+   * no unconfirmed release already says so (issue #1325)
+   * Occurs when: a close_debug_session that joined a detach whose own stop
+   * failed after its confirmed release, and whose own stop of the worker
+   * failed too, or any close whose release was confirmed and whose stop
+   * failed: the release is what the adapter answered; the stop is the
+   * worker, which the close did not see end. Also any other close whose stop
+   * failed, a child's among them, whose answer then claims neither
+   * processEnded nor released. The session is removed either way.
+   * Used in: src/server/handlers/session-tools.ts
+   * @param stopFailed - Why stopping the session's worker failed
+   */
+  closeStopFailed: (stopFailed: string) =>
+    `Stopping the debugger failed (${stopFailed}): the session was removed all the same, and whether its ` +
+    `connection to the adapter was closed is not known`,
+
+  /**
+   * The detach answer when the release it would have sent was already in
+   * flight from a close_debug_session (issue #1325)
+   * Occurs when: detach_from_process arrives while a close of the same
+   * session is releasing its target. The detach sends nothing of its own: a
+   * second `disconnect` on the same connection is what destroyed the
+   * target's debug port. It answers from that close's release, and says
+   * whose release it was and that the close removed the session.
+   * Used in: src/session/attach/attach-controller.ts
+   * @param fate - The detach sentence for what the close's release observed
+   */
+  detachJoinedClose: (fate: string) =>
+    `${fate}. The release was the one the close_debug_session already in progress sent; that close also removed the session`,
 
   /**
    * Refusal of a plain detach on a session that launched its program (issue #1151)
@@ -1199,6 +1259,11 @@ export const ErrorMessages = {
     if (held === 'attach' && requestedTool === 'restart_debugging') {
       return `${inFlight}, and restart_debugging is never available for an attach session: ` +
         `there is no launch configuration to replay. Detach and re-attach instead.`;
+    }
+    // Waiting cannot help either (issue #1325): the close removes the session.
+    if (held === 'close') {
+      return `${inFlight}, so ${requestedTool} has no session to act on once it returns. ` +
+        `Create a new session instead.`;
     }
     return `${inFlight}; wait for it to complete before calling ${requestedTool}.`;
   },

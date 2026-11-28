@@ -166,15 +166,85 @@ A session with child sessions, a child session or an attach root says what the c
   child's close terminates it, exit 0 reported to its parent).
 - `released: true` when the named session borrowed its program (an attach) and the debug adapter
   acknowledged the detach (issue #1148): its descendants are detached with their targets kept
-  running, deepest first, their rows removed, then the root is detached. When the adapter did not
-  acknowledge it within the worker's 1 s bound there is no `released`, and `warning` reads `The
-  debug adapter did not confirm that it released the process (<why>); whether the process is still
-  running is not known`; `processEnded: true` instead when the adapter reported that the program
-  exited. A session whose program was already gone, or one that launched its program, carries none
-  of the three. It used to be `released: true` for every attach root, whatever the adapter did. Also
-  when the named session is a JavaScript child: js-debug cannot end a target it adopted, so the
-  close disconnects with the process kept running and it finishes undebugged (a root's close
-  releases its JavaScript children the same way, counted in `childrenClosed`).
+  running, deepest first, their rows removed, then the root is released with the same `disconnect`
+  and the same 10 s bound as [`detach_from_process`](#detach_from_process), before the session's
+  worker is stopped (issue #1325). The close therefore waits for the adapter's answer: within
+  milliseconds on an idle target, and for an adapter that answers only once the target is free
+  (debugpy), as long as the target's busy call lasts, up to 10 s. This holds for the attach
+  sessions of every engine, not only Python's: an adapter that does not answer now keeps the close
+  waiting up to 10 s where it used to be 1 s. When the adapter did not acknowledge it there is
+  no `released`, and `warning` reads `The debug adapter did not confirm that it released the
+  process (no answer within 10000 ms). The connection to the adapter was closed: if the adapter
+  belongs to the target (it was listening before this session attached), the target's debug port
+  may have closed with it. Whether the process is still running is not known` (with another reason
+  in the parentheses when the request failed otherwise). When stopping the session's worker failed
+  as well, the warning does not say the connection was closed: its second sentence reads
+  `Stopping the debugger then failed (<why>), so whether its connection to the adapter was closed,
+  and with it a debug port that belongs to the target, is not known`. `processEnded: true` instead
+  when the adapter reported that the program exited. Beside `released` or `processEnded`, a failed
+  stop of the session's worker is said in a `warning` of its own: `Stopping the debugger failed
+  (<why>): the session was removed all the same, and whether its connection to the adapter was
+  closed is not known` (issue #1325). A child session whose stop failed carries neither
+  `processEnded` nor `released`, only that `warning`: the stop may have sent the child's
+  connection nothing. A session whose program was already gone, or one that launched its program,
+  carries none of the three, and that `warning` alone when stopping its worker failed. It used to
+  be `released: true` for every attach root, whatever the adapter did. Also when the named session is a JavaScript child:
+  js-debug cannot end a target it adopted, so the close disconnects with the process kept running
+  and it finishes undebugged (a root's close releases its JavaScript children the same way, counted
+  in `childrenClosed`).
+- **Why the close waits** (issue #1325): debugpy's `--listen` adapter belongs to the target (it is
+  started once and owns the target's debug port) and ends itself when its client closes the
+  connection before the reply to `disconnect` is written. The close used to give it 1 s, so closing
+  a session while the target was busy for longer closed the target's debug port for good. A target
+  busy for longer than the 10 s bound can still lose its port, on a close as on a detach; the rest
+  is tracked in #1325.
+- **When the close sends the release:** once the attach has put the session in `running` or
+  `paused`. That can be before `attach_to_process` has returned (it may still be verifying threads
+  or re-sending breakpoints): the release goes out all the same and the close waits for it as
+  above. The attach call can answer before the close does, successfully or not: one that fails
+  waits for the close before its own teardown, so it does not close the connection under the
+  release; one that succeeds answers while the close still waits, and the session is gone once the
+  close returns. What the target's port depends on is the live connection, not the call. A close
+  before that point (the session still `initializing`) releases through the worker's own detach,
+  with its 1 s bound, as do the closes the server makes as it exits and the idle policy's.
+- **Overlapping endings** (issue #1325): between `close_debug_session` and `detach_from_process`
+  calls, one session has at most one release in flight. A close or a detach that arrives while
+  another close or detach of the same session is in flight waits for it. A close during a detach
+  whose release was confirmed (`released` or `processEnded`) sends no second release: it removes
+  what the detach left and answers with what that release observed; that holds when the detach
+  then fails too (`Failed to detach: …`, because stopping its worker failed): the close sends
+  nothing, stops the worker itself, and when that stop fails as well, its answer carries a
+  `warning` that says so beside `released` or `processEnded`: `Stopping the debugger failed
+  (<why>): the session was removed all the same, and whether its connection to the adapter was
+  closed is not known`. A detach whose release was not confirmed (its answer's `warning`: the
+  request may never have reached the adapter), or that failed before it sent the release, leaves
+  the release to the close, which makes its own and answers from it, as a close that joined nothing
+  does: after a detach that went on to stop its worker there is nothing left to release, and the
+  close answers without a `warning` of its own; after one whose stop failed while its worker still
+  runs, the close sends the release under the same 10 s bound. When the detach's request did reach the adapter and only went
+  unanswered, that adapter then gets a second `disconnect`. A second
+  close answers what the first did. A detach during a close answers from the close's release, in a
+  detach's words, ending `The release was the one the close_debug_session already in progress
+  sent; that close also removed the session`. A detach with `terminateProcess: true` is not a
+  release, so it neither joins one nor is joined by one: it is refused while a close or a detach is
+  in flight (`This session is being closed …` / `A detach is already in progress …`), and so is a
+  plain detach while a terminating one runs; a close during a terminating detach answers the close
+  that detach made. For as long as a close is in flight, `start_debugging`, `restart_debugging` and
+  `attach_to_process` on the same session are refused, also when an `attach_to_process` that was
+  already in flight when the close came has answered meanwhile: `This session is being closed
+  (close_debug_session has not returned yet), so <tool> has no session to act on once it returns.
+  Create a new session instead.` A close is never refused. Before this, a close that arrived while a
+  detach waited sent a second `disconnect`, and debugpy's adapter ended, taking the target's debug
+  port, while both calls said `released: true`. The closes the server makes as it exits do not join
+  an ending in flight: they stop the worker, which sends no second `disconnect` once the first has
+  gone out but can close the connection before its answer.
+- **A tree's close is not bounded by 10 s.** Its live children are closed first, one after
+  another, deepest first, each under its own 1 s cap, and only then is the root released under its
+  10 s. With N children and an adapter that answers none of it, the close takes about N × 1 s +
+  10 s before the worker is stopped: about 42 s at the default cap of 32 children. The timers on
+  the server's side allow more: about 10N + 21 s in all (10N + 41 s for a JavaScript tree, whose
+  worker gets a longer exit grace). A child's release is not confirmed before the root's starts:
+  `childrenClosed` counts the rows removed.
 
 **Notes:**
 - Sessions may close automatically on errors
@@ -740,9 +810,11 @@ the first visible frame, as everywhere else; `threadId` appears when the answer 
 `note` carries any internal-frame disclosure (`Paused inside an internal frame …`, even with snapshots off or explicit
 variable access, issue #1181), any non-boilerplate stop description from the adapter (such as the COBOL shim's
 `returned from BUMP-PARA to VIA-TIMES …`, issue #1182), any no-program-frame or stale-build notice, and any structural
-fact proved by comparing the step's starting stack with its landing stack (issues #1180, #1184: `step_out` still inside
-the function stepped out of or dropping multiple frames, `step_into` entering no function with any policy step-filter
-hint, or a fiber/coroutine switch onto a disjoint call stack). A step stop is read plainly and never moves off its own
+fact proved by comparing the step's starting visible stack with its landing visible stack (issues #1180, #1184, #1328:
+`step_out` stopping at the same visible depth, with a frame of the starting function's name below the stop, or more than
+one frame shallower; `step_into` stopping in the starting function at the same visible depth, appending any active
+step-filter hint the first time it applies in a run; or a landing stack in which no starting function, or only the
+outermost entry, appears). A step stop is read plainly and never moves off its own
 thread; a step that was ended by a `pause` from elsewhere is read as a pause and may.
 
 #### Pending steps
@@ -819,6 +891,8 @@ Steps into function calls on the current line.
 ```
 
 Same ~5s wait and `pending: true` contract as step_over — see [Pending steps](#pending-steps).
+
+When `step_into` completes in the starting function at the same visible call-stack depth (without a JavaScript 512-step walk-limit message), `note` states `"The stop is in '<fn>' at the same visible call-stack depth as before step_into."` (adding `" It is on the starting source line."` when the source line did not change) and, the first time in a run that an engine step filter applies, appends a conditional step-filter hint — Python `justMyCode`, JavaScript `skipFiles`/`smartStep`, .NET `enableStepFiltering`, or CodeLLDB's Rust `std`/`core`/`alloc` filter, naming `adapterLaunchConfig` when it decides the effective setting (issues #1184, #1328).
 
 **JavaScript** (a launch that steps through skipped code, the default; issue #1130):
 
@@ -1845,9 +1919,11 @@ Detaches the debugger from a process the session attached to, leaving the proces
 
 - `released: true`: the adapter acknowledged the detach, by answering the request or by sending `terminated` in reply to it (debugpy does the latter). The process was left running.
 - `processEnded: true`: the adapter reported that the program exited (`message`: `Detached from process: the debug adapter reported that the program had exited, so there is no process left running`).
-- Neither field, and a `warning` that carries the `message` (joined with the pre-detach resume's note when that resume was refused too): `Detached, but the debug adapter did not confirm it (<why>). The debugger was stopped anyway; whether the process is still running is not known`. The adapter did not acknowledge the detach within 10 s; it is stopped all the same, and what that did to the target is not something the server saw. `success` is still `true`: the session is ended either way. This used to answer `Detached from process (process still running)`, after 30 s.
+- Neither field, and a `warning` that carries the `message` (joined with the pre-detach resume's note when that resume was refused too): `Detached, but the debug adapter did not confirm the release (no answer within 10000 ms). The debugger was stopped anyway, and its connection to the adapter was closed: if the adapter belongs to the target (it was listening before this session attached), the target's debug port may have closed with it. Whether the process is still running is not known` (with another reason in the parentheses when the request failed otherwise). The adapter did not acknowledge the detach within 10 s; the worker is stopped all the same, and what that did to the target is not something the server saw. An adapter that belongs to the target can end itself when its client leaves before it has replied: debugpy's `--listen` adapter does, and the target's debug port closes for good with it (issue #1325; measured with a target that held its interpreter for 13 s). `success` is still `true`: the session is ended either way. This used to answer `Detached from process (process still running)`, after 30 s.
 
-The 10 s is sized by measurement: every attach-capable adapter acknowledges a detach in 0 to 15 ms, and the worker may first spend up to 2 s resuming a stopped CodeLLDB target.
+The 10 s is sized by measurement: every attach-capable adapter acknowledges a detach in 0 to 15 ms on an idle target, and the worker may first spend up to 2 s resuming a stopped CodeLLDB target. debugpy acknowledges it only once the target's interpreter is free: a detach during a 3 to 4 s hold answers when the hold ends. [`close_debug_session`](#close_debug_session) sends the same release under the same bound.
+
+A `detach_from_process` and a `close_debug_session` of the same session never both send a release once one is confirmed (issue #1325); the closes the server makes as it exits do not join them (see [`close_debug_session`](#close_debug_session)). A plain detach that arrives while a close or another plain detach is in flight sends no second release: it waits for it, and answers from what its release observed: a second detach answers what the first did; a detach during a close answers in a detach's words, ending `The release was the one the close_debug_session already in progress sent; that close also removed the session`, or `No active debug session to detach from` when that close had nothing to release. A detach with `terminateProcess: true` while a close or a detach is in flight, and a plain detach while a terminating one runs, are refused (`This session is being closed …` / `A detach is already in progress …`) and send nothing. A close that arrives during a detach waits for it too, and sends no second release after a detach whose release was confirmed, also when the detach then fails after it (stopping its worker failed); a detach whose release was not confirmed, or that failed before it sent the release, leaves the close to send its own. See [`close_debug_session`](#close_debug_session).
 
 **Notes:**
 
@@ -1858,10 +1934,10 @@ was observed (#1288):
 > Child debugging changed the target for the rest of its life: processes it starts later still load a file from this server's install through NODE_OPTIONS after detach; see the attach_to_process description.
 
 - With `terminateProcess: true` the whole session is closed and the message reads `Detached and terminated process`.
-- After a JavaScript attach by `processId` that signalled, the detach and the close say what one probe of the inspector's address (1 s at most) sees, in `inspector` (issue #1261): `listening: an inspector answers on 127.0.0.1:9229, unauthenticated (one answered there after this attach signalled PID <pid>); this server does not close it`, `not listening: 127.0.0.1:9229 no longer accepts connections (…)`, or `not checked: 127.0.0.1:9229 did not answer as an inspector (<what was seen>); …`. After one that found an inspector open they do not probe: `left as it was: an inspector answered this attach's first probe on 127.0.0.1:9229, so no signal was sent; this server does not close it`. This server closes no inspector.
+- After a JavaScript attach by `processId` that signalled, the detach and the close say what one probe of the inspector's address (1 s at most) sees, in `inspector` (issue #1261), each answer its own probe, a detach or close that joined another ending of the session included (issue #1325): `listening: an inspector answers on 127.0.0.1:9229, unauthenticated (one answered there after this attach signalled PID <pid>); this server does not close it`, `not listening: 127.0.0.1:9229 no longer accepts connections (…)`, or `not checked: 127.0.0.1:9229 did not answer as an inspector (<what was seen>); …`. After one that found an inspector open they do not probe: `left as it was: an inspector answered this attach's first probe on 127.0.0.1:9229, so no signal was sent; this server does not close it`. This server closes no inspector.
 - Detaching sends DAP `disconnect` with `terminateDebuggee: false`, then stops the proxy; the session ends in `"stopped"` either way, so a later re-attach needs a new session.
 - CodeLLDB sessions on Windows (C/C++ and COBOL attach sessions): while the target is stopped, a DAP `continue` goes out ahead of the detaching `disconnect` — on this path, on `close_debug_session` and on shutdown alike — and `data.resumedBeforeDetach` is `true`; if the debugger refuses the continue, the detach still proceeds with `resumedBeforeDetach: false` and `data.warning` names the risk. Why: CodeLLDB's Windows detach otherwise kills a target whose last resume was a step (issue #763; the mechanism is in the C/C++ guide's attach section).
-- Detaching a session with no active debug process reports `success: false` with `No active debug session to detach from` in `message`. That includes a session already detached: a second detach does not repeat the first one's answer.
+- Detaching a session with no active debug process reports `success: false` with `No active debug session to detach from` in `message`. That includes a session already detached: a second detach after the first has returned does not repeat the first one's answer (one sent while the first is still in flight waits for it and answers the same, issue #1325).
 - **An attach root with child sessions** (the session tree, issues #1081 and #1082; Python and JavaScript): the children are detached first, deepest first, each with `disconnect` and `terminateDebuggee: false` so it runs on undebugged, then the parent. The child rows stay listed as `stopped` with `programEnd: { note: "Released: detached with its parent; the process runs on undebugged.", data: { released: true } }`, and the answer carries `childrenReleased: n` — n children now run undebugged (top level and in `data`). With `terminateProcess: true` the whole subtree is closed and the answer carries `childrenClosed: n` instead.
 
 ---
@@ -2086,7 +2162,7 @@ Session-lifecycle failures (unknown/terminated session, proxy not running) are a
 ```
 
 ### Common Error Scenarios
-1. **Session not found**: Occurs when a session terminates unexpectedly or was closed. A session the idle policy closed (`MCP_DEBUG_SESSION_IDLE_MS`, see `create_debug_session`) says so instead: `{ "success": false, "error": "Session … was closed by the idle policy at … Its program was ended. Create a new session to continue.", "closedBy": "idle-policy" }`. The sentence about the program is one of four: "Its program was ended." (a launched program the policy ended), "The process it was attached to was released and keeps running." (the debug adapter acknowledged the detach), "The debug adapter did not confirm that it released the process it was attached to, so whether that process is still running is not known." (it did not; issue #1148), or "It had no running program by then." (the session never launched, or its program was already over). An id created by another MCP client of the same process is found like any other; one outside the caller's scope (a future authenticated `http` mode; today every caller shares one scope) does not exist for that caller — every tool answers it exactly as it answers an id nobody holds (issue #1025)
+1. **Session not found**: Occurs when a session terminates unexpectedly or was closed. A session the idle policy closed (`MCP_DEBUG_SESSION_IDLE_MS`, see `create_debug_session`) says so instead: `{ "success": false, "error": "Session … was closed by the idle policy at … Its program was ended. Create a new session to continue.", "closedBy": "idle-policy" }`. The sentence about the program is one of four: "Its program was ended." (a launched program the policy ended), "The process it was attached to was released and keeps running." (the debug adapter acknowledged the detach), "The debug adapter did not confirm that it released the process it was attached to, so whether that process is still running is not known; the connection to the adapter was closed, and if the adapter belonged to the target (it was listening before the session attached), the target's debug port may have closed with it." (it did not; issues #1148, #1325), or "It had no running program by then." (the session never launched, or its program was already over). An id created by another MCP client of the same process is found like any other; one outside the caller's scope (a future authenticated `http` mode; today every caller shares one scope) does not exist for that caller — every tool answers it exactly as it answers an id nobody holds (issue #1025)
 2. **Invalid language**: Language must be one of the supported languages (discovered dynamically from installed adapters)
 3. **File not found**: When setting breakpoints in non-existent files
 4. **Invalid scope**: When passing wrong variablesReference to get_variables
