@@ -21,6 +21,7 @@
 import path from 'path';
 import {
   AdapterConfig,
+  type AttachFootprint,
   type ExceptionBreakMode,
   type IDebugAdapter,
   type GenericLaunchConfig,
@@ -107,6 +108,8 @@ export interface LaunchPreparationRecord {
   toolchainValidation?: ToolchainValidationState;
   /** The artefact the launch runs (issue #950); launch mode, success only. */
   transformedLaunch?: TransformedLaunch;
+  /** What the attach transform left in the target (issue #1261); attach mode. */
+  attachFootprint?: AttachFootprint;
 }
 
 /**
@@ -146,6 +149,8 @@ export class ProxyLauncher {
     session: ManagedSession,
     request: ProxyLaunchRequest
   ): Promise<LanguageSpecificLaunchConfig> {
+    // What a previous run's attach left in its target is not this run's (issue #1261).
+    session.run.attachFootprint = undefined;
     // A verdict belongs to exactly one proxy-launch attempt. Clear the stored
     // projection before any fallible setup so an adapter-acquire, filesystem,
     // or transform failure cannot inherit an earlier MSVC classification.
@@ -444,6 +449,8 @@ export class ProxyLauncher {
    * verdict attached to the thrown sentinel.
    */
   private commitPreparation(session: ManagedSession, record: LaunchPreparationRecord): void {
+    // First, before the store write below can throw: a failed attach still says what it left (issue #1261).
+    session.run.attachFootprint = record.attachFootprint;
     session.run.launchConfigNotices = record.launchConfigNotices;
     session.run.attachTransformNotices = record.attachTransformNotices;
     if (record.attachKeyDiff) {
@@ -491,6 +498,8 @@ export class ProxyLauncher {
           : notices;
         for (const notice of record.launchConfigNotices) this.ctx.logger.warn(`[SessionManager] ${notice}`);
       } else {
+        // What the attach left in the target (issue #1261), drained here or lost with the adapter.
+        record.attachFootprint = adapter.consumeAttachFootprint?.();
         // The adapter's own attach notes (issue #908): drained here or lost —
         // each attempt acquires a fresh adapter. On a thrown transform they
         // are recorded and logged only; the attach error is the adapter's own.

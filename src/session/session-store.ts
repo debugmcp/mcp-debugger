@@ -18,7 +18,7 @@ import {
   getPolicyForLanguage,
   isSettledSessionState
 } from '@debugmcp/shared';
-import type { AttachLocality, ExceptionBreakMode, ProgramEndExplanation, SessionStopInfo } from '@debugmcp/shared';
+import type { AttachFootprint, AttachLocality, ExceptionBreakMode, ProgramEndExplanation, SessionStopInfo } from '@debugmcp/shared';
 import { SessionNotFoundError } from '../errors/debug-errors.js';
 import type { NoUncaughtStop } from '../utils/error-messages.js';
 
@@ -254,6 +254,13 @@ export interface Run {
    * (issue #1221), settled before launch/end/wait answers finalize.
    */
   inFlightChildReleases?: Set<Promise<void>>;
+  /**
+   * What this run's attach left in its target, in the adapter's words (issue
+   * #1261): drained from the adapter right after its attach transform
+   * (`IDebugAdapter.consumeAttachFootprint`) and reported on the attach,
+   * detach and close answers. Nothing is given back. Reset by each start.
+   */
+  attachFootprint?: AttachFootprint;
 }
 
 export interface ManagedSession extends DebugSessionInfo {

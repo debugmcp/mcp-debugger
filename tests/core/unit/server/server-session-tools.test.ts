@@ -290,6 +290,29 @@ describe('Server Session Tools Tests', () => {
       expect(announce).toHaveBeenCalledTimes(3);
     });
 
+    it('says what is seen of what the closed root\'s attach left in its target, the field detach carries (issue #1261)', async () => {
+      const atEnd = vi.fn(async () => 'not listening: 127.0.0.1:9229 no longer accepts connections');
+      mockSessionManager.closeDebugSession.mockResolvedValue({
+        closed: true,
+        closedSessionIds: ['test-session'],
+        released: true,
+        attachFootprint: { field: 'inspector', atAttach: 'signalled: an inspector answers on 127.0.0.1:9229 now', atEnd }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'close_debug_session', arguments: { sessionId: 'test-session' } }
+      });
+
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        success: true,
+        message: 'Closed debug session: test-session',
+        released: true,
+        inspector: 'not listening: 127.0.0.1:9229 no longer accepts connections'
+      });
+      expect(atEnd).toHaveBeenCalledTimes(1);
+    });
+
     it('says the release was not confirmed, why, and what closing the connection can have done (issues #1148, #1325)', async () => {
       mockSessionManager.closeDebugSession.mockResolvedValue({
         closed: true, closedSessionIds: ['test-session'], releaseUnconfirmed: 'no answer within 10000 ms'

@@ -30,6 +30,7 @@ export type {
   GenericLaunchConfig,
   LaunchTransformContext,
   LaunchConfigDiagnostic,
+  AttachFootprint,
   LanguageSpecificLaunchConfig,
 
   // Features
