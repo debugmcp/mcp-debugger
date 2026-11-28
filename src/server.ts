@@ -199,10 +199,12 @@ export class DebugMcpServer implements ToolContext {
     const liveCaps = session?.adapterCapabilities;
     const policy = this.sessionManager.getSessionPolicy(sessionId);
     const language = session?.language ?? policy.name;
-    // A policy that compiles logpoints itself (js-debug, issue #850) checks
-    // the message up front, so a syntax error is refused here — like an
-    // expectedContent mismatch — instead of surfacing only in the adapter's
-    // stderr as an unbound breakpoint (issue #853).
+    // A policy that can tell up front that a message will not evaluate refuses
+    // it here, like an expectedContent mismatch, instead of the adapter
+    // reporting the error only at run time: js-debug, which compiles logpoints
+    // itself (issues #850, #853), and Python, where debugpy evaluates each brace
+    // group as an expression, so an f-string conversion, format spec or `=`
+    // logs a syntax error at every hit (issue #1334).
     const compileCheck = (): void => {
       const problem = logMessage !== undefined ? policy.validateLogMessage?.(logMessage, condition) : undefined;
       if (problem) {

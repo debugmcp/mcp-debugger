@@ -9,6 +9,7 @@ import { emptyLocalVariableExtraction, extractionFromScope } from './adapter-pol
 import type { StackFrame, Variable } from '../models/index.js';
 import type { DapClientBehavior, DapClientContext, ReverseRequestResult } from './dap-client-behavior.js';
 import type { ChildAdoptionContract, ChildReport } from './child-adoption.js';
+import { validatePythonLogMessage } from '../utils/python-logpoint.js';
 
 /**
  * A debugpy child report (issue #1081): a `startDebugging` whose configuration
@@ -111,6 +112,10 @@ export const PythonAdapterPolicy = {
   // correctly, sends no `initialized`: the worker does not wait for one (#746).
   honoursNoDebug: true,
   supportsLogPoints: true,
+  // debugpy joins every `{...}` group into one `'...' % (g1, g2, ...,)` and
+  // eval()s it at each hit, so an f-string conversion (`{entry!r}`), format spec
+  // (`{total:.2f}`) or `=` (`{x=}`) logs `invalid syntax` only when hit (issue #1334).
+  validateLogMessage: (logMessage: string, _condition?: string): string | undefined => validatePythonLogMessage(logMessage),
   supportsFunctionBreakpoints: true,
   supportsReverseStartDebugging: false,
   // debugpy runs exactly one of these (`debugpy/adapter/clients.py`: '"program",

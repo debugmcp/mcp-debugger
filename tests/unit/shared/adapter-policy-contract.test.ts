@@ -142,6 +142,8 @@ interface PinnedCapabilities {
   supportsFunctionBreakpoints: boolean | undefined;
   /** Static logpoint verdict; `undefined` means "unknown, re-check live". */
   supportsLogPoints: boolean | undefined;
+  /** Whether the policy pre-validates `logMessage` at `set_breakpoint` time (issues #853, #1334). */
+  validatesLogMessage: boolean;
   /** Out-of-band function-breakpoint delivery; `undefined` means the standard DAP request. */
   functionBreakpointsVia: 'dap' | 'cdp' | undefined;
   /** Whether verified:false at launch is by design rather than a warning. */
@@ -214,6 +216,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     policyName: 'python',
     supportsFunctionBreakpoints: true,
     supportsLogPoints: true,
+    validatesLogMessage: true,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
     describeUnboundBreakpoint: true,
@@ -236,6 +239,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     policyName: 'ruby',
     supportsFunctionBreakpoints: false,
     supportsLogPoints: false,
+    validatesLogMessage: false,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
     describeUnboundBreakpoint: true,
@@ -258,6 +262,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     policyName: 'js-debug',
     supportsFunctionBreakpoints: true,
     supportsLogPoints: true,
+    validatesLogMessage: true,
     functionBreakpointsVia: 'cdp',
     functionBreakpointsBindLate: true,
     describeUnboundBreakpoint: false,
@@ -280,6 +285,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     policyName: 'rust',
     supportsFunctionBreakpoints: true,
     supportsLogPoints: true,
+    validatesLogMessage: false,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
     describeUnboundBreakpoint: false,
@@ -302,6 +308,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     policyName: 'go',
     supportsFunctionBreakpoints: true,
     supportsLogPoints: true,
+    validatesLogMessage: false,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
     describeUnboundBreakpoint: false,
@@ -324,6 +331,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     policyName: 'java',
     supportsFunctionBreakpoints: true,
     supportsLogPoints: false,
+    validatesLogMessage: false,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: true,
     describeUnboundBreakpoint: false,
@@ -346,6 +354,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     policyName: 'dotnet',
     supportsFunctionBreakpoints: true,
     supportsLogPoints: false,
+    validatesLogMessage: false,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
     describeUnboundBreakpoint: false,
@@ -368,6 +377,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     policyName: 'cpp',
     supportsFunctionBreakpoints: true,
     supportsLogPoints: true,
+    validatesLogMessage: false,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
     describeUnboundBreakpoint: false,
@@ -390,6 +400,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     policyName: 'cobol',
     supportsFunctionBreakpoints: true,
     supportsLogPoints: true,
+    validatesLogMessage: false,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: true,
     describeUnboundBreakpoint: false,
@@ -412,6 +423,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     policyName: 'dart',
     supportsFunctionBreakpoints: false,
     supportsLogPoints: true,
+    validatesLogMessage: false,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
     describeUnboundBreakpoint: false,
@@ -434,6 +446,7 @@ const PINNED: Record<DebugLanguage, PinnedCapabilities> = {
     policyName: 'mock',
     supportsFunctionBreakpoints: true,
     supportsLogPoints: true,
+    validatesLogMessage: false,
     functionBreakpointsVia: undefined,
     functionBreakpointsBindLate: undefined,
     describeUnboundBreakpoint: false,
@@ -598,6 +611,11 @@ describe.each(LANGUAGES)('AdapterPolicy contract — %s', (language) => {
   it('declares the pinned breakpoint capabilities', () => {
     expect(policy.supportsFunctionBreakpoints).toBe(pinned.supportsFunctionBreakpoints);
     expect(policy.supportsLogPoints).toBe(pinned.supportsLogPoints);
+    expect(typeof policy.validateLogMessage === 'function').toBe(pinned.validatesLogMessage);
+    if (policy.validateLogMessage) {
+      expect(policy.supportsLogPoints).toBe(true);
+      expect(policy.validateLogMessage('x={x}')).toBeUndefined();
+    }
   });
 
   it('pins whether a noDebug launch turns the debugger off', () => {

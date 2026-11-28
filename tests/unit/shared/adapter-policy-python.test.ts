@@ -89,6 +89,12 @@ describe('PythonAdapterPolicy', () => {
     expect(PythonAdapterPolicy.getAttachBehavior?.()).toEqual({ pauseAfterAttach: true });
   });
 
+  it('validates Python logMessage f-string forms up front and leaves condition untouched (issue #1334)', () => {
+    expect(PythonAdapterPolicy.validateLogMessage!('x={x}', 'x >=')).toBeUndefined();
+    expect(PythonAdapterPolicy.validateLogMessage!('stale={entry!r}')).toContain('{repr(entry)}');
+    expect(PythonAdapterPolicy.validateLogMessage!('{total:.2f}')).toContain("{format(total, '.2f')}");
+  });
+
   describe('describeStepInFilter (issue #1328)', () => {
     it('explains debugpy justMyCode filtering conditionally on launch unless disabled', () => {
       const defaultHint = PythonAdapterPolicy.describeStepInFilter({ attachMode: false });
