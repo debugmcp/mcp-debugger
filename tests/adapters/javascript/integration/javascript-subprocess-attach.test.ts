@@ -15,7 +15,8 @@
  * target runs to its end either way. The last case is #501's wedge guard on
  * the fork target the e2e attach smoke uses, here so CI runs it.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
+import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -125,12 +126,32 @@ async function targetRanToItsEnd(target: Target): Promise<void> {
   }
 }
 
+const jsDebugTraceDir = path.join(root, 'logs/tests/js-debug');
+let jsDebugTraceSeq = 0;
+let testTraceFiles: string[] = [];
+const deferredTraceDeletes = new Set<string>();
+
+/**
+ * Adapter config for attaches that enable child debugging, adding js-debug's
+ * own trace log (`logs/tests/js-debug/*.log`, collected by CI's Windows
+ * diagnostics upload when a test fails; deleted after passing tests) to record
+ * what happens between the attach answer and child-environment injection;
+ * `trace` can be removed when #1313 is closed.
+ */
+function childAttachAdapterConfig(name: string): { autoAttachChildProcesses: true; trace: { logFile: string } } {
+  jsDebugTraceSeq += 1;
+  const logFile = path.join(jsDebugTraceDir, `${name}-${process.pid}-${Date.now()}-${jsDebugTraceSeq}.log`);
+  testTraceFiles.push(logFile);
+  return { autoAttachChildProcesses: true, trace: { logFile } };
+}
+
 /** Create the root, set the child's breakpoint before the attach, attach without stopping. */
 async function attachRoot(name: string, target: Target, extra: Record<string, unknown> = {}): Promise<{ rootId: string; attached: Stop }> {
   const rootId = await server.createSession('javascript', name);
   const bp = await call('set_breakpoint', { file: childFixture, line: CHILD_BREAKPOINT_LINE });
   expect(bp.success, JSON.stringify(bp)).toBe(true);
-  const attached = await call<Stop>('attach_to_process', { host: '127.0.0.1', port: target.port, stopOnEntry: false, verifyTimeout: 20000, adapterConfig: { autoAttachChildProcesses: true }, ...extra });
+  const adapterConfig = 'adapterConfig' in extra ? undefined : childAttachAdapterConfig(name);
+  const attached = await call<Stop>('attach_to_process', { host: '127.0.0.1', port: target.port, stopOnEntry: false, verifyTimeout: 20000, ...(adapterConfig ? { adapterConfig } : {}), ...extra });
   expect(attached.success, JSON.stringify(attached)).toBe(true);
   expect(attached.state, JSON.stringify(attached)).toBe('running');
   return { rootId, attached };
@@ -154,17 +175,57 @@ async function waitForChildStop(sessionId: string, file: RegExp, line: number): 
   return stop as Stop & { sessionId: string };
 }
 
+function deleteTraceFileBestEffort(file: string, deferIfBusy: boolean): void {
+  try {
+    fs.unlinkSync(file);
+    deferredTraceDeletes.delete(file);
+  } catch (error) {
+    if (deferIfBusy && (error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+      deferredTraceDeletes.add(file);
+    }
+  }
+}
+
+function removeTraceDirIfEmpty(): void {
+  try {
+    fs.rmdirSync(jsDebugTraceDir);
+  } catch {
+    // Absent or still holds a failed test's trace log; leave it.
+  }
+}
+
 beforeEach(async () => {
+  testTraceFiles = [];
   server = await startStdioClient({ name: 'js-subprocess-attach', callTimeoutMs: 60_000 });
 });
 
-afterEach(async () => {
+afterEach(async (ctx) => {
+  const traceFiles = testTraceFiles;
+  testTraceFiles = [];
   await server?.close();
   for (const target of targets) {
     if (target.proc.exitCode === null) target.proc.kill();
   }
   targets = [];
+  // server.close() stops the per-test server and its js-debug adapter first so
+  // Windows releases the log handle; if a handle briefly lingers, afterAll retries.
+  if (ctx.task.result?.state === 'pass') {
+    for (const file of traceFiles) {
+      deleteTraceFileBestEffort(file, true);
+    }
+    if (deferredTraceDeletes.size === 0) {
+      removeTraceDirIfEmpty();
+    }
+  }
 }, 30_000);
+
+afterAll(() => {
+  for (const file of [...deferredTraceDeletes]) {
+    deleteTraceFileBestEffort(file, false);
+  }
+  deferredTraceDeletes.clear();
+  removeTraceDirIfEmpty();
+});
 
 describe('JavaScript session tree over a by-port attach (issue #1082)', () => {
   it('a fork started after the attach stops on the breakpoint set before it, keeps its own output, and the root ends when the target does', async () => {
@@ -258,10 +319,11 @@ describe('JavaScript session tree over a by-port attach (issue #1082)', () => {
       const target = await startTarget(path.join(treeDir, 'attach_existing_child.js'));
       await pollUntil(async () => target.output(), text => text.includes('scan target ready child='), 30000);
       expect(target.output()).toContain('scan target ready child=');
-      const rootId = await server.createSession('javascript', `js-no-existing-child-scan-${autoAttachChildProcesses}`);
+      const name = `js-no-existing-child-scan-${autoAttachChildProcesses}`;
+      const rootId = await server.createSession('javascript', name);
       const attached = await call<Stop>('attach_to_process', {
         host: '127.0.0.1', port: target.port, stopOnEntry: false, verifyTimeout: 20000,
-        ...(autoAttachChildProcesses === undefined ? {} : { adapterConfig: { autoAttachChildProcesses } })
+        ...(autoAttachChildProcesses === undefined ? {} : { adapterConfig: childAttachAdapterConfig(name) })
       });
       expect(attached.success, JSON.stringify(attached)).toBe(true);
       const parentTicks = (): number => (target.output().match(/parent tick /g) ?? []).length;
@@ -372,7 +434,7 @@ describe('JavaScript session tree over a by-port attach (issue #1082)', () => {
   it('forks of a forking attach target become child sessions and keep completing their handshake (issue #501)', async () => {
     const target = await startTarget(forkTarget);
     const rootId = await server.createSession('javascript', 'js-attach-tree-fork-target');
-    const attached = await call<Stop>('attach_to_process', { host: '127.0.0.1', port: target.port, stopOnEntry: false, verifyTimeout: 20000, adapterConfig: { autoAttachChildProcesses: true } });
+    const attached = await call<Stop>('attach_to_process', { host: '127.0.0.1', port: target.port, stopOnEntry: false, verifyTimeout: 20000, adapterConfig: childAttachAdapterConfig('js-attach-tree-fork-target') });
     expect(attached.success, JSON.stringify(attached)).toBe(true);
 
     const handshakes = (): number => (target.output().match(/child-handshake /g) ?? []).length;
