@@ -143,7 +143,6 @@ interface SessionShadowState {
 export interface WriteBoundary {
   readonly seq: number;
   readonly stop: StopIdentity | undefined;
-  readonly atStop: boolean;
   readonly lastShownStop: StopIdentity | undefined;
   readonly continued: number;
   readonly runId: number;
@@ -277,7 +276,7 @@ export class StateShadow implements StateShadowPort {
       if (event === 'start' && !isTestSetupWrite(write)) {
         this.beginRun(session, state);
       }
-      return this.boundaryOf(session, state, session.state, event === 'start' || event === 'replace');
+      return this.boundaryOf(session, state, event === 'start' || event === 'replace');
     } catch {
       return undefined;
     }
@@ -413,12 +412,11 @@ export class StateShadow implements StateShadowPort {
 
   // ----- judging -----
 
-  private boundaryOf(session: ShadowSession, state: SessionShadowState, from: SessionState, needsTree: boolean): WriteBoundary {
+  private boundaryOf(session: ShadowSession, state: SessionShadowState, needsTree: boolean): WriteBoundary {
     state.seq += 1;
     return {
       seq: state.seq,
       stop: session.lastStop,
-      atStop: from === SessionState.PAUSED && session.lastStop !== undefined,
       lastShownStop: state.lastShownStop,
       continued: state.continued,
       runId: this.runIdOf(session),
@@ -444,7 +442,7 @@ export class StateShadow implements StateShadowPort {
     if (!taken && event === 'start' && !isTestSetupWrite(write)) {
       this.beginRun(session, state);
     }
-    const boundary = taken ?? this.boundaryOf(session, state, from, event === 'start' || event === 'replace');
+    const boundary = taken ?? this.boundaryOf(session, state, event === 'start' || event === 'replace');
     if (isTestSetupWrite(write)) {
       this.advance(state, boundary, 'test-setup', actual);
       return { outcome: 'test-setup', sessionId: session.id, runId: boundary.runId, from: publicFrom, event: write.event, actual: actualPhase, site: write.site };
@@ -482,7 +480,7 @@ export class StateShadow implements StateShadowPort {
   private judgeNote(session: ShadowSession, write: StateWrite, override?: { descendants: number }): ShadowRecord {
     const state = this.stateOf(session);
     const publicFrom = phaseOf(session.state);
-    const boundary = this.boundaryOf(session, state, session.state, false);
+    const boundary = this.boundaryOf(session, state, false);
     const invalid = this.invalidWrite(session, write, boundary.runId);
     if (invalid) {
       return { ...invalid, from: publicFrom, actual: publicFrom, note: true };
@@ -549,7 +547,6 @@ export class StateShadow implements StateShadowPort {
     return {
       ...(write.facts ?? {}),
       stop: boundary.stop,
-      atStop: boundary.atStop,
       lastShownStop: boundary.lastShownStop,
       runNow: boundary.runId,
       continuedNow: boundary.continued,

@@ -221,13 +221,15 @@ describe('the state shadow', () => {
 
   it('takes the guards\' facts at the write: a listener that changes the session does not change the verdict', () => {
     const { shadow } = makeShadow();
-    const session: FakeSession = { id: 's6b', state: SessionState.CREATED };
-    gate(shadow, session, SessionState.INITIALIZING, { site: 'attach', event: 'start' });
-    // A valid attach-verified write with no stop; its state listener installs one.
-    gate(shadow, session, SessionState.RUNNING, { site: 'attach.verified', event: 'attach-verified' }, () => {
-      session.lastStop = { reason: 'breakpoint' };
+    const shown = { reason: 'breakpoint' };
+    const session: FakeSession = { id: 's6b', state: SessionState.PAUSED, lastStop: shown };
+    const token = shadow.token(session);
+    gate(shadow, session, SessionState.RUNNING, { site: 'continue.sent', event: 'resume' });
+    // A valid refusal back to the stop it started from; its state listener moves the record on.
+    gate(shadow, session, SessionState.PAUSED, { site: 'continue.rejected', event: 'resume-refused', facts: { since: token } }, () => {
+      session.lastStop = { reason: 'exception' };
     });
-    expect(shadow.countsByKey().get('legal|attach.verified|attach-verified|starting|running')).toBe(1);
+    expect(shadow.countsByKey().get('legal|continue.rejected|resume-refused|running|paused')).toBe(1);
     expect(shadow.mismatches()).toEqual([]);
   });
 

@@ -20,11 +20,14 @@ import {
   rowsFor,
   siteNames,
   type GuardContext,
+  type GuardFacts,
   type GuardName,
   type Phase,
   type SessionEvent,
+  type StateWrite,
   type TransitionRow
 } from '../../../../src/session/machine/transition-table.js';
+import { StateShadow } from '../../../../src/session/machine/shadow.js';
 
 const STOP_A = { reason: 'breakpoint' };
 const STOP_B = { reason: 'exception' };
@@ -34,8 +37,7 @@ const TOKEN_A = { runId: 1, continued: 3, fromStop: STOP_A };
 const GUARD_CONTEXTS: Record<GuardName, { holds: GuardContext; fails: GuardContext }> = {
   'no-retained-child': { holds: { descendants: 0 }, fails: { descendants: 2 } },
   'retained-child': { holds: { descendants: 1 }, fails: { descendants: 0 } },
-  'entry-stop-off-and-not-at-stop': { holds: { stopOnEntry: false, atStop: false }, fails: { stopOnEntry: true, atStop: false } },
-  'not-at-stop': { holds: { atStop: false }, fails: { atStop: true } },
+  'entry-stop-off': { holds: { stopOnEntry: false }, fails: { stopOnEntry: true } },
   'refused-before-resume': {
     holds: { stop: STOP_A, runNow: 1, continuedNow: 3, since: TOKEN_A },
     fails: { stop: STOP_A, runNow: 1, continuedNow: 4, since: TOKEN_A }
@@ -56,8 +58,7 @@ const GUARD_CONTEXTS: Record<GuardName, { holds: GuardContext; fails: GuardConte
 const MISSING_FACTS: Record<GuardName, GuardContext> = {
   'no-retained-child': {},
   'retained-child': {},
-  'entry-stop-off-and-not-at-stop': { atStop: false },
-  'not-at-stop': {},
+  'entry-stop-off': {},
   'refused-before-resume': { stop: STOP_A, runNow: 1, continuedNow: 0 },
   'no-continued-since': { runNow: 1, continuedNow: 0 },
   'newer-stop-shown': { stop: STOP_B, lastShownStop: STOP_B, runNow: 1 },
@@ -198,6 +199,52 @@ describe('the transition table', () => {
               expect(evaluateTransition(from, row.event, to, MISSING_FACTS[row.guard]).verdict).toBe('unevaluated');
             }
           }
+        });
+      }
+    }
+  });
+
+  describe('every guard on a row in force can fail from each of the row\'s phases', () => {
+    // The facts come from the shadow itself (`begin` and the context it builds),
+    // so a fact that follows from the phase is computed, not supplied by the
+    // test: a guard that reads only such facts cannot fail, and is noise.
+    const STATE_OF: Record<Phase, SessionState> = {
+      created: SessionState.CREATED,
+      starting: SessionState.INITIALIZING,
+      running: SessionState.RUNNING,
+      paused: SessionState.PAUSED,
+      ended: SessionState.STOPPED,
+      failed: SessionState.ERROR
+    };
+    for (const row of IN_FORCE.filter((r) => r.guard)) {
+      for (const from of row.from) {
+        it(`${row.id} [${row.guard}] from ${from}`, () => {
+          const site = Object.entries(EVENT_OF_SITE).find(([, events]) => (events as readonly string[]).includes(row.event))![0];
+          let canFail = false;
+          for (const lastStop of [undefined, STOP_A]) {
+            for (const descendants of [0, 2]) {
+              const shadow = new StateShadow({ logger: () => undefined, descendantsOf: () => descendants });
+              const session = { id: `probe-${row.id}`, state: STATE_OF[from], lastStop };
+              const write = { site, event: row.event } as StateWrite;
+              const boundary = shadow.begin(session, write)!;
+              const facts: GuardFacts[] = [
+                {},
+                { stopOnEntry: true },
+                { stopOnEntry: false },
+                { since: { runId: boundary.runId, continued: boundary.continued, fromStop: lastStop } },
+                { since: { runId: boundary.runId, continued: boundary.continued + 1, fromStop: lastStop } },
+                { since: { runId: boundary.runId, continued: boundary.continued, fromStop: STOP_B } },
+                { exit: { code: 0, expected: true } },
+                { exit: { code: 1, expected: false } }
+              ];
+              for (const fact of facts) {
+                const context = (shadow as unknown as { contextFor: (w: StateWrite, b: unknown) => GuardContext })
+                  .contextFor({ ...write, facts: fact } as StateWrite, boundary);
+                if (GUARDS[row.guard!](context) === false) canFail = true;
+              }
+            }
+          }
+          expect(canFail, `guard '${row.guard}' on ${row.id} cannot fail from ${from}`).toBe(true);
         });
       }
     }
@@ -351,10 +398,12 @@ describe('the transition table', () => {
       expect(evaluateVirtual('running', 'replace')).toMatchObject({ verdict: 'legal', to: 'ended' });
     });
 
-    it('adapter-configured goes to running only with stopOnEntry off and the session not at a stop', () => {
-      expect(evaluateTransition('starting', 'adapter-configured', 'running', { stopOnEntry: false, atStop: false }).verdict).toBe('legal');
-      expect(evaluateTransition('starting', 'adapter-configured', 'running', { stopOnEntry: true, atStop: false }).verdict).toBe('guard-not-met');
-      expect(evaluateTransition('starting', 'adapter-configured', 'running', { atStop: false }).verdict).toBe('unevaluated');
+    it('adapter-configured goes to running only with stopOnEntry off; attach-verified has no guard', () => {
+      expect(evaluateTransition('starting', 'adapter-configured', 'running', { stopOnEntry: false }).verdict).toBe('legal');
+      expect(evaluateTransition('starting', 'adapter-configured', 'running', { stopOnEntry: true }).verdict).toBe('guard-not-met');
+      expect(evaluateTransition('starting', 'adapter-configured', 'running').verdict).toBe('unevaluated');
+      expect(evaluateTransition('starting', 'attach-verified', 'running').verdict).toBe('legal');
+      expect(evaluateTransition('running', 'attach-verified', 'running').verdict).toBe('legal');
       expect(evaluateTransition('running', 'adapter-configured', 'running').verdict).toBe('legal');
       expect(evaluateTransition('paused', 'adapter-configured', 'paused').verdict).toBe('no-row');
     });

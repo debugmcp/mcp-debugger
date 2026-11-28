@@ -29,8 +29,10 @@
  * A row with a `guard` goes to `to` when the guard holds and to `otherwise`
  * when it fails (no `otherwise`: the row does not apply then). Guards are
  * evaluated from facts taken at the write (see `GuardContext`); a guard whose
- * facts are missing is reported as not evaluated, never as met. Every `from`
- * list names only the phases a site can be in when it writes.
+ * facts are missing is reported as not evaluated, never as met. A guard on a
+ * row in force must be able to fail from each of the row's phases: one that
+ * cannot is noise. Every `from` list names only the phases a site can be in
+ * when it writes.
  */
 import { SessionState } from '@debugmcp/shared';
 
@@ -103,8 +105,7 @@ export const STAGES: readonly Stage[] = ['stop-record', 'hidden-stop', 'endings'
 export type GuardName =
   | 'no-retained-child'
   | 'retained-child'
-  | 'entry-stop-off-and-not-at-stop'
-  | 'not-at-stop'
+  | 'entry-stop-off'
   | 'refused-before-resume'
   | 'no-continued-since'
   | 'newer-stop-shown'
@@ -142,9 +143,9 @@ export const TRANSITIONS: readonly TransitionRow[] = [
   { id: 'start-failed', event: 'start-failed', kind: 'observation', from: LIVE, to: 'failed', note: 'a launch or attach failing, also after it projected running' },
   { id: 'start-failed-again', event: 'start-failed', kind: 'observation', from: ['failed'], to: 'same', note: 'a launch or attach fails after the session already failed: its catch writes ERROR over ERROR' },
   { id: 'start-failed-ended', event: 'start-failed', kind: 'observation', from: ['ended'], to: 'failed', legacy: 'endings', note: 'the launch catch rewrites an ending the program reached during the launch' },
-  { id: 'adapter-configured', event: 'adapter-configured', kind: 'observation', from: ['starting'], to: 'running', guard: 'entry-stop-off-and-not-at-stop', note: 'the site writes nothing when stopOnEntry is set or the session is paused' },
+  { id: 'adapter-configured', event: 'adapter-configured', kind: 'observation', from: ['starting'], to: 'running', guard: 'entry-stop-off', note: 'the site writes nothing when stopOnEntry is set or the session is paused' },
   { id: 'adapter-configured-running', event: 'adapter-configured', kind: 'observation', from: ['running'], to: 'same' },
-  { id: 'attach-verified', event: 'attach-verified', kind: 'request', from: ['starting', 'running'], to: 'running', guard: 'not-at-stop', note: 'the site writes nothing when the session is paused at a stop' },
+  { id: 'attach-verified', event: 'attach-verified', kind: 'request', from: ['starting', 'running'], to: 'running', note: 'the site writes nothing when the session is paused at a stop' },
   { id: 'stop-shown', event: 'stop-shown', kind: 'observation', from: LIVE, to: 'paused', note: 'from paused, a new stop supersedes the shown one' },
   { id: 'stop-hidden', event: 'stop-hidden', kind: 'observation', from: ['starting', 'running'], to: 'paused', legacy: 'hidden-stop', note: 'the transient pause of a stop the core resumes unseen' },
   { id: 'stop-hidden-unseen', event: 'stop-hidden', kind: 'observation', from: ['starting', 'running'], to: 'same', future: 'hidden-stop', note: 'a hidden stop leaves the phase alone' },
@@ -215,8 +216,6 @@ export interface GuardContext extends GuardFacts {
   readonly descendants?: number;
   /** The stop the session records (`lastStop`). */
   readonly stop?: StopIdentity;
-  /** Whether the session is at that stop: paused, with a stop recorded. */
-  readonly atStop?: boolean;
   /** The stop the session last showed in this run; undefined when none was seen. */
   readonly lastShownStop?: StopIdentity;
   readonly runNow?: number;
@@ -228,9 +227,7 @@ export interface GuardContext extends GuardFacts {
 export const GUARDS: Readonly<Record<GuardName, (context: GuardContext) => boolean | undefined>> = {
   'no-retained-child': (c) => (c.descendants === undefined ? undefined : c.descendants === 0),
   'retained-child': (c) => (c.descendants === undefined ? undefined : c.descendants > 0),
-  'entry-stop-off-and-not-at-stop': (c) =>
-    (c.stopOnEntry === undefined || c.atStop === undefined ? undefined : !c.stopOnEntry && !c.atStop),
-  'not-at-stop': (c) => (c.atStop === undefined ? undefined : !c.atStop),
+  'entry-stop-off': (c) => (c.stopOnEntry === undefined ? undefined : !c.stopOnEntry),
   // Refused before the program resumed (no `continued` since the request),
   // in the same run, and still at the stop the request started from.
   'refused-before-resume': (c) => {

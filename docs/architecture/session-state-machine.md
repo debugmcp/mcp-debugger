@@ -57,7 +57,7 @@ example, a step failure that leaves the proxy's event handlers attached, so that
 The gate calls the shadow twice:
 
 1. `begin`, just before it writes: it takes the facts the guards read (the stop the session
-   records, whether it is paused at it, the stop it last showed, how many `continued` events
+   records, the stop it last showed, how many `continued` events
    it has received, its run, its descendants). The gate's own state listeners run inside the
    write and may change the session; the verdict is about the write, so the facts are taken
    before them.
