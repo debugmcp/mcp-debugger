@@ -25,6 +25,7 @@ import {
   SessionLifecycleState,
   SessionState,
   type AdapterPolicy,
+  type AttachFootprint,
   type Breakpoint,
   type ExceptionBreakMode,
   type FunctionBreakpoint,
@@ -108,6 +109,11 @@ function makeHarness(options: HarnessOptions = {}): Harness {
     redactionEnabled: vi.fn(() => true)
   };
   return { launcher: new ProxyLauncher(ctx), ctx, policy };
+}
+
+/** What an adapter hands over after an attach transform that left something in its target (issue #1261). */
+function fakeFootprint(): AttachFootprint {
+  return { field: 'inspector', atAttach: 'opened by this attach', atEnd: vi.fn(async () => 'still listening') };
 }
 
 describe('ProxyLauncher.prepareLaunchInputs', () => {
@@ -830,6 +836,80 @@ describe('ProxyLauncher.start', () => {
     vi.mocked(h.ctx.redactionEnabled).mockReturnValue(false);
     await h.launcher.start(session, { scriptPath: SCRIPT, dapLaunchArgs: launchArgs({}), adapterLaunchConfig: { [token]: true } });
     expect(session.run.launchConfigNotices).toEqual([`adapterLaunchConfig.${token}: forwarded to the adapter but unrecognized`]);
+  });
+
+  describe('what an attach left in its target (issue #1261)', () => {
+    function adapterWith(footprint: AttachFootprint | undefined): FakeDebugAdapter & { consumeAttachFootprint: Mock } {
+      const adapter = new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE });
+      adapter.withAttachSupport();
+      return Object.assign(adapter, { consumeAttachFootprint: vi.fn(() => footprint) });
+    }
+    const attachRequest = { scriptPath: 'attach://pid', dapLaunchArgs: launchArgs({ request: 'attach', __attachMode: true }) };
+
+    it('drains it from the adapter right after the transform and keeps it on the run, observing nothing', async () => {
+      const footprint = fakeFootprint();
+      const adapter = adapterWith(footprint);
+      const h = makeHarness({ adapter, proxyManager: new MockProxyManager() });
+      const session = makeSession();
+
+      await h.launcher.start(session, attachRequest);
+
+      expect(adapter.consumeAttachFootprint).toHaveBeenCalledTimes(1);
+      expect(session.run.attachFootprint).toBe(footprint);
+      expect(footprint.atEnd).not.toHaveBeenCalled();
+    });
+
+    it('keeps it on the run when a step after the transform fails, so the failed attach still says it', async () => {
+      const footprint = fakeFootprint();
+      const adapter = adapterWith(footprint);
+      vi.mocked(adapter.resolveExecutablePath).mockRejectedValueOnce(new Error('js-debug is missing from this install'));
+      const h = makeHarness({ adapter, proxyManager: new MockProxyManager() });
+      const session = makeSession();
+
+      await expect(h.launcher.start(session, attachRequest)).rejects.toThrow('js-debug is missing from this install');
+
+      expect(session.run.attachFootprint).toBe(footprint);
+    });
+
+    it('writes it to the run before the store write that throws once a close removed the session mid-prepare', async () => {
+      const footprint = fakeFootprint();
+      const h = makeHarness({ adapter: adapterWith(footprint), proxyManager: new MockProxyManager() });
+      let touches = 0;
+      vi.mocked(h.ctx.updateSession).mockImplementation((_id, patch) => {
+        if (Object.keys(patch).length === 0 && ++touches === 2) {
+          throw new Error('Session not found: sess-1');
+        }
+      });
+      const session = makeSession();
+
+      await expect(h.launcher.start(session, attachRequest)).rejects.toThrow('Session not found');
+
+      expect(session.run.attachFootprint).toBe(footprint);
+    });
+
+    it('an earlier run\'s is not this run\'s: a launch, or an attach that left nothing, clears it', async () => {
+      const launch = makeSession({ run: { attachFootprint: fakeFootprint() } } as Partial<ManagedSession>);
+      const launchAdapter = Object.assign(new FakeDebugAdapter({ resolveExecutablePath: async () => FAKE_EXE }), {
+        consumeAttachFootprint: vi.fn(() => fakeFootprint())
+      });
+      await makeHarness({ adapter: launchAdapter, proxyManager: new MockProxyManager() }).launcher.start(launch, { scriptPath: SCRIPT });
+      expect(launchAdapter.consumeAttachFootprint).not.toHaveBeenCalled();
+      expect(launch.run.attachFootprint).toBeUndefined();
+
+      const attach = makeSession({ run: { attachFootprint: fakeFootprint() } } as Partial<ManagedSession>);
+      await makeHarness({ adapter: adapterWith(undefined), proxyManager: new MockProxyManager() }).launcher.start(attach, attachRequest);
+      expect(attach.run.attachFootprint).toBeUndefined();
+    });
+
+    it('a start that fails before the adapter is reached leaves no earlier footprint behind', async () => {
+      const session = makeSession({ run: { attachFootprint: fakeFootprint() } } as Partial<ManagedSession>);
+      const h = makeHarness({ adapter: adapterWith(fakeFootprint()), proxyManager: new MockProxyManager() });
+      vi.mocked(h.ctx.updateSession).mockImplementationOnce(() => { throw new Error('Session not found: sess-1'); });
+
+      await expect(h.launcher.start(session, attachRequest)).rejects.toThrow('Session not found');
+
+      expect(session.run.attachFootprint).toBeUndefined();
+    });
   });
 
   it('awaits an async transformAttachConfig and forwards its result as the attach config', async () => {

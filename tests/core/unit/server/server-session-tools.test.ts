@@ -290,6 +290,29 @@ describe('Server Session Tools Tests', () => {
       expect(announce).toHaveBeenCalledTimes(3);
     });
 
+    it('says what is seen of what the closed root\'s attach left in its target, the field detach carries (issue #1261)', async () => {
+      const atEnd = vi.fn(async () => 'no longer listening: 127.0.0.1:9229, where this attach opened the inspector, no longer accepts connections');
+      mockSessionManager.closeSessionReporting.mockResolvedValue({
+        closed: true,
+        closedSessionIds: ['test-session'],
+        released: true,
+        attachFootprint: { field: 'inspector', atAttach: 'opened by this attach on 127.0.0.1:9229', atEnd }
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'close_debug_session', arguments: { sessionId: 'test-session' } }
+      });
+
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        success: true,
+        message: 'Closed debug session: test-session',
+        released: true,
+        inspector: 'no longer listening: 127.0.0.1:9229, where this attach opened the inspector, no longer accepts connections'
+      });
+      expect(atEnd).toHaveBeenCalledTimes(1);
+    });
+
     it('says the release was not confirmed, and why, when nothing acknowledged the detach (issue #1148)', async () => {
       mockSessionManager.closeSessionReporting.mockResolvedValue({
         closed: true, closedSessionIds: ['test-session'], releaseUnconfirmed: 'DAP disconnect request timed out after 1000ms'

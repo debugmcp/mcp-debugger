@@ -4,7 +4,7 @@
  */
 import type { ToolHandler } from '../tool-context.js';
 import type { HotReloadArgs } from '@debugmcp/shared';
-import { attachRequestFromArgs, childSessionRefusal, hoistPausedChild, hoistProgramEnd, hoistStopLanding, hoistTreeFields, successWarning } from './shared.js';
+import { attachRequestFromArgs, childSessionRefusal, hoistAttachFootprint, hoistPausedChild, hoistProgramEnd, hoistStopLanding, hoistTreeFields, successWarning } from './shared.js';
 import {
   assertPlainObjectArg,
   foldTestRunnerPreset,
@@ -173,6 +173,8 @@ export const attachToProcessTool: ToolHandler = async (ctx, args) => {
     // location, threadId, note, snapshot, the source line and the
     // stale-build sentence — not just the note (issue #900's shape).
     await hoistStopLanding(ctx, responsePayload, attachResult.data, args.sessionId!, 'attach result');
+    // What the attach left in the target (issue #1261), on success and failure.
+    await hoistAttachFootprint(responsePayload, attachResult.data?.attachFootprint, 'attach');
 
     return jsonResult(responsePayload);
   } catch (error) {
@@ -219,6 +221,8 @@ export const detachFromProcessTool: ToolHandler = async (ctx, args) => {
       if (detachResult.data.released) responsePayload.released = true;
       if (detachResult.data.processEnded) responsePayload.processEnded = true;
       if (detachResult.data.warning !== undefined) responsePayload.warning = detachResult.data.warning;
+      // What the attach left in the target, as seen now (issue #1261).
+      await hoistAttachFootprint(responsePayload, detachResult.data.attachFootprint, 'end');
     }
 
     return jsonResult(responsePayload);

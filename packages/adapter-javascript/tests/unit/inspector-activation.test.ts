@@ -126,7 +126,7 @@ describe('activateInspector (issue #871)', () => {
     expect(ok.alreadyActive).toBe(false);
 
     const err = await failure(activateInspector(harness({ probes: [closed, reset], deadlineMs: 250, pollMs: 100 }).options));
-    expect(err.message).toMatch(/did not open an inspector on 127\.0\.0\.1:9229 within 250 ms/);
+    expect(err.message).toMatch(/none appeared on 127\.0\.0\.1:9229 within 250 ms/);
     expect(err.message).toMatch(/\(last probe: read ECONNRESET\)/);
   });
 
@@ -227,11 +227,14 @@ describe('activateInspector (issue #871)', () => {
     expect(err.message).toMatch(/could not activate the inspector of PID 4242: The system cannot find the file specified\./);
   });
 
-  it('gives up when no inspector opens on the port before the deadline, naming the --inspect-port case', async () => {
+  it('gives up when no inspector opens on the port before the deadline, saying the signal was sent and nothing was closed (#1261, #1310)', async () => {
     const { options, listTargets } = harness({ probes: [closed], deadlineMs: 350, pollMs: 100 });
     const err = await failure(activateInspector(options));
-    expect(err.message).toMatch(/PID 4242 did not open an inspector on 127\.0\.0\.1:9229 within 350 ms/);
-    expect(err.message).toMatch(/--inspect-port/);
+    expect(err.message).toBe(
+      'JavaScript attach: PID 4242 was signalled to open its inspector, but none appeared on 127.0.0.1:9229 within 350 ms; ' +
+        'one may now be open on another port (a target started with --inspect-port=<n> opens it there), ' +
+        'and this server closed nothing: restarting the target closes it (#1310). To attach to it, pass that port with processId'
+    );
     // the pre-signal probe, then one per poll until the clock passes the deadline
     expect(listTargets.mock.calls.length).toBeGreaterThanOrEqual(3);
   });
@@ -298,6 +301,42 @@ describe('probeInspector (the real /json/list probe)', () => {
     const port = srv.port;
     await srv.close();
     expect(await probeInspector('127.0.0.1', port, 1000)).toEqual({ status: 'closed' });
+  });
+
+  // The detach and close answers probe once (issue #1261): the bound is on the whole request.
+  it('bounds the whole request: a responder that keeps trickling is "other" when the bound passes, and its connection is destroyed', async () => {
+    let closedByProbe!: () => void;
+    const connectionClosed = new Promise<void>((resolve) => { closedByProbe = resolve; });
+    const srv = await serve((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.write('[');
+      const timer = setInterval(() => res.write(' '), 20);
+      res.on('close', () => { clearInterval(timer); closedByProbe(); });
+    });
+    try {
+      const started = Date.now();
+      const probe = await probeInspector('127.0.0.1', srv.port, 300);
+      expect(probe).toEqual({ status: 'other', detail: 'no answer from /json/list within 300 ms' });
+      expect(Date.now() - started).toBeLessThan(1000);
+      await connectionClosed;
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it('answers "other" as soon as a body passes the cap, without waiting for the bound', async () => {
+    const srv = await serve((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.write('[' + ' '.repeat(70 * 1024));
+    });
+    try {
+      const started = Date.now();
+      const probe = await probeInspector('127.0.0.1', srv.port, 5000);
+      expect(probe).toEqual({ status: 'other', detail: '/json/list answered with more than 65536 bytes' });
+      expect(Date.now() - started).toBeLessThan(2500);
+    } finally {
+      await srv.close();
+    }
   });
 });
 

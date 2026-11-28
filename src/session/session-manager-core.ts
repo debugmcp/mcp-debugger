@@ -9,7 +9,7 @@ import {
   SessionState, SessionLifecycleState, DebugLanguage, DebugSessionInfo, mapLegacyState,
   isTerminalSessionState, AdapterPolicy, SessionOutputEntry, redactSecretsInString
 } from '@debugmcp/shared';
-import type { Breakpoint, DapClientBehavior, FunctionBreakpoint, ProgramEndExplanation, SessionStopInfo, StackFrame, StopTopFrameLine } from '@debugmcp/shared';
+import type { AttachFootprint, Breakpoint, DapClientBehavior, FunctionBreakpoint, ProgramEndExplanation, SessionStopInfo, StackFrame, StopTopFrameLine } from '@debugmcp/shared';
 import { USER_BREAK_REASONS, BREAKPOINT_STOP_REASONS } from '@debugmcp/shared';
 import { stopProvesDebuggerOn } from './debugger-off.js';
 import { isRedactionEnabled } from '../utils/redaction-mode.js';
@@ -351,6 +351,8 @@ export type LaunchResultData = DebugResultData & StopAnswerFields & TreeAnswerFi
 export type DetachResultData = DebugResultData & Pick<TreeAnswerFields, 'childrenReleased' | 'childrenClosed'> & {
   /** Attach side effects that survive this detach (#1288). */
   note?: string;
+  /** What the run's attach left in its target (issue #1261); the server words it. */
+  attachFootprint?: AttachFootprint;
   /** The adapter acknowledged the detach and reported no exit: the process was left running (issue #1148). */
   released?: true;
   /** The adapter reported that the program exited (issue #1148). */
@@ -383,6 +385,8 @@ export interface CloseSessionOutcome {
    * detach (issue #1148): why. Neither `released` nor `processEnded` is set.
    */
   releaseUnconfirmed?: string;
+  /** What the closed root's attach left in its target (issue #1261); the server words it. */
+  attachFootprint?: AttachFootprint;
 }
 
 /**
@@ -391,7 +395,10 @@ export interface CloseSessionOutcome {
  * location/threadId/note/snapshot; before that only the `note` survived,
  * issue #900).
  */
-export type AttachResultData = DebugResultData & StopAnswerFields;
+export type AttachResultData = DebugResultData & StopAnswerFields & {
+  /** What the attach left in its target (issue #1261), on success and failure; the server words it. */
+  attachFootprint?: AttachFootprint;
+};
 
 export interface DebugResult<TData extends DebugResultData = DebugResultData> {
   success: boolean;
@@ -1178,7 +1185,10 @@ export abstract class SessionManagerCore extends EventEmitter {
         ...(childrenClosed > 0 ? { childrenClosed } : {}),
         ...(closed && fate.processEnded ? { processEnded: true as const } : {}),
         ...(closed && fate.released ? { released: true as const } : {}),
-        ...(closed && fate.unconfirmed !== undefined ? { releaseUnconfirmed: fate.unconfirmed } : {})
+        ...(closed && fate.unconfirmed !== undefined ? { releaseUnconfirmed: fate.unconfirmed } : {}),
+        // A child shares its root's run: only the root reports its attach's footprint.
+        ...(!session.parentSessionId && session.run.attachFootprint
+          ? { attachFootprint: session.run.attachFootprint } : {})
       };
     } finally {
       finishClose();

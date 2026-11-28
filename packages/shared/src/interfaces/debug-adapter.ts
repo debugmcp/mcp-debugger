@@ -184,6 +184,14 @@ export interface IDebugAdapter extends EventEmitter {
   consumeLaunchConfigDiagnostics?(): readonly LaunchConfigDiagnostic[];
 
   /**
+   * Drain what the last attach transform left in its target, if anything
+   * (issue #1261). The session layer drains it right after the transform,
+   * keeps it on the run, and reports it on that run's attach, detach and
+   * close answers.
+   */
+  consumeAttachFootprint?(): AttachFootprint | undefined;
+
+  /**
    * Transform generic attach config to language-specific format
    * Only called if supportsAttach() returns true
    *
@@ -391,6 +399,24 @@ export interface GenericLaunchConfig {
 export interface LaunchTransformContext {
   /** A non-empty cwd was supplied by the caller or configured defaults, rather than derived by the launcher. */
   cwdProvided: boolean;
+}
+
+/**
+ * What an attach left in its target that outlives the session (issue #1261),
+ * in the adapter's words. The session layer only carries it: nothing is given
+ * back. Example: the JavaScript adapter's attach by processId makes Node open
+ * its inspector, which stays open after the session ends.
+ */
+export interface AttachFootprint {
+  /** The answer field it is reported under, a lowerCamelCase noun (JavaScript: `inspector`). */
+  readonly field: string;
+  /** What the attach did, for the attach answer (a failed one included). */
+  readonly atAttach: string;
+  /**
+   * What is seen of it now, for the detach and close answers. May observe
+   * the target once, briefly; never rejects.
+   */
+  atEnd(): Promise<string>;
 }
 
 /** An adapter's explanation of how it handled one launch or attach input. */

@@ -912,6 +912,35 @@ describe('JavascriptDebugAdapter.transformAttachConfig by processId (issue #871)
       .rejects.toThrow(/PID 4242 is not a Node\.js process/);
   });
 
+  describe('what the attach leaves in the target (issue #1261)', () => {
+    it('an inspector the activation opened is handed over once, with its address', async () => {
+      const { adapter } = adapterWithActivation();
+      await adapter.transformAttachConfig({ request: 'attach', processId: 4242, port: 5935 } as any);
+      const footprint = adapter.consumeAttachFootprint();
+      expect(footprint?.field).toBe('inspector');
+      expect(footprint?.atAttach).toMatch(/^opened by this attach on 127\.0\.0\.1:5935; it stays open, unauthenticated/);
+      expect(adapter.consumeAttachFootprint()).toBeUndefined();
+    });
+
+    it('an inspector that was already open is handed over as left as it was', async () => {
+      const { adapter } = adapterWithActivation(async (o) => ({ host: '127.0.0.1', port: o.port ?? 9229, alreadyActive: true, title: 'x' }));
+      await adapter.transformAttachConfig({ request: 'attach', processId: 4242 } as any);
+      expect(adapter.consumeAttachFootprint()?.atAttach).toBe('already open on 127.0.0.1:9229 before this attach; left as it was');
+    });
+
+    it('an attach by port, or one whose activation failed, leaves none; nor does an earlier attach\'s outlive the next transform', async () => {
+      const { adapter, activate } = adapterWithActivation();
+      await adapter.transformAttachConfig({ request: 'attach', processId: 4242 } as any);
+      await adapter.transformAttachConfig({ request: 'attach', host: '127.0.0.1', port: 9229 } as any);
+      expect(adapter.consumeAttachFootprint()).toBeUndefined();
+
+      await adapter.transformAttachConfig({ request: 'attach', processId: 4242 } as any);
+      activate.mockRejectedValueOnce(new Error('JavaScript attach: PID 4242 was signalled to open its inspector, but none appeared'));
+      await expect(adapter.transformAttachConfig({ request: 'attach', processId: 4242 } as any)).rejects.toThrow(/was signalled/);
+      expect(adapter.consumeAttachFootprint()).toBeUndefined();
+    });
+  });
+
   it('refuses an attach with neither port nor processId instead of letting js-debug dial localhost:9229', async () => {
     const { adapter, activate } = adapterWithActivation();
     await expect(adapter.transformAttachConfig({ request: 'attach', host: '127.0.0.1' } as any))

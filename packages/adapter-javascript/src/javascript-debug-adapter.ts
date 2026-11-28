@@ -39,7 +39,7 @@ import {
   jsRunnerProjectRoot
 } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
-import type { AdapterDependencies } from '@debugmcp/shared';
+import type { AdapterDependencies, AttachFootprint } from '@debugmcp/shared';
 import { findNode } from './utils/executable-resolver.js';
 import { detectBinary } from './utils/typescript-detector.js';
 import { determineOutFiles, isESMProject, hasTsConfigPaths } from './utils/config-transformer.js';
@@ -52,6 +52,7 @@ import {
   type InspectorActivationOptions,
   type InspectorActivationResult
 } from './utils/inspector-activation.js';
+import { inspectorFootprint } from './utils/inspector-footprint.js';
 
 /**
  * Base path js-debug uses to resolve source-map `sources` on attach (issue
@@ -203,6 +204,15 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     const diagnostics = this.launchConfigDiagnostics;
     this.launchConfigDiagnostics = [];
     return diagnostics;
+  }
+
+  /** The inspector the last attach by processId opened or found (issue #1261), until the session layer drains it. */
+  private attachFootprint: AttachFootprint | undefined;
+
+  consumeAttachFootprint(): AttachFootprint | undefined {
+    const footprint = this.attachFootprint;
+    this.attachFootprint = undefined;
+    return footprint;
   }
 
   // js-debug pwa-node attach options https://github.com/microsoft/vscode-js-debug/blob/main/package.json
@@ -966,6 +976,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
    */
   async transformAttachConfig(config: GenericAttachConfig): Promise<LanguageSpecificAttachConfig> {
     this.launchConfigDiagnostics = [];
+    this.attachFootprint = undefined;
     const {
       request: _request,
       __attachMode: _attachMode,
@@ -993,6 +1004,8 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
       });
       attachHost = activated.host;
       attachPort = activated.port;
+      // The inspector stays open after the session ends: the answers say so (issue #1261).
+      this.attachFootprint = inspectorFootprint(activated);
       this.dependencies.logger.info(
         `[JavascriptDebugAdapter] ${activated.alreadyActive ? 'Found' : 'Activated'} the inspector of PID ${processId} ` +
           `on ${attachHost}:${attachPort} (${activated.title})`

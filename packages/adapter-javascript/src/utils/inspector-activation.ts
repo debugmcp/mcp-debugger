@@ -267,41 +267,58 @@ function defaultSignal(pid: number, platform: NodeJS.Platform): void {
   process.kill(pid, 'SIGUSR1');
 }
 
-/** GET http://host:port/json/list and classify what answered. */
+/** A /json/list body larger than this is not an inspector's (a Node target list is well under 1 KiB). */
+const PROBE_MAX_BODY_BYTES = 64 * 1024;
+
+/**
+ * GET http://host:port/json/list and classify what answered. `timeoutMs`
+ * bounds the whole request (issue #1261): a responder that stays silent, or
+ * keeps sending, is answered "other" when it passes and its connection is
+ * destroyed; a body larger than any inspector's is answered "other" at once.
+ */
 export function probeInspector(host: string, port: number, timeoutMs = 1000): Promise<InspectorProbe> {
   return new Promise((resolve) => {
-    const request = http.get({ host, port, path: '/json/list', timeout: timeoutMs }, (response) => {
+    let settled = false;
+    const finish = (probe: InspectorProbe): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      request.destroy();
+      resolve(probe);
+    };
+    const request = http.get({ host, port, path: '/json/list', agent: false }, (response) => {
       const chunks: Buffer[] = [];
-      response.on('data', (chunk: Buffer) => chunks.push(chunk));
+      let received = 0;
+      response.on('data', (chunk: Buffer) => {
+        received += chunk.length;
+        if (received > PROBE_MAX_BODY_BYTES) {
+          finish({ status: 'other', detail: `/json/list answered with more than ${PROBE_MAX_BODY_BYTES} bytes` });
+          return;
+        }
+        chunks.push(chunk);
+      });
       response.on('end', () => {
         const body = Buffer.concat(chunks).toString('utf8');
         if (response.statusCode !== 200) {
-          resolve({ status: 'other', detail: `HTTP ${response.statusCode} from /json/list` });
+          finish({ status: 'other', detail: `HTTP ${response.statusCode} from /json/list` });
           return;
         }
         try {
           const parsed: unknown = JSON.parse(body);
           if (Array.isArray(parsed)) {
-            resolve({ status: 'inspector', targets: parsed as InspectorTarget[] });
+            finish({ status: 'inspector', targets: parsed as InspectorTarget[] });
             return;
           }
         } catch {
           // not JSON — fall through
         }
-        resolve({ status: 'other', detail: `/json/list answered with something other than a target list` });
+        finish({ status: 'other', detail: `/json/list answered with something other than a target list` });
       });
-      response.on('error', (err) => resolve({ status: 'other', detail: err.message }));
+      response.on('error', (err) => finish({ status: 'other', detail: err.message }));
     });
-    request.on('timeout', () => {
-      request.destroy();
-      resolve({ status: 'other', detail: `no answer from /json/list within ${timeoutMs} ms` });
-    });
+    const timer = setTimeout(() => finish({ status: 'other', detail: `no answer from /json/list within ${timeoutMs} ms` }), timeoutMs);
     request.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'ECONNREFUSED') {
-        resolve({ status: 'closed' });
-      } else {
-        resolve({ status: 'other', detail: err.message });
-      }
+      finish(err.code === 'ECONNREFUSED' ? { status: 'closed' } : { status: 'other', detail: err.message });
     });
   });
 }
@@ -418,11 +435,13 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
     const result = await classify(await listTargets(host, port), true);
     if (result) return result;
     if (now() >= deadline) {
+      // The signal was sent and can have opened an inspector elsewhere: said,
+      // not looked for (issue #1310), and nothing is closed (issue #1261).
       throw invalid(
-        `PID ${pid} did not open an inspector on ${where} within ${deadlineMs} ms of being signalled` +
+        `PID ${pid} was signalled to open its inspector, but none appeared on ${where} within ${deadlineMs} ms` +
           (lastTransient ? ` (last probe: ${lastTransient})` : '') +
-          ` — a target started with --inspect-port=<n> (or NODE_OPTIONS=--inspect-port=<n>) opens it there: pass that port; ` +
-          `otherwise check that PID ${pid} is a Node.js process and that ${where} is free`
+          `; one may now be open on another port (a target started with --inspect-port=<n> opens it there), ` +
+          `and this server closed nothing: restarting the target closes it (#1310). To attach to it, pass that port with processId`
       );
     }
   }
