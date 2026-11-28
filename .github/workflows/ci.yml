@@ -268,6 +268,15 @@ jobs:
     - name: Run ESLint
       run: pnpm run lint
 
+    # Structure ratchet (under a second, no build needed): session-state writers,
+    # AdapterPolicy members and the ones only one engine uses, and language
+    # branches outside the policy files, against tests/structure-baseline.json.
+    # Fails when a count goes up (names the new items) or down (the baseline must
+    # be re-recorded in the same PR). Nothing a dependency bump can move, so no
+    # Dependabot split.
+    - name: Check structure ratchet
+      run: pnpm run structure:check
+
     # Type-only checks, no build needed: ~3 s for the sources and ~11 s for the ratchet
     # (Lint Code goes from ~25 s to ~40 s). `tsc -b -f .` in `build` stays the
     # authoritative compile; this catches type errors before the build job does.

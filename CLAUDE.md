@@ -133,6 +133,11 @@ npm run lint
 # Fix linting issues automatically
 npm run lint:fix
 
+# Structure ratchet against tests/structure-baseline.json (CI's Lint job runs it)
+npm run structure:check
+npm run structure:update        # re-record the baseline (see the note below)
+npm run structure:check -- --list  # print every counted item
+
 # Check for personal paths (pre-commit hook)
 npm run check:personal-paths
 npm run check:all-personal-paths  # Check all files
@@ -167,6 +172,22 @@ If the script refuses to read `tests/typecheck-baseline.json` at all (invalid JS
 wrong shape, a negative or non-integer count, a path outside the test trees), it exits 2
 and tells you to **delete the file first**: `--update` reads the baseline before writing
 one, so a corrupt file blocks its own repair.
+
+The structure ratchet (`scripts/check-structure.mjs`; its header and each rule's comment
+say exactly what is counted) reads the syntax tree of `src/` and `packages/shared/src/` and
+counts five measures: session-state writers, the direct writes among them that skip
+`_updateSessionState`, `AdapterPolicy` members, the members only one engine's policy uses,
+and language branches outside the policy files. Comments, strings and reformatting never
+move a count. It fails in both directions:
+
+- **A count went UP.** It names the new items and says what to do instead. Re-recording is
+  the exception: only when the item is unavoidable, or the change only moved or renamed
+  one, and say so in the PR.
+- **A count went DOWN.** That is progress. Run `npm run structure:update` and commit
+  `tests/structure-baseline.json` in the same PR.
+
+It exits 2 rather than guess, for example on a corrupt baseline or a policy getter it cannot
+read. `--update` never reads the baseline, so it repairs a corrupt one.
 
 ### Docker
 

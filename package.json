@@ -101,6 +101,8 @@
     "typecheck:tests:update": "node scripts/typecheck-tests-ratchet.mjs --update",
     "typecheck:tests:raw": "tsc -p tsconfig.spec.json --pretty false",
     "typecheck:all": "pnpm run typecheck && pnpm run typecheck:tests",
+    "structure:check": "node scripts/check-structure.mjs",
+    "structure:update": "node scripts/check-structure.mjs --update",
     "lint": "eslint \"src/**/*.ts\" \"packages/*/src/**/*.ts\" \"scripts/**/*.{js,mjs,cjs}\" \"tools/**/*.{js,mjs,cjs}\"",
     "lint:fix": "pnpm run lint --fix",
     "check:personal-paths": "node scripts/check-personal-paths.cjs",
