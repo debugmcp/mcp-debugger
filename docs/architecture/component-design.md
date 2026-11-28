@@ -67,13 +67,19 @@ The guard also holds the session's ending in flight (issue #1325):
 `close_debug_session` reaches the facade's `closeDebugSession`, which delegates
 to `AttachController.closeSession`, and a close or a plain detach that arrives
 while another close or detach of the session is in flight joins it
-(`InFlightGuard.ending` / `runEnding`) and sends no `disconnect` of its own; a
-terminating detach is refused instead. The close claims the session as well
-when nothing holds it, so a launch, restart or attach arriving meanwhile is
-refused, and is itself never refused: with a launch-shaped call in flight it
-goes ahead unclaimed, and an attach in flight that then fails waits for it
-before its own teardown. The server's exit and the idle policy close through
-`closeSessionReporting` directly.
+(`InFlightGuard.ending` / `runEnding`), and no second `disconnect` goes out; a
+terminating detach is refused instead. A detach that sent the release keeps
+it in its record when its cleanup fails afterwards, and a close that joined it
+hands it to `closeSessionReporting` as `releaseSent`: nothing is sent, and the
+close stops the worker the detach left. While an ending is in flight
+`InFlightGuard.tryAcquire` refuses every launch, restart or attach, whoever
+holds the claim. The close claims the session as well when nothing holds it,
+and is itself never refused: with a launch-shaped call in flight it goes ahead
+unclaimed. That call can answer before the close does: an attach that fails
+waits for the close before its own teardown, and one that succeeds answers
+while the close waits, after which the ending still refuses the next
+launch-shaped call. The server's exit and the idle policy close through
+`closeSessionReporting` directly, outside the join.
 
 Shared per-request DAP helpers (timeout override validation, the timeout hint,
 log truncation) live in `src/session/dap-request-helpers.ts`.

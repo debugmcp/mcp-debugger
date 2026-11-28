@@ -351,6 +351,29 @@ describe('Server Session Tools Tests', () => {
       expect(warning).not.toContain('The connection to the adapter was closed');
     });
 
+    it.each([
+      ['a confirmed release', { releasedSessionIds: ['test-session'], released: true as const }, { released: true }],
+      ["the program's reported exit", { processEnded: true as const }, { processEnded: true }]
+    ])('says stopping the worker failed beside %s too (issue #1325)', async (_fate, fate, fields) => {
+      // A close that joined a detach whose stop failed, and whose own stop then failed as well.
+      mockSessionManager.closeDebugSession.mockResolvedValue({
+        closed: true, closedSessionIds: ['test-session'], ...fate, stopFailed: 'kill EPERM'
+      });
+
+      const result = await callToolHandler({
+        method: 'tools/call',
+        params: { name: 'close_debug_session', arguments: { sessionId: 'test-session' } }
+      });
+
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        success: true,
+        message: 'Closed debug session: test-session',
+        ...fields,
+        warning: 'Stopping the debugger failed (kill EPERM): the session was removed all the same, and whether its ' +
+          'connection to the adapter was closed is not known'
+      });
+    });
+
     it("closes through the session manager's close_debug_session ending, which an overlapping close or detach joins (issue #1325)", async () => {
       mockSessionManager.closeDebugSession.mockResolvedValue({ closed: true, closedSessionIds: ['test-session'] });
 

@@ -315,7 +315,9 @@ On success it replays the last launch and re-applies every breakpoint, reporting
   answers from it (issue #1325); a `terminateProcess: true` detach is refused then.
 - *"This session is being closed (close_debug_session has not returned yet), so … has no
   session to act on once it returns. Create a new session instead."*: a close is releasing
-  the session's target (issue #1325), and the session will be gone when it returns.
+  the session's target (issue #1325), and the session will be gone when it returns. It is
+  the answer for as long as the close is in flight, also when an `attach_to_process` that
+  was in flight when the close came holds the session or has answered meanwhile.
 
 **What to do**: wait for the call in flight to return, then retry; after a close, create a
 new session. Nothing else about the session changed — the refused call never touched it —

@@ -5,16 +5,24 @@ Run under debugpy: python -m debugpy --listen 127.0.0.1:<port> busy_target.py
 Each line `block <port>` on stdin makes the target connect to 127.0.0.1:<port>
 (a listener the test opened) and make one C call, a blocking `recv` of one
 byte on that connection, through ctypes.PyDLL, which keeps the GIL for the
-whole call. While it blocks, pydevd's own threads cannot run, so the debug
-adapter cannot answer a disconnect. The hold ends when the test writes a byte:
-the test, not a clock, decides how long it lasts. A receive timeout of
-BLOCK_SAFETY_MS on the socket ends it anyway if the test never writes, so a
-stalled test cannot hold the target past the 10 s release bound.
+whole call. While it blocks, no other thread of the target runs Python code:
+pydevd's own threads cannot, so the debug adapter cannot answer a disconnect.
+The hold ends when the test writes a byte. A receive timeout of
+BLOCK_SAFETY_MS on the socket ends it anyway if the test never writes.
 
-`HOLD_START` is printed just before the call, and `HOLD_END <seconds> <why>`
-after it, where <why> is `byte` (the test let go), `timeout` (the safety
-expired) or `error <code>` (the call failed): a test asserts `byte`, so any
-other end fails under its own name.
+`HOLD_START` is printed before the C call, not at its start: after it the
+main thread still runs Python code (it looks up and prepares the ctypes
+function) before it is inside `recv`. What says the hold is on is a ticker
+thread, which writes one byte (`t`) on the same connection every TICK_MS for
+as long as it can get the GIL. It sends its first tick before `HOLD_START` is
+printed and stops once the hold has ended. A tick needs the GIL, so ticks
+stop while the main thread holds it in the C call: once ticks have arrived, a
+silence on the connection is the hold. A silence can also come from a target
+that is not being scheduled at all; the test's header lists that.
+
+`HOLD_END <seconds> <why>` is printed after the call, where <why> is `byte`
+(the test let go), `timeout` (the safety expired) or `error <code>` (the call
+failed): a test asserts `byte`, so any other end fails under its own name.
 
 The main thread polls a queue fed by a stdin reader thread rather than
 blocking on stdin itself, so it runs Python code every 100 ms and the
@@ -29,6 +37,7 @@ import threading
 import time
 
 BLOCK_SAFETY_MS = 8000
+TICK_MS = 20
 
 
 def _recv_one_holding_the_gil(sock):
@@ -60,6 +69,22 @@ def _recv_one_holding_the_gil(sock):
     return 'timeout' if timed_out else 'error %d' % error
 
 
+def _tick(sock, stop, started):
+    """One byte on the connection every TICK_MS, while this thread gets the GIL."""
+    try:
+        while True:
+            sock.sendall(b't')
+            started.set()
+            # Waits without the GIL; going on needs it again.
+            if stop.wait(TICK_MS / 1000):
+                return
+    except OSError:
+        # The test closed its end: nobody is listening for ticks any more.
+        return
+    finally:
+        started.set()
+
+
 def _block(port):
     # A blocking socket: settimeout() would make it non-blocking, and the C
     # recv would return at once. The safety timeout is set on the socket.
@@ -70,12 +95,19 @@ def _block(port):
     else:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVTIMEO,
                         struct.pack('ll', BLOCK_SAFETY_MS // 1000, (BLOCK_SAFETY_MS % 1000) * 1000))
+    stop = threading.Event()
+    started = threading.Event()
+    ticker = threading.Thread(target=_tick, args=(sock, stop, started), daemon=True)
+    ticker.start()
+    started.wait(5)
     try:
         print('HOLD_START', flush=True)
-        started = time.perf_counter()
+        began = time.perf_counter()
         why = _recv_one_holding_the_gil(sock)
-        print('HOLD_END %.3f %s' % (time.perf_counter() - started, why), flush=True)
+        print('HOLD_END %.3f %s' % (time.perf_counter() - began, why), flush=True)
     finally:
+        stop.set()
+        ticker.join(1)
         sock.close()
 
 

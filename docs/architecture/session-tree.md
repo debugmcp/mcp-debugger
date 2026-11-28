@@ -268,9 +268,12 @@ Two measured effects the answers name:
   1 s cap, so a tree's close is bounded by about N × 1 s + 10 s before the worker is stopped,
   not by 10 s (about 42 s at the default cap of 32 children; the server-side timers allow about
   10N + 21 s, 10N + 41 s for js-debug), and a child's release is not confirmed before the root's
-  starts. A close and a detach of one root never overlap on the wire: `InFlightGuard` holds the
-  session's ending in flight and a later close or plain detach joins it (issue #1325; the
-  pairings are in `docs/tool-reference.md`). Worker/adapter cleanup must not escalate to killing
+  starts. A `close_debug_session` and a `detach_from_process` of one root never both send a
+  release: `InFlightGuard` holds the session's ending in flight and a later close or plain detach
+  joins it, a close that joins a detach whose cleanup then failed included (issue #1325; the
+  pairings are in `docs/tool-reference.md`). The server's exit closes outside that join: its
+  worker stop sends no second `disconnect` once one has gone out, but can close the connection
+  before the answer. Worker/adapter cleanup must not escalate to killing
   the external targets.
 - A session that ended stays listed until it is closed, as today, so an agent can still read a
   child's `programEnd` and its output. Closing the parent removes its ended children with it.

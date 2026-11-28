@@ -16,7 +16,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SessionManager, SessionManagerConfig } from '../../../../src/session/session-manager.js';
 import { noAnswerWithin } from '../../../../src/session/attach/target-release.js';
 import type { InFlightGuard } from '../../../../src/session/in-flight-guard.js';
-import { DebugLanguage, SessionState, JsDebugAdapterPolicy, MockAdapterPolicy } from '@debugmcp/shared';
+import { hoistAttachFootprint } from '../../../../src/server/handlers/shared.js';
+import { DebugLanguage, SessionState, JsDebugAdapterPolicy, MockAdapterPolicy, type AttachFootprint } from '@debugmcp/shared';
 import { createMockDependencies } from './session-manager-test-utils.js';
 import { ErrorMessages } from '../../../../src/utils/error-messages.js';
 import { FakeDebugAdapter } from '../../../test-utils/fakes/fake-debug-adapter.js';
@@ -869,6 +870,307 @@ describe('SessionManager - the fate of a borrowed program (issue #1148)', () => 
       expect(attached.success).toBe(false);
       expect(disconnects()).toHaveLength(1);
       expect(mock.stopCalls).toBe(1);
+    });
+
+    // Issue #1325: a close that came while an attach was in flight could not
+    // take the claim; when the attach then answered and released it, a
+    // launch-shaped call was admitted beneath the close still waiting for its
+    // release, and could stop the worker under it. While an ending is in
+    // flight, every launch-shaped call is refused, whoever holds the claim.
+    describe('a close that comes while an attach is in flight', () => {
+      const closing = /^This session is being closed \(close_debug_session has not returned yet\)/;
+
+      /**
+       * An attach whose thread verification is held, a stop that puts the
+       * session in PAUSED, and a close whose release is held: the close is
+       * waiting, unclaimed, and the attach still holds the claim.
+       */
+      async function closeWaitingDuringAttach() {
+        const session = await sessionManager.createSession({ language: DebugLanguage.MOCK, executablePath: 'python' });
+        const adapter = new FakeDebugAdapter({ language: DebugLanguage.MOCK }).withAttachSupport({ directConnect: true });
+        vi.mocked(dependencies.adapterRegistry.create).mockResolvedValue(adapter);
+        const mock = dependencies.mockProxyManager;
+        let answerThreads!: () => void;
+        const threadsHeld = new Promise<void>((resolve) => { answerThreads = resolve; });
+        let letGo!: () => void;
+        const held = new Promise<void>((resolve) => { letGo = resolve; });
+        mock.setDapRequestHandler(async (command) => {
+          if (command === 'threads') {
+            await threadsHeld;
+            return { success: true, body: { threads: [{ id: 1, name: 'main' }] } };
+          }
+          if (command === 'stackTrace') {
+            return { success: true, body: { stackFrames: [{ id: 1, name: 'main', source: { path: 'test.py' }, line: 10, column: 0 }] } };
+          }
+          if (command === 'scopes') {
+            return { success: true, body: { scopes: [] } };
+          }
+          if (command === 'disconnect') {
+            await held;
+          }
+          return { success: true };
+        });
+
+        const attach = tracked(sessionManager.attachToProcess(session.id, { port: 5678 }));
+        await vi.waitFor(() => expect(mock.dapRequestCalls.some((call) => call.command === 'threads')).toBe(true));
+        mock.emit('stopped', 1, 'pause');
+        await vi.waitFor(() => expect(sessionManager.getSession(session.id)!.state).toBe(SessionState.PAUSED));
+        const close = tracked(sessionManager.closeDebugSession(session.id));
+        await firstDisconnectSent();
+        return { sessionId: session.id, mock, attach, close, answerThreads, letGo };
+      }
+
+      it('a launch-shaped call is refused by the close, not by the attach that holds the claim', async () => {
+        const { sessionId, attach, close, answerThreads, letGo } = await closeWaitingDuringAttach();
+
+        // Waiting for the attach would not help: the close removes the session.
+        const refused = await sessionManager.startDebugging(sessionId, 'test.py');
+
+        expect(refused.success).toBe(false);
+        expect(refused.error).toMatch(closing);
+        answerThreads();
+        letGo();
+        await Promise.all([attach.call, close.call]);
+      });
+
+      it('an attach that answers while the close waits lets no launch-shaped call in under the close', async () => {
+        const { sessionId, mock, attach, close, answerThreads, letGo } = await closeWaitingDuringAttach();
+        const guard = (sessionManager as unknown as { inFlight: InFlightGuard }).inFlight;
+
+        // The attach answers, successfully, while the close still waits for its release.
+        answerThreads();
+        const attached = await attach.call;
+        expect(attached.success, JSON.stringify(attached)).toBe(true);
+        expect(close.state.answered).toBe(false);
+        expect(guard.current(sessionId)).toBeUndefined();
+
+        const calls = [
+          tracked(sessionManager.startDebugging(sessionId, 'test.py')),
+          tracked(sessionManager.restartDebugging(sessionId)),
+          tracked(sessionManager.attachToProcess(sessionId, { port: 5678 }))
+        ];
+        await vi.advanceTimersByTimeAsync(50);
+        for (const call of calls) {
+          expect(call.state.answered).toBe(true);
+          const answer = await call.call;
+          expect(answer.success).toBe(false);
+          expect(answer.error).toMatch(closing);
+        }
+        // Nothing stopped the worker under the release, or started another.
+        expect(mock.stopCalls).toBe(0);
+        expect(mock.startCalls).toHaveLength(1);
+
+        letGo();
+        expect(await close.call).toMatchObject({ closed: true, released: true });
+        expect(disconnects()).toHaveLength(1);
+        expect(mock.stopCalls).toBe(1);
+      });
+    });
+
+    // Issue #1325: a detach that sent the release and whose cleanup
+    // then failed (its worker's stop rejected) used to leave nothing for the
+    // close that joined it, which then closed the still-running session as if
+    // nothing had been sent, and sent a second disconnect. The release and
+    // what was observed of it are kept apart from whether the cleanup worked.
+    describe('a detach whose cleanup fails after its release', () => {
+      it('the joined close sends nothing, finishes the cleanup, and says what the release observed', async () => {
+        const sessionId = await borrowedSession();
+        const mock = dependencies.mockProxyManager;
+        // No fabricated close-time report: what the close says comes from the detach's release.
+        mock.reportsDetachOnStop = false;
+        const letGo = holdDisconnects();
+        vi.spyOn(mock, 'stop').mockRejectedValueOnce(new Error('stop failed before teardown'));
+
+        const detach = sessionManager.detachFromProcess(sessionId);
+        await firstDisconnectSent();
+        const close = sessionManager.closeDebugSession(sessionId);
+        letGo();
+        const [detached, closed] = await Promise.all([detach, close]);
+
+        expect(detached).toMatchObject({ success: false, error: 'Failed to detach: stop failed before teardown' });
+        expect(closed).toEqual({ closed: true, closedSessionIds: [sessionId], releasedSessionIds: [sessionId], released: true });
+        expect(disconnects()).toHaveLength(1);
+        // The close stopped the worker the detach failed to stop, and removed the session.
+        expect(mock.stopCalls).toBe(1);
+        expect(sessionManager.getSession(sessionId)).toBeUndefined();
+      });
+
+      it('a release that saw the program exit is the close\'s processEnded', async () => {
+        const sessionId = await borrowedSession();
+        const mock = dependencies.mockProxyManager;
+        mock.reportsDetachOnStop = false;
+        mock.detachResult = { trigger: 'detach', acknowledged: true, by: 'response', debuggeeExited: true };
+        const letGo = holdDisconnects();
+        vi.spyOn(mock, 'stop').mockRejectedValueOnce(new Error('stop failed before teardown'));
+
+        const detach = sessionManager.detachFromProcess(sessionId);
+        await firstDisconnectSent();
+        const close = sessionManager.closeDebugSession(sessionId);
+        letGo();
+        const [detached, closed] = await Promise.all([detach, close]);
+
+        expect(detached.success).toBe(false);
+        expect(closed).toEqual({ closed: true, closedSessionIds: [sessionId], processEnded: true });
+        expect(disconnects()).toHaveLength(1);
+      });
+
+      it("when the close's own stop fails too, it says released and that stopping the worker failed", async () => {
+        const sessionId = await borrowedSession();
+        const mock = dependencies.mockProxyManager;
+        mock.reportsDetachOnStop = false;
+        const letGo = holdDisconnects();
+        vi.spyOn(mock, 'stop').mockRejectedValue(new Error('kill EPERM'));
+
+        const detach = sessionManager.detachFromProcess(sessionId);
+        await firstDisconnectSent();
+        const close = sessionManager.closeDebugSession(sessionId);
+        letGo();
+        const [detached, closed] = await Promise.all([detach, close]);
+
+        expect(detached).toMatchObject({ success: false, error: 'Failed to detach: kill EPERM' });
+        expect(closed).toEqual({
+          closed: true,
+          closedSessionIds: [sessionId],
+          releasedSessionIds: [sessionId],
+          released: true,
+          stopFailed: 'kill EPERM'
+        });
+        expect(disconnects()).toHaveLength(1);
+      });
+
+      // A fate the close observed of its own is kept over an unconfirmed one
+      // the joined detach observed, as for a release of the close's own. A
+      // release that never reached the worker is not confirmed; the worker's
+      // own detach, when the close stops it, can be: that one is what
+      // happened to the target.
+      it('an unconfirmed release yields to the worker\'s own detach that the close then saw acknowledged', async () => {
+        const sessionId = await borrowedSession();
+        const mock = dependencies.mockProxyManager;
+        let letGo!: () => void;
+        const held = new Promise<void>((resolve) => { letGo = resolve; });
+        mock.setDapRequestHandler(async (command) => {
+          if (command === 'disconnect') {
+            await held;
+            throw new Error('Proxy not initialized');
+          }
+          return { success: true };
+        });
+        vi.spyOn(mock, 'stop').mockRejectedValueOnce(new Error('stop failed before teardown'));
+
+        const detach = sessionManager.detachFromProcess(sessionId);
+        await firstDisconnectSent();
+        const close = sessionManager.closeDebugSession(sessionId);
+        letGo();
+        const [detached, closed] = await Promise.all([detach, close]);
+
+        expect(detached.success).toBe(false);
+        // The mock worker's stop reports its own close-time detach, acknowledged.
+        expect(closed).toEqual({ closed: true, closedSessionIds: [sessionId], releasedSessionIds: [sessionId], released: true });
+        expect(disconnects()).toHaveLength(1);
+      });
+
+      // The other side: a detach that failed before it sent anything leaves
+      // the release to the close that joined it, which sends exactly one.
+      it('a detach that fails before its release leaves the one release to the close that joined it', async () => {
+        const sessionId = await borrowedSession();
+        let fail!: () => void;
+        const failing = new Promise<void>((resolve) => { fail = resolve; });
+        const releaseChildren = vi.spyOn(sessionManager as unknown as { releaseDescendants: () => Promise<number> }, 'releaseDescendants')
+          .mockImplementationOnce(async () => {
+            await failing;
+            throw new Error('the children could not be released');
+          });
+
+        const detach = sessionManager.detachFromProcess(sessionId);
+        await vi.waitFor(() => expect(releaseChildren).toHaveBeenCalled());
+        const close = sessionManager.closeDebugSession(sessionId);
+        fail();
+        const [detached, closed] = await Promise.all([detach, close]);
+
+        expect(detached).toMatchObject({ success: false, error: 'Failed to detach: the children could not be released' });
+        expect(closed).toEqual({ closed: true, closedSessionIds: [sessionId], releasedSessionIds: [sessionId], released: true });
+        expect(disconnects()).toEqual([
+          { command: 'disconnect', args: { terminateDebuggee: false }, options: { timeoutMs: 10_000 } }
+        ]);
+      });
+    });
+
+    // Issue #1325: what an attach by process id left in its target
+    // (#1327, `attachFootprint`, answered as `inspector`) is carried by every
+    // answer of an ending, whichever ending sent the release. The detach that
+    // joined a close dropped it.
+    describe("what the attach left in its target, on every pairing's answers", () => {
+      const footprint = (): AttachFootprint => ({ field: 'inspector', atAttach: 'signalled', atEnd: vi.fn(async () => 'listening') });
+      /** The field the tool handlers answer it under, through their own helper. */
+      const inspectorOf = async (payload: Record<string, unknown>, carried: AttachFootprint | undefined) => {
+        await hoistAttachFootprint(payload, carried, 'end');
+        return payload.inspector;
+      };
+      const footprintedSession = async (): Promise<string> => {
+        const sessionId = await borrowedSession();
+        sessionManager.getSession(sessionId)!.run.attachFootprint = footprint();
+        return sessionId;
+      };
+
+      it('a close that sends its own release', async () => {
+        const sessionId = await footprintedSession();
+        const closed = await sessionManager.closeDebugSession(sessionId);
+        expect(await inspectorOf({}, closed.attachFootprint)).toBe('listening');
+      });
+
+      it('a close that joins a detach, and the detach', async () => {
+        const sessionId = await footprintedSession();
+        const letGo = holdDisconnects();
+        const detach = sessionManager.detachFromProcess(sessionId);
+        await firstDisconnectSent();
+        const close = sessionManager.closeDebugSession(sessionId);
+        letGo();
+        const [detached, closed] = await Promise.all([detach, close]);
+        expect(await inspectorOf({ data: detached.data }, detached.data?.attachFootprint)).toBe('listening');
+        expect(await inspectorOf({}, closed.attachFootprint)).toBe('listening');
+      });
+
+      it('a close that joins a close', async () => {
+        const sessionId = await footprintedSession();
+        const letGo = holdDisconnects();
+        const first = sessionManager.closeDebugSession(sessionId);
+        await firstDisconnectSent();
+        const second = sessionManager.closeDebugSession(sessionId);
+        letGo();
+        const [a, b] = await Promise.all([first, second]);
+        expect(await inspectorOf({}, a.attachFootprint)).toBe('listening');
+        expect(await inspectorOf({}, b.attachFootprint)).toBe('listening');
+      });
+
+      it.each([
+        ['released', undefined],
+        ['the program ended', { trigger: 'detach', acknowledged: true, by: 'response', debuggeeExited: true } as const],
+        ['not confirmed', { trigger: 'detach', acknowledged: false, error: 'no answer' } as const]
+      ])('a detach that joins a close (%s)', async (_fate, report) => {
+        const sessionId = await footprintedSession();
+        dependencies.mockProxyManager.detachResult = report;
+        const letGo = holdDisconnects();
+        const close = sessionManager.closeDebugSession(sessionId);
+        await firstDisconnectSent();
+        const detach = sessionManager.detachFromProcess(sessionId);
+        letGo();
+        const [closed, detached] = await Promise.all([close, detach]);
+        expect(detached.success, JSON.stringify(detached)).toBe(true);
+        expect(await inspectorOf({ data: detached.data }, detached.data?.attachFootprint)).toBe('listening');
+        expect(await inspectorOf({}, closed.attachFootprint)).toBe('listening');
+      });
+
+      it('a detach that joins a detach', async () => {
+        const sessionId = await footprintedSession();
+        const letGo = holdDisconnects();
+        const first = sessionManager.detachFromProcess(sessionId);
+        await firstDisconnectSent();
+        const second = sessionManager.detachFromProcess(sessionId);
+        letGo();
+        const [a, b] = await Promise.all([first, second]);
+        expect(await inspectorOf({ data: a.data }, a.data?.attachFootprint)).toBe('listening');
+        expect(await inspectorOf({ data: b.data }, b.data?.attachFootprint)).toBe('listening');
+      });
     });
 
     it("forgets the ending once it is over: the session's next ending is its own", async () => {

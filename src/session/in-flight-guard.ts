@@ -23,13 +23,15 @@
  * from a close that arrived while a detach waited for its answer, ended
  * debugpy's adapter and the target's debug port with it, while both calls
  * said the target was released. So for one session there is at most one
- * ending in flight: a close or a detach that arrives meanwhile joins it,
- * sends nothing of its own, and answers from what it observed. The close
- * takes the claim as well when it is free, so a launch-shaped call that
- * arrives meanwhile cannot stop the worker under its release; a close is
- * never refused, though, and one that finds a launch-shaped call in flight
- * goes ahead without it. An attach already in flight when the close came
- * that then fails waits for the close before its own teardown.
+ * ending in flight: a close or a detach that arrives meanwhile joins it and
+ * answers from what it observed, and no second release goes out. While an
+ * ending is in flight every launch-shaped call is refused, whoever holds the
+ * claim, so none can stop the worker under its release. A close takes the
+ * claim as well when it is free; it is never refused, though, and one that
+ * finds a launch-shaped call in flight goes ahead without the claim. That
+ * call can still answer before the close does, successfully or not: an
+ * attach that fails waits for the close before its own teardown, and once
+ * it has answered the ending still refuses the next launch-shaped call.
  */
 import { ErrorMessages, type InFlightOperation } from '../utils/error-messages.js';
 import type { CloseSessionOutcome, DebugResult, DebugResultData, DetachResultData } from './session-manager-core.js';
@@ -74,7 +76,11 @@ export type EndingOperation = Extract<InFlightOperation, 'close' | 'detach'>;
  */
 export interface EndingRecord {
   operation: EndingOperation;
-  /** A plain detach's release, and what the adapter did with it. */
+  /**
+   * A plain detach's release, and what the adapter did with it: set once the
+   * release was sent, whether or not the detach's cleanup then succeeded (its
+   * answer says that), so a close that joins it never sends a second one.
+   */
   release?: TargetRelease;
   /** The close the ending made: a close's outcome, or the one a terminating detach makes. */
   closed?: CloseSessionOutcome;
@@ -103,10 +109,20 @@ export class InFlightGuard {
   /**
    * Claim the session for `operation`. Returns undefined when the claim
    * succeeded, or the refusal message — naming the operation in flight and
-   * the tool that was refused — when another operation holds the session.
-   * A refusal never touches the existing claim.
+   * the tool that was refused — when an ending of the session is in flight
+   * or another operation holds the session. A refusal never touches the
+   * existing claim.
+   *
+   * The ending is checked first (issue #1325): a close that came while a
+   * launch-shaped call was in flight holds no claim, and that call's release
+   * of its own claim must not let the next one start under the close. The
+   * two endings ask `ending()` before they claim, and join one in flight.
    */
   tryAcquire(sessionId: string, operation: InFlightOperation, requestedTool: string): string | undefined {
+    const ending = this.endings.get(sessionId);
+    if (ending) {
+      return ErrorMessages.operationInFlight(ending.operation, requestedTool);
+    }
     const held = this.inFlight.get(sessionId);
     if (held) {
       return ErrorMessages.operationInFlight(held, requestedTool);

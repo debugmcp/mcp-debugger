@@ -19,13 +19,31 @@
  * Here the target holds the interpreter with one C call that blocks with the
  * GIL held until this test lets it go (`busy_target.py`, `block <port>`: a
  * `recv` on a loopback connection the target opened to a listener here). The
- * test, not a clock, ends the hold, so the sequence has no timing window: the
- * hold starts; the ending goes out; it is still unanswered 2 s later (the old
- * close answered after its 1 s cap, with a warning); the test lets go; the
- * ending answers `released: true`; a new session attaches on the same port.
- * The target's own 8 s receive timeout ends the hold if the test stalls, so a
- * stalled test cannot push it past the 10 s release bound; the hold's end
- * then says `timeout` rather than `byte`, and the test fails by that name.
+ * test, not a clock, ends the hold. The target prints `HOLD_START` before the
+ * call, while it still runs Python code; what says the call has begun is the
+ * target's ticker thread, which writes a byte on that connection every 20 ms
+ * for as long as it gets the GIL. The test waits, after `HOLD_START` and at
+ * least one tick, until no tick has arrived for 300 ms, and only then sends
+ * the ending. Then: the ending is still unanswered 2 s later (the old close
+ * answered after its 1 s cap, with a warning); the test lets go; the ending
+ * answers `released: true`; the hold's end says `byte`; a new session
+ * attaches on the same port.
+ *
+ * What can still make it fail without a defect in the server:
+ * - A silence that is not the hold: the target process (or only its ticker
+ *   thread) not scheduled for 300 ms while the main thread is still before
+ *   the C call. The ending then goes out before the hold, is answered at
+ *   once, and the "still unanswered 2 s later" assertion fails. (A stalled
+ *   test process does not count: after a silence the test lets Node read what
+ *   arrived meanwhile and looks again.)
+ * - The target's own 8 s receive timeout, which ends the hold if this test is
+ *   delayed past it (300 ms of silence, the 2 s wait, the calls): the hold's
+ *   end then says `timeout`, not `byte`, and the test fails by that name; and
+ *   when it expires the target need not be rescheduled at once.
+ * - A wait that runs out on a loaded machine: 10 s for the hold to start, its
+ *   first tick, the silence and the detach's log line; 15 s for the hold's end.
+ * - The target's debug port: chosen free, then bound by debugpy after the
+ *   choice is closed; taken in between, the start is retried up to 4 times.
  */
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';
@@ -48,6 +66,11 @@ const PYTHON = process.env.PYTHON_PATH ?? process.env.PYTHON_EXECUTABLE ?? (proc
  * 8 s safety and the 10 s release bound.
  */
 const STILL_WAITING_MS = 2000;
+/**
+ * How long no tick from the target's ticker thread means its main thread holds
+ * the GIL in the C call: fifteen of its 20 ms ticks.
+ */
+const HOLD_SILENCE_MS = 300;
 const DETACH_RELEASED = 'Detached from process: the debug adapter confirmed the detach, and the process was left running';
 
 async function getFreePort(): Promise<number> {
@@ -190,15 +213,47 @@ async function attachRunning(name: string, port: number): Promise<string> {
   return sessionId;
 }
 
+/** The target's ticks on the hold's connection: how many, and when the last one was read. */
+interface Ticks { count: number; lastAt: number }
+
+/**
+ * Until no tick has arrived for `HOLD_SILENCE_MS`: the target's main thread
+ * holds the GIL. A silence measured across a stall of this process would be
+ * ticks not yet read, so once the silence is long enough, Node's poll phase
+ * runs (a setImmediate comes after it) and the silence is measured again.
+ */
+async function untilSilent(ticks: Ticks, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (Date.now() - ticks.lastAt >= HOLD_SILENCE_MS) {
+      await new Promise((resolve) => setImmediate(resolve));
+      if (Date.now() - ticks.lastAt >= HOLD_SILENCE_MS) return;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`timed out waiting for the target to hold the interpreter: ${ticks.count} ticks, the last ${Date.now() - ticks.lastAt} ms ago`);
+    }
+    await sleep(20);
+  }
+}
+
 /**
  * Make the target hold the interpreter until `letGo()`: it connects to a
  * listener here and blocks in recv on that connection. Resolves once the
- * target has said the hold starts.
+ * target has said the hold starts, its ticker has been heard, and the ticker
+ * has then been silent for `HOLD_SILENCE_MS`: the main thread is in the call.
  */
 async function hold(target: Target): Promise<{ letGo: () => void; ended: () => Promise<{ seconds: number; why: string }> }> {
   const gate: { server: net.Server; socket?: net.Socket } = { server: net.createServer() };
   gates.push(gate);
-  const connected = new Promise<net.Socket>((resolve) => gate.server.once('connection', resolve));
+  const ticks: Ticks = { count: 0, lastAt: 0 };
+  const connected = new Promise<net.Socket>((resolve) => gate.server.once('connection', (socket: net.Socket) => {
+    socket.on('data', (chunk: Buffer) => {
+      ticks.count += chunk.length;
+      ticks.lastAt = Date.now();
+    });
+    socket.on('error', () => { /* the target closes its end when the hold is over */ });
+    resolve(socket);
+  }));
   await new Promise<void>((resolve, reject) => {
     gate.server.once('error', reject);
     gate.server.listen(0, '127.0.0.1', () => resolve());
@@ -207,6 +262,8 @@ async function hold(target: Target): Promise<{ letGo: () => void; ended: () => P
   target.proc.stdin!.write(`block ${gatePort}\n`);
   gate.socket = await connected;
   await until(() => target.output().includes('HOLD_START'), 10000, 'the hold to start');
+  await until(() => ticks.count > 0, 10000, "the target's first tick");
+  await untilSilent(ticks, 10000);
   const holdEnd = /HOLD_END (\d+\.\d+) ([^\r\n]+)/;
   return {
     letGo: () => { gate.socket!.write(Buffer.from([1])); },

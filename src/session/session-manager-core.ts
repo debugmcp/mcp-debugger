@@ -1174,13 +1174,17 @@ export abstract class SessionManagerCore extends EventEmitter {
    * target is released with the request and bound detach_from_process uses
    * before the worker is stopped. Without it (the server's exit, the idle
    * policy) the worker's own close-time detach releases it, under its 1 s cap.
-   * close_debug_session comes through AttachController.closeSession, which
-   * makes it the session's one ending in flight; this method itself does not
-   * serialize overlapping closes.
+   * `releaseSent` (issue #1325): the release a detach this close joined
+   * already sent, and what it observed. Nothing is sent; the outcome is read
+   * from it as from a release of this close's own, whether or not the
+   * detach's cleanup succeeded, and the worker the detach left, if any, is
+   * stopped. close_debug_session comes through AttachController.closeSession,
+   * which makes it the session's one ending in flight; this method itself does
+   * not serialize overlapping closes.
    */
   async closeSessionReporting(
     sessionId: string,
-    options: { terminateDebuggee?: boolean; releaseBeforeStop?: boolean } = {}
+    options: { terminateDebuggee?: boolean; releaseBeforeStop?: boolean; releaseSent?: TargetRelease } = {}
   ): Promise<CloseSessionOutcome> {
     const session = this.sessionStore.get(sessionId);
     if (!session) {
@@ -1236,14 +1240,16 @@ export abstract class SessionManagerCore extends EventEmitter {
       // is free ends itself when its client leaves first. From the moment
       // the attach has put the session in RUNNING or PAUSED: that can be
       // before attach_to_process returns (it may still be verifying threads
-      // or re-sending breakpoints, and then fails, its session gone), and the
-      // release goes out all the same, because what the port depends on is
-      // the live connection, not the call. Before that (INITIALIZING: the
-      // handshake is not done) the worker's own detach runs.
-      const release = options.releaseBeforeStop && borrowedRoot &&
+      // or re-sending breakpoints, and can answer before this close does,
+      // successfully or not), and the release goes out all the same, because
+      // what the port depends on is the live connection, not the call. Before
+      // that (INITIALIZING: the handshake is not done) the worker's own detach
+      // runs. A close that joined a detach sends none: that detach's release
+      // is this close's.
+      const release = options.releaseSent ?? (options.releaseBeforeStop && borrowedRoot &&
         (session.state === SessionState.RUNNING || session.state === SessionState.PAUSED)
         ? await releaseAttachedTarget(borrowedRoot, this.logger)
-        : undefined;
+        : undefined);
       const { closed, stopFailed } = await this.closeSingleSessionReporting(sessionId, { releaseChild: childEnd === 'release' });
       const fate: BorrowedProgramFate = session.parentSessionId
         ? { released: released === true, processEnded: childEnd === 'terminate' }

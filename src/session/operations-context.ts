@@ -28,6 +28,7 @@ import type { ManagedSession } from './session-store.js';
 import type { StackTraceResult } from './inspection/frame-anchor-resolver.js';
 import type { LocalVariablesResult } from './session-manager-data.js';
 import type { CloseSessionOutcome, CustomLaunchRequestArguments } from './session-manager-core.js';
+import type { TargetRelease } from './attach/target-release.js';
 import type { VariableAccessMode } from '../utils/variable-access.js';
 import type { IProxyManager } from '../proxy/proxy-manager.js';
 import type { IProxyManagerFactory } from '../factories/proxy-manager-factory.js';
@@ -138,7 +139,7 @@ export interface OperationsContext {
   /** `closeSession` with its outcome (issue #1081): the rows removed, and what the close did to the processes. */
   closeSessionReporting(
     sessionId: string,
-    options?: { terminateDebuggee?: boolean; releaseBeforeStop?: boolean }
+    options?: { terminateDebuggee?: boolean; releaseBeforeStop?: boolean; releaseSent?: TargetRelease }
   ): Promise<CloseSessionOutcome>;
   /** Block new child adoptions during a complete teardown; returns the release function. */
   beginSubtreeClose(sessionId: string): () => void;
