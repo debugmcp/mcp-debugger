@@ -168,29 +168,62 @@ A session with child sessions, a child session or an attach root says what the c
   acknowledged the detach (issue #1148): its descendants are detached with their targets kept
   running, deepest first, their rows removed, then the root is released with the same `disconnect`
   and the same 10 s bound as [`detach_from_process`](#detach_from_process), before the session's
-  worker is stopped (issue #1325). The close therefore waits for the adapter's answer: milliseconds
-  on an idle target, and for an adapter that answers only once the target is free (debugpy), as
-  long as the target's busy call lasts, up to 10 s. When the adapter did not acknowledge it there is
+  worker is stopped (issue #1325). The close therefore waits for the adapter's answer: within
+  milliseconds on an idle target, and for an adapter that answers only once the target is free
+  (debugpy), as long as the target's busy call lasts, up to 10 s. This holds for the attach
+  sessions of every engine, not only Python's: an adapter that does not answer now keeps the close
+  waiting up to 10 s where it used to be 1 s. When the adapter did not acknowledge it there is
   no `released`, and `warning` reads `The debug adapter did not confirm that it released the
   process (no answer within 10000 ms). The connection to the adapter was closed: if the adapter
   belongs to the target (it was listening before this session attached), the target's debug port
   may have closed with it. Whether the process is still running is not known` (with another reason
-  in the parentheses when the request failed otherwise); `processEnded: true` instead when the
-  adapter reported that the program exited. A session whose program was already gone, or one that
-  launched its program, carries none of the three. It used to be `released: true` for every attach
-  root, whatever the adapter did. Also when the named session is a JavaScript child: js-debug
-  cannot end a target it adopted, so the close disconnects with the process kept running and it
-  finishes undebugged (a root's close releases its JavaScript children the same way, counted in
-  `childrenClosed`).
+  in the parentheses when the request failed otherwise). When stopping the session's worker failed
+  as well, the warning does not say the connection was closed: its second sentence reads
+  `Stopping the debugger then failed (<why>), so whether its connection to the adapter was closed,
+  and with it a debug port that belongs to the target, is not known`. `processEnded: true` instead
+  when the adapter reported that the program exited. A session whose program was already gone, or
+  one that launched its program, carries none of the three. It used to be `released: true` for
+  every attach root, whatever the adapter did. Also when the named session is a JavaScript child:
+  js-debug cannot end a target it adopted, so the close disconnects with the process kept running
+  and it finishes undebugged (a root's close releases its JavaScript children the same way, counted
+  in `childrenClosed`).
 - **Why the close waits** (issue #1325): debugpy's `--listen` adapter belongs to the target (it is
   started once and owns the target's debug port) and ends itself when its client closes the
   connection before the reply to `disconnect` is written. The close used to give it 1 s, so closing
   a session while the target was busy for longer closed the target's debug port for good. A target
   busy for longer than the 10 s bound can still lose its port, on a close as on a detach; the rest
   is tracked in #1325.
-- Closes that do not come from this tool still release through the worker's own detach, with its
-  1 s bound: a close while the attach is still being made, the closes the server makes as it exits,
-  and the idle policy's.
+- **When the close sends the release:** once the attach has put the session in `running` or
+  `paused`. That can be before `attach_to_process` has returned (it may still be verifying threads
+  or re-sending breakpoints): the release goes out all the same, the close waits for it as above,
+  and the attach call then fails, its session gone; an attach that fails sooner waits for the close
+  before its own teardown, so it does not close the connection under the release. What the
+  target's port depends on is the live connection, not the call. A close before that point (the session still `initializing`) releases
+  through the worker's own detach, with its 1 s bound, as do the closes the server makes as it
+  exits and the idle policy's.
+- **Overlapping endings** (issue #1325): one session has at most one release in flight. A close
+  or a detach that arrives while another close or detach of the same session is in flight sends
+  nothing of its own and waits for it. A close during a detach removes what the detach left and
+  answers with what the detach's release observed (`released`, `processEnded` or the `warning`); a
+  second close answers what the first did. A detach during a close answers from the close's
+  release, in a detach's words, ending `The release was the one the close_debug_session already in
+  progress sent; that close also removed the session`. A detach with `terminateProcess: true` is
+  not a release, so it neither joins one nor is joined by one: it is refused while a close or a
+  detach is in flight (`This session is being closed …` / `A detach is already in progress …`), and
+  so is a plain detach while a terminating one runs; a close during a terminating detach answers
+  the close that detach made. While
+  a close is in flight, `start_debugging`, `restart_debugging` and `attach_to_process` on the same
+  session are refused: `This session is being closed (close_debug_session has not returned yet), so
+  <tool> has no session to act on once it returns. Create a new session instead.` A close is never
+  refused. Before this, a close that arrived while a detach waited sent a second `disconnect`, and
+  debugpy's adapter ended, taking the target's debug port, while both calls said `released: true`.
+- **A tree's close is not bounded by 10 s.** Its live children are closed first, one after
+  another, deepest first, each under its own 1 s cap, and only then is the root released under its
+  10 s. With N children and an adapter that answers none of it, the close takes about N × 1 s +
+  10 s before the worker is stopped: about 42 s at the default cap of 32 children. The timers on
+  the server's side allow more: about 10N + 21 s in all (10N + 41 s for a JavaScript tree, whose
+  worker gets a longer exit grace). A child's release is not confirmed before the root's starts:
+  `childrenClosed` counts the rows removed.
 
 **Notes:**
 - Sessions may close automatically on errors
@@ -1864,6 +1897,8 @@ Detaches the debugger from a process the session attached to, leaving the proces
 
 The 10 s is sized by measurement: every attach-capable adapter acknowledges a detach in 0 to 15 ms on an idle target, and the worker may first spend up to 2 s resuming a stopped CodeLLDB target. debugpy acknowledges it only once the target's interpreter is free: a detach during a 3 to 4 s hold answers when the hold ends. [`close_debug_session`](#close_debug_session) sends the same release under the same bound.
 
+A detach and a close of the same session never both send a release (issue #1325). A plain detach that arrives while a close or another plain detach is in flight sends nothing, waits for it, and answers from what its release observed: a second detach answers what the first did; a detach during a close answers in a detach's words, ending `The release was the one the close_debug_session already in progress sent; that close also removed the session`, or `No active debug session to detach from` when that close had nothing to release. A detach with `terminateProcess: true` while a close or a detach is in flight, and a plain detach while a terminating one runs, are refused (`This session is being closed …` / `A detach is already in progress …`) and send nothing. A close that arrives during a detach waits for it too and sends nothing; see [`close_debug_session`](#close_debug_session).
+
 **Notes:**
 
 After a local JavaScript attach (PID or loopback) with child debugging enabled,
@@ -1875,7 +1910,7 @@ was observed (#1288):
 - With `terminateProcess: true` the whole session is closed and the message reads `Detached and terminated process`.
 - Detaching sends DAP `disconnect` with `terminateDebuggee: false`, then stops the proxy; the session ends in `"stopped"` either way, so a later re-attach needs a new session.
 - CodeLLDB sessions on Windows (C/C++ and COBOL attach sessions): while the target is stopped, a DAP `continue` goes out ahead of the detaching `disconnect` — on this path, on `close_debug_session` and on shutdown alike — and `data.resumedBeforeDetach` is `true`; if the debugger refuses the continue, the detach still proceeds with `resumedBeforeDetach: false` and `data.warning` names the risk. Why: CodeLLDB's Windows detach otherwise kills a target whose last resume was a step (issue #763; the mechanism is in the C/C++ guide's attach section).
-- Detaching a session with no active debug process reports `success: false` with `No active debug session to detach from` in `message`. That includes a session already detached: a second detach does not repeat the first one's answer.
+- Detaching a session with no active debug process reports `success: false` with `No active debug session to detach from` in `message`. That includes a session already detached: a second detach after the first has returned does not repeat the first one's answer (one sent while the first is still in flight waits for it and answers the same, issue #1325).
 - **An attach root with child sessions** (the session tree, issues #1081 and #1082; Python and JavaScript): the children are detached first, deepest first, each with `disconnect` and `terminateDebuggee: false` so it runs on undebugged, then the parent. The child rows stay listed as `stopped` with `programEnd: { note: "Released: detached with its parent; the process runs on undebugged.", data: { released: true } }`, and the answer carries `childrenReleased: n` — n children now run undebugged (top level and in `data`). With `terminateProcess: true` the whole subtree is closed and the answer carries `childrenClosed: n` instead.
 
 ---

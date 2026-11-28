@@ -310,10 +310,16 @@ On success it replays the last launch and re-applies every breakpoint, reporting
   (#711) — each of them tears down whatever proxy the session holds and brings up (or
   takes down) another, and the session state alone cannot tell "a launch is being
   awaited" from "the program is running". The message names both the operation holding
-  the session and the tool that was refused.
+  the session and the tool that was refused. A plain `detach_from_process` is not refused
+  while another plain detach or a `close_debug_session` is in flight: it waits for it and
+  answers from it (issue #1325); a `terminateProcess: true` detach is refused then.
+- *"This session is being closed (close_debug_session has not returned yet), so … has no
+  session to act on once it returns. Create a new session instead."*: a close is releasing
+  the session's target (issue #1325), and the session will be gone when it returns.
 
-**What to do**: wait for the call in flight to return, then retry. Nothing else about the
-session changed — the refused call never touched it — and other sessions are unaffected.
+**What to do**: wait for the call in flight to return, then retry; after a close, create a
+new session. Nothing else about the session changed — the refused call never touched it —
+and other sessions are unaffected.
 
 The one refusal not worth waiting out is `restart_debugging` while an
 `attach_to_process` is in flight: an attach session has no launch configuration to

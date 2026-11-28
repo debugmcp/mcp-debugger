@@ -136,7 +136,10 @@ export interface OperationsContext {
   stopProxyPreservingSession(session: ManagedSession): Promise<number>;
   closeSession(sessionId: string): Promise<boolean>;
   /** `closeSession` with its outcome (issue #1081): the rows removed, and what the close did to the processes. */
-  closeSessionReporting(sessionId: string, options?: { terminateDebuggee?: boolean }): Promise<CloseSessionOutcome>;
+  closeSessionReporting(
+    sessionId: string,
+    options?: { terminateDebuggee?: boolean; releaseBeforeStop?: boolean }
+  ): Promise<CloseSessionOutcome>;
   /** Block new child adoptions during a complete teardown; returns the release function. */
   beginSubtreeClose(sessionId: string): () => void;
   /** Wait for any in-flight CHILD_RELEASE_COMMAND round-trips on this session's run (issue #1221). */

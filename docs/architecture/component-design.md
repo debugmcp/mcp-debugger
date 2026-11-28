@@ -63,6 +63,18 @@ child session is adopted, while `start_debugging` is still parked on the launch
 barrier. `restartDebugging` replays through the launcher's private `launch()`
 under its own claim, never through the facade's `startDebugging`.
 
+The guard also holds the session's ending in flight (issue #1325):
+`close_debug_session` reaches the facade's `closeDebugSession`, which delegates
+to `AttachController.closeSession`, and a close or a plain detach that arrives
+while another close or detach of the session is in flight joins it
+(`InFlightGuard.ending` / `runEnding`) and sends no `disconnect` of its own; a
+terminating detach is refused instead. The close claims the session as well
+when nothing holds it, so a launch, restart or attach arriving meanwhile is
+refused, and is itself never refused: with a launch-shaped call in flight it
+goes ahead unclaimed, and an attach in flight that then fails waits for it
+before its own teardown. The server's exit and the idle policy close through
+`closeSessionReporting` directly.
+
 Shared per-request DAP helpers (timeout override validation, the timeout hint,
 log truncation) live in `src/session/dap-request-helpers.ts`.
 

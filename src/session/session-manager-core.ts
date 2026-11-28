@@ -384,6 +384,12 @@ export interface CloseSessionOutcome {
    * detach (issue #1148): why. Neither `released` nor `processEnded` is set.
    */
   releaseUnconfirmed?: string;
+  /**
+   * Stopping the named session's worker failed, and why (issue #1325). The
+   * row is removed all the same, so whether the worker's connection to the
+   * adapter was closed is not something the close saw.
+   */
+  stopFailed?: string;
 }
 
 /** What a close did to the program its session borrowed, as the close answer states it. */
@@ -787,6 +793,7 @@ export abstract class SessionManagerCore extends EventEmitter {
       return report.released || report.releasedSessionIds?.includes(sessionId) ? 'released' : 'ended';
     };
     for (const sessionId of report.closedSessionIds) {
+      const outcome = outcomeOf(sessionId);
       this.recordIdleExpiry({
         sessionId,
         rootId: root.id,
@@ -794,7 +801,9 @@ export abstract class SessionManagerCore extends EventEmitter {
         closedAt: now,
         idleMs,
         windowMs,
-        outcome: outcomeOf(sessionId)
+        outcome,
+        // The connection is said to be closed only when the stop succeeded (issue #1325).
+        ...(outcome === 'unconfirmed' && report.stopFailed !== undefined ? { stopFailed: report.stopFailed } : {})
       });
     }
     const others = report.closedSessionIds.length - 1;
@@ -1100,17 +1109,11 @@ export abstract class SessionManagerCore extends EventEmitter {
   }
 
   /**
-   * What became of a borrowed program when its session closed (issue
-   * #1148), from the worker's report of the detaching disconnect: released
-   * when the adapter acknowledged it, ended when the adapter reported the
-   * program's exit, otherwise not confirmed, with why. No proxy means the
-   * program was already gone from this session: nothing is claimed.
-   */
-  /**
    * An attach root's close outcome (issue #1325): the release this close
    * sent, when it sent one; but an unconfirmed release whose worker then
    * detached by itself (the request never reached it, or it was already
-   * shutting down) answers from that detach, when it was acknowledged.
+   * shutting down) answers from that detach, when it was acknowledged or
+   * reported the program's exit.
    */
   private fateOfClose(release: TargetRelease | undefined, proxy: IProxyManager | undefined): BorrowedProgramFate {
     if (!release) {
@@ -1125,6 +1128,13 @@ export abstract class SessionManagerCore extends EventEmitter {
     return fateOfRelease(release);
   }
 
+  /**
+   * What became of a borrowed program when its session closed (issue
+   * #1148), from the worker's report of the detaching disconnect: released
+   * when the adapter acknowledged it, ended when the adapter reported the
+   * program's exit, otherwise not confirmed, with why. No proxy means the
+   * program was already gone from this session: nothing is claimed.
+   */
   private borrowedProgramFate(proxy: IProxyManager | undefined): BorrowedProgramFate {
     if (!proxy) {
       return { released: false, processEnded: false };
@@ -1157,6 +1167,9 @@ export abstract class SessionManagerCore extends EventEmitter {
    * target is released with the request and bound detach_from_process uses
    * before the worker is stopped. Without it (the server's exit, the idle
    * policy) the worker's own close-time detach releases it, under its 1 s cap.
+   * close_debug_session comes through AttachController.closeSession, which
+   * makes it the session's one ending in flight; this method itself does not
+   * serialize overlapping closes.
    */
   async closeSessionReporting(
     sessionId: string,
@@ -1213,13 +1226,18 @@ export abstract class SessionManagerCore extends EventEmitter {
       // the worker is stopped (issue #1325): the worker's own close-time
       // detach gives the adapter 1 s and then closes the connection, and an
       // adapter that belongs to the target and answers only once the target
-      // is free ends itself when its client leaves first. Only once the
-      // attach has completed; before that the worker's detach still runs.
+      // is free ends itself when its client leaves first. From the moment
+      // the attach has put the session in RUNNING or PAUSED: that can be
+      // before attach_to_process returns (it may still be verifying threads
+      // or re-sending breakpoints, and then fails, its session gone), and the
+      // release goes out all the same, because what the port depends on is
+      // the live connection, not the call. Before that (INITIALIZING: the
+      // handshake is not done) the worker's own detach runs.
       const release = options.releaseBeforeStop && borrowedRoot &&
         (session.state === SessionState.RUNNING || session.state === SessionState.PAUSED)
         ? await releaseAttachedTarget(borrowedRoot, this.logger)
         : undefined;
-      const closed = await this.closeSingleSession(sessionId, { releaseChild: childEnd === 'release' });
+      const { closed, stopFailed } = await this.closeSingleSessionReporting(sessionId, { releaseChild: childEnd === 'release' });
       const fate: BorrowedProgramFate = session.parentSessionId
         ? { released: released === true, processEnded: childEnd === 'terminate' }
         : this.fateOfClose(release, borrowedRoot);
@@ -1236,7 +1254,8 @@ export abstract class SessionManagerCore extends EventEmitter {
         ...(childrenClosed > 0 ? { childrenClosed } : {}),
         ...(closed && fate.processEnded ? { processEnded: true as const } : {}),
         ...(closed && fate.released ? { released: true as const } : {}),
-        ...(closed && fate.unconfirmed !== undefined ? { releaseUnconfirmed: fate.unconfirmed } : {})
+        ...(closed && fate.unconfirmed !== undefined ? { releaseUnconfirmed: fate.unconfirmed } : {}),
+        ...(closed && stopFailed !== undefined ? { stopFailed } : {})
       };
     } finally {
       finishClose();
@@ -1337,14 +1356,28 @@ export abstract class SessionManagerCore extends EventEmitter {
    * waiters.
    */
   protected async closeSingleSession(sessionId: string, options: { releaseChild?: boolean } = {}): Promise<boolean> {
+    return (await this.closeSingleSessionReporting(sessionId, options)).closed;
+  }
+
+  /**
+   * closeSingleSession, with whether stopping the session's proxy failed and
+   * why (issue #1325): the row is removed either way, and a close answer
+   * that says the connection to the adapter was closed may say so only when
+   * the stop succeeded.
+   */
+  private async closeSingleSessionReporting(
+    sessionId: string,
+    options: { releaseChild?: boolean } = {}
+  ): Promise<{ closed: boolean; stopFailed?: string }> {
     const session = this.sessionStore.get(sessionId);
     if (!session) {
       this.logger.warn(`[SESSION_CLOSE_FAIL] Session not found: ${sessionId}`);
-      return false;
+      return { closed: false };
     }
     this.logger.info(`Closing debug session: ${sessionId}. Active proxy: ${session.proxyManager ? 'yes' : 'no'}`);
     clearPauseIntent(session);
-    
+    let stopFailed: string | undefined;
+
     if (session.proxyManager) {
       session.lastProxyPid = session.proxyManager.getProxyPid?.() ?? session.lastProxyPid;
       // Always cleanup listeners first
@@ -1361,6 +1394,7 @@ export abstract class SessionManagerCore extends EventEmitter {
         await (options.releaseChild && isChildProxyView(proxy) ? proxy.stop({ terminateDebuggee: false }) : proxy.stop());
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
+        stopFailed = message;
         this.logger.error(`[SessionManager] Error stopping proxy for session ${sessionId}:`, message);
       } finally {
         session.proxyManager = undefined;
@@ -1414,7 +1448,7 @@ export abstract class SessionManagerCore extends EventEmitter {
     } else {
       this.verifyProxyReaped(sessionId, session.lastProxyPid);
     }
-    return true;
+    return stopFailed === undefined ? { closed: true } : { closed: true, stopFailed };
   }
 
   /**

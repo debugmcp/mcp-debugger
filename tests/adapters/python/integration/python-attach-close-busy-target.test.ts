@@ -4,26 +4,32 @@
  * A target started with `python -m debugpy --listen` has one debug adapter,
  * started once, which owns the listening port. That adapter answers a
  * `disconnect` only after pydevd inside the debuggee has processed it, which
- * waits for the interpreter: about 40 ms on an idle target, the length of the
- * hold on a busy one. When its client closes the connection before the reply
- * is written, the adapter ends itself (`debugpy/common/messaging.py`,
+ * waits for the interpreter: within milliseconds on an idle target, as long as
+ * the hold on a busy one. When its client closes the connection before the
+ * reply is written, the adapter ends itself (`debugpy/common/messaging.py`,
  * `_run_handlers`: `self.close(); os._exit(1)`), and the target's debug port is
  * closed for the rest of its life.
  *
  * `close_debug_session` used to send that disconnect from the worker's
  * shutdown with a 1 s cap and then close the connection: a close during a
  * hold of more than a second closed the port for good (measured with 0.27.0).
- * Here the target holds the interpreter for a few seconds with one C call (a
- * sleep made with the GIL held, `busy_target.py`: wall-clock time, so a slow
- * or loaded machine does not stretch it towards the 10 s bound), the session
- * is closed during the hold, and the port must still serve a new session
- * afterwards.
+ * And a close that arrived while a detach waited sent a second disconnect on
+ * the same connection, which did the same, while both calls said released.
  *
- * `HOLD_TEST_DEBUGPY_PORT` pins the target's debug port (for hosts that allow
- * only some ports); otherwise a free one is picked.
+ * Here the target holds the interpreter with one C call that blocks with the
+ * GIL held until this test lets it go (`busy_target.py`, `block <port>`: a
+ * `recv` on a loopback connection the target opened to a listener here). The
+ * test, not a clock, ends the hold, so the sequence has no timing window: the
+ * hold starts; the ending goes out; it is still unanswered 2 s later (the old
+ * close answered after its 1 s cap, with a warning); the test lets go; the
+ * ending answers `released: true`; a new session attaches on the same port.
+ * The target's own 8 s receive timeout ends the hold if the test stalls, so a
+ * stalled test cannot push it past the 10 s release bound; the hold's end
+ * then says `timeout` rather than `byte`, and the test fails by that name.
  */
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'path';
+import fs from 'node:fs';
 import net from 'node:net';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'url';
@@ -34,17 +40,17 @@ import { ensurePythonOnPath } from './env-utils.js';
 const currentDirName = path.dirname(fileURLToPath(import.meta.url));
 const fixturesDir = path.resolve(currentDirName, '../../../fixtures/python');
 const busyTarget = path.join(fixturesDir, 'busy_target.py');
+const serverLogPath = path.resolve(currentDirName, '../../busy_target_close_test_server.log');
 const PYTHON = process.env.PYTHON_PATH ?? process.env.PYTHON_EXECUTABLE ?? (process.platform === 'win32' ? 'python' : 'python3');
-/** What the target is asked to hold for; it reports what it held. */
-const HOLD_SECONDS = 3.5;
-/** The old cap the close waited for the adapter's answer (issue #1325). */
-const OLD_CLOSE_CAP_MS = 1000;
+/**
+ * How long an ending must still be waiting while the target is held: twice the
+ * 1 s the close used to give the adapter, and well inside the target's own
+ * 8 s safety and the 10 s release bound.
+ */
+const STILL_WAITING_MS = 2000;
+const DETACH_RELEASED = 'Detached from process: the debug adapter confirmed the detach, and the process was left running';
 
 async function getFreePort(): Promise<number> {
-  const pinned = Number(process.env.HOLD_TEST_DEBUGPY_PORT);
-  if (Number.isInteger(pinned) && pinned > 0) {
-    return pinned;
-  }
   return new Promise((resolve, reject) => {
     const server = net.createServer();
     server.listen(0, '127.0.0.1', () => {
@@ -54,6 +60,16 @@ async function getFreePort(): Promise<number> {
     });
     server.on('error', reject);
   });
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function until(condition: () => boolean, timeoutMs: number, what: string): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await sleep(20);
+  }
 }
 
 let client: Client | null = null;
@@ -66,13 +82,24 @@ async function startTestServer(): Promise<void> {
     if (process.env[key] !== undefined) env[key] = process.env[key] as string;
   }
   ensurePythonOnPath(env);
+  try {
+    if (fs.existsSync(serverLogPath)) fs.unlinkSync(serverLogPath);
+  } catch { /* best effort */ }
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [serverScriptPath, '--log-level', 'debug', '--log-file', path.resolve(currentDirName, '../../busy_target_close_test_server.log')],
+    args: [serverScriptPath, '--log-level', 'debug', '--log-file', serverLogPath],
     env
   });
   await client.connect(transport);
 }
+
+const serverLog = (): string => {
+  try {
+    return fs.readFileSync(serverLogPath, 'utf8');
+  } catch {
+    return '';
+  }
+};
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function call(name: string, args: Record<string, unknown>): Promise<any> {
@@ -85,16 +112,28 @@ async function call(name: string, args: Record<string, unknown>): Promise<any> {
   return JSON.parse(content[0].text);
 }
 
+/** A call in flight, and whether it has answered yet. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function track(answer: Promise<any>) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tracked: { answer: Promise<any>; answered: boolean; value?: unknown } = { answer, answered: false };
+  void answer.then((value) => { tracked.answered = true; tracked.value = value; }, () => { tracked.answered = true; });
+  return tracked;
+}
+
 interface Target { proc: ChildProcess; port: number; output: () => string }
 
-let target: Target | null = null;
+let targets: Target[] = [];
+const gates: Array<{ server: net.Server; socket?: net.Socket }> = [];
+
+const PORT_IN_USE_PATTERN = /Address already in use|EADDRINUSE|10048/i;
 
 /**
  * Start busy_target.py under debugpy and wait for its READY line. No TCP
  * probe: a session-less connect makes this adapter exit too
  * (docs/python/spike-notes-subprocess.md).
  */
-async function startTarget(): Promise<Target> {
+async function startTargetOnce(): Promise<Target> {
   const port = await getFreePort();
   const proc = spawn(PYTHON, ['-m', 'debugpy', '--listen', `127.0.0.1:${port}`, busyTarget], {
     cwd: fixturesDir,
@@ -102,8 +141,8 @@ async function startTarget(): Promise<Target> {
     stdio: ['pipe', 'pipe', 'pipe']
   });
   let buffer = '';
-  const started: Target = { proc, port, output: () => buffer };
-  target = started;
+  const target: Target = { proc, port, output: () => buffer };
+  targets.push(target);
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`debugpy target not ready: ${buffer}`)), 20000);
     const onData = (chunk: Buffer) => {
@@ -115,15 +154,26 @@ async function startTarget(): Promise<Target> {
     proc.on('error', (error) => { clearTimeout(timer); reject(error); });
     proc.on('exit', (code) => { clearTimeout(timer); reject(new Error(`debugpy target exited ${code} before ready: ${buffer}`)); });
   });
-  return started;
+  return target;
 }
 
-async function until(condition: () => boolean, timeoutMs: number, what: string): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!condition()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+/** Retries if a parallel test takes the port between getFreePort() and debugpy's bind (#1243). */
+async function startTarget(): Promise<Target> {
+  const maxAttempts = 4;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await startTargetOnce();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (attempt < maxAttempts && PORT_IN_USE_PATTERN.test(message)) {
+        const failed = targets.pop();
+        if (failed && failed.proc.exitCode === null) failed.proc.kill();
+        continue;
+      }
+      throw error;
+    }
   }
+  throw new Error('unreachable');
 }
 
 /** Attach a new session to the target and leave it running. */
@@ -140,7 +190,44 @@ async function attachRunning(name: string, port: number): Promise<string> {
   return sessionId;
 }
 
-describe('close_debug_session on a busy attached Python target (issue #1325) @requires-python', () => {
+/**
+ * Make the target hold the interpreter until `letGo()`: it connects to a
+ * listener here and blocks in recv on that connection. Resolves once the
+ * target has said the hold starts.
+ */
+async function hold(target: Target): Promise<{ letGo: () => void; ended: () => Promise<{ seconds: number; why: string }> }> {
+  const gate: { server: net.Server; socket?: net.Socket } = { server: net.createServer() };
+  gates.push(gate);
+  const connected = new Promise<net.Socket>((resolve) => gate.server.once('connection', resolve));
+  await new Promise<void>((resolve, reject) => {
+    gate.server.once('error', reject);
+    gate.server.listen(0, '127.0.0.1', () => resolve());
+  });
+  const gatePort = (gate.server.address() as net.AddressInfo).port;
+  target.proc.stdin!.write(`block ${gatePort}\n`);
+  gate.socket = await connected;
+  await until(() => target.output().includes('HOLD_START'), 10000, 'the hold to start');
+  const holdEnd = /HOLD_END (\d+\.\d+) ([^\r\n]+)/;
+  return {
+    letGo: () => { gate.socket!.write(Buffer.from([1])); },
+    ended: async () => {
+      await until(() => holdEnd.test(target.output()), 15000, 'the hold to end');
+      const [, seconds, why] = holdEnd.exec(target.output())!;
+      return { seconds: Number(seconds), why };
+    }
+  };
+}
+
+/** The port the ending must not have closed: the target runs, and a new session attaches and releases it. */
+async function portServesANewAttach(target: Target): Promise<void> {
+  expect(target.proc.exitCode, target.output()).toBeNull();
+  const again = await attachRunning('busy-target-again', target.port);
+  const closedAgain = await call('close_debug_session', { sessionId: again });
+  expect(closedAgain, JSON.stringify(closedAgain)).toMatchObject({ success: true, released: true });
+  expect(target.proc.exitCode, target.output()).toBeNull();
+}
+
+describe('ending a session on a busy attached Python target (issue #1325) @requires-python', () => {
   beforeAll(async () => {
     await startTestServer();
   }, 30000);
@@ -153,39 +240,59 @@ describe('close_debug_session on a busy attached Python target (issue #1325) @re
   });
 
   afterEach(() => {
-    if (target && target.proc.exitCode === null) target.proc.kill();
-    target = null;
+    for (const gate of gates.splice(0)) {
+      gate.socket?.destroy();
+      gate.server.close();
+    }
+    for (const target of targets) {
+      if (target.proc.exitCode === null) target.proc.kill();
+    }
+    targets = [];
   });
 
   it("keeps the target's debug port when the session is closed while the target holds the interpreter", async () => {
     const busy = await startTarget();
     const sessionId = await attachRunning('busy-target', busy.port);
+    const held = await hold(busy);
 
-    // The hold starts; the close goes out while it lasts.
-    busy.proc.stdin!.write(`hold ${HOLD_SECONDS}\n`);
-    await until(() => busy.output().includes('HOLD_START'), 10000, 'the hold to start');
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    expect(busy.output(), 'the close must go out during the hold').not.toContain('HOLD_END');
+    const closing = track(call('close_debug_session', { sessionId }));
+    await sleep(STILL_WAITING_MS);
+    // The close waits for the adapter's answer. The old one answered here,
+    // after its 1 s cap, with a warning, and the port was gone.
+    expect(closing.answered, `the close answered while the target still held the interpreter: ${JSON.stringify(closing.value)}`).toBe(false);
 
-    const closeStartedAt = Date.now();
-    const closed = await call('close_debug_session', { sessionId });
-    const closeMs = Date.now() - closeStartedAt;
-
-    await until(() => /HOLD_END (\d+\.\d+)/.test(busy.output()), 30000, 'the hold to end');
-    const heldMs = Number(/HOLD_END (\d+\.\d+)/.exec(busy.output())![1]) * 1000;
-    // The hold has to outlast the old cap by a margin, or this proves nothing.
-    expect(heldMs, busy.output()).toBeGreaterThan(OLD_CLOSE_CAP_MS + 500);
-
-    // The close waited for the adapter's answer instead of leaving after 1 s.
+    held.letGo();
+    const closed = await closing.answer;
     expect(closed, JSON.stringify(closed)).toMatchObject({ success: true, released: true });
     expect(closed.warning).toBeUndefined();
-    expect(closeMs).toBeGreaterThan(OLD_CLOSE_CAP_MS);
+    expect((await held.ended()).why, busy.output()).toBe('byte');
 
-    // The port survived: the target runs, and a new session attaches and releases it.
-    expect(busy.proc.exitCode).toBeNull();
-    const again = await attachRunning('busy-target-again', busy.port);
-    const closedAgain = await call('close_debug_session', { sessionId: again });
-    expect(closedAgain, JSON.stringify(closedAgain)).toMatchObject({ success: true, released: true });
-    expect(busy.proc.exitCode).toBeNull();
+    await portServesANewAttach(busy);
+  }, 60000);
+
+  it('releases the target once when a close arrives while a detach waits: both answers say what was observed', async () => {
+    const busy = await startTarget();
+    const sessionId = await attachRunning('busy-target-overlap', busy.port);
+    const held = await hold(busy);
+
+    const detaching = track(call('detach_from_process', { sessionId }));
+    // The close goes out once the detach is in flight, which the server logs
+    // as the detach starts: the order is observed, not slept for.
+    await until(() => serverLog().includes(`Detaching from process for session ${sessionId}`), 10000, 'the detach to be in flight');
+    const closing = track(call('close_debug_session', { sessionId }));
+    await sleep(STILL_WAITING_MS);
+    expect(detaching.answered, `the detach answered while the target still held the interpreter: ${JSON.stringify(detaching.value)}`).toBe(false);
+    expect(closing.answered, `the close answered while the detach still waited: ${JSON.stringify(closing.value)}`).toBe(false);
+
+    held.letGo();
+    const [detached, closed] = await Promise.all([detaching.answer, closing.answer]);
+    // The detach sent the one release; the close joined it and sent nothing.
+    expect(detached, JSON.stringify(detached)).toMatchObject({ success: true, state: 'stopped', released: true, message: DETACH_RELEASED });
+    expect(detached.warning).toBeUndefined();
+    expect(closed, JSON.stringify(closed)).toMatchObject({ success: true, message: `Closed debug session: ${sessionId}`, released: true });
+    expect(closed.warning).toBeUndefined();
+    expect((await held.ended()).why, busy.output()).toBe('byte');
+
+    await portServesANewAttach(busy);
   }, 60000);
 });

@@ -115,6 +115,20 @@ describe('what an agent sees of the idle policy (issue #1025, step 2)', () => {
         );
       });
 
+      it('says the connection was closed only when stopping the worker succeeded (issue #1325)', () => {
+        const sentence = describeIdleExpiry(record({ outcome: 'unconfirmed', stopFailed: 'kill EPERM' }));
+        expect(sentence).toContain(
+          ' The debug adapter did not confirm that it released the process it was attached to, so whether that process is still running is not known;' +
+          ' stopping the debugger then failed (kill EPERM), so whether the connection to the adapter was closed, and with it a debug port' +
+          ' that belonged to the target, is not known either. '
+        );
+        expect(sentence).not.toContain('; the connection to the adapter was closed');
+        // Another outcome is not reworded by a stop failure.
+        expect(describeIdleExpiry(record({ outcome: 'released', stopFailed: 'kill EPERM' }))).toContain(
+          ' The process it was attached to was released and keeps running. '
+        );
+      });
+
       it('states the idle time in the unit of the window, never a mix', () => {
         // A window in whole minutes: the idle time is minutes too (390 s is not "390 s").
         expect(describeIdleExpiry(record({ idleMs: 390_000 }))).toContain('for 6 min (the window is 5 min,');

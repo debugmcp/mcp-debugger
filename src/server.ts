@@ -345,8 +345,9 @@ export class DebugMcpServer implements ToolContext {
   }
 
   public async closeDebugSession(sessionId: string): Promise<CloseSessionOutcome> {
-    // An attached target is released the way detach_from_process releases it (issue #1325).
-    return this.sessionManager.closeSessionReporting(sessionId, { releaseBeforeStop: true });
+    // An attached target is released the way detach_from_process releases it,
+    // and an overlapping close or detach joins the one in flight (issue #1325).
+    return this.sessionManager.closeDebugSession(sessionId);
   }
 
   /**

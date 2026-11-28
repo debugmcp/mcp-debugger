@@ -262,9 +262,10 @@ export const closeDebugSessionTool: ToolHandler = async (ctx, args) => {
     ...(outcome.processEnded ? { processEnded: true } : {}),
     ...(outcome.released ? { released: true } : {}),
     // A borrowed program whose detach nothing acknowledged (issue #1148):
-    // neither field above, and the answer says why.
+    // neither field above, and the answer says why, and whether the
+    // connection to the adapter was seen to close (issue #1325).
     ...(outcome.releaseUnconfirmed !== undefined
-      ? { warning: ErrorMessages.closeReleaseUnconfirmed(outcome.releaseUnconfirmed) }
+      ? { warning: ErrorMessages.closeReleaseUnconfirmed(outcome.releaseUnconfirmed, outcome.stopFailed) }
       : {})
   });
 };

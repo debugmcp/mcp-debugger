@@ -147,6 +147,13 @@ describe('ErrorMessages', () => {
       expect(message).toContain('A detach is already in progress');
       expect(message).toContain('detach_from_process has not returned yet');
     });
+
+    it('does not tell a call to wait out a close: the close removes the session (issue #1325)', () => {
+      expect(ErrorMessages.operationInFlight('close', 'attach_to_process')).toBe(
+        'This session is being closed (close_debug_session has not returned yet), so attach_to_process has no ' +
+        'session to act on once it returns. Create a new session instead.'
+      );
+    });
   });
 
   it('builds adapter ready timeout message', () => {

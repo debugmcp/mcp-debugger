@@ -1,5 +1,8 @@
 /**
- * Attach-mode sessions: `attach_to_process` and `detach_from_process`.
+ * Attach-mode sessions: `attach_to_process` and `detach_from_process`, and
+ * the session's ending by `close_debug_session`, which a detach joins and
+ * which joins a detach (issue #1325: one release per session, whatever
+ * overlaps).
  *
  * An attach is a launch whose configuration says `request: 'attach'`, so the
  * proxy comes up through the same ProxyLauncher. What is attach-specific is
@@ -24,7 +27,13 @@ import type { AttachLocality } from '@debugmcp/shared';
 import { attachLocalityOf, classifyAttachAddressing } from './attach-addressing.js';
 import { ErrorMessages } from '../../utils/error-messages.js';
 import { DapResponseError } from '../../proxy/dap-response-error.js';
-import type { AttachResultData, CustomLaunchRequestArguments, DebugResult, DetachResultData } from '../session-manager-core.js';
+import type {
+  AttachResultData,
+  CloseSessionOutcome,
+  CustomLaunchRequestArguments,
+  DebugResult,
+  DetachResultData
+} from '../session-manager-core.js';
 import type { AttachContext } from '../operations-context.js';
 import type { BreakpointController } from '../breakpoints/breakpoint-controller.js';
 import { failProxySetup, sessionRemovedDuringTeardown } from '../launch/proxy-failure-diagnostics.js';
@@ -35,8 +44,8 @@ import { ATTACH_ANCHOR_BOUNDS, selectStopAnchor } from '../inspection/stop-ancho
 import { describeStopLocation, landingFields } from '../inspection/stop-location.js';
 import { composeStopSnapshot } from '../inspection/stop-snapshot.js';
 import type { PauseCoordinator } from '../execution/pause-coordinator.js';
-import { refuseChildSession, type InFlightGuard } from '../in-flight-guard.js';
-import { releaseAttachedTarget } from './target-release.js';
+import { refuseChildSession, type EndingRecord, type InFlightGuard, type SessionEnding } from '../in-flight-guard.js';
+import { releaseAttachedTarget, type TargetRelease } from './target-release.js';
 
 /** The attach_to_process arguments as the session layer receives them. */
 export interface AttachRequest {
@@ -535,6 +544,16 @@ export class AttachController {
       // log the same full failure record it logs, proxy-log tail included
       // (issue #561) — an attach that dies during proxy initialization used
       // to leave the adapter's own complaint unreadable.
+      //
+      // A close that arrived while this attach was in flight has sent the
+      // session's release and owns the teardown (issue #1325): stopping the
+      // worker here would close the connection before the adapter's answer,
+      // which is how a target-owned adapter loses the target's port. Wait for
+      // that close; its teardown leaves nothing for this one to stop.
+      const closing = this.inFlight.ending(sessionId);
+      if (closing) {
+        await closing.over;
+      }
       const diagnosticData = await failProxySetup(this.ctx, session, error, 'attachToProcess');
       session.failureDiagnostics = Object.keys(diagnosticData).length > 0
         ? diagnosticData
@@ -600,7 +619,9 @@ export class AttachController {
    * exit as the program running to completion and returned `success: true`
    * for a process the caller had just detached from. Claimed before the
    * proxy check and before the first await, so a same-tick call cannot race
-   * it, and a launch arriving mid-detach is refused likewise.
+   * it, and a launch arriving mid-detach is refused likewise. It is the
+   * session's ending too (issue #1325): a close or a plain detach that
+   * arrives while it runs joins it rather than send a second `disconnect`.
    */
   async detachFromProcess(
     sessionId: string,
@@ -619,30 +640,114 @@ export class AttachController {
     if (!terminateProcess && session.proxyManager && session.run.programOwnership === 'owned') {
       return { success: false, state: session.state, error: ErrorMessages.detachOwnedProgramRefused() };
     }
-    return this.inFlight.run(sessionId, 'detach', 'detach_from_process', this.ctx, () =>
+    // One ending per session at a time (issue #1325): a detach that arrives
+    // while a close or a plain detach releases the target sends nothing.
+    const inFlight = this.inFlight.ending(sessionId);
+    if (inFlight) {
+      return this.detachJoining(session, terminateProcess, inFlight);
+    }
+    const refusal = this.inFlight.tryAcquire(sessionId, 'detach', 'detach_from_process');
+    if (refusal) {
+      this.ctx.logger.warn(`[SessionManager] ${refusal}`);
+      return { success: false, state: session.state, error: refusal };
+    }
+    return this.inFlight.runEnding(sessionId, { operation: 'detach', terminate: terminateProcess, claimed: true }, () =>
       this.detach(sessionId, terminateProcess)
     );
   }
 
-  /** The detach proper; the caller holds the session's in-flight claim. */
+  /**
+   * A detach that arrived while another ending of the session was in flight
+   * (issue #1325). A plain detach joins a close or a plain detach: it waits
+   * for it and answers from what that ending observed, so the target gets
+   * one `disconnect`. A terminating detach is not a release, so it neither
+   * joins one nor is joined by one: it is refused, as it was before, and
+   * sends nothing. When the ending it joined failed before it observed
+   * anything, this detach goes ahead on its own, after it.
+   */
+  private async detachJoining(
+    session: ManagedSession,
+    terminateProcess: boolean,
+    inFlight: SessionEnding
+  ): Promise<DebugResult<DetachResultData>> {
+    if (terminateProcess || inFlight.terminate) {
+      const refusal = ErrorMessages.operationInFlight(inFlight.operation, 'detach_from_process');
+      this.ctx.logger.warn(`[SessionManager] ${refusal}`);
+      return { success: false, state: session.state, error: refusal };
+    }
+    this.ctx.logger.info(
+      `[SessionManager] detach_from_process for session ${session.id} joins the ${inFlight.operation} in progress (issue #1325)`
+    );
+    const record = await inFlight.over;
+    if (record.detached) {
+      return record.detached;
+    }
+    if (record.closed) {
+      return detachAnswerFromClose(record.closed);
+    }
+    return this.detachFromProcess(session.id, terminateProcess);
+  }
+
+  /**
+   * close_debug_session (issue #1325): the session's ending, joined like a
+   * detach. A close that arrives while another close or a detach is in
+   * flight waits for it and sends nothing of its own: the close it joined is
+   * its answer; after a detach it removes what is left (nothing runs, so
+   * nothing is sent) and carries what the detach's release observed. Else it
+   * takes the session's claim when it is free, so an attach, launch or
+   * restart that arrives while its release waits is refused rather than
+   * stopping the worker under it. A close is never refused: with a
+   * launch-shaped call in flight (an attach still being made) it goes ahead
+   * without the claim, as it always has, and still keeps joiners off.
+   */
+  async closeSession(sessionId: string): Promise<CloseSessionOutcome> {
+    const inFlight = this.inFlight.ending(sessionId);
+    if (inFlight) {
+      this.ctx.logger.info(
+        `[SessionManager] close_debug_session for session ${sessionId} joins the ${inFlight.operation} in progress (issue #1325)`
+      );
+      const record = await inFlight.over;
+      if (record.closed) {
+        return record.closed;
+      }
+      return withJoinedRelease(await this.closeSession(sessionId), sessionId, record.release);
+    }
+    const claimed = this.inFlight.tryAcquire(sessionId, 'close', 'close_debug_session') === undefined;
+    return this.inFlight.runEnding(sessionId, { operation: 'close', claimed }, async () => {
+      const closed = await this.ctx.closeSessionReporting(sessionId, { releaseBeforeStop: true });
+      return { answer: closed, record: { operation: 'close', closed } };
+    });
+  }
+
+  /** The detach proper; the caller holds the session's in-flight claim and its ending. */
   private async detach(
     sessionId: string,
     terminateProcess: boolean
-  ): Promise<DebugResult<DetachResultData>> {
+  ): Promise<{ answer: DebugResult<DetachResultData>; record: EndingRecord }> {
     const session = this.ctx.getSession(sessionId);
     this.ctx.logger.info(
       `[SessionManager] Detaching from process for session ${sessionId}, terminateProcess: ${terminateProcess}`
     );
 
+    // What a close or detach that joins this one reads (issue #1325): only
+    // what this detach observed, and only once it has succeeded.
+    const answered = (
+      answer: DebugResult<DetachResultData>,
+      observed: Pick<EndingRecord, 'release' | 'closed'> = {}
+    ): { answer: DebugResult<DetachResultData>; record: EndingRecord } => ({
+      answer,
+      record: { operation: 'detach', detached: answer, ...(answer.success ? observed : {}) }
+    });
+
     // A proxy that has stopped is a program this session let go of already
     // (issue #1148): a second detach has nothing to detach from, and must not
     // answer from what the first one saw.
     if (!session.proxyManager || !session.proxyManager.isRunning()) {
-      return {
+      return answered({
         success: false,
         state: session.state,
         error: 'No active debug session to detach from'
-      };
+      });
     }
 
     const detachNote = session.run.attachMode === true && session.run.childDebuggingOptedOut === undefined &&
@@ -660,13 +765,16 @@ export class AttachController {
     // each runs on undebugged, then detaches the parent.
     let childrenClosed = 0;
     let childrenReleased = 0;
+    let observed: Pick<EndingRecord, 'release' | 'closed'> = {};
     const finishClose = this.ctx.beginSubtreeClose(sessionId);
 
     try {
       if (terminateProcess) {
         // End children before disconnecting the root, and override an
         // attach root's usual keep-the-target-running close semantics.
-        childrenClosed = (await this.ctx.closeSessionReporting(sessionId, { terminateDebuggee: true })).childrenClosed ?? 0;
+        const closed = await this.ctx.closeSessionReporting(sessionId, { terminateDebuggee: true });
+        childrenClosed = closed.childrenClosed ?? 0;
+        observed = { closed };
       } else {
         const proxyManager = session.proxyManager;
         childrenReleased = await this.ctx.releaseDescendants(session);
@@ -680,6 +788,7 @@ export class AttachController {
         // request's own failure says nothing when `terminated` came in reply.
         // The same release close_debug_session sends (issue #1325).
         const release = await releaseAttachedTarget(proxyManager, this.ctx.logger);
+        observed = { release };
         if (release.fate === 'program-ended') {
           fate = { message: ErrorMessages.detachProgramEnded(), processEnded: true };
         } else if (release.fate === 'released') {
@@ -724,7 +833,7 @@ export class AttachController {
         });
       }
 
-      return {
+      return answered({
         success: true,
         state: SessionState.STOPPED,
         data: {
@@ -740,18 +849,73 @@ export class AttachController {
           ...(childrenClosed > 0 ? { childrenClosed } : {}),
           ...(childrenReleased > 0 ? { childrenReleased } : {})
         }
-      };
+      }, observed);
     } catch (error) {
       this.ctx.logger.error(`[SessionManager] Failed to detach from process for session ${sessionId}:`, error);
 
       const message = error instanceof Error ? error.message : String(error);
-      return {
+      return answered({
         success: false,
         state: session.state,
         error: `Failed to detach: ${message}`
-      };
+      });
     } finally {
       finishClose();
     }
+  }
+}
+
+/**
+ * A plain detach's answer from the close it joined (issue #1325): the
+ * release that close sent, worded as a detach states it, plus whose release
+ * it was. A close that released nothing (its session had no live program)
+ * leaves nothing for a detach either.
+ */
+function detachAnswerFromClose(closed: CloseSessionOutcome): DebugResult<DetachResultData> {
+  const stopped = SessionState.STOPPED;
+  if (closed.closed && closed.released) {
+    return {
+      success: true,
+      state: stopped,
+      data: { message: ErrorMessages.detachJoinedClose(ErrorMessages.detachReleased()), released: true }
+    };
+  }
+  if (closed.closed && closed.processEnded) {
+    return {
+      success: true,
+      state: stopped,
+      data: { message: ErrorMessages.detachJoinedClose(ErrorMessages.detachProgramEnded()), processEnded: true }
+    };
+  }
+  if (closed.closed && closed.releaseUnconfirmed !== undefined) {
+    const unconfirmed = ErrorMessages.detachJoinedClose(
+      ErrorMessages.closeReleaseUnconfirmed(closed.releaseUnconfirmed, closed.stopFailed)
+    );
+    return { success: true, state: stopped, data: { message: unconfirmed, warning: unconfirmed } };
+  }
+  return { success: false, state: stopped, error: 'No active debug session to detach from' };
+}
+
+/**
+ * A close's outcome after the detach it joined (issue #1325): the close
+ * removed what the detach left and sent nothing, so what became of the
+ * target is what the detach's release observed. A close that observed a
+ * fate of its own keeps it.
+ */
+function withJoinedRelease(
+  outcome: CloseSessionOutcome,
+  sessionId: string,
+  release: TargetRelease | undefined
+): CloseSessionOutcome {
+  if (!outcome.closed || !release || outcome.released || outcome.processEnded || outcome.releaseUnconfirmed !== undefined) {
+    return outcome;
+  }
+  switch (release.fate) {
+    case 'released':
+      return { ...outcome, released: true, releasedSessionIds: [...(outcome.releasedSessionIds ?? []), sessionId] };
+    case 'program-ended':
+      return { ...outcome, processEnded: true };
+    case 'unconfirmed':
+      return { ...outcome, releaseUnconfirmed: release.reason };
   }
 }
