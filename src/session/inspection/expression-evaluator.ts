@@ -333,7 +333,7 @@ export class ExpressionEvaluator {
       // Name the frame the failed evaluation ran in: "Unable to evaluate on
       // async stack frame" is only actionable when the caller can see which
       // frame that was (issue #672).
-      return { success: false, error: withTimeoutHint(userError), ...anchorFields };
+      return { success: false, error: withTimeoutHint(userError, error), ...anchorFields };
     }
   }
 }

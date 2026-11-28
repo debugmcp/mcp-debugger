@@ -347,7 +347,7 @@ A dual-state overlay (`SessionLifecycleState` + `ExecutionState`) is derived fro
 4. **Test Coverage**: Maintain >90% test coverage
 5. **Error Handling**: Use centralized error messages from `error-messages.ts`
 6. **Logging**: Use Winston logger with appropriate log levels
-7. **Async Operations**: All DAP operations are async with timeouts
+7. **Async Operations**: All DAP operations are async with timeouts. A wait or retry loop that states a bound ("within N ms") takes a `Deadline` (`deadline()` from `@debugmcp/shared`, `packages/shared/src/utils/deadline.ts`) instead of checking `Date.now()` between steps: `sleep` for its poll interval, `request` for what it sends (a DAP request goes through `sendDapRequest(command, args, { deadline })`, which gives the worker the time that remains), `race` for what it waits on but did not start, `dispose()` in `finally`, and the message names `budgetMs`. Its answer then comes within the bound plus `PARENT_GRACE_MS` (250 ms, the grace a request already sent has for the worker's own answer to arrive). Three loops use it so far (the implicit stack read's readiness wait in `frame-anchor-resolver.ts`, the JavaScript attach's inspector wait in `inspector-activation.ts`, the worker's `ensureInitialStop`); the other loops that state a bound still check it between steps
 8. **Process Cleanup**: Always ensure proper cleanup of spawned processes
 9. **Adapter Development**: New language adapters should implement `IAdapterFactory` from `@debugmcp/shared`
 

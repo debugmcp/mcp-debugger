@@ -9,8 +9,10 @@
  * #904); the resolver decides when to ask and what to do with the answer.
  */
 import {
+  deadline,
   SessionState,
   type AdapterPolicy,
+  type Deadline,
   type DebugLanguage,
   type ILogger,
   type StackFrame
@@ -401,18 +403,28 @@ export class FrameAnchorResolver {
     sessionId: string,
     proxyManager: IProxyManager,
     threadId: number,
-    opts?: { timeoutMs?: number }
+    opts?: { timeoutMs?: number; within?: Deadline }
   ): Promise<DebugProtocol.StackFrame[]> {
     this.ctx.logger.info(`[FrameAnchor ${sessionId}] Sending DAP stackTrace for thread ${threadId}.`);
+    const within = opts?.within;
     // Two arguments when no timeout is asked for: the plain read is what
     // every consumer and test of the resolver has always seen.
-    const response = typeof opts?.timeoutMs === 'number'
-      ? await proxyManager.sendDapRequest<DebugProtocol.StackTraceResponse>(
+    const response = within
+      // Inside the readiness window: the request is the window's,
+      // so it is answered by the window's backstop even from a proxy that
+      // ignores the deadline it is handed.
+      ? await within.request((remainingMs) => proxyManager.sendDapRequest<DebugProtocol.StackTraceResponse>(
         'stackTrace',
         { threadId },
-        { timeoutMs: opts.timeoutMs }
-      )
-      : await proxyManager.sendDapRequest<DebugProtocol.StackTraceResponse>('stackTrace', { threadId });
+        { timeoutMs: Math.min(opts?.timeoutMs ?? remainingMs, remainingMs), deadline: within }
+      ))
+      : typeof opts?.timeoutMs === 'number'
+        ? await proxyManager.sendDapRequest<DebugProtocol.StackTraceResponse>(
+          'stackTrace',
+          { threadId },
+          { timeoutMs: opts.timeoutMs }
+        )
+        : await proxyManager.sendDapRequest<DebugProtocol.StackTraceResponse>('stackTrace', { threadId });
     if (response?.success === false) {
       throw new Error(response.message || `DAP 'stackTrace' request failed`);
     }
@@ -466,48 +478,75 @@ export class FrameAnchorResolver {
       this.ctx.logger.info(`[FrameAnchor ${sessionId}] Thread ${threadId} is paused with no frames: ${empty.note}`);
       return { frames: [], threadId, note: empty.note };
     }
-    const deadline = Date.now() + pausedStackReadyTimeoutMs;
-    while (Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, pausedStackReadyIntervalMs));
-      if (session.state !== SessionState.PAUSED) {
-        return {
-          frames: [],
+    // The window is a Deadline: each poll interval ends at the
+    // window, every request in it is given what remains of it (and is
+    // answered by the window's backstop, the window plus PARENT_GRACE_MS, if
+    // the proxy never answers), and no read or scan starts once it has
+    // closed. So the sentence below that names the window is true.
+    const readiness = deadline(pausedStackReadyTimeoutMs, { label: `paused stack readiness for session ${sessionId}` });
+    try {
+      while ((await readiness.sleep(pausedStackReadyIntervalMs)) === 'slept') {
+        if (session.state !== SessionState.PAUSED) {
+          return {
+            frames: [],
+            threadId,
+            note: 'The session left the paused state while waiting for the stack; it is no longer paused.'
+          };
+        }
+        let frames: DebugProtocol.StackFrame[];
+        try {
+          frames = await this.requestRawStackFrames(sessionId, proxyManager, threadId, { within: readiness });
+        } catch (error) {
+          // A read the window cut off is the window's answer, not a failure.
+          if (readiness.expired) {
+            break;
+          }
+          throw error;
+        }
+        if (frames.length > 0) {
+          // The stopped thread's own stack, answered inside the grace at the
+          // latest: it changes nothing but the answer, so it wins.
+          return { frames, threadId };
+        }
+        if (readiness.expired) {
+          break;
+        }
+        const scanned = await this.scanSiblings(
+          sessionId,
+          proxyManager,
           threadId,
-          note: 'The session left the paused state while waiting for the stack; it is no longer paused.'
-        };
+          policy,
+          readiness.remaining(),
+          undefined,
+          undefined,
+          readiness
+        );
+        // Adopting a sibling moves the session's inspection anchor, which
+        // outlives this read: never after the window the answer states.
+        if (readiness.expired) {
+          break;
+        }
+        if (scanned) {
+          return this.adoptFramedSibling(sessionId, session, proxyManager, threadId, stopAtGate, scanned);
+        }
       }
-      const frames = await this.requestRawStackFrames(sessionId, proxyManager, threadId);
-      if (frames.length > 0) {
-        return { frames, threadId };
-      }
-      // At least one poll interval per scan: a sibling that answers in a
-      // few ms must not be "could not be unwound" because the window has
-      // a few ms left.
-      const scanned = await this.scanSiblings(
-        sessionId,
-        proxyManager,
-        threadId,
-        policy,
-        Math.max(deadline - Date.now(), pausedStackReadyIntervalMs)
-      );
-      if (scanned) {
-        return this.adoptFramedSibling(sessionId, session, proxyManager, threadId, stopAtGate, scanned);
-      }
+    } finally {
+      readiness.dispose();
     }
     if (empty) {
       // The policy's own reading, after the wait it did not rule out.
       this.ctx.logger.info(
-        `[FrameAnchor ${sessionId}] Thread ${threadId} is paused with no frames after ${pausedStackReadyTimeoutMs}ms: ${empty.note}`
+        `[FrameAnchor ${sessionId}] Thread ${threadId} is paused with no frames after ${readiness.budgetMs}ms: ${empty.note}`
       );
       return { frames: [], threadId, note: empty.note };
     }
     this.ctx.logger.warn(
-      `[FrameAnchor ${sessionId}] Stack stayed empty for ${pausedStackReadyTimeoutMs}ms on thread ${threadId}.`
+      `[FrameAnchor ${sessionId}] Stack stayed empty for ${readiness.budgetMs}ms on thread ${threadId}.`
     );
     return {
       frames: [],
       threadId,
-      note: `The stopped thread reported no stack frames within ${pausedStackReadyTimeoutMs}ms; the target may be paused in native code. Try get_stack_trace with a threadId from list_threads, or continue_execution followed by pause_execution to re-anchor the session on a reportable thread.`
+      note: `The stopped thread reported no stack frames within ${readiness.budgetMs}ms; the target may be paused in native code. Try get_stack_trace with a threadId from list_threads, or continue_execution followed by pause_execution to re-anchor the session on a reportable thread.`
     };
   }
 
@@ -620,9 +659,10 @@ export class FrameAnchorResolver {
     policy: AdapterPolicy,
     budgetMs: number,
     threads?: DebugProtocol.Thread[],
-    unwindTimeoutMs: number = SIBLING_UNWIND_TIMEOUT_MS
+    unwindTimeoutMs: number = SIBLING_UNWIND_TIMEOUT_MS,
+    within?: Deadline
   ): Promise<{ verdict: StopAnchorVerdict; threads: DebugProtocol.Thread[] }> {
-    const listed = threads ?? await this.listThreadsForScan(sessionId, proxyManager) ?? [];
+    const listed = threads ?? await this.listThreadsForScan(sessionId, proxyManager, within) ?? [];
     const verdict = await selectStopAnchor({
       stoppedThreadId,
       stoppedFrames,
@@ -632,7 +672,7 @@ export class FrameAnchorResolver {
       // may list its one user thread twentieth); each unwind under its own
       // short timeout, all within the window the caller has left.
       bounds: { maxThreads: Number.POSITIVE_INFINITY, unwindTimeoutMs, budgetMs: Math.max(budgetMs, 0) },
-      unwind: (threadId, { timeoutMs }) => this.requestRawStackFrames(sessionId, proxyManager, threadId, { timeoutMs }),
+      unwind: (threadId, { timeoutMs }) => this.requestRawStackFrames(sessionId, proxyManager, threadId, { timeoutMs, within }),
       log: (message) => this.ctx.logger.debug(`[FrameAnchor ${sessionId}] ${message}`)
     });
     return { verdict, threads: listed };
@@ -650,7 +690,8 @@ export class FrameAnchorResolver {
     policy: AdapterPolicy,
     budgetMs: number,
     threads?: DebugProtocol.Thread[],
-    unwindTimeoutMs?: number
+    unwindTimeoutMs?: number,
+    within?: Deadline
   ): Promise<SiblingStack | null> {
     const { verdict, threads: listed } = await this.verdictFor(
       sessionId,
@@ -660,7 +701,8 @@ export class FrameAnchorResolver {
       policy,
       budgetMs,
       threads,
-      unwindTimeoutMs
+      unwindTimeoutMs,
+      within
     );
     const chosen = verdict.programThreadId ?? verdict.framedSiblingId;
     if (chosen === undefined || chosen === excludeThreadId) {
@@ -711,10 +753,17 @@ export class FrameAnchorResolver {
 
   private async listThreadsForScan(
     sessionId: string,
-    proxyManager: IProxyManager
+    proxyManager: IProxyManager,
+    within?: Deadline
   ): Promise<DebugProtocol.Thread[] | null> {
     try {
-      const response = await proxyManager.sendDapRequest<DebugProtocol.ThreadsResponse>('threads', {});
+      const response = within
+        ? await within.request((remainingMs) => proxyManager.sendDapRequest<DebugProtocol.ThreadsResponse>(
+          'threads',
+          {},
+          { timeoutMs: remainingMs, deadline: within }
+        ))
+        : await proxyManager.sendDapRequest<DebugProtocol.ThreadsResponse>('threads', {});
       const threads = response?.body?.threads;
       return Array.isArray(threads) ? threads : null;
     } catch (error) {

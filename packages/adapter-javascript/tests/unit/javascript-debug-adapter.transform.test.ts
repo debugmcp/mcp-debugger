@@ -939,7 +939,8 @@ describe('JavascriptDebugAdapter.transformAttachConfig by processId (issue #871)
         platform: 'linux', container: false, selfPid: 1,
         processExists: () => true, isNodeProcess: async () => true, inspectorSignalDisabled: async () => false,
         signal, listTargets, pidOf: async () => undefined,
-        sleep: async () => undefined, deadlineMs: 0, pollMs: 0,
+        // One probe after the signal: the scripted inspector answers the first poll.
+        deadlineMs: 1000, pollMs: 0,
         ...extra
       });
       return { adapter, signal };

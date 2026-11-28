@@ -14,7 +14,7 @@
 import { EventEmitter } from 'events';
 import type { DebugProtocol } from '@vscode/debugprotocol';
 import type { HandshakeProxy, ILogger } from '@debugmcp/shared';
-import type { ChildReportedEvent, DetachResult, IProxyManager, PreDetachResume, ProxyManagerEvents } from './proxy-manager.js';
+import type { ChildReportedEvent, DapRequestOptions, DetachResult, IProxyManager, PreDetachResume, ProxyManagerEvents } from './proxy-manager.js';
 import type { ProxyConfig } from './proxy-config.js';
 import type { ProxyDapEventMessage, ProxyMessage, ProxyStatusMessage } from '../dap-core/types.js';
 import { CHILD_ADOPT_COMMAND, CHILD_CLOSE_COMMAND, type ChildAdoptArgs } from './dap-proxy-interfaces.js';
@@ -58,7 +58,7 @@ export interface ChildViewRoot {
     sessionId: string,
     command: string,
     args?: unknown,
-    options?: { timeoutMs?: number }
+    options?: DapRequestOptions
   ): Promise<T>;
   createChildView(childSessionId: string): IChildProxyView;
   detachChildView(childSessionId: string): void;
@@ -207,13 +207,21 @@ export class ChildProxyView extends EventEmitter implements IChildProxyView {
   async sendDapRequest<T extends DebugProtocol.Response>(
     command: string,
     args?: unknown,
-    options?: { timeoutMs?: number }
+    options?: DapRequestOptions
   ): Promise<T> {
     // A stopped event (and the session layer's immediate inspection) may
     // precede the adoption answer. Hold requests until the handshake settles,
     // preserving its error if adoption fails, instead of rejecting a live child.
+    // Under a deadline the hold is a wait on something this request did not
+    // start: it ends at the deadline, and an adoption that
+    // completes after it does not send the command (the root refuses an
+    // expired deadline before anything goes out).
     if (!this.connectionOpen && this.pendingAdoption && !this.stopped && !this.exitEmitted) {
-      await this.pendingAdoption;
+      if (options?.deadline) {
+        await options.deadline.race(this.pendingAdoption);
+      } else {
+        await this.pendingAdoption;
+      }
     }
     if (!this.connectionOpen || !this.root.isRunning()) {
       throw new Error(`child session ${this.childSessionId}: its connection is not open`);

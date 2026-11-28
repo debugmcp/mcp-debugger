@@ -3433,7 +3433,8 @@ describe('DapProxyWorker', () => {
       expect(mockLogger.warn).toHaveBeenCalledWith(
         expect.stringContaining('ensureInitialStop: no threads discovered within timeout')
       );
-      expect(sendRequestMock).toHaveBeenCalledWith('threads', {});
+      // Each poll is given what remains of the 120 ms budget.
+      expect(sendRequestMock).toHaveBeenCalledWith('threads', {}, 120);
 
       // Verify that exit was not called during this test
       expect(exitSpy).not.toHaveBeenCalled();

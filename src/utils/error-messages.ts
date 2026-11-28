@@ -183,6 +183,21 @@ export const ErrorMessages = {
     `If the problem persists, check the debug adapter logs.`,
 
   /**
+   * Error message for a DAP request sent under a Deadline that had
+   * no answer at the deadline's backstop
+   * Occurs when: The worker answered neither within the deadline nor within the grace after it
+   * Used in: src/proxy/proxy-manager.ts
+   * @param command - The DAP command (e.g., 'stackTrace', 'threads')
+   * @param budgetMs - The deadline the request was sent under, in ms
+   * @param graceMs - The grace after it (PARENT_GRACE_MS)
+   */
+  dapRequestNoAnswerWithin: (command: string, budgetMs: number, graceMs: number) =>
+    `Debug adapter did not respond to '${command}' request within ${Math.round(budgetMs)} ms ` +
+    `(the deadline it was sent under, and a ${graceMs} ms grace after it). ` +
+    `This typically means the debug adapter is busy, has crashed or lost connection. ` +
+    `If the problem persists, check the debug adapter logs.`,
+
+  /**
    * Hint appended to timeout failures on operations that accept a per-request
    * 'timeout' tool argument (evaluate_expression, hot_reload)
    * Occurs when: A DAP request times out but the operation may simply need more time than the default allows

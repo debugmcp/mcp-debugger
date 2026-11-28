@@ -28,12 +28,26 @@ import * as path from 'node:path';
 import { readlink, readFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { AdapterError, AdapterErrorCode, isLoopbackHost } from '@debugmcp/shared';
+import {
+  AdapterError,
+  AdapterErrorCode,
+  deadline,
+  DeadlineExpired,
+  invalidDeadlineBudget,
+  isLoopbackHost,
+  type MonotonicClock
+} from '@debugmcp/shared';
 
 const execFileAsync = promisify(execFile);
 
 /** Node's default inspector port, where SIGUSR1 / `_debugProcess` opens it. */
 export const DEFAULT_INSPECTOR_PORT = 9229;
+
+/** The longest one `/json/list` probe may take; inside the wait, less when less remains. */
+export const DEFAULT_PROBE_TIMEOUT_MS = 1000;
+
+/** The longest one ownership query (`process.pid` over CDP) may take; inside the wait, less when less remains. */
+export const DEFAULT_PID_QUERY_TIMEOUT_MS = 1500;
 
 export interface InspectorTarget {
   id?: string;
@@ -56,7 +70,12 @@ export interface InspectorActivationOptions {
   host?: string;
   /** Where the inspector is, or will open (default 9229). */
   port?: number;
-  /** How long to wait for the inspector after signalling (default 5000 ms). */
+  /**
+   * How long to wait for the inspector after signalling (default 5000 ms):
+   * a strict bound (issue #1339). The failure is given at this point, or at
+   * most PARENT_GRACE_MS after it when a probe still in flight ignores the
+   * time it was given.
+   */
   deadlineMs?: number;
   /** Probe interval while waiting (default 100 ms). */
   pollMs?: number;
@@ -71,11 +90,16 @@ export interface InspectorActivationOptions {
   /** This server's own PID (default process.pid) — never a valid target. */
   selfPid?: number;
   signal?: (pid: number) => void;
-  listTargets?: (host: string, port: number) => Promise<InspectorProbe>;
-  /** The PID behind an inspector target, or undefined when it cannot be told. */
-  pidOf?: (target: InspectorTarget) => Promise<number | undefined>;
-  sleep?: (ms: number) => Promise<void>;
-  now?: () => number;
+  /**
+   * Inside the wait after the signal, each probe is given the time it may
+   * take (never more than what remains of the wait) and a signal that aborts
+   * if the wait abandons it. The probe before the signal is given neither.
+   */
+  listTargets?: (host: string, port: number, timeoutMs?: number, abandoned?: AbortSignal) => Promise<InspectorProbe>;
+  /** The PID behind an inspector target, or undefined when it cannot be told; given a time and a signal as `listTargets` is. */
+  pidOf?: (target: InspectorTarget, timeoutMs?: number, abandoned?: AbortSignal) => Promise<number | undefined>;
+  /** The clock the wait after the signal runs on (default: the process's monotonic clock and timers). */
+  clock?: MonotonicClock;
 }
 
 export interface InspectorActivationResult {
@@ -143,22 +167,33 @@ type WebSocketConstructor = new (url: string) => MinimalWebSocket;
  * Ask the inspector behind `webSocketDebuggerUrl` for its `process.pid` over
  * one short CDP session (Node 22+ ships a global WebSocket). `undefined` when
  * it cannot be told: no answer within `timeoutMs` (a paused target does not
- * evaluate), a refused connection, or no WebSocket in this runtime.
+ * evaluate), an `abandoned` signal that aborts first, a refused connection,
+ * or no WebSocket in this runtime. Ending it closes the WebSocket, which is
+ * a closing handshake: the global WebSocket has no way to destroy its
+ * connection, so a peer that ignores the close keeps it open a while longer.
  */
-export function pidViaInspector(webSocketDebuggerUrl: string, timeoutMs = 1500): Promise<number | undefined> {
+export function pidViaInspector(
+  webSocketDebuggerUrl: string,
+  timeoutMs = DEFAULT_PID_QUERY_TIMEOUT_MS,
+  abandoned?: AbortSignal
+): Promise<number | undefined> {
   const WebSocketImpl = (globalThis as { WebSocket?: WebSocketConstructor }).WebSocket;
   if (typeof WebSocketImpl !== 'function') return Promise.resolve(undefined);
+  if (abandoned?.aborted) return Promise.resolve(undefined);
   return new Promise((resolve) => {
     let socket: MinimalWebSocket | undefined;
     let settled = false;
+    const onAbandoned = (): void => finish(undefined);
     const finish = (pid?: number): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      abandoned?.removeEventListener('abort', onAbandoned);
       try { socket?.close(); } catch { /* already closed */ }
       resolve(pid);
     };
     const timer = setTimeout(() => finish(undefined), timeoutMs);
+    abandoned?.addEventListener('abort', onAbandoned, { once: true });
     try {
       socket = new WebSocketImpl(webSocketDebuggerUrl);
     } catch {
@@ -184,11 +219,11 @@ export function pidViaInspector(webSocketDebuggerUrl: string, timeoutMs = 1500):
 }
 
 /** The PID behind a target: the title's `[pid]` suffix when present, else the inspector's own answer. */
-async function defaultPidOf(target: InspectorTarget): Promise<number | undefined> {
+async function defaultPidOf(target: InspectorTarget, timeoutMs?: number, abandoned?: AbortSignal): Promise<number | undefined> {
   const fromTitle = pidOfTitle(target.title);
   if (fromTitle !== undefined) return fromTitle;
   if (typeof target.webSocketDebuggerUrl !== 'string') return undefined;
-  return pidViaInspector(target.webSocketDebuggerUrl);
+  return pidViaInspector(target.webSocketDebuggerUrl, timeoutMs, abandoned);
 }
 
 function describeTargets(targets: InspectorTarget[]): string {
@@ -293,14 +328,26 @@ const PROBE_MAX_BODY_BYTES = 64 * 1024;
  * bounds the whole request (issue #1261): a responder that stays silent, or
  * keeps sending, is answered "other" when it passes and its connection is
  * destroyed; a body larger than any inspector's is answered "other" at once.
+ * An `abandoned` signal that aborts ends it the same way, at once (issue
+ * #1339); one already aborted opens nothing.
  */
-export function probeInspector(host: string, port: number, timeoutMs = 1000): Promise<InspectorProbe> {
+export function probeInspector(
+  host: string,
+  port: number,
+  timeoutMs = DEFAULT_PROBE_TIMEOUT_MS,
+  abandoned?: AbortSignal
+): Promise<InspectorProbe> {
+  if (abandoned?.aborted) {
+    return Promise.resolve({ status: 'other', detail: 'the probe of /json/list was abandoned before it was sent' });
+  }
   return new Promise((resolve) => {
     let settled = false;
+    const onAbandoned = (): void => finish({ status: 'other', detail: 'no answer from /json/list before the probe was abandoned' });
     const finish = (probe: InspectorProbe): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      abandoned?.removeEventListener('abort', onAbandoned);
       request.destroy();
       resolve(probe);
     };
@@ -341,13 +388,12 @@ export function probeInspector(host: string, port: number, timeoutMs = 1000): Pr
       response.on('error', (err) => finish({ status: 'other', detail: err.message }));
     });
     const timer = setTimeout(() => finish({ status: 'other', detail: `no answer from /json/list within ${timeoutMs} ms` }), timeoutMs);
+    abandoned?.addEventListener('abort', onAbandoned, { once: true });
     request.on('error', (err: NodeJS.ErrnoException) => {
       finish(err.code === 'ECONNREFUSED' ? { status: 'closed' } : { status: 'other', detail: err.message });
     });
   });
 }
-
-const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Make the inspector of `pid` reachable on `host:port` and say where it is.
@@ -364,12 +410,17 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
   const isNodeProcess = options.isNodeProcess ?? ((p: number) => isNodeProcessByPid(p, platform));
   const inspectorSignalDisabled = options.inspectorSignalDisabled ?? ((p: number) => inspectorSignalDisabledByPid(p, platform));
   const signal = options.signal ?? ((p: number) => defaultSignal(p, platform));
-  const listTargets = options.listTargets ?? ((h: string, p: number) => probeInspector(h, p));
+  const listTargets = options.listTargets ??
+    ((h: string, p: number, timeoutMs?: number, abandoned?: AbortSignal) => probeInspector(h, p, timeoutMs, abandoned));
   const pidOf = options.pidOf ?? defaultPidOf;
-  const sleep = options.sleep ?? wait;
-  const now = options.now ?? Date.now;
   const deadlineMs = options.deadlineMs ?? 5000;
   const pollMs = options.pollMs ?? 100;
+  // A bound the wait's deadline would refuse is refused here, before anything
+  // is probed or signalled; the wait's clock still starts at the signal.
+  const badBound = invalidDeadlineBudget(deadlineMs);
+  if (badBound) {
+    throw invalid(`deadlineMs: ${badBound}`);
+  }
 
   if (!isLoopbackHost(requestedHost)) {
     throw invalid(`attach by processId is local only (host ${requestedHost}); for a remote target start it with --inspect and pass host/port`);
@@ -390,7 +441,13 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
   // while the inspector's HTTP server comes up) is not a verdict — keep
   // polling and name it only if the deadline passes.
   let lastTransient: string | undefined;
-  const classify = async (probe: InspectorProbe, afterSignal: boolean): Promise<InspectorActivationResult | undefined> => {
+  /** Inside the wait: how long an ownership query may take now, and the signal that abandons it. */
+  type Ownership = { timeoutMs: () => number; abandoned: AbortSignal };
+  const classify = async (
+    probe: InspectorProbe,
+    afterSignal: boolean,
+    ownership?: Ownership
+  ): Promise<InspectorActivationResult | undefined> => {
     if (probe.status === 'closed') return undefined;
     if (probe.status === 'other') {
       if (afterSignal) {
@@ -399,7 +456,9 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
       }
       throw invalid(`${where} is in use by something that is not a Node inspector (${probe.detail}); pass port if PID ${pid} listens elsewhere, or free the port`);
     }
-    const owners = await Promise.all(probe.targets.map((target) => pidOf(target)));
+    const owners = await Promise.all(probe.targets.map((target) => (
+      ownership ? pidOf(target, ownership.timeoutMs(), ownership.abandoned) : pidOf(target)
+    )));
     const index = owners.indexOf(pid);
     if (index >= 0) {
       return { host, port, alreadyActive: !afterSignal, title: probe.targets[index].title ?? '' };
@@ -464,18 +523,36 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
       `and this server does not close it (#1310). To attach to it, pass that port with processId`,
     pid, host, port
   );
+  // The wait is a Deadline (issue #1339): each poll interval ends
+  // at the deadline, each probe and ownership query is given what remains
+  // (capped by its own default), none starts once the deadline has passed,
+  // and one still in flight that ignores what it was given is abandoned
+  // PARENT_GRACE_MS after it. A probe that answers inside the grace is
+  // classified as before: an inspector that appeared is not reported as
+  // none, and an ownership query asked then gets 1 ms, so the verdict falls
+  // to the title and the opened-after-the-signal rule.
+  const wait = deadline(deadlineMs, { clock: options.clock, label: `the inspector wait for PID ${pid}` });
+  const noneAppeared = (): SignalledActivationError =>
+    signalled(`none appeared on ${where} within ${wait.budgetMs} ms` + (lastTransient ? ` (last probe: ${lastTransient})` : ''));
+  const attempt = async (remainingMs: number, abandoned: AbortSignal): Promise<InspectorActivationResult | undefined> => {
+    const probe = await listTargets(host, port, Math.min(DEFAULT_PROBE_TIMEOUT_MS, remainingMs), abandoned);
+    if (abandoned.aborted) return undefined;
+    return classify(probe, true, {
+      timeoutMs: () => Math.min(DEFAULT_PID_QUERY_TIMEOUT_MS, Math.max(1, Math.ceil(wait.remaining()))),
+      abandoned
+    });
+  };
   try {
-    const deadline = now() + deadlineMs;
-    for (;;) {
-      await sleep(pollMs);
-      const result = await classify(await listTargets(host, port), true);
+    while ((await wait.sleep(pollMs)) === 'slept') {
+      const result = await wait.request(attempt);
       if (result) return result;
-      if (now() >= deadline) {
-        throw signalled(`none appeared on ${where} within ${deadlineMs} ms` + (lastTransient ? ` (last probe: ${lastTransient})` : ''));
-      }
     }
+    throw noneAppeared();
   } catch (err) {
     if (err instanceof SignalledActivationError) throw err;
+    if (err instanceof DeadlineExpired) throw noneAppeared();
     throw signalled(err instanceof Error ? err.message : String(err));
+  } finally {
+    wait.dispose();
   }
 }
