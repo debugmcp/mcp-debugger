@@ -33,6 +33,7 @@ import {
   AdapterErrorCode,
   deadline,
   DeadlineExpired,
+  invalidDeadlineBudget,
   isLoopbackHost,
   type MonotonicClock
 } from '@debugmcp/shared';
@@ -414,6 +415,12 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
   const pidOf = options.pidOf ?? defaultPidOf;
   const deadlineMs = options.deadlineMs ?? 5000;
   const pollMs = options.pollMs ?? 100;
+  // A bound the wait's deadline would refuse is refused here, before anything
+  // is probed or signalled; the wait's clock still starts at the signal.
+  const badBound = invalidDeadlineBudget(deadlineMs);
+  if (badBound) {
+    throw invalid(`deadlineMs: ${badBound}`);
+  }
 
   if (!isLoopbackHost(requestedHost)) {
     throw invalid(`attach by processId is local only (host ${requestedHost}); for a remote target start it with --inspect and pass host/port`);

@@ -8,7 +8,7 @@
  * depend on nothing but their arguments, so they live here as free functions —
  * a collaborator that needs one imports it instead of inheriting it.
  */
-import type { ILogger } from '@debugmcp/shared';
+import { DeadlineExpired, type ILogger } from '@debugmcp/shared';
 import { ErrorMessages } from '../utils/error-messages.js';
 
 /** Upper bound for caller-supplied per-request DAP timeouts (10 minutes). */
@@ -57,15 +57,38 @@ export function resolveDapTimeoutOverride(
 
 /**
  * Whether a failed DAP request got no answer at all, as against one the
- * adapter refused: the worker's and the parent's timeout wordings.
+ * adapter refused: the worker's and the parent's timeout wordings, or a
+ * Deadline that ended it (by class: the DeadlineExpired itself, or an error
+ * whose `cause` is one). Its `budget` and `backstop` ends are timeouts. Its
+ * `cancelled` and `disposed` ends are not: the caller gave the request up,
+ * and the adapter was not left unanswering, so neither the timeout's
+ * sentence nor its hint is true of it.
  */
-export function isDapRequestTimeout(errorMessage: string): boolean {
-  return /timed out|did not respond/i.test(errorMessage);
+export function isDapRequestTimeout(failure: unknown): boolean {
+  const ended = deadlineExpiredIn(failure);
+  if (ended) {
+    return ended.why === 'budget' || ended.why === 'backstop';
+  }
+  return /timed out|did not respond/i.test(failure instanceof Error ? failure.message : String(failure));
 }
 
-/** Append the 'timeout' tool-arg hint to DAP timeout failures. */
-export function withTimeoutHint(errorMessage: string): string {
-  if (!isDapRequestTimeout(errorMessage)) {
+/** The DeadlineExpired a failure is, or carries as its cause (a few levels deep). */
+function deadlineExpiredIn(failure: unknown): DeadlineExpired | undefined {
+  for (let current = failure, depth = 0; current instanceof Error && depth < 4; current = current.cause, depth++) {
+    if (current instanceof DeadlineExpired) {
+      return current;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Append the 'timeout' tool-arg hint to DAP timeout failures. Pass the
+ * failure as well as the message shown for it: a Deadline's is classified by
+ * its class, any other by the message, as before.
+ */
+export function withTimeoutHint(errorMessage: string, failure?: unknown): string {
+  if (!isDapRequestTimeout(deadlineExpiredIn(failure) ? failure : errorMessage)) {
     return errorMessage;
   }
   const separator = errorMessage.trimEnd().endsWith('.') ? ' ' : '. ';

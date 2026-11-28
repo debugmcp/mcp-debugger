@@ -14,6 +14,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as crypto from 'node:crypto';
 import * as http from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
+import { AdapterError, AdapterErrorCode } from '@debugmcp/shared';
 import {
   activateInspector,
   pidViaInspector,
@@ -189,6 +190,23 @@ describe('activateInspector keeps its wait after the signal (issue #1339)', () =
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, 2 ** 31])('refuses a wait of %d ms before it probes or signals anything', async (deadlineMs) => {
+    const listTargets = vi.fn(async () => closed);
+    const signal = vi.fn();
+    let caught: unknown;
+    try {
+      await activateInspector({ ...options(listTargets), listTargets, signal, deadlineMs });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(AdapterError);
+    expect(caught).not.toBeInstanceOf(SignalledActivationError);
+    expect((caught as AdapterError).code).toBe(AdapterErrorCode.ENVIRONMENT_INVALID);
+    expect((caught as Error).message).toMatch(/^JavaScript attach: deadlineMs: the budget must be /);
+    expect(signal).not.toHaveBeenCalled();
+    expect(listTargets).not.toHaveBeenCalled();
+  });
+
   it('names the window it kept when one is given', async () => {
     vi.useFakeTimers();
     const { at, error } = await settle(options(async () => closed, { deadlineMs: 350, pollMs: 100 }));
@@ -211,18 +229,47 @@ async function silentServer(): Promise<{ server: http.Server; closedConnections:
   return { server, closedConnections: () => closedCount, opened: () => opened };
 }
 
-async function freePort(): Promise<number> {
-  const probe = http.createServer();
-  await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
-  const { port } = probe.address() as AddressInfo;
-  await new Promise<void>((resolve) => probe.close(() => resolve()));
-  return port;
+/**
+ * The probes a real activation makes, for a listener that owns its port from
+ * the start. The probe before the signal is answered "closed" (the port
+ * refused it); every probe after the signal goes to the real probeInspector
+ * with the time and the abort signal the wait hands it, and is recorded.
+ *
+ * Why the first answer is scripted: "refused, then listening" on one real
+ * port needs the port free before the signal and bound after it, and a port
+ * that is free can be taken by any other process in between (the race the
+ * attach suites removed in #1243). A listener on port 0, read back, has no
+ * such window. What this gives up is only the default `listTargets`, which
+ * forwards the same two arguments to the same probe.
+ */
+function refusedThenReal(): {
+  listTargets: InspectorActivationOptions['listTargets'];
+  given: Array<{ timeoutMs?: number; abandoned?: AbortSignal }>;
+} {
+  let first = true;
+  const given: Array<{ timeoutMs?: number; abandoned?: AbortSignal }> = [];
+  const listTargets: ListTargets = (host, port, timeoutMs, abandoned) => {
+    if (first) {
+      first = false;
+      return Promise.resolve(closed);
+    }
+    given.push({ timeoutMs, abandoned });
+    return probeInspector(host, port, timeoutMs, abandoned);
+  };
+  return { listTargets: listTargets as InspectorActivationOptions['listTargets'], given };
+}
+
+async function listenOnAnyPort(server: http.Server): Promise<number> {
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  return (server.address() as AddressInfo).port;
 }
 
 describe('activateInspector against a real silent listener (issue #1339)', () => {
   it('cuts the real /json/list probe in flight at the window and closes its connection', async () => {
-    const port = await freePort();
     const silent = await silentServer();
+    const port = await listenOnAnyPort(silent.server);
+    const { listTargets, given } = refusedThenReal();
+    const signal = vi.fn();
     try {
       const started = Date.now();
       let caught: unknown;
@@ -233,9 +280,8 @@ describe('activateInspector against a real silent listener (issue #1339)', () =>
           platform: 'win32',
           processExists: () => true,
           selfPid: 1,
-          // The default probe throughout: the port is closed before the
-          // signal, and the signal brings up a listener that never answers.
-          signal: () => { silent.server.listen(port, '127.0.0.1'); },
+          signal,
+          listTargets,
           pidOf: (async () => undefined) as InspectorActivationOptions['pidOf'],
           deadlineMs: 400,
           pollMs: 100
@@ -244,10 +290,17 @@ describe('activateInspector against a real silent listener (issue #1339)', () =>
         caught = err;
       }
       const elapsed = Date.now() - started;
+      expect(signal).toHaveBeenCalledOnce();
       expect(caught).toBeInstanceOf(SignalledActivationError);
-      expect((caught as Error).message).toMatch(new RegExp(`none appeared on 127\\.0\\.0\\.1:${port} within 400 ms`));
+      expect((caught as Error).message).toMatch(new RegExp(`none appeared on 127\.0\.0\.1:${port} within 400 ms`));
       // 400 ms and the grace, with room for a loaded machine; the old probe ran on for its own 1,000 ms.
       expect(elapsed).toBeLessThan(400 + GRACE_MS + 200);
+      // Each real probe was given what remained of the wait, and its abort signal.
+      expect(given.length).toBeGreaterThan(0);
+      for (const probe of given) {
+        expect(probe.timeoutMs!).toBeLessThanOrEqual(400);
+        expect(probe.abandoned).toBeInstanceOf(AbortSignal);
+      }
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(silent.opened()).toBeGreaterThan(0);
       expect(silent.closedConnections()).toBe(silent.opened());
@@ -321,7 +374,7 @@ describe('the probes honour an abort signal (issue #1339)', () => {
 
 describe('activateInspector\'s default ownership query (issue #1339)', () => {
   it('is given what remains of the wait, so an inspector it cannot identify is still taken on time', async () => {
-    const port = await freePort();
+    let port = 0;
     const upgraded = new Set<{ destroy(): void }>();
     // A Node-shaped inspector whose title names no pid and whose WebSocket is
     // accepted and never answered: the ownership query can only time out.
@@ -340,6 +393,9 @@ describe('activateInspector\'s default ownership query (issue #1339)', () => {
       const accept = crypto.createHash('sha1').update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64');
       socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
     });
+    port = await listenOnAnyPort(server);
+    const { listTargets } = refusedThenReal();
+    const signal = vi.fn();
     try {
       const started = Date.now();
       const result = await activateInspector({
@@ -348,12 +404,14 @@ describe('activateInspector\'s default ownership query (issue #1339)', () => {
         platform: 'win32',
         processExists: () => true,
         selfPid: 1,
-        // Closed before the signal; the signal brings the inspector up.
-        signal: () => { server.listen(port, '127.0.0.1'); },
+        signal,
+        // The real probe after the signal; the ownership query is the default one.
+        listTargets,
         deadlineMs: 400,
         pollMs: 100
       });
       const elapsed = Date.now() - started;
+      expect(signal).toHaveBeenCalledOnce();
       expect(result).toEqual({ host: '127.0.0.1', port, alreadyActive: false, title: 'server.js' });
       // Its own 1,500 ms would have outlasted the wait and its grace.
       expect(elapsed).toBeLessThan(400 + GRACE_MS + 200);

@@ -180,8 +180,7 @@ export class PauseCoordinator {
         if (stoppedSeen || (sessionPaused() && session.lastStop)) {
           return observed();
         }
-        const message = first.error instanceof Error ? first.error.message : String(first.error);
-        return isDapRequestTimeout(message) ? unanswered(first.error) : rejected(first.error);
+        return isDapRequestTimeout(first.error) ? unanswered(first.error) : rejected(first.error);
       }
 
       this.ctx.logger.info(

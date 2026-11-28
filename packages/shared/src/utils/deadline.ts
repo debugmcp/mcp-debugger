@@ -51,12 +51,14 @@
  * ignores its timeout and its `abandoned` signal is still abandoned (the
  * caller is answered), but what it opened is its own to release.
  *
- * Decisions where the design left a detail open:
+ * Details the contract settles:
  *
  * - A budget of zero or less makes a deadline that is born expired: nothing
  *   is armed, `request` refuses, `sleep` answers `'expired'`. A budget that is
  *   not a finite number, or that exceeds the largest timer delay (2^31 - 1
  *   ms), is a RangeError: a NaN or an overflowing timer would fire at once.
+ *   `invalidDeadlineBudget()` states that rule, so a caller can refuse a bad
+ *   bound before it does anything the deadline would have had to cover.
  * - Expiry is observed as well as scheduled: `remaining()` and `expired`
  *   read the clock, and a reading at or past the deadline expires it on the
  *   spot, so `expired`, `signal.aborted` and `remaining() === 0` always agree
@@ -77,6 +79,22 @@ export const PARENT_GRACE_MS = 250;
 
 /** The largest delay a Node timer honours; a longer one fires at once. */
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+/**
+ * Why `budgetMs` cannot be the budget of a `deadline()`, or undefined when it
+ * can (zero and negative can: such a deadline is born expired). The one rule
+ * the constructor applies, exported so a caller can refuse a bad bound before
+ * it does anything the deadline would then have to cover.
+ */
+export function invalidDeadlineBudget(budgetMs: unknown): string | undefined {
+  if (typeof budgetMs !== 'number' || Number.isNaN(budgetMs)) {
+    return `the budget must be a number of milliseconds (got ${String(budgetMs)})`;
+  }
+  if (!Number.isFinite(budgetMs) || budgetMs > MAX_TIMER_DELAY_MS) {
+    return `the budget must be finite and at most ${MAX_TIMER_DELAY_MS} ms (got ${budgetMs})`;
+  }
+  return undefined;
+}
 
 /**
  * Time and timers from one source. The default reads `performance.now()`
@@ -199,11 +217,12 @@ class DeadlineImpl implements Deadline {
     parentDeadline?: DeadlineImpl,
     parentSignal?: AbortSignal
   ) {
-    if (typeof budgetMs !== 'number' || Number.isNaN(budgetMs)) {
-      throw new RangeError(`deadline: the budget must be a number of milliseconds (got ${String(budgetMs)})`);
-    }
-    if (!parentDeadline && (!Number.isFinite(budgetMs) || budgetMs > MAX_TIMER_DELAY_MS)) {
-      throw new RangeError(`deadline: the budget must be finite and at most ${MAX_TIMER_DELAY_MS} ms (got ${budgetMs})`);
+    // A child's cap may be infinite (no cap); a root's budget follows the one rule.
+    const invalid = parentDeadline
+      ? (typeof budgetMs !== 'number' || Number.isNaN(budgetMs) ? invalidDeadlineBudget(budgetMs) : undefined)
+      : invalidDeadlineBudget(budgetMs);
+    if (invalid) {
+      throw new RangeError(`deadline: ${invalid}`);
     }
     this.clock = clock;
     this.label = label;

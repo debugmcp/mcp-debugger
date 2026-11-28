@@ -300,7 +300,7 @@ export {
 } from './utils/secret-redaction.js';
 export type { SecretRule, RedactionHit, RedactionResult } from './utils/secret-redaction.js';
 export { LineBuffer } from './utils/line-buffer.js';
-export { deadline, DeadlineExpired, PARENT_GRACE_MS, systemClock } from './utils/deadline.js';
+export { deadline, DeadlineExpired, invalidDeadlineBudget, PARENT_GRACE_MS, systemClock } from './utils/deadline.js';
 export type { Deadline, DeadlineEnd, DeadlineOptions, MonotonicClock } from './utils/deadline.js';
 export { isLoopbackHost } from './utils/loopback-host.js';
 // Doctor-row helpers for IAdapterFactory.describeToolchain (issue #435).

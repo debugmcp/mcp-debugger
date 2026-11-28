@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   deadline,
   DeadlineExpired,
+  invalidDeadlineBudget,
   PARENT_GRACE_MS,
   type Deadline,
   type MonotonicClock
@@ -212,6 +213,18 @@ describe('budgets that are not ordinary', () => {
   it.each([Number.NaN, Number.POSITIVE_INFINITY, 2 ** 31])('refuses a budget of %d ms', (budget) => {
     expect(() => deadline(budget)).toThrow(RangeError);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('invalidDeadlineBudget states the rule the constructor applies', () => {
+    for (const budget of [0, -5, 1, 2 ** 31 - 1]) {
+      expect(invalidDeadlineBudget(budget)).toBeUndefined();
+      expect(() => deadline(budget).dispose()).not.toThrow();
+    }
+    for (const budget of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 2 ** 31, '5', undefined]) {
+      const why = invalidDeadlineBudget(budget);
+      expect(why).toMatch(/^the budget must be /);
+      expect(() => deadline(budget as number)).toThrow(`deadline: ${why}`);
+    }
   });
 
   it('refuses a child cap that is not a number, and takes an infinite one as no cap', () => {

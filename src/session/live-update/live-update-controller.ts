@@ -102,7 +102,7 @@ export class LiveUpdateController {
       .then(() => ({ kind: 'hold' as const }));
     const first = await Promise.race([response, hold]);
     if (first.kind === 'error') {
-      return { success: false, state: this.ctx.getSession(sessionId).state, error: withTimeoutHint(getErrorMessage(first.error)) };
+      return { success: false, state: this.ctx.getSession(sessionId).state, error: withTimeoutHint(getErrorMessage(first.error), first.error) };
     }
     if (first.kind === 'response') {
       // Answered first: the stop, if the reassemble lands on one, follows within the hold.
@@ -155,7 +155,7 @@ export class LiveUpdateController {
       };
     } catch (error) {
       this.ctx.logger.error(`[SM hotReload ${sessionId}] Error: ${getErrorMessage(error)}`);
-      return { success: false, error: withTimeoutHint(getErrorMessage(error)) };
+      return { success: false, error: withTimeoutHint(getErrorMessage(error), error) };
     }
   }
 
