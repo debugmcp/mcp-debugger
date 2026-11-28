@@ -740,9 +740,11 @@ the first visible frame, as everywhere else; `threadId` appears when the answer 
 `note` carries any internal-frame disclosure (`Paused inside an internal frame …`, even with snapshots off or explicit
 variable access, issue #1181), any non-boilerplate stop description from the adapter (such as the COBOL shim's
 `returned from BUMP-PARA to VIA-TIMES …`, issue #1182), any no-program-frame or stale-build notice, and any structural
-fact proved by comparing the step's starting stack with its landing stack (issues #1180, #1184: `step_out` still inside
-the function stepped out of or dropping multiple frames, `step_into` entering no function with any policy step-filter
-hint, or a fiber/coroutine switch onto a disjoint call stack). A step stop is read plainly and never moves off its own
+fact proved by comparing the step's starting visible stack with its landing visible stack (issues #1180, #1184, #1328:
+`step_out` stopping at the same visible depth, with a frame of the starting function's name below the stop, or more than
+one frame shallower; `step_into` stopping in the starting function at the same visible depth, appending any active
+step-filter hint the first time it applies in a run; or a landing stack in which no starting function, or only the
+outermost entry, appears). A step stop is read plainly and never moves off its own
 thread; a step that was ended by a `pause` from elsewhere is read as a pause and may.
 
 #### Pending steps
@@ -819,6 +821,8 @@ Steps into function calls on the current line.
 ```
 
 Same ~5s wait and `pending: true` contract as step_over — see [Pending steps](#pending-steps).
+
+When `step_into` completes in the starting function at the same visible call-stack depth (without a JavaScript 512-step walk-limit message), `note` states `"The stop is in '<fn>' at the same visible call-stack depth as before step_into."` (adding `" It is on the starting source line."` when the source line did not change) and, the first time in a run that an engine step filter applies, appends a conditional step-filter hint — Python `justMyCode`, JavaScript `skipFiles`/`smartStep`, .NET `enableStepFiltering`, or CodeLLDB's Rust `std`/`core`/`alloc` filter, naming `adapterLaunchConfig` when it decides the effective setting (issues #1184, #1328).
 
 **JavaScript** (a launch that steps through skipped code, the default; issue #1130):
 
