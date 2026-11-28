@@ -11,7 +11,7 @@ import type { SessionManagerDependencies } from '../../../../src/session/session
 import { SessionStore, type ManagedSession } from '../../../../src/session/session-store.js';
 import { MockProxyManagerFactory } from '../../../../src/factories/proxy-manager-factory.js';
 import type { IProxyManager } from '../../../../src/proxy/proxy-manager.js';
-import { DebugLanguage, SessionLifecycleState, SessionState } from '@debugmcp/shared';
+import { DebugLanguage, SessionLifecycleState, SessionState, type AttachFootprint } from '@debugmcp/shared';
 import { DebugSessionCreationError } from '../../../../src/errors/debug-errors.js';
 import { DapResponseError } from '../../../../src/proxy/dap-response-error.js';
 import {
@@ -1164,5 +1164,76 @@ describe('SessionManagerOperations attach modes', () => {
 
     expect(failure).toBeInstanceOf(DebugSessionCreationError);
     expect((failure as Error).message).not.toContain('attach_to_process');
+  });
+
+  describe('what the attach left in its target (issue #1261)', () => {
+    function adapterLeaving() {
+      const footprint: AttachFootprint = {
+        field: 'inspector',
+        atAttach: 'signalled: an inspector answers on 127.0.0.1:9229 now; this server leaves it open when this session ends',
+        atEnd: vi.fn(async () => 'listening')
+      };
+      const adapter = Object.assign(makeDirectConnectRubyAdapter(), { consumeAttachFootprint: vi.fn(() => footprint) });
+      return { adapter, footprint };
+    }
+
+    it('the attach answer carries it, and the session layer observes nothing', async () => {
+      const { adapter, footprint } = adapterLeaving();
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapter);
+
+      const result = await operations.attachToProcess('test-session', { port: 12345, stopOnEntry: false });
+
+      expect(result.success).toBe(true);
+      expect(result.data?.attachFootprint).toBe(footprint);
+      expect(footprint.atEnd).not.toHaveBeenCalled();
+    });
+
+    it('a failed attach carries what it left before it failed', async () => {
+      const { adapter, footprint } = adapterLeaving();
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapter);
+      mockProxyManager.sendDapRequest.mockResolvedValue({ body: { threads: [] } });
+
+      const result = await operations.attachToProcess('test-session', { port: 12345, stopOnEntry: false, verifyTimeout: 30 });
+
+      expect(result).toMatchObject({ success: false, state: SessionState.ERROR });
+      expect(result.data?.attachFootprint).toBe(footprint);
+    });
+
+    // The review's construction, through the launcher: an activation that signalled and then failed throws from the
+    // attach transform, and the footprint the adapter left must still reach the failed answer.
+    it('a transform that fails after it left a footprint still hands it to the failed attach answer', async () => {
+      const { adapter, footprint } = adapterLeaving();
+      Object.assign(adapter, {
+        transformAttachConfig: vi.fn(async () => { throw new Error('JavaScript attach: PID 4242 was signalled to open its inspector, but none appeared'); })
+      });
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapter);
+
+      const result = await operations.attachToProcess('test-session', { processId: 4242, stopOnEntry: false });
+
+      expect(result).toMatchObject({ success: false });
+      expect(result.error).toMatch(/was signalled to open its inspector/);
+      expect(adapter.consumeAttachFootprint).toHaveBeenCalledTimes(1);
+      expect(result.data?.attachFootprint).toBe(footprint);
+    });
+
+    it.each([false, true])('a detach (terminateProcess %s) carries it for the answer to word', async (terminateProcess) => {
+      const { adapter, footprint } = adapterLeaving();
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(adapter);
+      expect((await operations.attachToProcess('test-session', { port: 12345, stopOnEntry: false })).success).toBe(true);
+
+      const detached = await operations.detachFromProcess('test-session', terminateProcess);
+
+      expect(detached.success).toBe(true);
+      expect(detached.data?.attachFootprint).toBe(footprint);
+      expect(footprint.atEnd).not.toHaveBeenCalled();
+    });
+
+    it('an attach that left nothing carries nothing', async () => {
+      vi.mocked(mockDependencies.adapterRegistry.create).mockResolvedValue(makeDirectConnectRubyAdapter());
+      const result = await operations.attachToProcess('test-session', { port: 12345, stopOnEntry: false });
+      expect(result.success).toBe(true);
+      expect(result.data).not.toHaveProperty('attachFootprint');
+      expect((await operations.detachFromProcess('test-session')).data).not.toHaveProperty('attachFootprint');
+    });
   });
 });

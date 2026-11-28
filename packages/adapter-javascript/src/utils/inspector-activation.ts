@@ -97,6 +97,24 @@ function invalid(message: string): AdapterError {
   return new AdapterError(`JavaScript attach: ${message}`, AdapterErrorCode.ENVIRONMENT_INVALID);
 }
 
+/**
+ * An activation that failed after it had signalled the process (issue
+ * #1261): its message says so, and the adapter reports what the attach left.
+ */
+export class SignalledActivationError extends AdapterError {
+  constructor(message: string, readonly pid: number, readonly host: string, readonly port: number) {
+    super(message, AdapterErrorCode.ENVIRONMENT_INVALID);
+    this.name = 'SignalledActivationError';
+  }
+}
+
+/** A target list entry is a Node inspector's when it names a Node target and its WebSocket address. */
+function isNodeTarget(target: unknown): target is InspectorTarget {
+  const t = target as InspectorTarget | null;
+  return typeof t === 'object' && t !== null && t.type === 'node' &&
+    typeof t.webSocketDebuggerUrl === 'string' && t.webSocketDebuggerUrl.length > 0;
+}
+
 function parsePid(raw: number | string): number {
   const text = String(raw).trim();
   const pid = typeof raw === 'number' ? raw : /^\d+$/.test(text) ? Number(text) : NaN;
@@ -267,41 +285,64 @@ function defaultSignal(pid: number, platform: NodeJS.Platform): void {
   process.kill(pid, 'SIGUSR1');
 }
 
-/** GET http://host:port/json/list and classify what answered. */
+/** A /json/list body larger than this is not an inspector's (a Node target list is well under 1 KiB). */
+const PROBE_MAX_BODY_BYTES = 64 * 1024;
+
+/**
+ * GET http://host:port/json/list and classify what answered. `timeoutMs`
+ * bounds the whole request (issue #1261): a responder that stays silent, or
+ * keeps sending, is answered "other" when it passes and its connection is
+ * destroyed; a body larger than any inspector's is answered "other" at once.
+ */
 export function probeInspector(host: string, port: number, timeoutMs = 1000): Promise<InspectorProbe> {
   return new Promise((resolve) => {
-    const request = http.get({ host, port, path: '/json/list', timeout: timeoutMs }, (response) => {
+    let settled = false;
+    const finish = (probe: InspectorProbe): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      request.destroy();
+      resolve(probe);
+    };
+    const request = http.get({ host, port, path: '/json/list', agent: false }, (response) => {
       const chunks: Buffer[] = [];
-      response.on('data', (chunk: Buffer) => chunks.push(chunk));
+      let received = 0;
+      response.on('data', (chunk: Buffer) => {
+        received += chunk.length;
+        if (received > PROBE_MAX_BODY_BYTES) {
+          finish({ status: 'other', detail: `/json/list answered with more than ${PROBE_MAX_BODY_BYTES} bytes` });
+          return;
+        }
+        chunks.push(chunk);
+      });
       response.on('end', () => {
         const body = Buffer.concat(chunks).toString('utf8');
         if (response.statusCode !== 200) {
-          resolve({ status: 'other', detail: `HTTP ${response.statusCode} from /json/list` });
+          finish({ status: 'other', detail: `HTTP ${response.statusCode} from /json/list` });
           return;
         }
         try {
           const parsed: unknown = JSON.parse(body);
           if (Array.isArray(parsed)) {
-            resolve({ status: 'inspector', targets: parsed as InspectorTarget[] });
+            // A Node inspector lists its target with a type and a WebSocket
+            // address, even with a client attached (issue #1261): a bare JSON
+            // array is some other HTTP server.
+            const targets = parsed.filter(isNodeTarget);
+            finish(targets.length > 0
+              ? { status: 'inspector', targets }
+              : { status: 'other', detail: `/json/list answered a list with no Node inspector target in it (${parsed.length} ${parsed.length === 1 ? 'entry' : 'entries'})` });
             return;
           }
         } catch {
           // not JSON — fall through
         }
-        resolve({ status: 'other', detail: `/json/list answered with something other than a target list` });
+        finish({ status: 'other', detail: `/json/list answered with something other than a target list` });
       });
-      response.on('error', (err) => resolve({ status: 'other', detail: err.message }));
+      response.on('error', (err) => finish({ status: 'other', detail: err.message }));
     });
-    request.on('timeout', () => {
-      request.destroy();
-      resolve({ status: 'other', detail: `no answer from /json/list within ${timeoutMs} ms` });
-    });
+    const timer = setTimeout(() => finish({ status: 'other', detail: `no answer from /json/list within ${timeoutMs} ms` }), timeoutMs);
     request.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'ECONNREFUSED') {
-        resolve({ status: 'closed' });
-      } else {
-        resolve({ status: 'other', detail: err.message });
-      }
+      finish(err.code === 'ECONNREFUSED' ? { status: 'closed' } : { status: 'other', detail: err.message });
     });
   });
 }
@@ -365,7 +406,9 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
     }
     const other = owners.find((owner) => owner !== undefined && owner !== pid);
     if (other !== undefined) {
-      throw invalid(`${where} is already held by a Node inspector for a different process (PID ${other}: ${describeTargets(probe.targets)}); pass port if PID ${pid} listens elsewhere, or free the port`);
+      const held = `${where} is already held by a Node inspector for a different process (PID ${other}: ${describeTargets(probe.targets)})`;
+      // After the signal, the failure says the signal was sent (below).
+      throw afterSignal ? new Error(held) : invalid(`${held}; pass port if PID ${pid} listens elsewhere, or free the port`);
     }
     if (afterSignal) {
       // Closed before our signal, open right after it: PID pid's, even though
@@ -412,18 +455,27 @@ export async function activateInspector(options: InspectorActivationOptions): Pr
     throw invalid(`could not activate the inspector of PID ${pid}: ${detail}${hint}`);
   }
 
-  const deadline = now() + deadlineMs;
-  for (;;) {
-    await sleep(pollMs);
-    const result = await classify(await listTargets(host, port), true);
-    if (result) return result;
-    if (now() >= deadline) {
-      throw invalid(
-        `PID ${pid} did not open an inspector on ${where} within ${deadlineMs} ms of being signalled` +
-          (lastTransient ? ` (last probe: ${lastTransient})` : '') +
-          ` — a target started with --inspect-port=<n> (or NODE_OPTIONS=--inspect-port=<n>) opens it there: pass that port; ` +
-          `otherwise check that PID ${pid} is a Node.js process and that ${where} is free`
-      );
+  // From here the signal has been sent: every failure says so, and that an
+  // inspector may now be open elsewhere, not looked for (issue #1310); this
+  // server closes none (issue #1261).
+  const signalled = (why: string): SignalledActivationError => new SignalledActivationError(
+    `JavaScript attach: PID ${pid} was signalled to open its inspector, but ${why}; ` +
+      `one may now be open on another port (a target started with --inspect-port=<n> opens it there), ` +
+      `and this server does not close it (#1310). To attach to it, pass that port with processId`,
+    pid, host, port
+  );
+  try {
+    const deadline = now() + deadlineMs;
+    for (;;) {
+      await sleep(pollMs);
+      const result = await classify(await listTargets(host, port), true);
+      if (result) return result;
+      if (now() >= deadline) {
+        throw signalled(`none appeared on ${where} within ${deadlineMs} ms` + (lastTransient ? ` (last probe: ${lastTransient})` : ''));
+      }
     }
+  } catch (err) {
+    if (err instanceof SignalledActivationError) throw err;
+    throw signalled(err instanceof Error ? err.message : String(err));
   }
 }

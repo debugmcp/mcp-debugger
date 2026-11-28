@@ -12,6 +12,7 @@ import {
   REDACTION_NOTICE,
   SessionState,
   Variable,
+  type AttachFootprint,
   type SessionStopInfo
 } from '@debugmcp/shared';
 import { isRedactionEnabled } from '../../utils/redaction-mode.js';
@@ -238,6 +239,38 @@ export function hoistTreeFields(response: Record<string, unknown>, data: TreeAns
   if (typeof data.childrenReleased === 'number') {
     response.childrenReleased = data.childrenReleased;
   }
+}
+
+/** A field name an adapter may give its attach footprint: a lowerCamelCase word. */
+const ATTACH_FOOTPRINT_FIELD = /^[a-z][A-Za-z0-9]*$/;
+
+/**
+ * Say what the run's attach left in its target (issue #1261) in one
+ * top-level field named by the adapter — `inspector` for JavaScript: on an
+ * attach answer what the attach did, on a detach or close answer what is seen
+ * of it now. The carrier is taken out of an embedded `data`. A name that is
+ * not a plain word, or that the answer already uses, falls back to
+ * `attachFootprint`.
+ */
+export async function hoistAttachFootprint(
+  response: Record<string, unknown>,
+  footprint: AttachFootprint | undefined,
+  moment: 'attach' | 'end'
+): Promise<void> {
+  const embedded = response.data;
+  if (embedded && typeof embedded === 'object' && 'attachFootprint' in embedded) {
+    const { attachFootprint: _carrier, ...rest } = embedded as Record<string, unknown>;
+    if (Object.keys(rest).length > 0) {
+      response.data = rest;
+    } else {
+      delete response.data;
+    }
+  }
+  if (!footprint) {
+    return;
+  }
+  const field = ATTACH_FOOTPRINT_FIELD.test(footprint.field) && !(footprint.field in response) ? footprint.field : 'attachFootprint';
+  response[field] = moment === 'attach' ? footprint.atAttach : await footprint.atEnd();
 }
 
 export type ProgramEndAnswerFields = Pick<DebugResultData, 'exitCode' | 'unhitBreakpoints' | 'outputTail'>;

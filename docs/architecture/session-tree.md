@@ -471,7 +471,8 @@ A child is a session of its own, and what is read about it is read where it is t
 - **Its tree's run.** A launch or an attach is called on one session, the root: launch or
   attach, where an attach's target lives, what the adapter's transform handed the engine, what
   the caller asked for, the exception arming, the debugger-off decision, the notes and the
-  toolchain verdict of the start. A child is adopted, never launched; those are facts of the
+  toolchain verdict of the start, and what its attach left in the target (`attachFootprint`,
+  issue #1261; only the root's answers report it). A child is adopted, never launched; those are facts of the
   run, the same for every session of the tree. They live in one record, `Run`
   (`src/session/session-store.ts`), which the root owns and every child references
   (`session.run`; adoption does `child.run = parent.run`), so a reader holding any session of

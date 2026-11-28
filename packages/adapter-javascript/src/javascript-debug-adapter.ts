@@ -39,7 +39,7 @@ import {
   jsRunnerProjectRoot
 } from '@debugmcp/shared';
 import { DebugLanguage } from '@debugmcp/shared';
-import type { AdapterDependencies } from '@debugmcp/shared';
+import type { AdapterDependencies, AttachFootprint } from '@debugmcp/shared';
 import { findNode } from './utils/executable-resolver.js';
 import { detectBinary } from './utils/typescript-detector.js';
 import { determineOutFiles, isESMProject, hasTsConfigPaths } from './utils/config-transformer.js';
@@ -50,8 +50,10 @@ import { resolveLaunchEnvironment } from './utils/launch-environment.js';
 import {
   activateInspector,
   type InspectorActivationOptions,
-  type InspectorActivationResult
+  type InspectorActivationResult,
+  SignalledActivationError
 } from './utils/inspector-activation.js';
+import { inspectorFootprint, signalledFootprint } from './utils/inspector-footprint.js';
 
 /**
  * Base path js-debug uses to resolve source-map `sources` on attach (issue
@@ -203,6 +205,15 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
     const diagnostics = this.launchConfigDiagnostics;
     this.launchConfigDiagnostics = [];
     return diagnostics;
+  }
+
+  /** What the last attach by processId observed of the inspector, signalled or found (issue #1261), until the session layer drains it. */
+  private attachFootprint: AttachFootprint | undefined;
+
+  consumeAttachFootprint(): AttachFootprint | undefined {
+    const footprint = this.attachFootprint;
+    this.attachFootprint = undefined;
+    return footprint;
   }
 
   // js-debug pwa-node attach options https://github.com/microsoft/vscode-js-debug/blob/main/package.json
@@ -966,6 +977,7 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
    */
   async transformAttachConfig(config: GenericAttachConfig): Promise<LanguageSpecificAttachConfig> {
     this.launchConfigDiagnostics = [];
+    this.attachFootprint = undefined;
     const {
       request: _request,
       __attachMode: _attachMode,
@@ -986,16 +998,27 @@ export class JavascriptDebugAdapter extends EventEmitter implements IDebugAdapte
 
     const byPid = processId !== undefined && processId !== null && processId !== '';
     if (byPid) {
-      const activated = await this.activateInspector({
-        pid: processId as number | string,
-        host: attachHost,
-        port: attachPort
-      });
+      let activated: InspectorActivationResult;
+      try {
+        activated = await this.activateInspector({
+          pid: processId as number | string,
+          host: attachHost,
+          port: attachPort
+        });
+      } catch (error) {
+        // A failure after the signal still says the process was signalled (issue #1261).
+        if (error instanceof SignalledActivationError) {
+          this.attachFootprint = signalledFootprint(error);
+        }
+        throw error;
+      }
       attachHost = activated.host;
       attachPort = activated.port;
+      // What the attach observed of the inspector, which this server does not close (issue #1261).
+      this.attachFootprint = inspectorFootprint({ ...activated, pid: Number(String(processId).trim()) });
       this.dependencies.logger.info(
-        `[JavascriptDebugAdapter] ${activated.alreadyActive ? 'Found' : 'Activated'} the inspector of PID ${processId} ` +
-          `on ${attachHost}:${attachPort} (${activated.title})`
+        `[JavascriptDebugAdapter] Attach by PID ${processId}: an inspector answered ` +
+          `${activated.alreadyActive ? 'the first probe' : 'after the signal'} on ${attachHost}:${attachPort} (${activated.title})`
       );
     } else if (!(attachPort !== undefined && attachPort > 0) && !(typeof rest.websocketAddress === 'string' && rest.websocketAddress.length > 0)) {
       throw new AdapterError(

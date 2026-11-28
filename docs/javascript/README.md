@@ -481,9 +481,10 @@ Three ways in:
   its inspector on `127.0.0.1:9229`, confirms through the inspector's `/json/list` that the
   port now belongs to that PID, and attaches there. A target started with
   `--inspect-port=<n>` (or `NODE_OPTIONS=--inspect-port=<n>`) opens on that port instead:
-  pass it as `port` alongside `processId`. The inspector **stays open after detach and
-  close**, until something inside the process closes it or the process exits
-  ([#1261](https://github.com/debugmcp/mcp-debugger/issues/1261)).
+  pass it as `port` alongside `processId`. **This server closes no inspector**: the one the
+  attach reaches is left listening after detach and close
+  ([#1261](https://github.com/debugmcp/mcp-debugger/issues/1261) records why), and the
+  answers say what the attach saw (below).
   A later attach — by PID or by `port: 9229` — reuses it without a second signal, and so can
   anything else on the host: the inspector has no authentication, so any local process can
   connect to it and run code in the target, and while it holds 9229 an attach by PID to a
@@ -491,7 +492,28 @@ Three ways in:
   `process._debugEnd()` in the target while it is paused: the inspector closes and the
   process runs on, but the call is answered `Unable to evaluate` and the session then
   reports the program as ended ([#1262](https://github.com/debugmcp/mcp-debugger/issues/1262)).
-  Restarting the target closes it too.
+  An inspector belongs to its process: it goes when that process exits.
+
+  Each attach by PID, and the detach and close of its session, says what the attach saw in
+  one field, `inspector` — only what it observed, in order, and what this server does; never
+  what opened the inspector or how long it will listen. After an attach that signalled, the
+  detach and close look once (one `/json/list` probe of the address, 1 s at most; an answer
+  counts as an inspector only when it lists a Node target with a WebSocket address) and say
+  what they saw; after one that found an inspector open, they do not look. An attach by
+  port or by inspector URL says nothing about it.
+
+  | When | `inspector` |
+  |---|---|
+  | attach that signalled, and an inspector answered (a failed attach too) | `signalled: 127.0.0.1:9229 refused this attach's first probe, this attach then signalled PID <pid>, and an inspector answered there after the signal, unauthenticated; this server does not close it` |
+  | attach whose first probe an inspector answered | `already open: an inspector answered this attach's first probe on 127.0.0.1:9229, so no signal was sent; this server does not close it` |
+  | attach that signalled and then failed to identify one | `signalled: this attach signalled PID <pid>, and no inspector of it was identified on 127.0.0.1:9229; one may now be open on another port, and this server does not close it` (the same on its close) |
+  | detach or close, an inspector answers | `listening: an inspector answers on 127.0.0.1:9229, unauthenticated (one answered there after this attach signalled PID <pid>); this server does not close it` |
+  | detach or close, the port refuses | `not listening: 127.0.0.1:9229 no longer accepts connections (one answered there after this attach signalled PID <pid>)` |
+  | detach or close, no answer or something else | `not checked: 127.0.0.1:9229 did not answer as an inspector (<what was seen>); one answered there after this attach signalled PID <pid>, and this server does not close it` |
+  | detach or close, it had been found open | `left as it was: an inspector answered this attach's first probe on 127.0.0.1:9229, so no signal was sent; this server does not close it` |
+
+  A session whose connection ended by itself says nothing until its close, which carries
+  the field as above.
 - **By inspector URL** (issue #896) — `attach_to_process { adapterConfig: { websocketAddress:
   "ws://127.0.0.1:9229/<uuid>" } }`, the `webSocketDebuggerUrl` that `http://host:port/json/list`
   reports. js-debug dials it directly; no `port` is needed, and a `host`/`port` beside it is
@@ -535,9 +557,14 @@ was observed (#1288):
 ## Known Limitations
 
 - Browser/Chrome debugging not yet supported (Node.js via `pwa-node` only)
-- Attach by PID leaves the target's inspector open after detach and close, unauthenticated
-  ([#1261](https://github.com/debugmcp/mcp-debugger/issues/1261)); see
-  [Attaching to a running Node.js process](#attaching-to-a-running-nodejs-process)
+- Attach by PID leaves the target's inspector open after detach and close, unauthenticated:
+  this server does not close it, and the answers say so in `inspector`
+  ([#1261](https://github.com/debugmcp/mcp-debugger/issues/1261) records why no close is safe
+  today); see [Attaching to a running Node.js process](#attaching-to-a-running-nodejs-process)
+- A target started with `--inspect-port=<n>` and attached by PID without `port: <n>` fails:
+  the signal opens its inspector on `<n>`, the attach looks at 9229, and the failure says that
+  the PID was signalled and that this server does not close what may now be open elsewhere
+  ([#1310](https://github.com/debugmcp/mcp-debugger/issues/1310)). Pass the port to attach
 - Attach by PID activates the inspector on Node's default port unless the target set
   `--inspect-port`; two PID attaches to two different plain `node` processes on one host
   therefore need the second target started with `--inspect-port=<n>` and `port: <n>` passed

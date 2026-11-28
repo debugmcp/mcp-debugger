@@ -493,7 +493,8 @@ export class AttachController {
           : attachedTo,
         ...(attachPausePending ? { pending: true } : {}),
         ...(landing ? landingFields(landing) : {}),
-        ...(snapshot ? { snapshot } : {})
+        ...(snapshot ? { snapshot } : {}),
+        ...(session.run.attachFootprint ? { attachFootprint: session.run.attachFootprint } : {})
       };
       // Surface adapterConfig keys the adapter's attach transform dropped
       // (issue #450) and keys forwarded to the adapter unrecognized (issue
@@ -558,11 +559,16 @@ export class AttachController {
       if (state === SessionState.ERROR) {
         this.ctx.updateState(session, SessionState.ERROR);
       }
+      // What the attach left in the target before it failed (issue #1261).
+      const data: AttachResultData = {
+        ...diagnosticData,
+        ...(session.run.attachFootprint ? { attachFootprint: session.run.attachFootprint } : {})
+      };
       return {
         success: false,
         state,
         error: `Failed to attach: ${message}`,
-        ...(Object.keys(diagnosticData).length > 0 ? { data: diagnosticData } : {})
+        ...(Object.keys(data).length > 0 ? { data } : {})
       };
     }
   }
@@ -763,7 +769,8 @@ export class AttachController {
             ? { warning: [fate.warning, warning].filter((part) => part !== undefined).join('; ') }
             : terminateProcess && warning !== undefined ? { warning } : {}),
           ...(childrenClosed > 0 ? { childrenClosed } : {}),
-          ...(childrenReleased > 0 ? { childrenReleased } : {})
+          ...(childrenReleased > 0 ? { childrenReleased } : {}),
+          ...(session.run.attachFootprint ? { attachFootprint: session.run.attachFootprint } : {})
         }
       };
     } catch (error) {
