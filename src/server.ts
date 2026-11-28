@@ -765,7 +765,7 @@ export class DebugMcpServer implements ToolContext {
       variableAccessMode: getVariableAccessMode(this.environment),
       snapshotEnabled: isSnapshotEnabled(this.environment),
       containerMode: isContainerMode(this.environment),
-      ...(this.idlePolicy.idleMs > 0 ? { idleWindow: describeIdleWindow(this.idlePolicy.idleMs) } : {})
+      idleMs: this.idlePolicy.idleMs
     });
 
     const sessionManagerConfig: SessionManagerConfig = {

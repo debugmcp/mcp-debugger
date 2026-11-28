@@ -3,7 +3,7 @@
     "tools": [
       {
         "name": "create_debug_session",
-        "description": "Create a new debugging session. Passing port, processId or an adapterConfig that names a target (a debugger URI: vmServiceUri, websocketAddress, vmServiceInfoFile; or a Flutter deviceId, for an app running on an Android device) attaches to a running process in the same call, with every attach argument attach_to_process takes (host alone does not); omit them for launch mode. Attaching pauses the target unless stopOnEntry is false",
+        "description": "Create a new debugging session. Passing port, processId or an adapterConfig that names a target (a debugger URI: vmServiceUri, websocketAddress, vmServiceInfoFile; or a Flutter deviceId, for an app running on an Android device) attaches to a running process in the same call, with every attach argument attach_to_process takes (host alone does not); omit them for launch mode. Attaching requests a pause by default (stopOnEntry, see attach_to_process); the answer's state and warning say whether one was requested and whether it landed",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -60,7 +60,7 @@
             },
             "stopOnEntry": {
               "type": "boolean",
-              "description": "Attach mode only: same as attach_to_process.stopOnEntry — omitted means true, the target is paused after attach (possibly late, reported as pending:true). Pass false to attach to a live service without stopping it"
+              "description": "Attach mode only: same as attach_to_process.stopOnEntry — omitted means true, a pause is requested after attach (it can land late, reported as pending:true). Pass false to attach to a live service without stopping it"
             },
             "timeout": {
               "type": "number",
@@ -213,7 +213,7 @@
       },
       {
         "name": "start_debugging",
-        "description": "Start debugging a script. Answers when the launched program stops, when it ends, or after a short hold — whichever comes first, and the same way in every language: \"paused\" with a reason and, as wait_for_stop answers a stop, the location, its source context and a note (a breakpoint reached as the program starts is answered here), \"stopped\" with the exit code, or \"running\" with pending:true when the program has not stopped yet; the message says what is armed. The hold is not a limit on the program — nothing is cancelled when it passes and breakpoints stay armed: call wait_for_stop to block until the program stops or ends (for a server, after sending the request that reaches your breakpoint). A stopOnEntry launch is answered at its entry stop",
+        "description": "Start debugging a script. Answers when the launched program stops, when it ends, or after a short hold — whichever comes first, and the same way in every language: \"paused\" with a reason and, as wait_for_stop answers a stop, the location and its source context when the stop has a frame, and any note (a breakpoint reached as the program starts is answered here), \"stopped\" with the exit code, or \"running\" with pending:true when the program has not stopped yet; the message says what is armed. The hold is not a limit on the program — nothing is cancelled when it passes and breakpoints stay armed: call wait_for_stop to block until the program stops or ends (for a server, after sending the request that reaches your breakpoint). A stopOnEntry launch is answered at its entry stop",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -236,7 +236,7 @@
               "properties": {
                 "stopOnEntry": {
                   "type": "boolean",
-                  "description": "Pause at the first line before running. Default false — the opposite of attach, which pauses unless stopOnEntry is false"
+                  "description": "Pause at the first line before running. Default false — the opposite of attach, where it defaults to true"
                 },
                 "justMyCode": {
                   "type": "boolean",
@@ -264,7 +264,7 @@
             },
             "testRunner": {
               "type": "string",
-              "description": "Run scriptPath under a test runner the language declares a preset for (list_supported_languages shows testRunners per language; python: \"pytest\"). The preset builds the launch — for pytest: python -m pytest <scriptPath>[::testTarget] -x, run from pytest's rootdir (the nearest pytest.ini, pyproject.toml with a [tool.pytest.ini_options] table, tox.ini or setup.cfg with a pytest section above the file, else setup.py), with pytest-xdist and pytest-cov turned off — -p no:<plugin>, or the plugin's inert switch (-n0 / --no-cov) when the project's own addopts turns it on — unless your args ask for them, and the debugger armed to pause on the first failing assert or escaping exception with the test frame live (uncaught + userUnhandled). The answer is the autopsy: snapshot.exception, frames and locals; a passing test runs to completion. Your args are appended as pytest arguments. An undeclared runner is refused by name before anything starts"
+              "description": "Run scriptPath under a test runner the language declares a preset for (list_supported_languages shows testRunners per language; python: \"pytest\"). The preset builds the launch — for pytest: python -m pytest <scriptPath>[::testTarget] -x, run from pytest's rootdir (the nearest pytest.ini, pyproject.toml with a [tool.pytest.ini_options] table, tox.ini or setup.cfg with a pytest section above the file, else setup.py), with pytest-xdist and pytest-cov turned off — -p no:<plugin>, or the plugin's inert switch (-n0 / --no-cov) when the project's own addopts turns it on — unless your args ask for them, and the debugger armed to pause on the first failing assert or escaping exception with the test frame live (uncaught + userUnhandled). At that stop the answer's snapshot, when there is one, is the autopsy (what it carries: see wait_for_stop). The same filters can also pause at an exception that is handled after all, so a passing test can pause too: where an exception leaves one of the program's frames into generated or library code although a frame further down handles it (a raise in a dataclass's __post_init__, or an attrs post-init or validator, inside pytest.raises is the common case), at pytest.skip(), and, where pydevd traces frames (Python 3.11 and older, or debugpy before 1.8.6), at an exception pytest.raises expects. continue_execution goes on; breakOnExceptions: \"none\" turns off every exception stop, the failing test's included. Your args are appended as pytest arguments. An undeclared runner is refused by name before anything starts"
             },
             "testTarget": {
               "type": "string",
@@ -339,7 +339,7 @@
             },
             "stopOnEntry": {
               "type": "boolean",
-              "description": "Pause the target after attaching. Default true when omitted (thread verification, then a pause request; if the stop lands after the response you get pending:true and the target still freezes on its next dispatch). Pass false to attach without stopping — required when attaching to a live service"
+              "description": "Request a pause after attaching. Default true when omitted (thread verification, then a pause request, which is not sent when the target has not answered the breakpoint request — the warning says so; if the stop lands after the response you get pending:true and the target still freezes on its next dispatch). Pass false to attach without stopping — required when attaching to a live service"
             },
             "justMyCode": {
               "type": "boolean",
@@ -367,7 +367,7 @@
       },
       {
         "name": "detach_from_process",
-        "description": "Detach from a process the session attached to, leaving it running. A program the session launched ends with its session: a plain detach there is refused (use close_debug_session, or terminateProcess: true)",
+        "description": "Detach from a process the session attached to, asking the debugger to leave it running; the answer's released, processEnded or warning says what became of it. A program the session launched ends with its session: a plain detach there is refused (use close_debug_session, or terminateProcess: true)",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -417,7 +417,7 @@
       },
       {
         "name": "close_debug_session",
-        "description": "Close a debugging session, with its child sessions. A program the session launched is ended; a process it attached to is released and keeps running; the answer says which (processEnded, released). Close every session when done, even after a failure",
+        "description": "Close a debugging session, with its child sessions. The debugger is asked to end a program the session launched, and to detach from a process it attached to and leave it running. While the session is still attached, the answer says what became of the process: released (detached; it keeps running), processEnded (it ended), or a warning that the debugger did not confirm the detach. Close every session when done, even after a failure",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -432,7 +432,7 @@
       },
       {
         "name": "step_over",
-        "description": "Step over the current line. Waits briefly for the program to stop; if the step is still executing after ~5s (e.g. stepping over a long-running call), returns success with state \"running\" and pending:true — the step is still in effect and the session becomes \"paused\" when it completes (call wait_for_stop to block until then, or pause_execution to interrupt). Unless the server runs with DEBUG_MCP_NO_SNAPSHOT=1, an answer at a stop (not an entry stop) carries snapshot: the top 3 frames; this server withholds the locals (least-privilege mode), and snapshot.note says so. At an exception the answer also carries its type and message, in snapshot.exception.",
+        "description": "Step over the current line. Waits briefly for the program to stop; if the step is still executing after ~5s (e.g. stepping over a long-running call), returns success with state \"running\" and pending:true — the step is still in effect and the session becomes \"paused\" when it completes (call wait_for_stop to block until then, or pause_execution to interrupt). Read any snapshot in the answer first (what it carries: see wait_for_stop; here it holds an exception's type and message, when reported, in snapshot.exception).",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -447,7 +447,7 @@
       },
       {
         "name": "step_into",
-        "description": "Step into the current call. Waits briefly for the program to stop; if the step is still executing after ~5s, returns success with state \"running\" and pending:true — the session becomes \"paused\" when the step completes (call wait_for_stop to block until then). Unless the server runs with DEBUG_MCP_NO_SNAPSHOT=1, an answer at a stop (not an entry stop) carries snapshot: the top 3 frames; this server withholds the locals (least-privilege mode), and snapshot.note says so. At an exception the answer also carries its type and message, in snapshot.exception.",
+        "description": "Step into the current call. Waits briefly for the program to stop; if the step is still executing after ~5s, returns success with state \"running\" and pending:true — the session becomes \"paused\" when the step completes (call wait_for_stop to block until then). Read any snapshot in the answer first (what it carries: see wait_for_stop; here it holds an exception's type and message, when reported, in snapshot.exception).",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -462,7 +462,7 @@
       },
       {
         "name": "step_out",
-        "description": "Step out of the current function. Waits briefly for the program to stop; if the step is still executing after ~5s (e.g. the rest of the function is long-running), returns success with state \"running\" and pending:true — the session becomes \"paused\" when the step completes (call wait_for_stop to block until then). Unless the server runs with DEBUG_MCP_NO_SNAPSHOT=1, an answer at a stop (not an entry stop) carries snapshot: the top 3 frames; this server withholds the locals (least-privilege mode), and snapshot.note says so. At an exception the answer also carries its type and message, in snapshot.exception.",
+        "description": "Step out of the current function. Waits briefly for the program to stop; if the step is still executing after ~5s (e.g. the rest of the function is long-running), returns success with state \"running\" and pending:true — the session becomes \"paused\" when the step completes (call wait_for_stop to block until then). Read any snapshot in the answer first (what it carries: see wait_for_stop; here it holds an exception's type and message, when reported, in snapshot.exception).",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -492,7 +492,7 @@
       },
       {
         "name": "wait_for_stop",
-        "description": "Block until the session next pauses or ends, then say why and where. Call it after continue_execution (which does not wait) and whenever a tool answers pending:true, instead of polling list_debug_sessions. Answers at once when the session is already paused (state \"paused\" with lastStop — the same record list_debug_sessions shows — and the top frame as location) or already over (the terminal state, with exitCode when the debuggee reported one); note says when the answer is anchored on a thread other than the one the stop was reported on, or when no frame of the shown stack is program code. If neither happens within the timeout it answers state \"running\" with pending:true: nothing was cancelled, breakpoints and exception filters stay armed — call it again to keep waiting, or pause_execution to interrupt. A session whose program spawned child sessions (Python and JavaScript launches, on by default: dapLaunchArgs subProcess: false or autoAttachChildProcesses: false opts a launch out; a JavaScript attach needs adapterConfig: { autoAttachChildProcesses: true }, whose costs the attach_to_process description states) is waited on as a tree: sessionId names the session the answer is about — the session itself when it is paused, else the first paused descendant, else the session itself when it has ended — and children lists every descendant with its state; an ended child alone never completes the parent's wait. A non-zero exit with program output also carries outputTail. Unless the server runs with DEBUG_MCP_NO_SNAPSHOT=1, an answer at a stop (not an entry stop) carries snapshot: the top 3 frames; this server withholds the locals (least-privilege mode), and snapshot.note says so. At an exception the answer also carries its type and message, in lastStop.",
+        "description": "Block until the session next pauses or ends, then say why and where. Call it after continue_execution (which does not wait) and whenever a tool answers pending:true, instead of polling list_debug_sessions. Answers at once when the session is already paused (state \"paused\" with lastStop — the same record list_debug_sessions shows — and the top frame, when there is one, as location) or already over (the terminal state, with exitCode when the debuggee reported one); note says when the answer is anchored on a thread other than the one the stop was reported on, or when no frame of the shown stack is program code. If neither happens within the timeout it answers state \"running\" with pending:true: nothing was cancelled, breakpoints and exception filters stay armed — call it again to keep waiting, or pause_execution to interrupt. A session whose program spawned child sessions (Python and JavaScript launches, on by default: dapLaunchArgs subProcess: false or autoAttachChildProcesses: false opts a launch out; a JavaScript attach needs adapterConfig: { autoAttachChildProcesses: true }, whose costs the attach_to_process description states) is waited on as a tree: sessionId names the session the answer is about — the session itself when it is paused, else the first paused descendant, else the session itself when it has ended — and children lists every descendant with its state; an ended child alone never completes the parent's wait. A non-zero exit with program output also carries outputTail. When snapshots are on (the default; DEBUG_MCP_NO_SNAPSHOT=1 or true turns them off), an answer at a stop other than an entry stop may carry snapshot: up to 3 top frames; this server withholds the locals (least-privilege mode), and snapshot.note says so. An exception's type and message are in lastStop when the debugger reports them. Read the snapshot first.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -511,7 +511,7 @@
       },
       {
         "name": "pause_execution",
-        "description": "Pause a running program. Waits briefly for the stop; if the program cannot stop within ~5s (e.g. blocked in native code, or an idle server waiting for input), returns success with pending:true and the session reports \"paused\" the next time the program runs code (call wait_for_stop to block until then). An observed stop answers with stopReason, the first visible frame as location (with its source context), and note when the stop was reported on a thread with no program frame — a sibling thread in program code is shown instead, or, when none has one, the note says no program frame is active. Fails with an actionable error if the session has no debuggable target to pause (e.g. a js attach whose target session was never adopted or has ended). Unless the server runs with DEBUG_MCP_NO_SNAPSHOT=1, an answer at a stop (not an entry stop) carries snapshot: the top 3 frames; this server withholds the locals (least-privilege mode), and snapshot.note says so. At an exception the answer also carries its type and message, in snapshot.exception.",
+        "description": "Pause a running program. Waits briefly for the stop; if the program cannot stop within ~5s (e.g. blocked in native code, or an idle server waiting for input), returns success with pending:true and the session reports \"paused\" the next time the program runs code (call wait_for_stop to block until then). An observed stop answers with stopReason, the first visible frame, when there is one, as location (with its source context), and note when the stop was reported on a thread with no program frame — a sibling thread in program code is shown instead, or, when none has one, the note says no program frame is active. Fails with an actionable error if the session has no debuggable target to pause (e.g. a js attach whose target session was never adopted or has ended). Read any snapshot in the answer first (what it carries: see wait_for_stop).",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -545,7 +545,7 @@
       },
       {
         "name": "get_variables",
-        "description": "Get variables (scope is variablesReference: number). Responses are size-guarded: oversized values are cut (truncated:true) and very large scopes return a capped list with a truncation notice — pass names:[...] to fetch specific variables in full. Unless the server runs with DEBUG_MCP_NO_REDACT=1, credential-shaped values (API keys, tokens, private keys) and the values of sensitive names (password, api_key, ...) are shown as <redacted:rule-id>: the program's state is unchanged, only the display is masked, and the answer's redaction field says what was masked.",
+        "description": "Get variables (scope is variablesReference: number). Responses are size-guarded: oversized values are cut (truncated:true) and very large scopes return a capped list with a truncation notice — pass names:[...] to fetch specific variables in full. When redaction is on (the default; starting the server with DEBUG_MCP_NO_REDACT=1 or true turns it off, and a change takes a restart), credential-shaped values (API keys, tokens, private keys) and the values of sensitive names (password, api_key, ...) are shown as <redacted:rule-id>: only the display is masked, the program's state is unchanged, and the answer's redaction field says what was masked.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -573,7 +573,7 @@
       },
       {
         "name": "get_local_variables",
-        "description": "Get local variables for the shared inspection anchor. If the stopped thread is frameless, a sibling with policy-recognized user frames is preferred, adopted, and disclosed in note. At a breakpoint or step inside a frame the stack display hides as internal (a node_modules dependency), the anchor is that frame — the one the program stopped in — and note says so. A JavaScript frame with no Local/block scope returns empty with guidance instead of mislabeling Global bindings. Responses are size-guarded; pass names:[...] to fetch specific variables in full. Unless the server runs with DEBUG_MCP_NO_REDACT=1, credential-shaped values (API keys, tokens, private keys) and the values of sensitive names (password, api_key, ...) are shown as <redacted:rule-id>: the program's state is unchanged, only the display is masked, and the answer's redaction field says what was masked.",
+        "description": "Get local variables for the shared inspection anchor. If the stopped thread is frameless, a sibling with policy-recognized user frames is preferred, adopted, and disclosed in note. At a breakpoint or step inside a frame the stack display hides as internal (a node_modules dependency), the anchor is that frame — the one the program stopped in — and note says so. A JavaScript frame with no Local/block scope returns empty with guidance instead of mislabeling Global bindings. Responses are size-guarded; pass names:[...] to fetch specific variables in full. Values may show as <redacted:rule-id>: see get_variables for the redaction rule.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -643,7 +643,7 @@
       },
       {
         "name": "evaluate_expression",
-        "description": "Evaluate expression in the current debug context. Without frameId, uses the same adopted top frame as stack and locals — at a breakpoint or step that is the frame the program stopped in even when the stack display would hide it — and discloses an automatic thread switch or a hidden paused frame in anchorNote; frame names the frame that was used, on success and on failure. Expressions can read and modify program state. Waits up to 30s by default. Unless the server runs with DEBUG_MCP_NO_REDACT=1, credential-shaped values (API keys, tokens, private keys) and the values of sensitive names (password, api_key, ...) are shown as <redacted:rule-id>: the program's state is unchanged, only the display is masked, and the answer's redaction field says what was masked.",
+        "description": "Evaluate expression in the current debug context. Without frameId, uses the same adopted top frame as stack and locals — at a breakpoint or step that is the frame the program stopped in even when the stack display would hide it — and discloses an automatic thread switch or a hidden paused frame in anchorNote; frame names the frame that was used, on success and on failure. Expressions can read and modify program state. Waits up to 30s by default. Values may show as <redacted:rule-id>: see get_variables for the redaction rule.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -699,7 +699,7 @@
       },
       {
         "name": "get_output",
-        "description": "Get debuggee output (stdout/stderr/console) captured for a session. Buffered per launch (last 1000 entries; adapter telemetry and known adapter-internal diagnostics — e.g. LLDB DWARF-parser noise — filtered out). Works while the program is running and after it finishes, until the session is closed. Pass since=nextSince from the previous response to fetch only new output. A session with child sessions lists them in children: the lines of a logpoint are on the session of the process that hit it, read with get_output on that sessionId. Unless the server runs with DEBUG_MCP_NO_REDACT=1, credential-shaped values (API keys, tokens, private keys) and the values of sensitive names (password, api_key, ...) are shown as <redacted:rule-id>: the program's state is unchanged, only the display is masked, and the answer's redaction field says what was masked.",
+        "description": "Get debuggee output (stdout/stderr/console) captured for a session. Buffered per launch (last 1000 entries; adapter telemetry and known adapter-internal diagnostics — e.g. LLDB DWARF-parser noise — filtered out). Works while the program is running and after it finishes, until the session is closed. Pass since=nextSince from the previous response to fetch only new output. A session with child sessions lists them in children: the lines of a logpoint are on the session of the process that hit it, read with get_output on that sessionId. Values may show as <redacted:rule-id>: see get_variables for the redaction rule.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -722,7 +722,7 @@
       },
       {
         "name": "hot_reload",
-        "description": "Apply changed code to the running program and keep its state — the adapter's own live update. Flutter: the SDK adapter's hot reload (the app must have started; the reassemble runs build(), so a breakpoint there is reported by this call as the stop, with its location and snapshot; widget state, counters and timers survive; a reload sent to a paused program lands when it resumes). Java: class redefinition (JDI HotSwap) — scans classesDir for .class files modified after sinceTimestamp, redefines the ones the JVM has loaded, re-plants breakpoints, and returns which classes were redefined and the newest file timestamp (pass it as sinceTimestamp next time for an incremental update). Statement-anchored breakpoints are re-resolved against the new source after the update (anchorResolution reports moved/stale). Refused by name on the other languages. redefine_classes is a deprecated alias of this tool.",
+        "description": "Apply changed code to the running program and keep its state — the adapter's own live update. Flutter: the SDK adapter's hot reload (the app must have started; the reassemble runs build(), so a breakpoint there is reported by this call as the stop, with its location and snapshot when they can be read; widget state, counters and timers survive; a reload sent to a paused program lands when it resumes). Java: class redefinition (JDI HotSwap) — scans classesDir for .class files modified after sinceTimestamp, redefines the ones the JVM has loaded, re-plants breakpoints, and returns which classes were redefined and the newest file timestamp (pass it as sinceTimestamp next time for an incremental update). Statement-anchored breakpoints are re-resolved against the new source after the update (anchorResolution reports moved/stale). Refused by name on the other languages. redefine_classes is a deprecated alias of this tool.",
         "inputSchema": {
           "type": "object",
           "properties": {

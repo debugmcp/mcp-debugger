@@ -75,7 +75,7 @@ describe('Server Initialization Tests', () => {
     it('builds the instructions from the settings in the environment', () => {
       const defaults = new DebugMcpServer({ logLevel: 'debug' }).instructions;
       expect(defaults).toContain('file and scriptPath must be ABSOLUTE paths');
-      expect(defaults).toContain('carries snapshot:');
+      expect(defaults).toContain('may carry snapshot:');
       expect(defaults).toContain('(redacted and capped)');
 
       vi.stubEnv('DEBUG_MCP_NO_SNAPSHOT', '1');
@@ -86,12 +86,22 @@ describe('Server Initialization Tests', () => {
       vi.stubEnv('MCP_WORKSPACE_ROOT', '/workspace');
       const configured = new DebugMcpServer({ logLevel: 'debug' }).instructions;
       expect(configured).toContain('Stop snapshots are off on this server (DEBUG_MCP_NO_SNAPSHOT)');
-      expect(configured).not.toContain('carries snapshot:');
+      expect(configured).not.toContain('may carry snapshot:');
       expect(configured).not.toMatch(/redact/i);
       expect(configured).toContain('DEBUG_MCP_VARIABLE_ACCESS=explicit');
       expect(configured).toContain('no tool call has named for 5 min');
       expect(configured).toContain('relative to the project root');
       expect(configured).not.toContain('ABSOLUTE');
+    });
+
+    // The switches accept true as well as 1, trimmed and in any case
+    // (isSnapshotEnabled, isRedactionEnabled): the instructions follow them.
+    it('reads true as well as 1 for the snapshot and redaction switches', () => {
+      vi.stubEnv('DEBUG_MCP_NO_SNAPSHOT', ' TRUE ');
+      vi.stubEnv('DEBUG_MCP_NO_REDACT', 'true');
+      const instructions = new DebugMcpServer({ logLevel: 'debug' }).instructions;
+      expect(instructions).toContain('Stop snapshots are off on this server (DEBUG_MCP_NO_SNAPSHOT)');
+      expect(instructions).not.toMatch(/redact/i);
     });
 
     it('should initialize with log file configuration', () => {

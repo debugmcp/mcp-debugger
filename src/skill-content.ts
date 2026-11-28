@@ -17,6 +17,7 @@ import {
   supportsExpectedContent,
   supportsStatementAnchors
 } from './utils/bp-addressing.js';
+import { describeIdleWindow } from './session/idle-policy.js';
 
 /**
  * The most characters of `instructions` a client is known to show the model
@@ -31,13 +32,19 @@ export const SERVER_INSTRUCTIONS_LIMIT = 4096;
 
 /** What the server's settings change in the instructions; each defaults to the shipped default. */
 export interface ServerInstructionsOptions {
-  /** Secret redaction (issue #237): on unless the server runs with DEBUG_MCP_NO_REDACT=1. */
+  /** Secret redaction (issue #237): on unless DEBUG_MCP_NO_REDACT is 1 or true (isRedactionEnabled). */
   redactionEnabled?: boolean;
   /** Least-privilege variable access (issue #237): DEBUG_MCP_VARIABLE_ACCESS. */
   variableAccessMode?: 'open' | 'explicit';
-  /** The idle policy's window in words (describeIdleWindow); absent = the policy is off (issue #1025). */
-  idleWindow?: string;
-  /** The stop snapshot (issue #982): on unless the server runs with DEBUG_MCP_NO_SNAPSHOT=1. */
+  /**
+   * The idle policy's window in ms (IdlePolicy.idleMs, issue #1025); the rule
+   * is stated only for a window above 0, as the policy runs only then. The
+   * builder words the window itself (describeIdleWindow), so the text it
+   * quotes is at most 27 characters for any number, and the bound holds for
+   * every value this option admits, not only the ones the server passes.
+   */
+  idleMs?: number;
+  /** The stop snapshot (issue #982): on unless DEBUG_MCP_NO_SNAPSHOT is 1 or true (isSnapshotEnabled). */
   snapshotEnabled?: boolean;
   /** Container mode (MCP_CONTAINER=true): paths are relative to the workspace mount, not absolute. */
   containerMode?: boolean;
@@ -48,13 +55,19 @@ export interface ServerInstructionsOptions {
  * (issue #1331): what the server is; the rules an operator's setting adds,
  * because they change which calls work or what happens to the program; the
  * shortest path for a launch, a failing test and an attach; what a stop
- * answer already carries; waiting; logpoints; how a session ends; and where
+ * answer may already carry; waiting; logpoints; how a session ends; and where
  * the rest is. A rule about one tool's details lives in that tool's
  * description (src/server/tool-schemas.ts), which the agent reads when it
- * loads the tool. The whole text must fit in SERVER_INSTRUCTIONS_LIMIT for
- * every option combination (tests/core/unit/server/server-instructions.test.ts),
- * and it is ASCII so that characters, UTF-16 units and bytes agree, whichever
- * a client counts.
+ * loads the tool. Every sentence must be true in every case it covers: where
+ * the runtime does not guarantee an outcome, the text says what is requested
+ * and where the answer says what happened.
+ *
+ * The whole text fits in SERVER_INSTRUCTIONS_LIMIT for every value the
+ * options admit (tests/core/unit/server/server-instructions.test.ts): the
+ * mode and the switches choose among fixed sentences, and the one number,
+ * idleMs, is worded here, in at most 27 characters for any number; and it is
+ * ASCII so that characters, UTF-16 units and bytes agree, whichever a client
+ * counts.
  */
 export function buildServerInstructions(
   mode: BpAddressingMode = DEFAULT_BP_ADDRESSING,
@@ -67,36 +80,42 @@ export function buildServerInstructions(
   // The rules an operator's setting adds come before the general ones: each
   // changes which calls work or what happens to the program.
   const operatorRules: string[] = [];
-  if (opts.idleWindow) {
+  if (typeof opts.idleMs === 'number' && opts.idleMs > 0) {
     // Off by default (MCP_DEBUG_SESSION_IDLE_MS, issue #1025): it ends
-    // programs, so the agent must know. The sweep skips the whole process
-    // while a client holds a notification stream open (the attended check).
+    // programs, so the agent must know. The sweep closes the tree with the
+    // close_debug_session call (closeSessionReporting), and closes nothing
+    // while a client holds a notification stream open; only the HTTP
+    // transport reports such a stream (setAttendedSupplier in
+    // http-command.ts), so over stdio an open stream does not hold a tree.
     operatorRules.push(
-      `- This server closes a debug session tree that no tool call has named for ${opts.idleWindow} (idle policy, MCP_DEBUG_SESSION_IDLE_MS; not while a client holds a notification stream open): a launched program is ended, an attached one released. A tool call naming any session of the tree restarts the clock and holds the tree while the call runs; list_debug_sessions shows each session's expiresInMs.`
+      `- This server closes a debug session tree that no tool call has named for ${describeIdleWindow(opts.idleMs)} (MCP_DEBUG_SESSION_IDLE_MS; not while an HTTP client holds a notification stream open), as close_debug_session does. A call naming any session of the tree holds the tree while it runs and restarts its clock; list_debug_sessions shows expiresInMs.`
     );
   }
   if (explicitNames) {
     operatorRules.push(
-      '- This server runs in least-privilege variable access mode (DEBUG_MCP_VARIABLE_ACCESS=explicit): get_variables and get_local_variables require names: ["..."] (exact and case-sensitive; missing ones are listed in notFound), and stop snapshots carry no locals. evaluate_expression remains available for targeted reads.'
+      '- Variable access is least-privilege (DEBUG_MCP_VARIABLE_ACCESS=explicit): get_variables and get_local_variables require names: ["..."] (exact, case-sensitive; notFound lists missing ones), stop snapshots carry no locals, and evaluate_expression still works.'
     );
   }
   if (!snapshotEnabled) {
+    // No location promise: a stop with no frame has none (stop-location.ts).
     operatorRules.push(
-      '- Stop snapshots are off on this server (DEBUG_MCP_NO_SNAPSHOT): an answer at a stop carries its location but no snapshot of frames and locals; read them with get_stack_trace and get_local_variables.'
+      '- Stop snapshots are off on this server (DEBUG_MCP_NO_SNAPSHOT): read frames and locals with get_stack_trace and get_local_variables.'
     );
   }
   const operatorBlock = operatorRules.length > 0 ? `\n\n${operatorRules.join('\n')}` : '';
 
   // Host mode refuses a relative path (SimpleFileChecker); container mode
   // resolves every path under the workspace mount (resolvePathForRuntime), so
-  // a host's absolute path does not reach the file there.
+  // a host's absolute path does not reach the file there. A Java breakpoint
+  // may name its class instead of a file (isNonFileSourceIdentifier), in
+  // either mode.
   const pathRule = opts.containerMode
-    ? 'file and scriptPath are relative to the project root; the server resolves them under its workspace mount.'
-    : 'file and scriptPath must be ABSOLUTE paths.';
+    ? 'file and scriptPath are relative to the project root (for Java, file may be a class name).'
+    : 'file and scriptPath must be ABSOLUTE paths (for Java, file may be a class name).';
   const testFile = opts.containerMode ? 'the test file' : 'ABSOLUTE test file';
   // Content addressing is named only where the mode serves it (issue #271).
   const breakpointStep = supportsStatementAnchors(mode)
-    ? 'set_breakpoint {sessionId, file, line} (or statement: "<text of the line>" in place of line, re-resolved at restart_debugging after an edit)'
+    ? 'set_breakpoint {sessionId, file, line} (or statement: "<text of the line>" in place of line)'
     : supportsExpectedContent(mode)
       ? 'set_breakpoint {sessionId, file, line} (add expectedContent: "<text of the line>" to catch a wrong line number)'
       : 'set_breakpoint {sessionId, file, line}';
@@ -104,30 +123,35 @@ export function buildServerInstructions(
     ? 'give the paths the target sees, a mapping (see attach_to_process) or a function breakpoint (not Ruby or Dart), which needs no path'
     : 'give the paths the target sees or a mapping (see attach_to_process)';
 
-  // Explicit-names mode withholds the snapshot's locals (stop-snapshot.ts),
-  // so the snapshot rule says only what that mode's answers carry.
-  // wait_for_stop carries an exception's message in lastStop, not in the
-  // snapshot, so the message is the answer's, not the snapshot's.
+  // Every part of the snapshot is best effort (stop-snapshot.ts): a stop with
+  // no frame and no exception has none; locals are read only from program
+  // frames, from the first of the top frames that has any (issue #468), and
+  // the read can fail or come back empty; the exception's fields are what the
+  // debugger reported; a stop answered again carries full locals, not a diff.
+  // Explicit-names mode withholds the locals, so its rule says only what that
+  // mode's answers carry. wait_for_stop carries the exception in lastStop, not
+  // in the snapshot, so the exception is the answer's, not the snapshot's.
+  const exceptionFields = 'An exception\'s type and message are in the answer when the debugger reports them.';
   const snapshotCarries = explicitNames
-    ? 'the top frames; an entry stop carries none. At an exception the answer also carries its message. Read it before calling get_stack_trace; get_scopes -> get_variables with a variablesReference (and names) reads nested values.'
-    : `the top frames and the top frame's locals (${redactionEnabled ? 'redacted and capped' : 'capped'}); an entry stop carries none. At an exception the answer also carries its message. A repeated stop in the same frame carries changedVariables (what changed) instead of locals. Read it before calling get_stack_trace or get_local_variables; call those, and get_scopes -> get_variables with a variablesReference, only for more frames, the full list or nested values.`;
+    ? `the top frames. ${exceptionFields} Read it first; get_stack_trace and get_scopes -> get_variables (a variablesReference and names) read the rest.`
+    : `the top frames and, when they can be read, the locals of the first of them that has any (${redactionEnabled ? 'redacted and capped' : 'capped'}). ${exceptionFields} A later stop in the same frame may carry changedVariables (what changed) instead of locals. Read it first; get_stack_trace, get_local_variables and get_scopes -> get_variables (a variablesReference) read the rest.`;
   const snapshotRule = snapshotEnabled
-    ? `\n\nAn answer that reports a stop (launch, restart, wait_for_stop, pause, attach, steps) carries snapshot: ${snapshotCarries}`
+    ? `\n\nAn answer that reports a stop (not an entry stop) may carry snapshot: ${snapshotCarries}`
     : '';
 
   return `mcp-debugger drives real step-through debuggers (Python, JavaScript/TypeScript, Ruby, Rust, Go, Java, .NET, C/C++, COBOL, Dart/Flutter) as MCP tools.${operatorBlock}
 
-Launch: create_debug_session {language} -> ${breakpointStep} -> start_debugging {sessionId, scriptPath}. ${pathRule} start_debugging answers paused when a breakpoint is reached as the program starts, stopped when the program ends first, otherwise running with pending:true; wait_for_stop {sessionId} then blocks until the stop.
+Launch: create_debug_session {language} -> ${breakpointStep} -> start_debugging {sessionId, scriptPath}. ${pathRule} start_debugging answers paused if the program stops soon after it starts, stopped if it ends first, otherwise running with pending:true (then wait_for_stop).
 
-Failing test (Python): start_debugging {sessionId, scriptPath: ${testFile}, testRunner: "pytest", testTarget: "test_name"} needs no breakpoint: it pauses at the failing assert (or the raise site of an exception that escapes the test), and a passing test runs to completion (exit code 0).
+Failing test (Python): start_debugging {sessionId, scriptPath: ${testFile}, testRunner: "pytest", testTarget: "test_name"} needs no breakpoint: it pauses at the failing assert (or the raise site of an exception that escapes the test). It can also pause at an exception handled after all (a raise in a dataclass's __post_init__ inside pytest.raises): continue_execution goes on; breakOnExceptions: "none" turns exception stops off.
 
-Attach: create_debug_session {language, host, port} (or processId) attaches in the same call; attach_to_process attaches an existing session. The target is a program started under its debugger (python -m debugpy --listen, rdbg --open, node --inspect, a JVM with JDWP, a Dart VM service at adapterConfig.vmServiceUri) or, for C/C++, COBOL, .NET and a local Node.js process, a processId. Attaching pauses the target unless stopOnEntry is false. Breakpoint paths are resolved on the target's filesystem: ${attachPathForms}; a remote attach takes file and line. list_supported_languages shows each language's attach forms and test runners.${snapshotRule}
+Attach: create_debug_session {language, host, port} (or processId) attaches in the same call; attach_to_process attaches an existing session. The target runs under its debugger (debugpy --listen, rdbg --open, node --inspect, JDWP, a Dart VM service) or is a processId (C/C++, COBOL, .NET, local Node.js). Never test a debugpy port with a bare connection (nc, /dev/tcp): it stops answering for good; attach instead. Attaching requests a pause unless stopOnEntry is false or the target has not answered its breakpoints; the answer's state and warning say if it paused. Breakpoint paths are resolved on the target's filesystem: ${attachPathForms}; a remote attach takes file and line. list_supported_languages shows each language's attach forms and test runners.${snapshotRule}
 
-Steps, evaluation and variable reads need a paused session; each pause says why it stopped. continue_execution returns at once; wait_for_stop blocks until the session pauses or ends. A launch, restart, step, pause or attach may answer pending:true: nothing was cancelled and breakpoints stay armed, so call wait_for_stop, and again if it answers pending:true. wait_for_stop on a session whose program started child sessions (Python, JavaScript) waits on the whole tree, and its answer's sessionId names the session that stopped: inspect with that id.
+Steps, evaluation and variable reads need a paused session; each pause says why it stopped. continue_execution returns at once; wait_for_stop blocks until the session pauses or ends. pending:true in an answer means nothing was cancelled and breakpoints stay armed: call wait_for_stop, and again while it answers pending:true. wait_for_stop on a session whose program started child sessions (Python, JavaScript) waits on its whole tree, and its answer's sessionId names the session that stopped: inspect with that id.
 
-A logpoint (set_breakpoint with logMessage: "total={total}") writes values to get_output without pausing; each hit costs time, so keep it out of tight loops. Java, .NET and Ruby refuse logpoints. A launch pauses at an uncaught exception by default (not Ruby, nor C/C++ on Windows); an attach does not.
+A logpoint (set_breakpoint with logMessage: "total={total}") writes values to get_output without pausing; each hit costs time, so keep it out of tight loops. Java, .NET and Ruby refuse logpoints. A launch pauses at an uncaught exception by default (not Ruby, nor C/C++ on Windows); an attach applies no default.
 
-End every session with close_debug_session, even after a failure: a launched program is ended, an attached one released and left running.
+End every session with close_debug_session, even after a failure: it requests the end of a launched program, or a detach that leaves an attached one running; for a live attach, the answer's released, processEnded or warning says which happened.
 
 For the full debugging workflow (root-cause discipline, per-language quirks), request the "debugging-workflow" prompt or install the agent skill from skills/debugging/ in the repo.`;
 }
