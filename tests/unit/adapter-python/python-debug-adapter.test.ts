@@ -769,6 +769,14 @@ describe('PythonDebugAdapter', () => {
       expect(config.clientOS).toBe(value);
     });
 
+    it.each([
+      ['win32', ['WINDOWS']],
+      ['linux', { os: 'UNIX' }]
+    ] as const)('forwards an array or object clientOS as the same value, never the default (%s host, caller %o)', (platform, value) => {
+      const config = onPlatform(platform, () => attach({ clientOS: value }));
+      expect(config.clientOS).toBe(value);
+    });
+
     it('treats a null clientOS as not passed: pydevd would read it as "NONE" and reject it', () => {
       expect(onPlatform('win32', () => attach({ clientOS: null })).clientOS).toBe('WINDOWS');
     });

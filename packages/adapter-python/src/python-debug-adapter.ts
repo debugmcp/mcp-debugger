@@ -54,12 +54,14 @@ const LAUNCH_TARGET_FLAGS: Record<string, string> = { module: 'python -m', code:
  * as pydevd compares it. `pydevd_file_utils.set_ide_os` asserts `WINDOWS` or
  * `UNIX` and maps PyCharm's `WIN`; debugpy 1.8 upper-cases the key first
  * (`pydevd_json_debug_options.py`), so `windows`, `unix` and `win` pass in any
- * case, an empty string skips `set_ide_os` and leaves the target's own system
- * assumed, and any other value fails the attach in the target. Without the
- * key pydevd assumes the TARGET's own system (`_ide_os = "WINDOWS" if
- * IS_WINDOWS else "UNIX"`). The value decides which separator pydevd expects
- * in the client's paths, `localRoot` included, and writes in the paths it
- * returns. When a Linux target took a Windows client for Linux, roots without
+ * case, an empty string skips `set_ide_os` and so leaves pydevd's current
+ * client-system setting unchanged, and any other value fails the attach in
+ * the target. That setting starts as the TARGET's own system (`_ide_os =
+ * "WINDOWS" if IS_WINDOWS else "UNIX"`) and is kept between attaches to the
+ * same process, so without a value the target's own system is assumed unless
+ * an earlier attach set another. The value decides which separator pydevd
+ * expects in the client's paths, `localRoot` included, and writes in the paths
+ * it translates back. When a Linux target took a Windows client for Linux, roots without
  * a trailing separator went wrong: `C:\…\app\service.py` matched `localRoot`
  * `C:\…\app`, but the rest of the path kept its `\` (`/srv/app\service.py`,
  * no such file on the target, so "Breakpoint in file that does not exist."),
